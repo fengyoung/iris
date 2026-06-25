@@ -1,0 +1,18 @@
+{
+  "version": "1.0",
+  "scan": {
+    "folders": ["INBOX", "周报"],
+    "_note": "文件夹名称，视邮件系统和目录结构配置"
+  },
+  "filters": {
+    "subject_keywords": ["周报", "周会", "week report", "weekly"],
+    "sender_whitelist": [],
+    "date_range_days": 7,
+    "date_from": null
+  },
+  "output": {
+    "dir": "${IRIS_OUTPUT_DIR}/weekly_reports",
+    "filename_format": "周报-w{week}-{name}-{date}.md",
+    "file_overwrite": false
+  }
+}

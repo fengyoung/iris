@@ -1,0 +1,30 @@
+{
+  "version": "1.0",
+  "default_source": "work_docs_main",
+  "sources": {
+    "work_docs_main": {
+      "enabled": true,
+      "name": "工作文档主数据源",
+      "path": "${IRIS_WORK_DOCS_DIR}",
+      "format": "markdown",
+      "read_only": true,
+      "recursive": true,
+      "include_patterns": ["**/*.md"],
+      "exclude_patterns": [".DS_Store", "**/.obsidian/**"],
+      "follow_symlinks": false,
+      "extract_metadata": true,
+      "notes": "个人知识库原始文档目录"
+    }
+  },
+  "ingestion": {
+    "scan_on_startup": true,
+    "incremental_scan": true,
+    "chunk_strategy": "markdown_section",
+    "max_file_size_mb": 20,
+    "encoding": "utf-8",
+    "store_file_hash": true,
+    "store_mtime": true,
+    "max_chunk_chars": 1200,
+    "max_preview_chars": 180
+  }
+}

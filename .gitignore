@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+venv/
+.venv/
+
+# Environment
+.env
+
+# Config (user-specific, contains real paths/keys)
+config/*.json
+
+# Runtime data
+data/
+
+# Output
+output/
+
+# Temp
+temp/
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Memory (Claude working memory - user-specific)
+memory/
+
+# Benchmarks
+.benchmarks/
+
+# Pytest
+.pytest_cache/

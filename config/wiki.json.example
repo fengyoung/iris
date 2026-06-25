@@ -1,0 +1,38 @@
+{
+  "version": "3.0",
+  "wiki_root": "${IRIS_WIKI_ROOT}",
+  "page_types": {
+    "domain": {
+      "enabled": true,
+      "subdir": "01-领域",
+      "filename_prefix": "领域-",
+      "template_name": "domain.md"
+    },
+    "concept": {
+      "enabled": true,
+      "subdir": "02-概念",
+      "filename_prefix": "概念-",
+      "template_name": "concept.md"
+    },
+    "project": {
+      "enabled": true,
+      "subdir": "03-项目",
+      "filename_prefix": "项目-",
+      "template_name": "project.md"
+    },
+    "person": {
+      "enabled": true,
+      "subdir": "04-人物",
+      "filename_prefix": "人物-",
+      "template_name": "person.md"
+    }
+  },
+  "index": {
+    "auto_update": true,
+    "filename": "index.md"
+  },
+  "changelog": {
+    "auto_update": true,
+    "filename": "changelog.md"
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "version": "3.0",
+  "app": {
+    "name": "Iris",
+    "env": "local",
+    "language": "zh-CN",
+    "timezone": "Asia/Shanghai"
+  },
+  "paths": {
+    "project_root": "${IRIS_PROJECT_ROOT}",
+    "output_dir": "${IRIS_OUTPUT_DIR}",
+    "temp_dir": "./temp",
+    "memory_dir": "${IRIS_MEMORY_DIR}",
+    "template_dir": "./templates",
+    "log_dir": "./logs"
+  },
+  "session": {
+    "enable_session_memory": true,
+    "enable_user_preferences": true,
+    "working_context_file": "${IRIS_MEMORY_DIR}/working/working_context.md",
+    "session_summary_dir": "${IRIS_MEMORY_DIR}/session",
+    "auto_session_summary": true,
+    "session_timeout_minutes": 30
+  },
+  "output": {
+    "default_output_mode": "chat",
+    "include_citations_by_default": true,
+    "answer_style": "balanced"
+  },
+  "qa": {
+    "max_prompt_context_chars": 6000,
+    "max_evidence_blocks": 6,
+    "max_wiki_hits": 3,
+    "max_block_summary_chars": 320,
+    "max_wiki_summary_chars": 220
+  },
+  "logging": {
+    "level": "info",
+    "log_to_file": true,
+    "record_model_routing": true
+  },
+  "safety": {
+    "protect_read_only_sources": true,
+    "require_confirmation_for_destructive_actions": true,
+    "deny_write_outside_allowed_paths": true,
+    "allowed_write_paths": [
+      "${IRIS_OUTPUT_DIR}",
+      "./temp",
+      "${IRIS_MEMORY_DIR}",
+      "${IRIS_DATA_DIR}"
+    ]
+  }
+}

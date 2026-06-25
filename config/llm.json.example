@@ -1,0 +1,90 @@
+{
+  "version": "2.0",
+  "default_strategy": {
+    "default_model_role": "base_model",
+    "fallback_model_role": "adv_model",
+    "prefer_lower_cost": true,
+    "allow_auto_upgrade": true,
+    "allow_auto_downgrade": true
+  },
+  "models": {
+    "base_model": {
+      "enabled": true,
+      "default_model_id": "deepseek-v4-flash",
+      "models": {
+        "deepseek-v4-flash": {
+          "provider": "Deepseek",
+          "model": "deepseek-v4-flash",
+          "display_name": "DeepSeek V4 Flash",
+          "multimodal": false,
+          "max_context_tokens": 1000000,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 60,
+          "max_retries": 2,
+          "priority": 10,
+          "cost_level": "low",
+          "reasoning_level": "standard",
+          "supported_inputs": ["text"],
+          "use_cases": ["qa", "summary", "analysis_basic"],
+          "notes": "默认纯文本主力模型",
+          "api_base_url": "https://api.deepseek.com/v1",
+          "api_key": "${DEEPSEEK_API_KEY}"
+        }
+      }
+    },
+    "adv_model": {
+      "enabled": true,
+      "default_model_id": "deepseek-v4-pro",
+      "models": {
+        "deepseek-v4-pro": {
+          "provider": "Deepseek",
+          "model": "deepseek-v4-pro",
+          "display_name": "DeepSeek V4 Pro",
+          "multimodal": false,
+          "max_context_tokens": 1000000,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 120,
+          "max_retries": 2,
+          "priority": 10,
+          "cost_level": "medium",
+          "reasoning_level": "advanced",
+          "supported_inputs": ["text"],
+          "use_cases": ["qa", "analysis", "image_understanding"],
+          "notes": "增强推理模型",
+          "api_base_url": "https://api.deepseek.com/v1",
+          "api_key": "${DEEPSEEK_API_KEY}"
+        }
+      }
+    }
+  },
+  "routing": {
+    "rules": [
+      {
+        "name": "default-qa",
+        "enabled": true,
+        "priority": 1,
+        "match": {"task_type": "qa"},
+        "route_to": "base_model",
+        "fallback_to": "adv_model",
+        "description": "默认问答路由到 base_model"
+      },
+      {
+        "name": "complex-analysis",
+        "enabled": true,
+        "priority": 10,
+        "match": {"complexity": "complex"},
+        "route_to": "adv_model",
+        "fallback_to": null,
+        "description": "复杂分析路由到 adv_model"
+      }
+    ]
+  },
+  "embedding": {
+    "enabled": false,
+    "model": "text-embedding-v3",
+    "api_base_url": "",
+    "api_key": ""
+  }
+}

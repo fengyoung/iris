@@ -1,0 +1,13 @@
+{
+  "api_key": "${TRELLO_API_KEY}",
+  "token": "${TRELLO_TOKEN}",
+  "workspace_name": "我的工作区",
+  "board_name": "Iris 看板",
+  "default_lists": ["TODO", "进行中", "Done"],
+  "default_due_hours": 48,
+  "done_list_pattern": "Done-{year}{month:02d}",
+  "labels": {
+    "work": {"name": "工作", "color": "blue"},
+    "life": {"name": "生活", "color": "green"}
+  }
+}
