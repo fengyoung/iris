@@ -27,7 +27,7 @@ COMMANDS = [
     "secrets-set", "secrets-list", "secrets-delete",
     # ── 委托命令 ──
     "trello", "extract-weekly-reports", "extract-didi-travel",
-    "sync-memory",
+    "sync-memory", "feishu-doc-convert",
 ]
 
 _DELEGATED_SCRIPTS = {
@@ -101,6 +101,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--export-review", default="", help="discover-wiki 导出审核 JSONL")
     parser.add_argument("--export-review-md", default="", help="discover-wiki 导出审核 Markdown")
     parser.add_argument("--fix", action="store_true", help="wiki-lint 自动修复模式")
+    # 飞书文档转换
+    parser.add_argument("--url", default="", help="feishu-doc-convert 飞书文档 URL（逗号分隔多文档）")
+    parser.add_argument("--from-config", action="store_true", help="feishu-doc-convert 从配置文件读取文档列表")
+    parser.add_argument("--dry-run", action="store_true", help="feishu-doc-convert / transcribe-meeting 预览模式不写入")
     return parser
 
 

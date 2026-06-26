@@ -1,15 +1,23 @@
-"""飞书知识库客户端 — 基于 lark-cli 的 wiki API 封装。"""
+"""飞书知识库客户端 — 基于 lark-cli 的 wiki + docs API 封装。"""
 
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
 class FeishuClientError(RuntimeError):
     """飞书 API 调用错误。"""
+
+
+_DOC_URL_RE = re.compile(
+    r"(?:https?://[^/]+/(?:docx|docs|wiki)/|^)([a-zA-Z0-9]{8,40})(?:\?|$|/#)"
+)
+"""匹配飞书文档 URL 或裸 token。"""
 
 
 @dataclass(frozen=True)
@@ -149,3 +157,81 @@ class FeishuClient:
             if node.title == title:
                 return node
         return None
+
+    # ── 文档操作 ──────────────────────────────────────────
+
+    @staticmethod
+    def parse_doc_url(url: str) -> str:
+        """从飞书文档 URL 中提取 doc token。
+
+        支持格式：
+          - https://bytedance.feishu.cn/docx/Wi0Td6c...
+          - https://bytedance.feishu.cn/docs/Wi0Td6c...
+          - https://bytedance.feishu.cn/wiki/Wi0Td6c...
+          - 裸 token: Wi0Td6c...
+        """
+        m = _DOC_URL_RE.search(url.strip())
+        if not m:
+            raise FeishuClientError(f"无法从 URL 中提取文档 token: {url}")
+        return m.group(1)
+
+    def fetch_doc_content(self, token: str) -> Dict[str, Any]:
+        """获取飞书文档内容和元信息。
+
+        返回:
+            {"title": str, "content": str(markdown), "create_time": str, "modify_time": str, "owner_name": str}
+        """
+        data = self._run([
+            "docs", "+fetch",
+            "--doc", token,
+            "--doc-format", "markdown",
+        ], timeout=120)
+        doc = data.get("data", {}).get("document", {})
+        # 若无 document 字段则尝试顶层 data
+        if not doc:
+            doc = data.get("data", {})
+        return {
+            "title": doc.get("title", ""),
+            "content": doc.get("content", ""),
+            "create_time": doc.get("create_time", ""),
+            "modify_time": doc.get("modify_time", ""),
+            "owner_name": doc.get("owner_name", ""),
+        }
+
+    def download_image(self, file_token: str, save_path: str, *, overwrite: bool = False) -> str:
+        """下载飞书文档中的图片到本地。
+
+        Args:
+            file_token: 图片资源 token
+            save_path: 本地保存路径
+            overwrite: 是否覆盖已有文件
+
+        Returns:
+            实际保存路径
+        """
+        save = Path(save_path)
+        if save.exists() and not overwrite:
+            return str(save)
+
+        save.parent.mkdir(parents=True, exist_ok=True)
+        self._run([
+            "docs", "+media-download",
+            "--token", file_token,
+            "--type", "media",
+            "--output", str(save),
+            "--overwrite",
+        ], timeout=120)
+        return str(save)
+
+    def search_chat_messages(self, chat_id: str, *,
+                              time_start: str = "", time_end: str = "",
+                              page_size: int = 100) -> List[Dict[str, Any]]:
+        """搜索群聊消息（保留供 chat-digest 使用）。"""
+        args = ["im", "+search", "--chat-id", chat_id]
+        if time_start:
+            args += ["--time-start", time_start]
+        if time_end:
+            args += ["--time-end", time_end]
+        args += ["--page-size", str(min(page_size, 500))]
+        data = self._run(args, timeout=120)
+        return data.get("data", {}).get("items", [])

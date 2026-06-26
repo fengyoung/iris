@@ -24,6 +24,7 @@ class ConfigBundle:
     llm: Dict[str, Any]
     wiki: Dict[str, Any] | None = None
     meeting_routes: Dict[str, Any] | None = None
+    feishu_ingest: Dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +213,19 @@ def load_config_bundle(
         meeting_routes_config = resolve_env_vars(_load_json(config_root / "meeting_routes.json.example"), env)
         meeting_routes_config = resolve_path_vars(meeting_routes_config, root)
 
-    return ConfigBundle(root=root, **loaded, wiki=wiki_config, meeting_routes=meeting_routes_config)
+    # 可选加载 feishu_ingest.json（飞书文档/聊天提取配置）
+    feishu_ingest_config_path = config_root / "feishu_ingest.json"
+    feishu_ingest_config = None
+    if feishu_ingest_config_path.exists():
+        feishu_ingest_config = resolve_env_vars(_load_json(feishu_ingest_config_path), env)
+        feishu_ingest_config = resolve_path_vars(feishu_ingest_config, root)
+    elif (config_root / "feishu_ingest.json.example").exists():
+        feishu_ingest_config = resolve_env_vars(_load_json(config_root / "feishu_ingest.json.example"), env)
+        feishu_ingest_config = resolve_path_vars(feishu_ingest_config, root)
+
+    return ConfigBundle(root=root, **loaded, wiki=wiki_config,
+                        meeting_routes=meeting_routes_config,
+                        feishu_ingest=feishu_ingest_config)
 
 
 def _load_json(path: Path) -> Dict[str, Any]:

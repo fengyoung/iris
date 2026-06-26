@@ -500,6 +500,35 @@ def handle_batch_transcribe(args, bundle, logger) -> int:
     return 0 if result["failed"] == 0 else 1
 
 
+def handle_feishu_doc_convert(args, bundle, logger) -> int:
+    """飞书文档转本地 Markdown 并归档到 SOURCE。"""
+    from iris.feishu.doc_convert import FeishuDocConverter
+
+    converter = FeishuDocConverter(bundle)
+    urls_str = getattr(args, "url", "")
+    from_config = getattr(args, "from_config", False)
+    force = getattr(args, "force", False)
+    dry_run = getattr(args, "dry_run", False)
+
+    if from_config:
+        results = converter.convert_from_config(force=force, dry_run=dry_run)
+    elif urls_str:
+        urls = [u.strip() for u in urls_str.split(",") if u.strip()]
+        results = converter.convert_batch(urls, force=force, dry_run=dry_run)
+    else:
+        print("需要 --url <文档URL> 或 --from-config", file=__import__('sys').stderr)
+        return 1
+
+    _emit_output(args.command, results, pretty=args.pretty)
+    # 汇总统计
+    success = sum(1 for r in results if r.get("status") == "success")
+    skipped = sum(1 for r in results if r.get("status") == "skipped")
+    errors = sum(1 for r in results if r.get("status") == "error")
+    if success:
+        print(f"✅ {success} 成功, {skipped} 跳过, {errors} 失败", file=__import__('sys').stderr)
+    return 0 if errors == 0 else 1
+
+
 def _expand_file_list(files_expr: str):
     import glob
     paths = []
@@ -821,4 +850,5 @@ COMMAND_HANDLERS = {
     "secrets-set": handle_secrets_set,
     "secrets-list": handle_secrets_list,
     "secrets-delete": handle_secrets_delete,
+    "feishu-doc-convert": handle_feishu_doc_convert,
 }

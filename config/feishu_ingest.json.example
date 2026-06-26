@@ -1,0 +1,17 @@
+{
+  "version": "3.2",
+  "pic_dir": "",
+  "doc_convert": {
+    "dedup_index": "data/dedup/feishu_doc_index.json",
+    "default_output": "to_source",
+    "documents": [
+      {"url": "https://example.feishu.cn/docx/xxx", "enabled": true, "note": "替换为实际文档 URL"}
+    ]
+  },
+  "chat_digest": {
+    "dedup_index": "data/dedup/chat_digest_index.json",
+    "default_output": "to_source",
+    "default_range_days": 3,
+    "targets": []
+  }
+}
