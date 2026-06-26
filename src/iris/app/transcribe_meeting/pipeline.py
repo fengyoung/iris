@@ -22,7 +22,7 @@ class TranscribeMeetingPipeline:
 
     def run(self, audio_path: str = "", *, transcript_path: Optional[str] = None,
             output_path: Optional[str] = None, whisper_model: str = "base",
-            force_retranscribe: bool = False) -> Dict[str, Any]:
+            force_retranscribe: bool = False, to_source: bool = False) -> Dict[str, Any]:
         has_audio = bool(audio_path)
         has_text = transcript_path is not None
         if not has_audio and not has_text:
@@ -83,7 +83,17 @@ class TranscribeMeetingPipeline:
 
         # Step 3: LLM 生成会议纪要
         print(f"[3/3] base_model 生成会议纪要...", file=sys.stderr)
-        minutes = self._call_llm(raw_transcript, wiki_context, meeting_type, meeting_topic)
+        source_filename = source.name  # 来源文件，供输出标识和未来排重
+        minutes = self._call_llm(raw_transcript, wiki_context, meeting_type, meeting_topic,
+                                 source_filename=source_filename)
+
+        # Step 3b: 路由判定（--to-source 模式）
+        route_result = None
+        if to_source and not output_path:
+            route_result = self._classify_target(raw_transcript, meeting_type, meeting_topic)
+            output_path = str(self._resolve_routed_output(route_result, stem))
+            route_name = route_result.get("route", "05-会议纪要")
+            print(f"     📂 路由归档: {route_name} ← {route_result.get('reason', '')}", file=sys.stderr)
 
         if output_path:
             out = Path(output_path).resolve()
@@ -93,9 +103,13 @@ class TranscribeMeetingPipeline:
         safe_write_text(out, minutes, self._bundle, allow_existing_outside=True)
         print(f"     完成 → {out.name}", file=sys.stderr)
 
-        return {"audio_file": str(source) if has_audio else "", "transcript_file": str(source) if has_text else "",
-                "source_type": source_type, "word_count": word_count, "wiki_pages_loaded": page_count,
-                "output_file": str(out), "model": self._provider.get_active_model_config("base_model")["model"]}
+        result = {"audio_file": str(source) if has_audio else "", "transcript_file": str(source) if has_text else "",
+                  "source_type": source_type, "word_count": word_count, "wiki_pages_loaded": page_count,
+                  "output_file": str(out), "model": self._provider.get_active_model_config("base_model")["model"]}
+        if route_result:
+            result["route"] = route_result.get("route", "")
+            result["route_reason"] = route_result.get("reason", "")
+        return result
 
     def _resolve_source_dir(self) -> Path:
         """解析 SOURCE/05-会议纪要/ 输出目录。"""
@@ -108,6 +122,120 @@ class TranscribeMeetingPipeline:
                     meeting_dir = src_root / "05-会议纪要"
                     return meeting_dir
         return self._temp_dir
+
+    # ── 纪要路由 ────────────────────────────────────────────────
+
+    def _load_routing_config(self) -> Dict[str, Any]:
+        """从 ConfigBundle 读取路由目标描述，不存在时返回空字典。
+
+        配置来源：config/meeting_routes.json（gitignored），
+        内容为各 SOURCE 子目录的用途描述、关键词和命名规范。
+        """
+        if self._bundle.meeting_routes:
+            return self._bundle.meeting_routes.get("route_targets", {})
+        return {}
+
+    def _build_routing_prompt_section(self, targets: Dict[str, Any]) -> str:
+        """构建 LLM 路由判定的 prompt 段（不含硬编码的公司信息）。"""
+        if not targets:
+            return ""
+        lines = ["## 可用归档目录", ""]
+        for dir_name, info in targets.items():
+            desc = info.get("description", "")
+            naming = info.get("naming", "")
+            kw = ", ".join(info.get("keywords", []))
+            lines.append(f"- {dir_name}")
+            if desc:
+                lines.append(f"  用途：{desc}")
+            if naming:
+                lines.append(f"  命名格式：{naming}")
+            if kw:
+                lines.append(f"  常见关键词：{kw}")
+            lines.append("")
+        return "\n".join(lines)
+
+    def _classify_target(self, raw_transcript: str,
+                         meeting_type: str, meeting_topic: str) -> Dict[str, str]:
+        """轻量调用 LLM 判定路由目标目录和文件名。
+
+        返回 {"route": 目录名, "reason": 理由, "filename": 文件名}
+        无配置或 LLM 失败时返回默认值（05-会议纪要）。
+        """
+        targets = self._load_routing_config()
+        if not targets:
+            return {"route": "05-会议纪要", "reason": "默认路由（未配置路由规则）", "filename": ""}
+
+        route_section = self._build_routing_prompt_section(targets)
+        transcript_excerpt = raw_transcript[:1500]
+
+        prompt = f"""你是会议纪要归档路由专家。请根据转写内容判断归档目录。
+
+{route_section}
+
+## 会议信息
+类型：{meeting_type or "未知"}
+主题：{meeting_topic or "未知"}
+
+## 转写内容（前1500字）
+{transcript_excerpt}
+
+请选择最合适的归档目录，并生成符合命名格式的文件名（不含 .md 后缀）。
+
+判定依据：
+- 参与人数是首要信号：1对1或双人讨论 → 优先归入「讨论思考」目录，即使有决策和待办
+- 多人（≥3人）正式会议，有明确决策/待办/计划 → 会议纪要目录
+- 产出正式方案/技术结论 → 方案报告目录
+- 外部学习资料 → 参考资料目录
+
+直接输出以下格式（不含多余内容）：
+ROUTE: <目录名>
+REASON: <一句话理由>
+FILENAME: <文件名>"""
+
+        response = self._provider.generate(
+            LLMRequest(prompt=prompt, route_context={"input_type": "text"}),
+            temperature=0, max_tokens=300)
+        return self._parse_route_response(response.text)
+
+    @staticmethod
+    def _parse_route_response(text: str) -> Dict[str, str]:
+        """解析 LLM 返回的 ROUTE/REASON/FILENAME。支持英文和中文冒号。"""
+        result = {"route": "05-会议纪要", "reason": "LLM 解析失败，使用默认路由", "filename": ""}
+        for line in text.strip().split("\n"):
+            line = line.strip()
+            for prefix, key in [("ROUTE：", "route"), ("ROUTE:", "route"),
+                                 ("REASON：", "reason"), ("REASON:", "reason"),
+                                 ("FILENAME：", "filename"), ("FILENAME:", "filename")]:
+                if line.startswith(prefix):
+                    val = line[len(prefix):].strip().strip('"').strip("'")
+                    if val:
+                        result[key] = val
+                    break
+        return result
+
+    def _resolve_routed_source_dir(self, route_target: str) -> Path:
+        """根据路由目标确定 SOURCE 子目录路径。"""
+        data_source = self._bundle.data_source
+        sources = data_source.get("sources", {})
+        for cfg in sources.values():
+            if cfg.get("enabled") and cfg.get("path"):
+                src_root = Path(cfg["path"]).resolve()
+                if src_root.exists():
+                    target_dir = src_root / route_target
+                    target_dir.mkdir(parents=True, exist_ok=True)
+                    return target_dir
+        return self._temp_dir
+
+    def _resolve_routed_output(self, route_result: Dict[str, str], input_stem: str) -> Path:
+        """根据路由结果生成输出文件路径。"""
+        route = route_result.get("route", "05-会议纪要")
+        target_dir = self._resolve_routed_source_dir(route)
+        filename = route_result.get("filename", "")
+        if not filename:
+            filename = f"{input_stem}.md"
+        elif not filename.endswith(".md"):
+            filename = f"{filename}.md"
+        return target_dir / filename
 
     def _get_transcript_search_dir(self) -> Path | None:
         """获取转写文件默认搜索目录（OS环境变量 > .env 文件）。"""
@@ -215,12 +343,16 @@ class TranscribeMeetingPipeline:
         return text
 
     def _call_llm(self, raw_transcript: str, wiki_context: str,
-                  meeting_type: str = "", meeting_topic: str = "") -> str:
+                  meeting_type: str = "", meeting_topic: str = "",
+                  source_filename: str = "") -> str:
         date_str = time.strftime("%Y-%m-%d")
         type_label = meeting_type or "会议"
         topic_label = meeting_topic or ""
         title = f"会议纪要 - {topic_label}" if topic_label else f"会议纪要 - {type_label}"
-        header = f"# {title}\n日期：{date_str}\n类型：{type_label}" if topic_label else f"# {title}\n日期：{date_str}"
+        header_lines = [f"# {title}", f"日期：{date_str}", f"类型：{type_label}"]
+        if source_filename:
+            header_lines.append(f"来源：{source_filename}")
+        header = "\n".join(header_lines)
         prompt = f"""{SYSTEM_PROMPT}
 
 以下是一次{type_label}的语音转写文本（Whisper ASR 结果，包含同音/近音误识别）。

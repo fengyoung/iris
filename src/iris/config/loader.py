@@ -23,6 +23,7 @@ class ConfigBundle:
     data_source: Dict[str, Any]
     llm: Dict[str, Any]
     wiki: Dict[str, Any] | None = None
+    meeting_routes: Dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +202,17 @@ def load_config_bundle(
         wiki_config = resolve_env_vars(_load_json(config_root / "wiki.json.example"), env)
         wiki_config = resolve_path_vars(wiki_config, root)
 
-    return ConfigBundle(root=root, **loaded, wiki=wiki_config)
+    # 可选加载 meeting_routes.json（纪要提取路由配置）
+    meeting_routes_config_path = config_root / "meeting_routes.json"
+    meeting_routes_config = None
+    if meeting_routes_config_path.exists():
+        meeting_routes_config = resolve_env_vars(_load_json(meeting_routes_config_path), env)
+        meeting_routes_config = resolve_path_vars(meeting_routes_config, root)
+    elif (config_root / "meeting_routes.json.example").exists():
+        meeting_routes_config = resolve_env_vars(_load_json(config_root / "meeting_routes.json.example"), env)
+        meeting_routes_config = resolve_path_vars(meeting_routes_config, root)
+
+    return ConfigBundle(root=root, **loaded, wiki=wiki_config, meeting_routes=meeting_routes_config)
 
 
 def _load_json(path: Path) -> Dict[str, Any]:

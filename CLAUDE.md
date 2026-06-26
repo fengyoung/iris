@@ -155,6 +155,22 @@ sources:
 - 断链智能过滤：技术术语白名单（100+）+ 源文档引用 + 字符级模糊匹配，排除率 83%
 - `wiki-lint` 6 维指标：frontmatter / 摘要 / 出链 / draft 状态 / 过期 / 断链
 
+### 会议纪要路由（🆕 v3.2.1）
+
+`transcribe-meeting --to-source` 现在支持 LLM 动态路由，自动判定纪要归档到 SOURCE 对应子目录：
+
+| 路由目标 | 判定条件 | 命名格式 |
+|---------|---------|---------|
+| `05-会议纪要/` | 多人（≥3）正式会议，有决策/待办 | `YYYYMMDD-{type}-{topic}.md` |
+| `04-讨论思考/` | 1对1/双人讨论（首要信号），即使有决策待办 | `YYYYMMDD-{type}-{topic}.md` |
+| `03-方案报告/` | 产出正式方案或技术结论 | `YYYYMMDD-{topic}.md` |
+| `08-参考资料/` | 外部学习资料、参会笔记 | `YYYYMMDD-{source}-{topic}.md` |
+
+**配置驱动（开源安全）：** 路由规则存于 `config/meeting_routes.json`（gitignored），
+代码零硬编码。`.example` 为脱敏占位。
+
+**来源标识：** 纪要头部写入 `来源：原始文件名`，供后续排重和溯源。
+
 ---
 
 ## 步骤 3：飞书团队知识库管理 ⏳
@@ -201,7 +217,7 @@ JSON 配置中使用 `${VAR_NAME}` 引用环境变量或 .env 中的值。
 
 | 层 | 位置 | 格式 | 含义 | 当前值 |
 |----|------|------|------|--------|
-| **产品版本** | `pyproject.toml` | SemVer X.Y.Z | 软件发布版本 | 3.2.0 |
+| **产品版本** | `pyproject.toml` | SemVer X.Y.Z | 软件发布版本 | 3.2.1 |
 | **协议版本** | `src/iris/__init__.py` | MAJOR.MINOR | CLI 命令集 / agent-spec 格式 | 3.2 |
 | **数据版本** | `config/*.json` | 各自独立 | 配置文件 Schema | 3.2 |
 
@@ -220,7 +236,7 @@ JSON 配置中使用 `${VAR_NAME}` 引用环境变量或 .env 中的值。
 
 ```
 iris3/
-├── pyproject.toml          # 3.1.0，依赖：PyMuPDF / python-docx / numpy
+├── pyproject.toml          # 3.2.1，依赖：PyMuPDF / python-docx / numpy
 ├── README.md
 ├── CLAUDE.md               # 本文件
 ├── .env.example            # 环境变量模板

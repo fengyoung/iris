@@ -467,16 +467,15 @@ def handle_transcribe_meeting(args, bundle, logger) -> int:
         raise ValueError("transcribe-meeting 需要 --audio-file 或 --transcript-file")
     pipeline = TranscribeMeetingPipeline(bundle)
 
-    # --to-source 模式：自动输出到 SOURCE/05-会议纪要/
-    output = args.output
-    if not output and getattr(args, "to_source", False):
-        source_dir = pipeline._resolve_source_dir()
-        raw_name = Path(args.transcript_file or args.audio_file).name
-        base = raw_name.rsplit(".", 1)[0] if "." in raw_name else raw_name
-        output = str(source_dir / f"{base}.md")
+    # --to-source 模式：LLM 动态路由到 SOURCE 对应子目录
+    to_source = getattr(args, "to_source", False)
+
+    # --output 优先级高于 --to-source
+    output = args.output if args.output else None
 
     result = pipeline.run(args.audio_file, transcript_path=args.transcript_file or None,
-                          output_path=output or None, whisper_model=args.whisper_model, force_retranscribe=args.force)
+                          output_path=output, whisper_model=args.whisper_model,
+                          force_retranscribe=args.force, to_source=to_source)
     _emit_output(args.command, result, pretty=args.pretty)
     return 0
 

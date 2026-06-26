@@ -17,6 +17,9 @@ config/*.json
 # Runtime data
 data/
 
+# Working data (raw transcripts, intermediate files)
+work-data/
+
 # Output
 output/
 
