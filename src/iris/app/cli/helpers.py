@@ -205,7 +205,8 @@ def _build_agent_spec_payload(capabilities=None) -> Dict[str, Any]:
             "tags": cap.tags,
             "inputs": list(cap.input_schema.keys()) if cap.input_schema else [],
         }
-    return {"version": "1.0", "command_count": len(commands), "commands": commands}
+    from iris import __version__
+    return {"protocol_version": __version__, "command_count": len(commands), "commands": commands}
 
 
 # ── 参数解析辅助 ─────────────────────────────────────────
