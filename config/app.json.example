@@ -37,8 +37,7 @@
   "biweekly_report": {
     "author_name": "",
     "author_info": "你是一个技术团队负责人的写作助手。",
-    "search_keywords": ["周报", "进展", "项目", "上线", "优化"],
-    "_note": "author_name 用于生成文件名（如 双周报-w25-张三-20260621.md）；author_info 用于 prompt 角色定义"
+    "_note": "author_name 用于生成文件名（如 双周报-w25-张三-20260621.md）；author_info 用于 prompt 角色定义。搜索关键词从 OP 文档动态提取，无需配置。"
   },
   "logging": {
     "level": "info",

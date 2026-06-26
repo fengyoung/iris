@@ -197,7 +197,7 @@ class AnalysisReportService:
             # 查找 OP 规划文件
             op_dir = src_path / "01-目标管理"
             if op_dir.exists():
-                for f in sorted(op_dir.glob("*.md")):
+                for f in sorted(op_dir.glob("*.md"), reverse=True):  # 最新OP优先
                     try:
                         text = f.read_text(encoding="utf-8")
                     except (OSError, UnicodeDecodeError):
@@ -210,15 +210,54 @@ class AnalysisReportService:
                     return text[:8000]
         return ""
 
+    @staticmethod
+    def _extract_op_keywords(op_text: str) -> list[str]:
+        """从 OP 文档中提取搜索关键词（方向名、项目名、责任人）。
+
+        关键词驱动近两周证据检索，OP 更新后自动适配。
+        """
+        import re
+        keywords = []
+        # 提取 OP 各层级的核心词（适配多种格式）
+        # 方向标题：## 1、图验技术 或 ## 方向一：质检...
+        for m in re.finditer(r"##\s*(?:\d+[、.])?\s*(.+?)(?:\n|$)", op_text):
+            title = m.group(1).strip()
+            # 跳过非方向行（如空行、纯数字）
+            if not title or len(title) < 3:
+                continue
+            clean = re.sub(r'[“”‘’\"\'＞>]', '', title)
+            words = re.findall(r"[\w一-鿿]{2,}", clean)
+            keywords.extend(words[:5])
+        # 子项标题：### 1.1、某检测项目拆修检测
+        for m in re.finditer(r"###\s+\d+\.\d+[、.]?\s*(.+?)(?:\n|$)", op_text):
+            desc = m.group(1).strip()
+            nouns = re.findall(r"[\w一-鿿A-Za-z]{2,}", desc)
+            keywords.extend(nouns[:3])
+        # 责任人、目标中的关键名词
+        for m in re.finditer(r"责任人[：:]\s*(.+?)$", op_text, re.MULTILINE):
+            names = m.group(1).strip()
+            for name in re.split(r"[//、,，\s]+", names):
+                if name and len(name) >= 2:
+                    keywords.append(name)
+        # 去重、去通用词、排序
+        stop = {"方向", "检测", "覆盖", "实现", "推动", "提升", "建立", "持续", "支撑", "完成", "目标", "举措", "扩展", "能力"}
+        seen = set()
+        result = []
+        for kw in keywords:
+            if kw not in stop and kw not in seen and len(kw) >= 2:
+                seen.add(kw)
+                result.append(kw)
+        return result[:20]
+
     def _retrieve_recent_evidence(self, query: str, top_k: int) -> str:
         """检索近两周的工作证据——多关键词并发搜索、按相关度合并去重。"""
         from iris.retrieval.searcher import LocalRetriever
         import re as _re
         retriever = LocalRetriever(self._config)
 
-        # 多关键词搜索（从配置读取，开源安全）
-        cfg = self._config.app.get("biweekly_report", {})
-        keywords = cfg.get("search_keywords", ["周报", "进展", "项目", "上线", "优化"])
+        # 从 OP 文档中动态提取搜索关键词（不硬编码）
+        op_text = self._load_op_document()
+        keywords = self._extract_op_keywords(op_text) if op_text else ["进展", "项目"]
         seen_ids = set()
         all_hits = []
         for kw in keywords:
