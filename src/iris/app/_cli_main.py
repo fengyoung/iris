@@ -77,7 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--audio-file", default="", help="transcribe-meeting 录音文件路径")
     parser.add_argument("--transcript-file", default="", help="transcribe-meeting 已有转写文本路径")
     parser.add_argument("--output", default="", help="transcribe-meeting 输出路径")
-    parser.add_argument("--to-source", action="store_true", help="transcribe-meeting 输出到 SOURCE/05-会议纪要/")
+    parser.add_argument("--to-source", action="store_true", help="输出归档到 SOURCE（会议纪要→05/，双周报→06/）")
     parser.add_argument("--whisper-model", default="base", help="Whisper 模型规格")
     parser.add_argument("--force", action="store_true", help="强制重新转写")
     parser.add_argument("--files", default="", help="batch-transcribe 文件列表（逗号分隔）")

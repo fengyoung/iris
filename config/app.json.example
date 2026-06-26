@@ -35,9 +35,10 @@
     "max_wiki_summary_chars": 220
   },
   "biweekly_report": {
+    "author_name": "",
     "author_info": "你是一个技术团队负责人的写作助手。",
     "search_keywords": ["周报", "进展", "项目", "上线", "优化"],
-    "_note": "author_info 用于 prompt 中定义写作角色；search_keywords 用于检索近两周数据"
+    "_note": "author_name 用于生成文件名（如 双周报-w25-张三-20260621.md）；author_info 用于 prompt 角色定义"
   },
   "logging": {
     "level": "info",

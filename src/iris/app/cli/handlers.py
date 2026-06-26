@@ -162,15 +162,36 @@ def handle_build_mindmap(args, bundle, logger) -> int:
 
 def handle_build_biweekly_report(args, bundle, logger) -> int:
     from iris.analysis import AnalysisReportService
+    from datetime import datetime
+
     service = AnalysisReportService(bundle)
     query = getattr(args, "query", "") or ""
     result = service.build_biweekly_report(query=query, mode=getattr(args, "mode", "llm"))
     payload = result.to_dict()
-    if args.output_file:
-        path = Path(args.output_file)
+
+    # 确定输出路径
+    output = args.output_file
+    if not output and getattr(args, "to_source", False):
+        # 自动生成文件名：双周报-w{week}-{name}-{date}.md
+        cfg = bundle.app.get("biweekly_report", {})
+        author = cfg.get("author_name", "")
+        today = datetime.now()
+        _, week, _ = today.isocalendar()
+        date_str = today.strftime("%Y%m%d")
+        filename = f"双周报-w{week:02d}-{author}-{date_str}.md" if author else f"双周报-w{week:02d}-{date_str}.md"
+
+        # 输出到 SOURCE/06-我的周报/
+        from iris.app.transcribe_meeting.pipeline import TranscribeMeetingPipeline
+        pipeline = TranscribeMeetingPipeline(bundle)
+        source_dir = pipeline._resolve_source_dir().parent / "06-我的周报"
+        output = str(source_dir / filename)
+
+    if output:
+        path = Path(output)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(result.markdown, encoding="utf-8")
         payload["output_file"] = str(path)
+
     _emit_output(args.command, payload, pretty=args.pretty)
     return 0
 
