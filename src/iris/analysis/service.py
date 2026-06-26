@@ -108,8 +108,11 @@ class AnalysisReportService:
 
         # 3. LLM 模式：用模板生成
         try:
+            cfg = self._config.app.get("biweekly_report", {})
+            author_info = cfg.get("author_info", "你是一个技术团队的写作助手。")
             prompt = self._prompt_loader.render("biweekly_report.md", {
                 "period": period,
+                "author_info": author_info,
                 "wiki_context": wiki_context,
                 "evidence": evidence_blocks,
             })
@@ -213,8 +216,9 @@ class AnalysisReportService:
         import re as _re
         retriever = LocalRetriever(self._config)
 
-        # 多关键词搜索，提高召回覆盖率
-        keywords = ["周报", "进展", "项目", "上线", "优化", "某检测项目", "拍照", "质检", "搜索", "推荐"]
+        # 多关键词搜索（从配置读取，开源安全）
+        cfg = self._config.app.get("biweekly_report", {})
+        keywords = cfg.get("search_keywords", ["周报", "进展", "项目", "上线", "优化"])
         seen_ids = set()
         all_hits = []
         for kw in keywords:

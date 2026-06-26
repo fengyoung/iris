@@ -34,6 +34,11 @@
     "max_block_summary_chars": 320,
     "max_wiki_summary_chars": 220
   },
+  "biweekly_report": {
+    "author_info": "你是一个技术团队负责人的写作助手。",
+    "search_keywords": ["周报", "进展", "项目", "上线", "优化"],
+    "_note": "author_info 用于 prompt 中定义写作角色；search_keywords 用于检索近两周数据"
+  },
   "logging": {
     "level": "info",
     "log_to_file": true,
