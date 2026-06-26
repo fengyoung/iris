@@ -147,36 +147,65 @@ class AnalysisReportService:
                                   llm={"fallback_used": True, "reason": str(exc)})
 
     def _load_wiki_for_report(self) -> str:
-        """加载 Wiki 页面上下文，用于双周报背景知识。"""
+        """加载 Wiki 页面上下文 + OP 规划文档，用于双周报背景知识。"""
         from pathlib import Path as _Pt
-        wiki_root = _Pt(self._config.wiki["wiki_root"]).resolve() if self._config.wiki else _Pt()
-        if not wiki_root.exists():
-            return "（Wiki 目录不存在）"
-
         fragments = []
-        for subdir, label in [("01-领域", "领域"), ("03-项目", "项目"), ("04-人物", "人物")]:
-            d = wiki_root / subdir
-            if not d.exists():
-                continue
-            for f in sorted(d.glob("*.md")):
-                try:
-                    text = f.read_text(encoding="utf-8")
-                except (OSError, UnicodeDecodeError):
-                    continue
-                # 去掉 frontmatter
-                if text.startswith("---"):
-                    parts = text.split("---", 2)
-                    text = parts[2].strip() if len(parts) >= 3 else text
-                if len(text) > 2000:
-                    text = text[:2000] + "\n\n..."
-                name = f.stem
-                for prefix in ("领域-", "项目-", "人物-"):
-                    if name.startswith(prefix):
-                        name = name[len(prefix):]
-                        break
-                fragments.append(f"## {label}：{name}\n{text[:2000]}")
 
-        return "\n\n".join(fragments) if fragments else "（无 Wiki 页面）"
+        # 0. 优先加载 OP 规划作为主框架
+        op_text = self._load_op_document()
+        if op_text:
+            fragments.append(f"## OP规划（双周报必须对齐此框架）\n{op_text}")
+
+        # 1. Wiki 页面
+        wiki_root = _Pt(self._config.wiki["wiki_root"]).resolve() if self._config.wiki else _Pt()
+        if wiki_root.exists():
+            for subdir, label in [("01-领域", "领域"), ("03-项目", "项目"), ("04-人物", "人物")]:
+                d = wiki_root / subdir
+                if not d.exists():
+                    continue
+                for f in sorted(d.glob("*.md")):
+                    try:
+                        text = f.read_text(encoding="utf-8")
+                    except (OSError, UnicodeDecodeError):
+                        continue
+                    if text.startswith("---"):
+                        parts = text.split("---", 2)
+                        text = parts[2].strip() if len(parts) >= 3 else text
+                    if len(text) > 1500:
+                        text = text[:1500] + "\n\n..."
+                    name = f.stem
+                    for prefix in ("领域-", "项目-", "人物-"):
+                        if name.startswith(prefix):
+                            name = name[len(prefix):]
+                            break
+                    fragments.append(f"## {label}：{name}\n{text[:1500]}")
+
+        return "\n\n".join(fragments) if fragments else "（无背景知识）"
+
+    def _load_op_document(self) -> str:
+        """加载 SOURCE 中的 OP 规划文档。"""
+        from pathlib import Path as _Pt
+        # 从数据源配置中获取 SOURCE 路径
+        sources = self._config.data_source.get("sources", {})
+        for cfg in sources.values():
+            src_path = _Pt(cfg.get("path", "")).resolve()
+            if not src_path.exists():
+                continue
+            # 查找 OP 规划文件
+            op_dir = src_path / "01-目标管理"
+            if op_dir.exists():
+                for f in sorted(op_dir.glob("*.md")):
+                    try:
+                        text = f.read_text(encoding="utf-8")
+                    except (OSError, UnicodeDecodeError):
+                        continue
+                    # 去掉 frontmatter（如果有）
+                    if text.startswith("---"):
+                        parts = text.split("---", 2)
+                        text = parts[2].strip() if len(parts) >= 3 else text
+                    # 截断过长的 OP（保留核心：方向+目标+举措+责任人）
+                    return text[:8000]
+        return ""
 
     def _retrieve_recent_evidence(self, query: str, top_k: int) -> str:
         """检索近两周的工作证据——多关键词并发搜索、按相关度合并去重。"""
