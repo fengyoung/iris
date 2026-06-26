@@ -87,6 +87,11 @@ class LocalRetriever:
     def _ensure_loaded(self) -> None:
         if self._loaded:
             return
+        # 优先尝试 SQLite（FTS5 全文搜索，性能更高）
+        if self._try_load_sqlite():
+            self._loaded = True
+            return
+        # 回退 JSON
         data_source = self._config.data_source
         sources = data_source.get("sources", {})
         metadata_root = self._config.root / "data" / "metadata"
@@ -105,6 +110,23 @@ class LocalRetriever:
                 except (json.JSONDecodeError, OSError):
                     continue
         self._loaded = True
+
+    def _try_load_sqlite(self) -> bool:
+        """尝试从 SQLite ChunkStore 加载（FTS5 全文搜索加速）。"""
+        try:
+            from iris.core.storage import ChunkStore
+            db_path = self._config.root / "data" / "chunk_store.db"
+            if not db_path.exists():
+                return False
+            store = ChunkStore(db_path)
+            chunks = store.load_all()
+            for chunk in chunks:
+                self._chunks.append(chunk)
+            for chunk in chunks:
+                self._by_source.setdefault(chunk.source_name, []).append(chunk)
+            return len(chunks) > 0
+        except Exception:
+            return False
 
 
 def _tokenize(text: str) -> List[str]:

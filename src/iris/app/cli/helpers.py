@@ -183,37 +183,29 @@ def _run_sync_memory(bundle) -> Dict[str, Any]:
         return {"synced": False, "error": f"加载 sync_memory 失败: {exc}"}
 
 
-def _build_agent_spec_payload() -> Dict[str, Any]:
-    return {
-        "version": "1.0",
-        "commands": {
-            "status": {
-                "purpose": "查看项目状态和配置",
-                "inputs": [],
-                "outputs": ["project_root", "model_info", "suggested_next_action"],
-            },
-            "working-set": {
-                "purpose": "设置当前工作上下文",
-                "inputs": ["--task", "--pending", "--add-pending", "--change", "--add-change", "--notes"],
-                "outputs": ["current_task", "pending_items", "recent_changes", "notes", "updated_at"],
-            },
-            "working-show": {
-                "purpose": "查看当前工作上下文",
-                "inputs": [],
-                "outputs": ["current_task", "pending_items", "recent_changes", "notes", "updated_at"],
-            },
-            "working-clear": {
-                "purpose": "清空工作上下文",
-                "inputs": [],
-                "outputs": ["current_task", "pending_items", "recent_changes", "notes", "updated_at"],
-            },
-            "process": {
-                "purpose": "复杂输入双阶段处理：adv_model 理解图片 → base_model 生成回答",
-                "inputs": ["--query (必填)", "--image (逗号分隔多张)", "--output-file (可选)"],
-                "outputs": ["query", "stage1_output", "stage2_output", "stage1_model", "stage2_model"],
-            },
-        },
-    }
+def _build_agent_spec_payload(capabilities=None) -> Dict[str, Any]:
+    """从 AgentCapability 列表构建 agent-spec 输出。
+
+    capabilities 来自 iris.core.agent_adapter.IRIS_CAPABILITIES，
+    是 agent 能力的唯一真相来源。
+    """
+    if capabilities is None:
+        # 回退：尝试从 adapter 加载
+        try:
+            from iris.core.agent_adapter import IRIS_CAPABILITIES as caps
+            capabilities = caps
+        except ImportError:
+            capabilities = []
+
+    commands = {}
+    for cap in capabilities:
+        commands[cap.name] = {
+            "purpose": cap.description,
+            "command": cap.command,
+            "tags": cap.tags,
+            "inputs": list(cap.input_schema.keys()) if cap.input_schema else [],
+        }
+    return {"version": "1.0", "command_count": len(commands), "commands": commands}
 
 
 # ── 参数解析辅助 ─────────────────────────────────────────

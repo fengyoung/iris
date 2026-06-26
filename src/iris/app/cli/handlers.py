@@ -623,7 +623,9 @@ def handle_status(args, bundle, logger) -> int:
 
 
 def handle_agent_spec(args, bundle, logger) -> int:
-    _emit_output(args.command, _build_agent_spec_payload(), pretty=args.pretty)
+    from iris.core.agent_adapter import IRIS_CAPABILITIES
+    from iris.app.cli.helpers import _build_agent_spec_payload
+    _emit_output(args.command, _build_agent_spec_payload(IRIS_CAPABILITIES), pretty=args.pretty)
     return 0
 
 

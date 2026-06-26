@@ -398,9 +398,13 @@ def lint_wiki(wiki_root: Path, data_root: Optional[Path] = None) -> Dict[str, An
         index_info["wiki_page_count"] = len(wiki_topics)
         index_info["wiki_source_coverage_pct"] = round(len(source_files) / max(index_info.get("source_documents", 1), 1) * 100, 1)
 
+    # ── 内容质量评分 ──────────────────────────────────────
+    quality = _compute_content_quality(page_titles, wiki_root)
+
     return {
         # Wiki 健康
         "page_count": page_count,
+        "content_quality": quality,
         "by_type": {
             cfg["name"]: len(list((wiki_root / cfg["dir"]).glob("*.md")))
             for ptype, cfg in PAGE_TYPE_CONFIG.items()
@@ -510,3 +514,71 @@ def _parse_updated_from_content(content: str) -> str:
         if line.startswith("updated:"):
             return line.split(":", 1)[1].strip().strip("\"'")
     return ""
+
+
+def _compute_content_quality(page_titles: dict, wiki_root: Path) -> Dict[str, Any]:
+    """计算 Wiki 内容质量：信息密度 + 重复检测。"""
+    import re
+    from collections import Counter
+
+    pages = []
+    for title, path in page_titles.items():
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        # 去掉 frontmatter
+        if text.startswith("---"):
+            parts = text.split("---", 2)
+            body = parts[2] if len(parts) >= 3 else text
+        else:
+            body = text
+        # 统计
+        words = len(body)
+        headings = len(re.findall(r"^#{1,4}\s", body, re.MULTILINE))
+        sections = max(headings, 1)
+        density = round(words / sections) if sections > 0 else words
+        pages.append({"title": title, "words": words, "sections": sections, "density": density, "path": str(path)})
+
+    if not pages:
+        return {"info_density": {}, "duplicates": []}
+
+    # 信息密度分布
+    densities = [p["density"] for p in pages]
+    info_density = {
+        "avg_words_per_section": round(sum(densities) / len(densities)),
+        "min_density": min(densities),
+        "max_density": max(densities),
+        "thin_pages": [p["title"] for p in pages if p["words"] < 500][:5],
+        "dense_pages": [p["title"] for p in pages if p["words"] > 3000][:5],
+    }
+
+    # 重复检测：计算页面间的 Jaccard 相似度
+    duplicates = []
+    tokenized = {}
+    for p in pages:
+        try:
+            body_text = Path(p["path"]).read_text(encoding="utf-8")
+            if body_text.startswith("---"):
+                body_text = body_text.split("---", 2)[-1]
+            tokens = set(re.findall(r"[\w一-鿿]{3,}", body_text.lower()))
+            tokenized[p["title"]] = tokens
+        except Exception:
+            continue
+
+    titles = list(tokenized.keys())
+    for i in range(len(titles)):
+        for j in range(i + 1, len(titles)):
+            a, b = tokenized[titles[i]], tokenized[titles[j]]
+            if not a or not b:
+                continue
+            jaccard = len(a & b) / len(a | b)
+            if jaccard > 0.3:  # 相似度 > 30% 标记
+                duplicates.append({"pair": [titles[i], titles[j]], "similarity": round(jaccard, 2)})
+
+    duplicates.sort(key=lambda d: -d["similarity"])
+    return {
+        "info_density": info_density,
+        "duplicates": duplicates[:10],
+        "duplicate_count": len(duplicates),
+    }

@@ -152,6 +152,36 @@ class ChunkStore:
             cursor = conn.execute("DELETE FROM chunk_store WHERE source_name = ?", (source_name,))
             return cursor.rowcount
 
+    def load_all(self) -> list:
+        """加载全部 chunks 为 ChunkRecord 列表（供 LocalRetriever 使用）。"""
+        try:
+            from iris.ingest.chunker import ChunkRecord
+        except ImportError:
+            return []
+        conn = self._get_conn()
+        rows = conn.execute("SELECT * FROM chunk_store ORDER BY source_name, relative_path").fetchall()
+        results = []
+        for row in rows:
+            d = _row_to_full_dict(row)
+            try:
+                results.append(ChunkRecord(
+                    chunk_id=d["chunk_id"], source_name=d["source_name"],
+                    document_path=d.get("document_path", d["relative_path"]),
+                    relative_path=d["relative_path"], document_hash=d.get("document_hash", ""),
+                    title=d["title"], section_path=_parse_json_array(d.get("section_path", "[]")),
+                    level=d.get("level", 0), content=d.get("content", ""),
+                    content_preview=d.get("content_preview", ""),
+                    line_start=d.get("line_start", 1), line_end=d.get("line_end", 1),
+                    word_count=d.get("word_count", 0), token_count=d.get("token_count", 0),
+                    chunk_type=d.get("chunk_type", "section"),
+                    segment_index=d.get("segment_index", 1), segment_count=d.get("segment_count", 1),
+                    structural_tags=_parse_json_array(d.get("structural_tags", "[]")),
+                    extracted_fields=_parse_json_dict(d.get("extracted_fields", "{}")),
+                ))
+            except (TypeError, ValueError):
+                continue
+        return results
+
     def get_chunks_by_source(self, source_name: str) -> List[Dict[str, Any]]:
         conn = self._get_conn()
         cursor = conn.execute(
