@@ -80,30 +80,162 @@ class AnalysisReportService:
         self._logger.log("analysis_report", result.to_dict())
         return result
 
-    def build_biweekly_report(self, *, query: str = "", top_k: int = 8, mode: str = "llm") -> ReportResponse:
-        """生成双周报——汇总近两周进展。"""
+    def build_biweekly_report(self, *, query: str = "", top_k: int = 12, mode: str = "llm") -> ReportResponse:
+        """生成双周报——汇总近两周进展，按项目方向编写。
+
+        与 build_report 不同：此方法独立实现完整 pipeline，
+        加载 Wiki 上下文 + 检索最近证据 → LLM 按方向编写结构化周报。
+        """
         from datetime import datetime, timedelta, timezone
+
         now = datetime.now(timezone.utc)
-        two_weeks_ago = (now - timedelta(days=14)).strftime("%Y-%m-%d")
-        period = f"{two_weeks_ago} ~ {now.strftime('%Y-%m-%d')}"
+        two_weeks_ago = now - timedelta(days=14)
+        period = f"{two_weeks_ago.strftime('%Y.%m.%d')}～{now.strftime('%Y.%m.%d')}"
 
         if not query:
             query = f"近两周({period})工作进展"
 
-        # 利用通用报告服务生成
-        result = self.build_report(query, top_k=top_k, mode=mode)
+        # 1. 加载 Wiki 上下文作为背景知识
+        wiki_context = self._load_wiki_for_report()
 
-        # 包装为双周报格式
-        header = f"# 双周报 ({period})\n\n"
-        # 尝试在 markdown 开头插入周期信息
-        if not result.markdown.startswith("# 双周报"):
-            revised = header + result.markdown
-            result = ReportResponse(
-                query=result.query, mode=result.mode, markdown=revised,
-                blocks=result.blocks, structured=result.structured,
-                llm=result.llm, review=result.review, revised=result.revised,
+        # 2. 检索近两周的证据
+        evidence_blocks = self._retrieve_recent_evidence(query, top_k=top_k)
+
+        if mode == "local":
+            markdown = self._build_local_biweekly(period, evidence_blocks, wiki_context)
+            return ReportResponse(query=query, mode="local", markdown=markdown, blocks=[],
+                                  structured={}, llm={"fallback_used": False})
+
+        # 3. LLM 模式：用模板生成
+        try:
+            prompt = self._prompt_loader.render("biweekly_report.md", {
+                "period": period,
+                "wiki_context": wiki_context,
+                "evidence": evidence_blocks,
+            })
+            # 使用 base_model（避免 reasoning 模型输出 CoT）
+            response = self._llm_provider.generate(
+                LLMRequest(prompt=prompt, route_context={
+                    "input_type": "text", "task_type": "analysis",
+                    "complexity": "standard", "use_case": "biweekly_report",
+                })
             )
-        return result
+            markdown = response.text.strip()
+            # 清理代码块包裹
+            from iris.wiki.generator import WikiGenerator
+            markdown = WikiGenerator._strip_code_fence(markdown)
+
+            # 添加时间周期头
+            if not markdown.startswith("*时间周期"):
+                markdown = f"*时间周期：{period}*\n\n{markdown}"
+
+            llm_payload = {
+                "provider": response.provider, "model": response.model,
+                "selected_role": response.selected_role,
+                "matched_rule": response.matched_rule, "fallback_used": False,
+            }
+            result = ReportResponse(query=query, mode="llm", markdown=markdown,
+                                     blocks=[], structured={}, llm=llm_payload)
+            self._logger.log("biweekly_report", result.to_dict())
+            return result
+
+        except LLMProviderError as exc:
+            self._logger.log("biweekly_llm_fallback", {"query": query, "reason": str(exc)})
+            markdown = self._build_local_biweekly(period, evidence_blocks, wiki_context)
+            return ReportResponse(query=query, mode="local_fallback", markdown=markdown,
+                                  blocks=[], structured={},
+                                  llm={"fallback_used": True, "reason": str(exc)})
+
+    def _load_wiki_for_report(self) -> str:
+        """加载 Wiki 页面上下文，用于双周报背景知识。"""
+        from pathlib import Path as _Pt
+        wiki_root = _Pt(self._config.wiki["wiki_root"]).resolve() if self._config.wiki else _Pt()
+        if not wiki_root.exists():
+            return "（Wiki 目录不存在）"
+
+        fragments = []
+        for subdir, label in [("01-领域", "领域"), ("03-项目", "项目"), ("04-人物", "人物")]:
+            d = wiki_root / subdir
+            if not d.exists():
+                continue
+            for f in sorted(d.glob("*.md")):
+                try:
+                    text = f.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    continue
+                # 去掉 frontmatter
+                if text.startswith("---"):
+                    parts = text.split("---", 2)
+                    text = parts[2].strip() if len(parts) >= 3 else text
+                if len(text) > 2000:
+                    text = text[:2000] + "\n\n..."
+                name = f.stem
+                for prefix in ("领域-", "项目-", "人物-"):
+                    if name.startswith(prefix):
+                        name = name[len(prefix):]
+                        break
+                fragments.append(f"## {label}：{name}\n{text[:2000]}")
+
+        return "\n\n".join(fragments) if fragments else "（无 Wiki 页面）"
+
+    def _retrieve_recent_evidence(self, query: str, top_k: int) -> str:
+        """检索近两周的工作证据——多关键词并发搜索、按相关度合并去重。"""
+        from iris.retrieval.searcher import LocalRetriever
+        import re as _re
+        retriever = LocalRetriever(self._config)
+
+        # 多关键词搜索，提高召回覆盖率
+        keywords = ["周报", "进展", "项目", "上线", "优化", "某检测项目", "拍照", "质检", "搜索", "推荐"]
+        seen_ids = set()
+        all_hits = []
+        for kw in keywords:
+            result = retriever.search(kw, top_k=max(top_k // 3, 3))
+            for hit in result.hits:
+                if hit.chunk_id not in seen_ids:
+                    seen_ids.add(hit.chunk_id)
+                    all_hits.append(hit)
+
+        # 按 score 降序、去重，取 top 15
+        all_hits.sort(key=lambda h: -h.score)
+        top_hits = all_hits[:15]
+
+        if not top_hits:
+            # 回退：直接用原 query 搜索
+            result = retriever.search(query, top_k=top_k)
+            top_hits = list(result.hits[:15])
+
+        lines = []
+        for i, hit in enumerate(top_hits, 1):
+            source_info = f"{hit.relative_path}:{hit.line_start}"
+            date_hint = ""
+            m = _re.search(r"(\d{8})", hit.relative_path)
+            if m:
+                date_hint = f" [{m.group(1)[:4]}.{m.group(1)[4:6]}.{m.group(1)[6:8]}]"
+            lines.append(f"### 证据 {i}{date_hint}")
+            lines.append(f"来源：{source_info}")
+            lines.append(f"标题：{hit.title}")
+            lines.append(f"内容：{hit.content_preview[:400]}")
+            lines.append("")
+
+        return "\n".join(lines) if lines else "（未检索到工作相关数据）"
+
+    def _build_local_biweekly(self, period: str, evidence: str, wiki: str) -> str:
+        """降级模式：生成简版双周报。"""
+        lines = [
+            f"*时间周期：{period}*",
+            "",
+            "## 本周进展汇总",
+            "",
+            "*以下为基于近两周数据的自动汇总，建议使用 LLM 模式获得更高质量报告。*",
+            "",
+            wiki[:3000] if wiki else "",
+            "",
+            evidence[:5000] if evidence else "",
+            "",
+            "---",
+            "> This report was generated by Iris.",
+        ]
+        return "\n".join(lines)
 
     def _review_and_revise(self, query, draft, structured, llm_payload) -> Tuple[str, Optional[Dict], bool]:
         structured_ctx = render_structured_evidence(structured)
