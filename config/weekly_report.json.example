@@ -1,5 +1,5 @@
 {
-  "version": "1.0",
+  "version": "3.1",
   "scan": {
     "folders": ["INBOX", "周报"],
     "_note": "文件夹名称，视邮件系统和目录结构配置"
