@@ -72,12 +72,17 @@ def extract_terms(text: str) -> List[str]:
 
 def extract_persons(text: str) -> List[str]:
     """从文本中提取可能的人名。"""
+    import re as _re
     found: List[str] = []
     for pattern in PERSON_PATTERNS:
         for match in pattern.finditer(text):
-            name = match.group(1).strip()
-            if name and len(name) >= 2 and name not in found:
-                found.append(name)
+            raw = match.group(1).strip()
+            # 参会人列表：按 、，, 拆分
+            parts = _re.split(r"[、，,]", raw)
+            for part in parts:
+                name = part.strip()
+                if name and len(name) >= 2 and len(name) <= 6 and name not in found:
+                    found.append(name)
     return found
 
 

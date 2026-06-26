@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from iris.config.loader import ConfigBundle
 from iris.llm import EnvironmentConfiguredLLMProvider, LLMProviderError, LLMRequest
 from iris.retrieval.searcher import LocalRetriever
 from iris.utils.logging import IrisLogger
 
-from .searcher import WikiSearcher
+from .searcher import WikiSearcher, FRONTMATTER_RE
 
 # 页面类型 → 中文名
 TYPE_NAMES = {
@@ -118,6 +119,7 @@ class WikiGenerator:
         return BatchWikiResult(items=results)
 
     def write_page(self, draft: WikiPageDraft, *, overwrite: bool = False, backup: bool = False) -> WikiWriteResult:
+        from iris.core.write_guard import safe_write_text
         output_path = Path(draft.output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         if output_path.exists() and not overwrite:
@@ -127,7 +129,9 @@ class WikiGenerator:
             backup_path = str(self._build_backup_path(output_path))
             Path(backup_path).write_text(output_path.read_text(encoding="utf-8"), encoding="utf-8")
         action = "created" if not output_path.exists() else "overwritten"
-        output_path.write_text(draft.markdown, encoding="utf-8")
+        # 使用安全检查写入，Wiki 目录为用户配置的外部路径
+        safe_write_text(output_path, draft.markdown, self._config,
+                        allow_existing_outside=True)
         self._logger.log("wiki_write_page", {"path": str(output_path), "action": action, "backup_path": backup_path})
         return WikiWriteResult(path=str(output_path), action=action, backup_path=backup_path)
 
@@ -168,7 +172,23 @@ class WikiGenerator:
         now = datetime.now().strftime("%Y-%m-%d")
         type_name = TYPE_NAMES.get(page_type, page_type)
 
-        prompt = f"""你是一个知识库编辑助手。请生成一份 {type_name} 类型的 Wiki 页面。
+        if page_type == "person":
+            prompt = self._build_person_prompt(title, query, evidence, related, now)
+        else:
+            prompt = self._build_generic_prompt(type_name, page_type, title, query, evidence, related, now)
+
+        try:
+            response = self._llm_provider.generate(
+                LLMRequest(prompt=prompt, route_context={"input_type": "text", "task_type": "qa",
+                                                          "complexity": "standard", "use_case": "wiki_generate"})
+            )
+            return self._strip_code_fence(response.text)
+        except LLMProviderError as exc:
+            return self._fallback_markdown(page_type=page_type, title=title, query=query,
+                                           evidence=evidence, related=related)
+
+    def _build_generic_prompt(self, type_name, page_type, title, query, evidence, related, now):
+        return f"""你是一个知识库编辑助手。请生成一份 {type_name} 类型的 Wiki 页面。
 
 ## 页面信息
 - 标题：{title}
@@ -188,15 +208,65 @@ class WikiGenerator:
 
 请输出完整的 Markdown。"""
 
+    def _build_person_prompt(self, title, query, evidence, related, now):
+        return f"""你是一个知识库编辑助手。请为团队成员 **{title}** 生成一份人物 Wiki 页面。
+
+## 参考证据（来自周报、会议纪要、项目文档）
+{evidence}
+
+## 要求
+1. 生成 YAML frontmatter，含 title/type(person)/status/created/updated/email/sync: false
+
+2. 页面结构：
+   - **摘要**：1-2 句概括该成员的角色和核心方向
+   - **基本信息**：部门、职位（从证据中推断）、邮箱
+   - **负责方向**：从证据中提取该成员负责的项目、技术方向、业务领域
+   - **协作网络**：从会议纪要和周报中提取经常协作的同事
+   - **周报时间线**：按时间顺序列出周报覆盖周期和主线变化
+   - **关联页面**：链接到相关的项目/领域 Wiki 页面
+
+3. 保持客观，仅从证据中提取事实，不编造
+4. 使用 [[Wiki-链接]] 格式做交叉引用
+5. email 字段提取证据中的邮箱信息
+
+请输出完整的 Markdown。"""
+
         try:
             response = self._llm_provider.generate(
                 LLMRequest(prompt=prompt, route_context={"input_type": "text", "task_type": "qa",
                                                           "complexity": "standard", "use_case": "wiki_generate"})
             )
-            return response.text.strip()
+            return self._strip_code_fence(response.text)
         except LLMProviderError as exc:
             return self._fallback_markdown(page_type=page_type, title=title, query=query,
                                            evidence=evidence, related=related)
+
+    @staticmethod
+    def _strip_code_fence(text: str) -> str:
+        """去除 LLM 返回内容中的 ```markdown 代码块包裹和对话前缀，提取纯 Markdown。"""
+        text = text.strip()
+        # 尝试提取 ```markdown ... ``` 中的内容
+        m = re.search(r"```(?:markdown)?\s*\n(.*?)```", text, re.DOTALL)
+        if m:
+            return m.group(1).strip()
+        # 如果文本以 YAML frontmatter 开头，直接返回
+        if text.startswith("---"):
+            return text
+        # 尝试查找 ---\ntitle: 开头的 frontmatter
+        idx = text.find("\n---\n")
+        if idx != -1:
+            candidate = text[idx + 1:]
+            if candidate.strip().startswith("---"):
+                return candidate.strip()
+        # 尝试查找 ---\ntitle:（文本可能以对话开始）
+        fm_start = text.find("---\ntitle:")
+        if fm_start != -1:
+            # 从前面一个 --- 开始
+            prev = text.rfind("---", 0, fm_start)
+            if prev != -1:
+                return text[prev:].strip()
+        # 降级：返回原文本
+        return text
 
     def _fallback_markdown(self, *, page_type: str, title: str, query: str,
                            evidence: str, related: str) -> str:
@@ -234,6 +304,224 @@ sources:
             if not candidate.exists():
                 return candidate
             counter += 1
+
+    # ── 增量更新 ──────────────────────────────────────────────
+
+    def _parse_frontmatter_field(self, content: str, field: str) -> str:
+        """从 YAML frontmatter 中提取指定字段的值。"""
+        fm_match = FRONTMATTER_RE.match(content)
+        if not fm_match:
+            return ""
+        for line in fm_match.group(1).splitlines():
+            if line.startswith(field + ":"):
+                return line.split(":", 1)[1].strip().strip("\"'")
+        return ""
+
+    def _find_page_by_title(self, title: str, page_type: Optional[str] = None) -> Optional[Tuple[Path, str, str]]:
+        """按标题查找已有 Wiki 页面，返回 (path, page_type, content)。"""
+        if not self._wiki_root.exists():
+            return None
+        for path in sorted(self._wiki_root.rglob("*.md")):
+            if path.name in ("index.md", "changelog.md") or ".bak." in path.name:
+                continue
+            content = path.read_text(encoding="utf-8")
+            page_title = self._parse_frontmatter_field(content, "title")
+            pt = self._parse_frontmatter_field(content, "type") or "domain"
+            if page_title == title:
+                if page_type and pt != page_type:
+                    continue
+                return (path, pt, content)
+        return None
+
+    def _generate_incremental_update(
+        self, *, existing_content: str, title: str, page_type: str,
+        evidence: str, last_updated: str, related: str,
+    ) -> Optional[str]:
+        """LLM 判断是否需要更新，返回更新后的完整 Markdown（无变化则返回原样）。"""
+        today = datetime.now().strftime("%Y-%m-%d")
+        type_name = TYPE_NAMES.get(page_type, page_type)
+
+        if page_type == "person":
+            prompt = self._build_person_update_prompt(existing_content, last_updated, evidence, related, today)
+        else:
+            prompt = self._build_generic_update_prompt(existing_content, type_name, last_updated, evidence, related, today)
+
+        try:
+            response = self._llm_provider.generate(
+                LLMRequest(prompt=prompt, route_context={
+                    "input_type": "text", "task_type": "qa",
+                    "complexity": "standard", "use_case": "wiki_update",
+                })
+            )
+            return self._strip_code_fence(response.text)
+        except LLMProviderError as exc:
+            self._logger.log("wiki_update_llm_failed", {"title": title, "error": str(exc)})
+            return None
+
+    def _build_generic_update_prompt(self, existing_content, type_name, last_updated, evidence, related, today):
+        return f"""你是一个知识库编辑助手。请对一篇现有的 {type_name} 类型 Wiki 页面做增量更新。
+
+## 现有页面内容
+```markdown
+{existing_content}
+```
+
+## 页面上次更新时间
+{last_updated or '未知'}
+
+## 最新的参考证据（来自更新的原始文档）
+{evidence}
+
+## 关联页面
+{related}
+
+## 要求
+1. 判断证据中是否包含页面尚未覆盖的**实质性新内容**
+   - 如果无新内容 → 直接将 existing_content 原样输出，不做任何修改
+   - 如果有新内容 → 在适当位置插入更新（新增章节或在现有章节中补充）
+2. 保留原有内容结构和 wording，不要删改已有的有效信息
+3. 更新 YAML frontmatter 中的 updated 字段为 {today}
+4. 保持 [[Wiki-链接]] 交叉引用格式
+5. 在「参考来源」中补充新证据的来源
+6. **输出纯 Markdown，以 --- 开头，不要任何对话前缀或代码块包裹**"""
+
+    def _build_person_update_prompt(self, existing_content, last_updated, evidence, related, today):
+        return f"""你是一个知识库编辑助手。请对团队成员 Wiki 页面做增量更新。
+
+## 现有页面内容
+```markdown
+{existing_content}
+```
+
+## 页面上次更新时间
+{last_updated or '未知'}
+
+## 最新的参考证据（来自周报、会议纪要、项目文档）
+{evidence}
+
+## 关联页面
+{related}
+
+## 要求
+1. 判断证据中是否包含页面尚未覆盖的**实质性新信息**
+   - 新负责方向 → 追加到「负责方向」，标记开始时间
+   - 新增协作人 → 追加到「协作网络」
+   - 新的周报 → 追加到「周报时间线」
+   - 旧方向 >6月未提及 → 移入「过往负责」章节
+   - 无新内容 → 原样输出
+2. 保留原有内容结构和 wording
+3. 更新 YAML frontmatter 中的 updated 字段为 {today}
+4. 保持 [[Wiki-链接]] 交叉引用格式
+5. 在「参考来源」中补充新来源
+6. **输出纯 Markdown，以 --- 开头，不要任何对话前缀或代码块包裹**"""
+
+    @staticmethod
+    def _validate_update_output(new_content: str, existing_content: str, expected_title: str) -> str:
+        """校验 LLM 输出：确保 frontmatter 完整且 title 未被篡改。"""
+        import re as _re
+        fm = _re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
+        m = fm.match(new_content)
+        if not m:
+            return existing_content  # frontmatter 损坏 → 回退
+
+        # 提取新内容中的 title
+        new_title = ""
+        for line in m.group(1).splitlines():
+            if line.startswith("title:"):
+                new_title = line.split(":", 1)[1].strip().strip("\"'")
+                break
+
+        # title 被篡改 → 修复
+        if new_title != expected_title:
+            new_content = _re.sub(
+                r"^title:.*$",
+                f"title: {expected_title}",
+                new_content,
+                count=1,
+                flags=_re.MULTILINE,
+            )
+
+        # 确保结尾没有多余代码块
+        new_content = new_content.strip()
+        if new_content.endswith("```"):
+            new_content = new_content[:-3].strip()
+
+        return new_content
+
+    def update_page(self, *, title: str, page_type: Optional[str] = None, top_k: int = 8) -> Dict[str, Any]:
+        """增量更新单个 Wiki 页面。"""
+        found = self._find_page_by_title(title, page_type)
+        if not found:
+            return {"status": "not_found", "title": title}
+        path, existing_type, existing_content = found
+        last_updated = self._parse_frontmatter_field(existing_content, "updated")
+
+        # 检索最新证据
+        result = self._retriever.search(title, top_k=top_k)
+        evidence_text = self._format_evidence(result.hits)
+
+        # 查找关联页面
+        slug = _slugify_title(title)
+        related = self._compute_related_pages(title, title, exclude_slug=slug) if self._wiki_searcher else "暂无"
+
+        # LLM 增量更新
+        new_content = self._generate_incremental_update(
+            existing_content=existing_content, title=title, page_type=existing_type,
+            evidence=evidence_text, last_updated=last_updated, related=related,
+        )
+
+        if new_content is None:
+            return {"status": "error", "title": title, "reason": "LLM 调用失败"}
+
+        # ── 输出校验：确保 LLM 没有损坏 frontmatter ──
+        validated = self._validate_update_output(new_content, existing_content, title)
+        if validated != new_content:
+            self._logger.log("wiki_update_validation", {"title": title, "action": validated})
+            new_content = validated
+
+        if new_content.strip() == existing_content.strip():
+            return {"status": "no_changes", "title": title, "path": str(path)}
+
+        # 备份并写入
+        draft = WikiPageDraft(page_type=existing_type, title=title, slug=slug,
+                              output_path=str(path), markdown=new_content)
+        write_result = self.write_page(draft, overwrite=True, backup=True)
+
+        self._logger.log("wiki_update_page", {"title": title, "path": str(path),
+                                                "action": write_result.action})
+        return {
+            "status": "updated",
+            "title": title,
+            "path": str(path),
+            "action": write_result.action,
+            "backup_path": write_result.backup_path,
+        }
+
+    def update_all_pages(self, *, top_k: int = 8) -> Dict[str, Any]:
+        """遍历并增量更新所有现有 Wiki 页面。"""
+        if not self._wiki_root.exists():
+            return {"status": "error", "reason": "Wiki 目录不存在"}
+        results: List[Dict[str, Any]] = []
+        for path in sorted(self._wiki_root.rglob("*.md")):
+            if path.name in ("index.md", "changelog.md") or ".bak." in path.name:
+                continue
+            title = self._parse_frontmatter_field(path.read_text(encoding="utf-8"), "title")
+            if not title:
+                continue
+            r = self.update_page(title=title, top_k=top_k)
+            results.append(r)
+        updated = [r for r in results if r.get("status") == "updated"]
+        unchanged = [r for r in results if r.get("status") == "no_changes"]
+        not_found = [r for r in results if r.get("status") == "not_found"]
+        errors = [r for r in results if r.get("status") == "error"]
+        return {
+            "total": len(results),
+            "updated": len(updated),
+            "unchanged": len(unchanged),
+            "not_found": len(not_found),
+            "errors": len(errors),
+            "details": results,
+        }
 
 
 def _slugify_title(title: str) -> str:

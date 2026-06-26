@@ -2,7 +2,7 @@
 
 from .discovery import CandidateDiscovery
 from .generator import BatchWikiItem, WikiGenerator, WikiPageDraft, WikiWriteResult
-from .navigation import WikiNavigationBuilder, append_changelog, lint_wiki
+from .navigation import WikiNavigationBuilder, append_changelog, fix_wiki, lint_wiki
 from .searcher import WikiHit, WikiSearcher
 
 __all__ = [

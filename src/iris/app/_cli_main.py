@@ -17,9 +17,10 @@ from iris.app.cli.handlers import COMMAND_HANDLERS
 COMMANDS = [
     "check-config", "route-model", "diagnose", "status", "agent-spec",
     "scan-source", "build-chunks", "build-vector-index",
-    "search", "ask", "build-report", "build-mindmap",
+    "search", "ask", "build-report", "build-mindmap", "build-biweekly-report",
     "discover-wiki", "discover-wiki-auto", "build-wiki",
-    "build-wiki-nav", "wiki-pipeline", "wiki-lint",
+    "build-wiki-nav", "wiki-pipeline", "wiki-lint", "wiki-update",
+    "build-asr-prompt",
     "memory-status", "memory-list", "memory-delete", "memory-maintenance",
     "memory-export", "memory-import", "working-set", "working-show",
     "working-clear", "process", "transcribe-meeting", "batch-transcribe", "daily-start",
@@ -76,9 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--audio-file", default="", help="transcribe-meeting 录音文件路径")
     parser.add_argument("--transcript-file", default="", help="transcribe-meeting 已有转写文本路径")
     parser.add_argument("--output", default="", help="transcribe-meeting 输出路径")
+    parser.add_argument("--to-source", action="store_true", help="transcribe-meeting 输出到 SOURCE/05-会议纪要/")
     parser.add_argument("--whisper-model", default="base", help="Whisper 模型规格")
     parser.add_argument("--force", action="store_true", help="强制重新转写")
-    parser.add_argument("--files", default="", help="batch-transcribe 文件列表")
+    parser.add_argument("--files", default="", help="batch-transcribe 文件列表（逗号分隔）")
+    parser.add_argument("--dir", default="", help="batch-transcribe 批量处理目录下所有 .txt")
     parser.add_argument("--output-dir", default="", help="batch-transcribe 统一输出目录")
     # 密钥链
     parser.add_argument("--key", default="", help="密钥名称")
@@ -97,6 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--export-jsonl", default="", help="discover-wiki 导出候选 JSONL")
     parser.add_argument("--export-review", default="", help="discover-wiki 导出审核 JSONL")
     parser.add_argument("--export-review-md", default="", help="discover-wiki 导出审核 Markdown")
+    parser.add_argument("--fix", action="store_true", help="wiki-lint 自动修复模式")
     return parser
 
 

@@ -97,13 +97,35 @@ class CandidateDiscovery:
 
         candidates = suppress_path_concentrated_noise(candidates)
         candidates = cluster_and_resolve(candidates)
-        candidates.sort(key=lambda item: (-item.score, -item.evidence_count, item.title))
+
+        # 按类型分层排序，确保每种类型都有展示
+        per_type_min = max(limit // 5, 3)
+        selected: list[CandidateItem] = []
+        seen_keys: set = set()
+        for pt in ("domain", "concept", "project", "person"):
+            pool = sorted(
+                [c for c in candidates if c.page_type == pt],
+                key=lambda c: (-c.score, -c.evidence_count, c.title),
+            )
+            for item in pool[:per_type_min]:
+                key = (item.page_type, item.title)
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    selected.append(item)
+
+        # 用剩余名额补充高分候选
+        remaining = sorted(
+            [c for c in candidates if (c.page_type, c.title) not in seen_keys],
+            key=lambda c: (-c.score, -c.evidence_count, c.title),
+        )
+        selected.extend(remaining[:limit - len(selected)])
+        selected.sort(key=lambda c: (-c.score, -c.evidence_count, c.title))
 
         # 增量模式：检查已有 Wiki 页面
         if incremental:
-            candidates = self._filter_incremental(candidates)
+            selected = self._filter_incremental(selected)
 
-        return candidates[:limit]
+        return selected[:limit]
 
     def _filter_incremental(self, candidates: List[CandidateItem]) -> List[CandidateItem]:
         """过滤掉已有且非 stale 的候选。"""

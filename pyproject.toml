@@ -1,16 +1,29 @@
 [project]
 name = "iris"
-version = "3.0.0"
+version = "3.1.0"
 description = "工作知识助手 — 个人知识库与飞书团队知识库集成"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
     {name = "maintainer"},
 ]
+dependencies = [
+    "PyMuPDF>=1.24",
+    "python-docx>=1.1",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+transcribe = ["openai-whisper>=20231117"]
+weekly = ["beautifulsoup4>=4.12"]
+
+[project.scripts]
+iris = "scripts.run_cli:main"
 
 [build-system]
 requires = ["setuptools>=64"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
+
 
 [tool.setuptools.packages.find]
 where = ["src"]

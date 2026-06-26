@@ -80,6 +80,31 @@ class AnalysisReportService:
         self._logger.log("analysis_report", result.to_dict())
         return result
 
+    def build_biweekly_report(self, *, query: str = "", top_k: int = 8, mode: str = "llm") -> ReportResponse:
+        """生成双周报——汇总近两周进展。"""
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone.utc)
+        two_weeks_ago = (now - timedelta(days=14)).strftime("%Y-%m-%d")
+        period = f"{two_weeks_ago} ~ {now.strftime('%Y-%m-%d')}"
+
+        if not query:
+            query = f"近两周({period})工作进展"
+
+        # 利用通用报告服务生成
+        result = self.build_report(query, top_k=top_k, mode=mode)
+
+        # 包装为双周报格式
+        header = f"# 双周报 ({period})\n\n"
+        # 尝试在 markdown 开头插入周期信息
+        if not result.markdown.startswith("# 双周报"):
+            revised = header + result.markdown
+            result = ReportResponse(
+                query=result.query, mode=result.mode, markdown=revised,
+                blocks=result.blocks, structured=result.structured,
+                llm=result.llm, review=result.review, revised=result.revised,
+            )
+        return result
+
     def _review_and_revise(self, query, draft, structured, llm_payload) -> Tuple[str, Optional[Dict], bool]:
         structured_ctx = render_structured_evidence(structured)
         try:

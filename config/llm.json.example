@@ -76,7 +76,6 @@
         "priority": 10,
         "match": {"complexity": "complex"},
         "route_to": "adv_model",
-        "fallback_to": null,
         "description": "复杂分析路由到 adv_model"
       }
     ]

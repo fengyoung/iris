@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import sys
 import time
 from pathlib import Path
@@ -12,15 +11,6 @@ from iris.config.loader import ConfigBundle
 from iris.llm import EnvironmentConfiguredLLMProvider, LLMRequest
 
 SYSTEM_PROMPT = "你是一个专业的会议纪要提取专家，擅长从语音转写文本中提取结构化会议纪要。你会仔细校正 ASR 误识别，准确提取信息。注意：直接输出会议纪要正文，不要输出任何前缀说明、开场白或打招呼内容。"
-
-# 新 Wiki 页面目录配置
-WIKI_SECTIONS = [
-    ("team", "01-领域"),
-    ("topic", "01-领域"),
-    ("concept", "02-概念"),
-    ("project", "03-项目"),
-    ("person", "04-人物"),
-]
 
 
 class TranscribeMeetingPipeline:
@@ -47,7 +37,15 @@ class TranscribeMeetingPipeline:
             stem = source.stem
             source_type = "audio"
         else:
-            source = Path(transcript_path).resolve()
+            source = Path(transcript_path)
+            # 仅文件名 → 在配置的转写目录查找
+            if not source.is_absolute() and not source.exists():
+                default_dir = self._get_transcript_search_dir()
+                if default_dir:
+                    candidate = default_dir / source.name
+                    if candidate.exists():
+                        source = candidate
+            source = source.resolve()
             if not source.exists():
                 raise FileNotFoundError(f"转写文件不存在: {source}")
             stem = source.stem
@@ -91,13 +89,41 @@ class TranscribeMeetingPipeline:
             out = Path(output_path).resolve()
         else:
             out = self._temp_dir / f"{stem}.md"
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(minutes, encoding="utf-8")
+        from iris.core.write_guard import safe_write_text
+        safe_write_text(out, minutes, self._bundle, allow_existing_outside=True)
         print(f"     完成 → {out.name}", file=sys.stderr)
 
         return {"audio_file": str(source) if has_audio else "", "transcript_file": str(source) if has_text else "",
                 "source_type": source_type, "word_count": word_count, "wiki_pages_loaded": page_count,
                 "output_file": str(out), "model": self._provider.get_active_model_config("base_model")["model"]}
+
+    def _resolve_source_dir(self) -> Path:
+        """解析 SOURCE/05-会议纪要/ 输出目录。"""
+        data_source = self._bundle.data_source
+        sources = data_source.get("sources", {})
+        for cfg in sources.values():
+            if cfg.get("enabled") and cfg.get("path"):
+                src_root = Path(cfg["path"]).resolve()
+                if src_root.exists():
+                    meeting_dir = src_root / "05-会议纪要"
+                    return meeting_dir
+        return self._temp_dir
+
+    def _get_transcript_search_dir(self) -> Path | None:
+        """获取转写文件默认搜索目录（OS环境变量 > .env 文件）。"""
+        import os
+        # 首先检查 OS 环境变量
+        env_dir = os.environ.get("IRIS_MEETING_TRANS_DIR", "")
+        if not env_dir:
+            # 回退到 .env 文件
+            from iris.config.loader import load_env_file
+            env = load_env_file(self._bundle.root / ".env")
+            env_dir = env.get("IRIS_MEETING_TRANS_DIR", "")
+        if env_dir:
+            p = Path(env_dir).expanduser().resolve()
+            if p.exists():
+                return p
+        return None
 
     def _transcribe(self, audio: Path, transcript_path: Path, model_name: str) -> int:
         import whisper

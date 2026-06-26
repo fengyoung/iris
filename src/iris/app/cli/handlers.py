@@ -157,6 +157,24 @@ def handle_build_mindmap(args, bundle, logger) -> int:
     return 0
 
 
+# ── 双周报 ────────────────────────────────────────────
+
+
+def handle_build_biweekly_report(args, bundle, logger) -> int:
+    from iris.analysis import AnalysisReportService
+    service = AnalysisReportService(bundle)
+    query = getattr(args, "query", "") or ""
+    result = service.build_biweekly_report(query=query, mode=getattr(args, "mode", "llm"))
+    payload = result.to_dict()
+    if args.output_file:
+        path = Path(args.output_file)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(result.markdown, encoding="utf-8")
+        payload["output_file"] = str(path)
+    _emit_output(args.command, payload, pretty=args.pretty)
+    return 0
+
+
 # ── Wiki 命令 ────────────────────────────────────────────
 
 
@@ -245,12 +263,106 @@ def handle_wiki_pipeline(args, bundle, logger) -> int:
 
 
 def handle_wiki_lint(args, bundle, logger) -> int:
-    from iris.wiki import lint_wiki
+    from iris.wiki import lint_wiki, fix_wiki
     from pathlib import Path
 
     wiki_root = Path(bundle.wiki["wiki_root"]).resolve() if bundle.wiki else Path()
-    result = lint_wiki(wiki_root)
+    data_root = bundle.root / "data"
+
+    if getattr(args, "fix", False):
+        fix_result = fix_wiki(wiki_root)
+        if args.pretty:
+            total = fix_result.get("actions_taken", 0)
+            details = fix_result.get("details", {})
+            print(f"## 自动修复完成（{total} 处）")
+            for key, items in details.items():
+                if items:
+                    print(f"  {key}: {len(items)} 处 ({', '.join(items[:5])})")
+        else:
+            import json as _json
+            print(_json.dumps(fix_result, ensure_ascii=False, indent=2))
+        return 0
+
+    result = lint_wiki(wiki_root, data_root=data_root)
     _emit_output(args.command, result, pretty=args.pretty)
+    return 0
+
+
+def handle_wiki_update(args, bundle, logger) -> int:
+    """增量更新 Wiki 页面。"""
+    from iris.wiki.generator import WikiGenerator
+
+    generator = WikiGenerator(bundle)
+    if args.title:
+        result = generator.update_page(title=args.title, page_type=args.page_type)
+    else:
+        result = generator.update_all_pages()
+    _emit_output(args.command, result, pretty=args.pretty)
+    return 0
+
+
+def handle_build_asr_prompt(args, bundle, logger) -> int:
+    """从 Wiki 知识库构建 ASR 校正提示词。"""
+    from pathlib import Path as _Pt
+    wiki_root = _Pt(bundle.wiki["wiki_root"]).resolve() if bundle.wiki else _Pt()
+    if not wiki_root.exists():
+        _emit_output(args.command, {"error": "Wiki 根目录不存在"}, pretty=args.pretty)
+        return 1
+
+    sections: dict[str, str] = {}
+    page_count = 0
+    for subdir in ("02-概念", "01-领域", "03-项目", "04-人物"):
+        d = wiki_root / subdir
+        if not d.exists():
+            continue
+        for f in sorted(d.glob("*.md")):
+            try:
+                text = f.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            # 移除 frontmatter
+            if text.startswith("---"):
+                parts = text.split("---", 2)
+                text = parts[2].strip() if len(parts) >= 3 else text
+            # 截断长页面
+            if len(text) > 2000:
+                text = text[:2000] + "\n\n..."
+            key = f"{subdir}/{f.stem}"
+            sections[key] = text
+            page_count += 1
+
+    # 构建 ASR 校正提示词
+    lines = [
+        "# ASR 校正词汇表",
+        f"## 来源：LLM-WIKI 知识库（{page_count} 页）",
+        "## 使用说明",
+        "将此内容作为 Whisper ASR 的后处理上下文，用于校正转写中的同音/近音误识别。",
+        "特别注意以下类别：",
+        "- **人名**（来自 04-人物）：确保姓名拼写准确",
+        "- **项目名**（来自 03-项目）：如 某检测项目、图像采集3.0 等",
+        "- **技术术语**（来自 02-概念）：如 OCR、MMoE、BM25 等",
+        "- **领域知识**（来自 01-领域）：确保领域上下文准确",
+        "",
+    ]
+    for key, content in sections.items():
+        lines.append(f"### {key}")
+        lines.append(content)
+        lines.append("")
+
+    prompt = "\n".join(lines)
+
+    if args.output_file:
+        out = _Pt(args.output_file)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(prompt, encoding="utf-8")
+
+    _emit_output(args.command, {
+        "page_count": page_count,
+        "prompt_chars": len(prompt),
+        "sections": list(sections.keys()),
+    }, pretty=args.pretty)
+    if args.pretty:
+        print(f"\n{prompt[:2000]}")
     return 0
 
 
@@ -333,16 +445,31 @@ def handle_transcribe_meeting(args, bundle, logger) -> int:
     if not args.audio_file and not args.transcript_file:
         raise ValueError("transcribe-meeting 需要 --audio-file 或 --transcript-file")
     pipeline = TranscribeMeetingPipeline(bundle)
+
+    # --to-source 模式：自动输出到 SOURCE/05-会议纪要/
+    output = args.output
+    if not output and getattr(args, "to_source", False):
+        source_dir = pipeline._resolve_source_dir()
+        raw_name = Path(args.transcript_file or args.audio_file).name
+        base = raw_name.rsplit(".", 1)[0] if "." in raw_name else raw_name
+        output = str(source_dir / f"{base}.md")
+
     result = pipeline.run(args.audio_file, transcript_path=args.transcript_file or None,
-                          output_path=args.output or None, whisper_model=args.whisper_model, force_retranscribe=args.force)
+                          output_path=output or None, whisper_model=args.whisper_model, force_retranscribe=args.force)
     _emit_output(args.command, result, pretty=args.pretty)
     return 0
 
 
 def handle_batch_transcribe(args, bundle, logger) -> int:
     from iris.app.transcribe_meeting import TranscribeMeetingPipeline
+    # --dir 支持：自动扫描目录下所有 .txt 文件
+    if not args.files and getattr(args, "dir", ""):
+        import glob as _g
+        dir_path = Path(getattr(args, "dir", ""))
+        if dir_path.exists() and dir_path.is_dir():
+            args.files = ",".join(str(p) for p in sorted(dir_path.glob("*.txt")))
     if not args.files:
-        raise ValueError("batch-transcribe 需要 --files")
+        raise ValueError("batch-transcribe 需要 --files 或 --dir")
     file_paths = _expand_file_list(args.files)
     if not file_paths:
         print("未匹配到任何文件", file=__import__('sys').stderr)
@@ -409,11 +536,41 @@ def handle_daily_start(args, bundle, logger) -> int:
         chunk_summaries.append(cs)
         scan_info.append({"source_name": scan_summary.source_name, "document_count": scan_summary.document_count})
 
-    # 4. Wiki 自动发现 + 索引维护
+    # 3.5 向量索引增量更新（若 embedding 已启用）
+    try:
+        from iris.retrieval.embedder import EmbedderError, build_embedder_from_config
+        emb_cfg = bundle.llm.get("embedding", {})
+        if emb_cfg.get("enabled", False):
+            from iris.retrieval.vector_index import VectorIndex, build_vector_index
+            embedder = build_embedder_from_config(bundle.llm)
+            if embedder:
+                import json as _vi_json
+                summary_path = bundle.root / "data" / "metadata" / "work_docs_main_chunk_summary.json"
+                if summary_path.exists():
+                    vi_payload = _vi_json.loads(summary_path.read_text(encoding="utf-8"))
+                    from iris.ingest.chunker import ChunkRecord as _ChunkRecord
+                    vi_chunks = [_ChunkRecord(**item) for item in vi_payload["chunks"]]
+                    index_path = bundle.root / "data" / "metadata" / "work_docs_main_vector_index"
+                    existing = VectorIndex(index_path)
+                    existing.load()
+                    idx = build_vector_index("work_docs_main", vi_chunks, embedder, index_path, existing_index=existing)
+                    vector_index_result = {"status": "ok", "indexed": idx.size()}
+                else:
+                    vector_index_result = {"status": "skipped", "reason": "no_chunk_summary"}
+            else:
+                vector_index_result = {"status": "skipped", "reason": "embedder_not_configured"}
+        else:
+            vector_index_result = {"status": "skipped", "reason": "embedding_disabled"}
+    except Exception as _vi_exc:
+        vector_index_result = {"status": "error", "reason": str(_vi_exc)}
+
+    # 4. Wiki 自动发现 + 索引维护 + 增量更新
     total_rebuilt = sum(cs.build_stats.get("rebuilt_documents", 0) for cs in chunk_summaries)
     from iris.app.cli.helpers import _auto_discover_wiki
     wiki_discover_result = _auto_discover_wiki(bundle, changed_count=total_rebuilt)
     if bundle.wiki:
+        from iris.wiki.generator import WikiGenerator
+        wiki_update_result = WikiGenerator(bundle).update_all_pages(top_k=4)
         builder = WikiNavigationBuilder(bundle)
         builder.build(write=True)
         append_changelog(Path(bundle.wiki["wiki_root"]), "daily-start 自动维护")
@@ -424,7 +581,9 @@ def handle_daily_start(args, bundle, logger) -> int:
                "chunks": [{"source_name": cs.source_name, "chunk_count": cs.chunk_count,
                             "reused_documents": cs.build_stats.get("reused_documents", 0),
                             "rebuilt_documents": cs.build_stats.get("rebuilt_documents", 0)} for cs in chunk_summaries],
-               "wiki_discover": wiki_discover_result}
+               "vector_index": vector_index_result,
+               "wiki_discover": wiki_discover_result,
+               "wiki_update": wiki_update_result}
     _emit_output(args.command, payload, pretty=args.pretty)
     return 0
 
@@ -612,12 +771,15 @@ COMMAND_HANDLERS = {
     "ask": handle_ask,
     "build-report": handle_build_report,
     "build-mindmap": handle_build_mindmap,
+    "build-biweekly-report": handle_build_biweekly_report,
     "discover-wiki": handle_discover_wiki,
     "discover-wiki-auto": handle_discover_wiki_auto,
     "build-wiki": handle_build_wiki,
     "build-wiki-nav": handle_build_wiki_nav,
     "wiki-pipeline": handle_wiki_pipeline,
     "wiki-lint": handle_wiki_lint,
+    "wiki-update": handle_wiki_update,
+    "build-asr-prompt": handle_build_asr_prompt,
     "diagnose": handle_diagnose,
     "status": handle_status,
     "agent-spec": handle_agent_spec,

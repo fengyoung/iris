@@ -12,7 +12,7 @@
   },
   "output": {
     "dir": "${IRIS_OUTPUT_DIR}/weekly_reports",
-    "filename_format": "周报-w{week}-{name}-{date}.md",
+    "filename_format": "{date}-周报-w{week}-{name}.md",
     "file_overwrite": false
   }
 }
