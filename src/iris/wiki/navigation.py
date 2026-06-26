@@ -151,7 +151,7 @@ EXTERNAL_CONCEPT_PATTERNS = [
         r"^门店 AI 需求",
         r"^二手商品货架进销存",
         r"^价格策略与定价",
-        r"^转转集团",
+        r"^集团",
         r"^VOC-CCR",
         r"^主搜算法",
         r"^质检AI应用",
@@ -187,7 +187,7 @@ def _is_wiki_broken_link(target: str, page_titles: dict) -> str | None:
     for pt in page_titles:
         if target in pt or pt in target:
             return None
-    # 前缀匹配（如 "技术研发部" → "技术研发部2026年目标与规划"）
+    # 前缀匹配（如 "AlphaTeam" → "AlphaTeam2026年目标与规划"）
     if len(target) >= 4:
         for pt in page_titles:
             if pt.startswith(target) or target.startswith(pt):
@@ -204,12 +204,12 @@ def _is_wiki_broken_link(target: str, page_titles: dict) -> str | None:
             target_norm in pt_norm or pt_norm in target_norm
         ):
             return None
-    # 字符级有序子序列匹配（如 "某检测项目拆修检测" → "某检测项目手机拆修检测项目"）
+    # 字符级有序子序列匹配（如 "AlphaProject" → "AlphaProject手机拆修检测项目"）
     if len(target) >= 6:
         for pt in page_titles:
             if _char_sequence_match(target, pt):
                 return None
-    # 连写数字修复（如 "拍照30" ↔ "图像采集3.0", "30AI" ↔ "3.0 AI"）
+    # 连写数字修复（如 "v10" ↔ "v1.0", "20AI" ↔ "2.0 AI"）
     target_decimal = re.sub(r"(\d+)\.?(\d*)", lambda m: m.group(1) + "." + m.group(2) if m.group(2) else m.group(1), target_norm)
     for pt in page_titles:
         pt_decimal = re.sub(r"(\d+)\.?(\d*)", lambda m: m.group(1) + "." + m.group(2) if m.group(2) else m.group(1), _norm(pt))
@@ -221,8 +221,8 @@ def _is_wiki_broken_link(target: str, page_titles: dict) -> str | None:
 def _char_sequence_match(short: str, long: str) -> bool:
     """判断 short 的所有字符是否在 long 中按顺序出现（字符级子序列匹配）。
 
-    例: "某检测项目拆修检测" → "某检测项目手机拆修检测项目" → True
-        "拍照30AI" → "图像采集3.0 AI外观定级" → True (30 → 3.0 不在此处理)
+    例: "AlphaProject" → "AlphaProject手机拆修检测项目" → True
+        "Alpha20AI" → "Alpha2.0 AI项目" → True (20 → 2.0 不在此处理)
     """
     si = 0
     for ch in long:

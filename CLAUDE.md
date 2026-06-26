@@ -1,4 +1,4 @@
-# Iris 3.2 — 项目执行说明
+# Iris 3.3 — 项目执行说明
 
 > 工作知识助手，从 Iris v2.7.1 重构升级而来。
 > 个人知识库（Obsidian Wiki）重新设计 + 新增飞书团队知识库操作能力。
@@ -13,14 +13,14 @@
 |------|------|------|
 | **步骤 1** | 最小化迁移：非知识库能力迁移（搭骨架） | ✅ 完成 |
 | **步骤 2** | 本地知识库重构（新 Wiki 体系 + 能力重构） | ✅ 完成 |
-| **步骤 3** | 飞书团队知识库管理（全新能力） | 🟡 客户端就绪 |
+| **步骤 3** | 飞书 → 本地知识库提炼 | ✅ 完成 |
 
 ### 当前规模
 
 | 维度 | 数据 |
 |------|------|
-| 源代码 | 10,432 行，75 个文件，16 个模块 |
-| CLI 命令 | 42 个 |
+| 源代码 | 12,559 行，79 个文件，18 个模块 |
+| CLI 命令 | 43 个 |
 | 单元测试 | 59 个 |
 | 数据源 | 594 个文档，3,402 个 Chunk |
 | 向量索引 | 5,810 条，25 MB |
@@ -41,7 +41,7 @@ Obsidian 仓库：.../WORKSPACE/
                 │   │   ├── 06-我的周报/
                 │   │   ├── 07-成员周报/
                 │   │   ├── 08-参考资料/
-                │   │   └── xiaolongxia/ → ../../xiaolongxia (软链)
+                │   │   └── v2-data/ → ../../v2-data (软链)
                 │   └── LLM-WIKI/        ← Wiki 输出（4 种页面类型）
                 │       ├── 01-领域/
                 │       ├── 02-概念/
@@ -49,9 +49,9 @@ Obsidian 仓库：.../WORKSPACE/
                 │       ├── 04-人物/
                 │       ├── index.md
                 │       └── changelog.md
-                ├── @转转/
+                ├── @项目/
                 ├── LLM-Wiki/             ← v2.7.1 旧 Wiki（保留不迁）
-                └── xiaolongxia/          ← v2.7.1 旧数据源
+                └── v2-data/          ← v2.7.1 旧数据源
 ```
 
 路径通过 `.env` 中的 `${IRIS_WORK_DOCS_DIR}` 和 `${IRIS_WIKI_ROOT}` 配置。
@@ -70,7 +70,7 @@ Obsidian 仓库：.../WORKSPACE/
 | 模型路由 | `src/iris/llm/router.py` | 路由规则引擎 |
 | 日志 | `src/iris/utils/logging.py` | 结构化 JSON 日志 |
 | 核心抽象 | `src/iris/core/` | Protocol、文件锁、写入守卫、存储层 |
-| CLI 框架 | `src/iris/app/cli/` | argparse 分发表、41 个命令 |
+| CLI 框架 | `src/iris/app/cli/` | argparse 分发表、43 个命令 |
 | 记忆系统 | `src/iris/memory/` | 画像、校正、工作上下文、会话 |
 | Trello | `src/iris/trello/` | 看板 CRUD + LLM 汇总 |
 | 图文处理 | `src/iris/complex_input/` | 双阶段图文处理 |
@@ -155,7 +155,7 @@ sources:
 - 断链智能过滤：技术术语白名单（100+）+ 源文档引用 + 字符级模糊匹配，排除率 83%
 - `wiki-lint` 6 维指标：frontmatter / 摘要 / 出链 / draft 状态 / 过期 / 断链
 
-### 会议纪要路由（🆕 v3.2.1）
+### 会议纪要路由（v3.2.1）
 
 `transcribe-meeting --to-source` 现在支持 LLM 动态路由，自动判定纪要归档到 SOURCE 对应子目录：
 
@@ -173,16 +173,39 @@ sources:
 
 ---
 
-## 步骤 3：飞书 → 本地知识库提炼 🟡 进行中
+## 步骤 3：飞书 → 本地知识库提炼 ✅
 
 飞书文档/聊天记录 → 本地 Markdown → SOURCE 归档 → Wiki 自然吸收。
 
 | 管道 | 状态 | 说明 |
 |------|------|------|
-| `feishu-doc-convert` | 🟡 待开发 | 飞书文档转本地 Markdown（图片→Pic，补充元信息，排重） |
-| `chat-digest` | 🟡 待开发 | 聊天记录 AI 提炼为结构化文档（主题/决策/待办/关联项目） |
+| `feishu-doc-convert` | ✅ 完成 | 飞书文档转本地 Markdown（图片→Pic，补充元信息+作者，排重） |
+| `chat-digest` | ✅ 完成 | 聊天记录 AI 提炼为结构化文档（主题/决策/待办/关联项目） |
 
 **不包含**：本地 → 飞书发布（需求已取消）、团队知识查询（直接用飞书搜）。
+
+### 使用方式
+
+```bash
+# 飞书文档转换
+iris feishu-doc-convert --url <文档URL>              # 单篇文档
+iris feishu-doc-convert --url <URL1> --url <URL2>     # 批量
+iris feishu-doc-convert --from-config                 # 从配置文件读取
+iris feishu-doc-convert --url <URL> --dry-run         # 预览路由结果
+
+# 聊天记录提炼
+iris chat-digest --group <群聊名> --range 5           # 指定群聊+天数
+iris chat-digest --user <用户名> --range 3            # 指定用户单聊
+iris chat-digest --interactive                        # 交互选择模式
+iris chat-digest --from-config                        # 从配置文件读取
+```
+
+### 关键设计
+
+- **路由驱动**：文档用 `meeting_routes.json` 配置规则，聊天用 AI 萃取后的决策/待办判定
+- **排重索引**：`data/dedup/feishu_doc_index.json` 和 `chat_digest_index.json`
+- **图片存储**：`Pic/{stem}/feishu_xxx.png`（与 Obsidian 兼容）
+- **开源安全**：全部关键词和描述均从 gitignored 配置文件动态读取
 
 详细设计见 [[feishu-to-local-pipelines]]。
 
@@ -222,9 +245,9 @@ JSON 配置中使用 `${VAR_NAME}` 引用环境变量或 .env 中的值。
 
 | 层 | 位置 | 格式 | 含义 | 当前值 |
 |----|------|------|------|--------|
-| **产品版本** | `pyproject.toml` | SemVer X.Y.Z | 软件发布版本 | 3.2.1 |
-| **协议版本** | `src/iris/__init__.py` | MAJOR.MINOR | CLI 命令集 / agent-spec 格式 | 3.2 |
-| **数据版本** | `config/*.json` | 各自独立 | 配置文件 Schema | 3.2 |
+| **产品版本** | `pyproject.toml` | SemVer X.Y.Z | 软件发布版本 | 3.3.0 |
+| **协议版本** | `src/iris/__init__.py` | MAJOR.MINOR | CLI 命令集 / agent-spec 格式 | 3.3 |
+| **数据版本** | `config/*.json` | 各自独立 | 配置文件 Schema | 3.3 |
 
 > 三层解耦：只有真正发生变化的层才递增版本号。
 
@@ -241,7 +264,7 @@ JSON 配置中使用 `${VAR_NAME}` 引用环境变量或 .env 中的值。
 
 ```
 iris3/
-├── pyproject.toml          # 3.2.1，依赖：PyMuPDF / python-docx / numpy
+├── pyproject.toml          # 3.3.0，依赖：PyMuPDF / python-docx / numpy
 ├── README.md
 ├── CLAUDE.md               # 本文件
 ├── .env.example            # 环境变量模板
@@ -264,8 +287,10 @@ iris3/
 │   ├── analysis/           # 步骤 2 — 报告/思维导图/双周报
 │   ├── output/             # 步骤 1 — 输出格式化
 │   └── feishu/             # 步骤 3 — 飞书文档/聊天提炼
-│       ├── client.py       #   lark-cli 封装（文档拉取、图片下载）
-│       └── doc_convert.py  #   飞书文档→本地 Markdown
+│       ├── client.py       #   lark-cli 封装（文档/IM/图片/通讯录）
+│       ├── _shared.py      #   共享工具（路径/排重/时间/标题清理）
+│       ├── doc_convert.py  #   飞书文档→本地 Markdown + 路由归档
+│       └── chat_digest.py  #   聊天记录 AI 提炼 + 结构化输出
 ├── scripts/                # CLI 入口 + 委托脚本
 ├── templates/              # Prompt / Wiki 模板
 ├── tests/                  # 单元测试（59 用例）

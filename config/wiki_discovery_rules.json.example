@@ -53,7 +53,7 @@
   ],
   "page_type_priority": { "project": 3, "topic": 2, "term": 1 },
   "generic_term_suppress": ["AI", "AB", "VS", "OKR", "TODO"],
-  "high_value_topic_hints": ["技术", "系统", "能力", "平台", "架构", "模型", "治理", "推荐", "搜索", "图验", "验真", "识别"],
+  "high_value_topic_hints": ["技术", "系统", "能力", "平台", "架构", "模型", "治理", "推荐", "搜索", "视觉检测", "鉴定", "识别"],
   "low_value_path_hints": ["周报", "模板", "例会", "邮件"],
   "low_value_term_patterns": [
     "^V?\\d+(?:\\.\\d+)+$",

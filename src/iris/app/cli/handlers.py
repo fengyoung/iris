@@ -360,7 +360,7 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
         "将此内容作为 Whisper ASR 的后处理上下文，用于校正转写中的同音/近音误识别。",
         "特别注意以下类别：",
         "- **人名**（来自 04-人物）：确保姓名拼写准确",
-        "- **项目名**（来自 03-项目）：如 某检测项目、图像采集3.0 等",
+        "- **项目名**（来自 03-项目）：如 Alpha、Beta 等",
         "- **技术术语**（来自 02-概念）：如 OCR、MMoE、BM25 等",
         "- **领域知识**（来自 01-领域）：确保领域上下文准确",
         "",
@@ -527,6 +527,71 @@ def handle_feishu_doc_convert(args, bundle, logger) -> int:
     if success:
         print(f"✅ {success} 成功, {skipped} 跳过, {errors} 失败", file=__import__('sys').stderr)
     return 0 if errors == 0 else 1
+
+
+def handle_chat_digest(args, bundle, logger) -> int:
+    """聊天记录提炼。"""
+    from iris.feishu.chat_digest import ChatDigester
+
+    digester = ChatDigester(bundle)
+    group = getattr(args, "group", "")
+    user = getattr(args, "user", "")
+    time_range = getattr(args, "range", "")
+    from_config = getattr(args, "from_config", False)
+    interactive = getattr(args, "interactive", False)
+    force = getattr(args, "force", False)
+    dry_run = getattr(args, "dry_run", False)
+
+    if interactive:
+        groups = digester.list_available_groups()
+        if not groups:
+            print("未找到可用的群聊", file=__import__('sys').stderr)
+            return 1
+        print("📋 可提取的聊天目标：", file=__import__('sys').stderr)
+        for i, g in enumerate(groups, 1):
+            print(f"  {i}. {g['name']}（{g.get('member_count', 0)} 人）", file=__import__('sys').stderr)
+        print("请输入序号（逗号分隔多选，留空全部）：", end=" ", file=__import__('sys').stderr)
+        try:
+            choice = input().strip()
+        except (EOFError, KeyboardInterrupt):
+            return 1
+        if choice:
+            indices = [int(i.strip()) for i in choice.split(",") if i.strip().isdigit()]
+            selected = [groups[i-1] for i in indices if 1 <= i <= len(groups)]
+        else:
+            selected = groups
+        results = []
+        for g in selected:
+            r = digester.digest(group=g["name"], time_range=time_range, force=force, dry_run=dry_run)
+            results.append(r)
+        _emit_output(args.command, results, pretty=args.pretty)
+        success = sum(1 for r in results if r.get("status") == "success")
+        print(f"✅ {success}/{len(results)} 成功", file=__import__('sys').stderr)
+        return 0
+
+    if from_config:
+        results = digester.digest_from_config(force=force, dry_run=dry_run)
+        _emit_output(args.command, results, pretty=args.pretty)
+        return 0
+
+    if not group and not user:
+        print("需要 --group <群聊名> 或 --user <用户名> 或 --interactive 或 --from-config",
+              file=__import__('sys').stderr)
+        return 1
+
+    result = digester.digest(group=group or None, user=user or None,
+                              time_range=time_range, force=force, dry_run=dry_run)
+    _emit_output(args.command, [result], pretty=args.pretty)
+    if result.get("status") == "success":
+        print(f"✅ {result.get('message_count', 0)} 条消息 → {result.get('route', '')}",
+              file=__import__('sys').stderr)
+        return 0
+    elif result.get("status") == "skipped":
+        print(f"⏭️ {result.get('reason', '')}", file=__import__('sys').stderr)
+        return 0
+    else:
+        print(f"❌ {result.get('error', '')}", file=__import__('sys').stderr)
+        return 1
 
 
 def _expand_file_list(files_expr: str):
@@ -851,4 +916,5 @@ COMMAND_HANDLERS = {
     "secrets-list": handle_secrets_list,
     "secrets-delete": handle_secrets_delete,
     "feishu-doc-convert": handle_feishu_doc_convert,
+    "chat-digest": handle_chat_digest,
 }

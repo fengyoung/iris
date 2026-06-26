@@ -27,7 +27,7 @@ COMMANDS = [
     "secrets-set", "secrets-list", "secrets-delete",
     # ── 委托命令 ──
     "trello", "extract-weekly-reports", "extract-didi-travel",
-    "sync-memory", "feishu-doc-convert",
+    "sync-memory", "feishu-doc-convert", "chat-digest",
 ]
 
 _DELEGATED_SCRIPTS = {
@@ -103,8 +103,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fix", action="store_true", help="wiki-lint 自动修复模式")
     # 飞书文档转换
     parser.add_argument("--url", default="", help="feishu-doc-convert 飞书文档 URL（逗号分隔多文档）")
-    parser.add_argument("--from-config", action="store_true", help="feishu-doc-convert 从配置文件读取文档列表")
-    parser.add_argument("--dry-run", action="store_true", help="feishu-doc-convert / transcribe-meeting 预览模式不写入")
+    parser.add_argument("--from-config", action="store_true", help="feishu-doc-convert / chat-digest 从配置文件读取目标列表")
+    parser.add_argument("--dry-run", action="store_true", help="feishu-doc-convert / chat-digest 预览模式不写入")
+    # 聊天提炼
+    parser.add_argument("--group", default="", help="chat-digest 群聊名称")
+    parser.add_argument("--user", default="", help="chat-digest 用户名称（单聊）")
+    parser.add_argument("--range", default="", help="chat-digest 时间范围（天数或 ISO 开始~结束）")
+    parser.add_argument("--interactive", action="store_true", help="chat-digest 交互选择模式")
     return parser
 
 

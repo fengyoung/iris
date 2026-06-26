@@ -39,22 +39,55 @@ class FeishuClient:
 
     # ── 低层 API 调用 ──────────────────────────────────
 
-    def _run(self, args: list[str], timeout: int = 60) -> dict:
+    def _run(self, args: list[str], timeout: int = 60, retries: int = 3) -> dict:
+        """执行 lark-cli 命令，自动追加 --as 和 --format，支持退避重试。
+
+        Raises:
+            FeishuClientError: 在非零退出码且无法解析 JSON 时，或重试耗尽后
+        """
+        import time as _time
+
         cmd = [self.LARK_CLI] + args + ["--as", self._as, "--format", "json"]
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-            if result.returncode != 0:
-                stderr = (result.stderr or "")[:300]
-                raise FeishuClientError(f"lark-cli 返回 {result.returncode}: {stderr}")
-            data = json.loads(result.stdout) if result.stdout.strip() else {}
-            if not data.get("ok", True):
-                err = data.get("error", {}).get("message", "未知错误")
-                raise FeishuClientError(f"API 错误: {err}")
-            return data
-        except json.JSONDecodeError as e:
-            raise FeishuClientError(f"JSON 解析失败: {e}")
-        except subprocess.TimeoutExpired:
-            raise FeishuClientError(f"命令超时 ({timeout}s)")
+        last_error = None
+
+        for attempt in range(retries):
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+                # 优先解析 JSON — 即使退出码非零，stdout 也可能包含结构化的错误信息
+                stdout = (result.stdout or "").strip()
+                if stdout:
+                    try:
+                        data = json.loads(stdout)
+                    except json.JSONDecodeError:
+                        if result.returncode != 0:
+                            stderr = (result.stderr or "")[:300]
+                            raise FeishuClientError(
+                                f"lark-cli 返回 {result.returncode}: {stderr or stdout[:200]}")
+                        return {}
+                else:
+                    data = {}
+
+                # 检查 ok 标志（JSON 可能含业务错误）
+                if not data.get("ok", True):
+                    err = data.get("error", {})
+                    msg = err.get("message", "未知错误")
+                    raise FeishuClientError(f"API 错误: {msg}")
+
+                return data
+            except FeishuClientError:
+                raise
+            except subprocess.TimeoutExpired as e:
+                last_error = e
+                if attempt < retries - 1:
+                    _time.sleep(1.2 ** attempt)
+                    continue
+            except Exception as e:
+                last_error = e
+                if attempt < retries - 1:
+                    _time.sleep(1.2 ** attempt)
+                    continue
+
+        raise FeishuClientError(f"命令超时/失败 ({retries}次): {last_error}")
 
     # ── Wiki 空间操作 ──────────────────────────────────
 
@@ -165,9 +198,9 @@ class FeishuClient:
         """从飞书文档 URL 中提取 doc token。
 
         支持格式：
-          - https://bytedance.feishu.cn/docx/Wi0Td6c...
-          - https://bytedance.feishu.cn/docs/Wi0Td6c...
-          - https://bytedance.feishu.cn/wiki/Wi0Td6c...
+          - https://example.feishu.cn/docx/Wi0Td6c...
+          - https://example.feishu.cn/docs/Wi0Td6c...
+          - https://example.feishu.cn/wiki/Wi0Td6c...
           - 裸 token: Wi0Td6c...
         """
         m = _DOC_URL_RE.search(url.strip())
@@ -198,6 +231,34 @@ class FeishuClient:
             "owner_name": doc.get("owner_name", ""),
         }
 
+    def resolve_owner_name(self, doc_url: str) -> str:
+        """通过 wiki +node-get 获取文档作者姓名。
+
+        作为 docs +fetch 拿不到 owner_name 时的 fallback。
+        需要完整 wiki URL（含域名），仅支持 wiki 节点。
+        """
+        try:
+            data = self._run([
+                "wiki", "+node-get",
+                "--node-token", doc_url,
+            ], timeout=30)
+            node = data.get("data", {})
+            owner_id = node.get("owner", "")
+            if not owner_id:
+                return ""
+            # 通过 contact +get-user 按 open_id 查询姓名
+            contact = self._run([
+                "contact", "+get-user",
+                "--user-id", owner_id,
+                "--user-id-type", "open_id",
+            ], timeout=30)
+            user = contact.get("data", {}).get("user", {})
+            if user:
+                return user.get("name", "") or user.get("localized_name", "")
+            return ""
+        except (FeishuClientError, json.JSONDecodeError):
+            return ""
+
     def download_image(self, file_token: str, save_path: str, *, overwrite: bool = False) -> str:
         """下载飞书文档中的图片到本地。
 
@@ -223,15 +284,132 @@ class FeishuClient:
         ], timeout=120)
         return str(save)
 
-    def search_chat_messages(self, chat_id: str, *,
-                              time_start: str = "", time_end: str = "",
-                              page_size: int = 100) -> List[Dict[str, Any]]:
-        """搜索群聊消息（保留供 chat-digest 使用）。"""
-        args = ["im", "+search", "--chat-id", chat_id]
+    # ── IM 操作 ────────────────────────────────────────────
+
+    def search_group_by_name(self, name: str) -> Optional[str]:
+        """按群聊名称搜索，返回第一个匹配的 chat_id。"""
+        data = self._run([
+            "im", "+chat-search",
+            "--query", name,
+        ], timeout=30)
+        chats = data.get("data", {}).get("chats", [])
+        if chats:
+            return chats[0].get("chat_id", "")
+        return None
+
+    def list_chats(self, *, page_size: int = 50) -> List[Dict[str, Any]]:
+        """列出用户可见的群聊（供交互模式使用）。"""
+        data = self._run([
+            "im", "+chat-list", "--page-size", str(page_size),
+        ], timeout=30)
+        return data.get("data", {}).get("chats", [])
+
+    def search_user(self, query: str) -> Optional[Dict[str, Any]]:
+        """按姓名搜索用户，返回第一个匹配的用户信息。"""
+        try:
+            data = self._run([
+                "contact", "+search-user", "--query", query,
+            ], timeout=30)
+            users = data.get("data", {}).get("users", [])
+            return users[0] if users else None
+        except (FeishuClientError, IndexError):
+            return None
+
+    def list_chat_messages(self, chat_id: str = "", *,
+                            user_id: str = "",
+                            time_start: str = "", time_end: str = "",
+                            page_size: int = 50, page_token: str = "") -> Dict[str, Any]:
+        """列出群聊/P2P 消息，支持分页。
+
+        chat_id 和 user_id 二选一：
+          - chat_id: 群聊 ID (oc_xxx)
+          - user_id: 用户 open_id (ou_xxx)，用于单聊
+
+        返回:
+            {"items": [...], "page_token": str, "has_more": bool}
+        """
+        args = ["im", "+chat-messages-list",
+                "--page-size", str(min(page_size, 50)), "--sort", "asc"]
+        if chat_id:
+            args += ["--chat-id", chat_id]
+        elif user_id:
+            args += ["--user-id", user_id]
+        else:
+            raise FeishuClientError("list_chat_messages 需要 chat_id 或 user_id")
         if time_start:
-            args += ["--time-start", time_start]
+            args += ["--start", time_start]
         if time_end:
-            args += ["--time-end", time_end]
-        args += ["--page-size", str(min(page_size, 500))]
+            args += ["--end", time_end]
+        if page_token:
+            args += ["--page-token", page_token]
         data = self._run(args, timeout=120)
-        return data.get("data", {}).get("items", [])
+        d = data.get("data", {})
+        # +chat-messages-list 返回 messages 字段（也有用 items 的旧版本）
+        raw = d.get("messages", []) or d.get("items", [])
+        return {
+            "items": raw,
+            "page_token": d.get("page_token", ""),
+            "has_more": d.get("has_more", False),
+        }
+
+    def fetch_all_messages(self, chat_id: str = "", *,
+                            user_id: str = "",
+                            time_start: str = "", time_end: str = "",
+                            max_messages: int = 500) -> List[Dict[str, Any]]:
+        """自动分页拉取群聊/P2P 消息，上限 max_messages 条。"""
+        all_items: List[Dict[str, Any]] = []
+        page_token = ""
+        while len(all_items) < max_messages:
+            result = self.list_chat_messages(
+                chat_id, user_id=user_id,
+                time_start=time_start, time_end=time_end,
+                page_size=50, page_token=page_token)
+            items = result.get("items", [])
+            if not items:
+                break
+            all_items.extend(items)
+            if not result.get("has_more"):
+                break
+            page_token = result.get("page_token", "")
+            if not page_token:
+                break
+        return all_items[:max_messages]
+
+    def batch_enrich_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """批量补全消息的发送者信息。
+
+        通过 +messages-mget 批量获取消息详情（含 sender），
+        将 sender 信息合并回原始消息列表。
+        """
+        ids = [m["message_id"] for m in messages if m.get("message_id")]
+        if not ids:
+            return messages
+
+        # 按 50 条一组分批查询
+        enriched = {}
+        for i in range(0, len(ids), 50):
+            batch = ids[i:i + 50]
+            try:
+                data = self._run([
+                    "im", "+messages-mget",
+                    "--message-ids", ",".join(batch),
+                ], timeout=60)
+                items = data.get("data", {}).get("messages", []) or data.get("data", {}).get("items", [])
+                for item in items:
+                    mid = item.get("message_id", "")
+                    if mid:
+                        enriched[mid] = item
+            except FeishuClientError:
+                continue
+
+        # 合并 sender 信息
+        for msg in messages:
+            mid = msg.get("message_id", "")
+            if mid and mid in enriched:
+                enriched_msg = enriched[mid]
+                sender = enriched_msg.get("sender", {})
+                if sender:
+                    msg["sender"] = sender
+                if not msg.get("msg_type"):
+                    msg["msg_type"] = enriched_msg.get("msg_type", "")
+        return messages

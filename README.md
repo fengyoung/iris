@@ -1,10 +1,10 @@
-# Iris 3.2
+# Iris 3.3
 
-工作知识助手 — 个人知识库（Obsidian Wiki）与飞书团队知识库集成。
+工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
 
-**v3.2.0** — 步骤 2 完成，基础设施加固，步骤 3 预备。
+**v3.3.0** — 步骤 3 完成，飞书文档/聊天提炼功能上线。
 
 ## 开发路线
 
@@ -12,7 +12,7 @@
 |------|------|------|
 | **步骤 1** | 最小化迁移：非知识库能力迁移（搭骨架） | ✅ 完成 |
 | **步骤 2** | 本地知识库重构（新 Wiki 体系 + 能力重构） | ✅ 完成 |
-| **步骤 3** | 飞书团队知识库管理（全新能力） | ⏳ 待开始 |
+| **步骤 3** | 飞书 → 本地知识库提炼 | ✅ 完成 |
 
 ## 快速开始
 
@@ -46,6 +46,7 @@ python scripts/run_cli.py daily-start
 | 健康检查 | `wiki-lint`, `wiki-lint --fix` | 6 维质量检查 + 自动修复 |
 | 报告 | `build-report`, `build-mindmap`, `build-biweekly-report` | 专题报告 / 思维导图 / 双周报 |
 | 会议 | `transcribe-meeting`, `batch-transcribe`, `build-asr-prompt` | 转录纪要 / 批量处理 / ASR校正 |
+| 飞书 | `feishu-doc-convert`, `chat-digest` | 文档转换 / 聊天记录提炼 |
 | 记忆 | `memory-*`, `working-set`, `sync-memory` | 记忆管理 / 工作上下文 |
 | 工具 | `process`, `trello`, `extract-weekly-reports` | 图文处理 / 看板 / 周报提取 |
 | 系统 | `daily-start`, `check-config`, `status`, `diagnose` | 日常维护 / 配置检查 |

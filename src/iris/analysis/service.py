@@ -219,7 +219,7 @@ class AnalysisReportService:
         import re
         keywords = []
         # 提取 OP 各层级的核心词（适配多种格式）
-        # 方向标题：## 1、图验技术 或 ## 方向一：质检...
+        # 方向标题：## 1、视觉检测 或 ## 方向一：质量...
         for m in re.finditer(r"##\s*(?:\d+[、.])?\s*(.+?)(?:\n|$)", op_text):
             title = m.group(1).strip()
             # 跳过非方向行（如空行、纯数字）
@@ -228,7 +228,7 @@ class AnalysisReportService:
             clean = re.sub(r'[“”‘’\"\'＞>]', '', title)
             words = re.findall(r"[\w一-鿿]{2,}", clean)
             keywords.extend(words[:5])
-        # 子项标题：### 1.1、某检测项目拆修检测
+        # 子项标题：### 1.1、Alpha项目
         for m in re.finditer(r"###\s+\d+\.\d+[、.]?\s*(.+?)(?:\n|$)", op_text):
             desc = m.group(1).strip()
             nouns = re.findall(r"[\w一-鿿A-Za-z]{2,}", desc)
