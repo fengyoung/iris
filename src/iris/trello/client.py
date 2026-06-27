@@ -6,15 +6,20 @@ import contextlib
 import json
 import subprocess
 import socket
-from typing import Any, Dict, List, Optional
+import threading
+import time
+from typing import Any, Dict, List, Optional, Tuple
 from urllib import error, request
 from urllib.parse import quote
 
 TRELLO_API_BASE = "https://api.trello.com/1"
 _TRELLO_DOMAIN = "api.trello.com"
 _CUSTOM_DNS = "8.8.8.8"
+_DNS_CACHE_TTL = 3600  # DNS 缓存有效期（秒）
 
-_dns_cache: Dict[str, str] = {}
+# DNS 缓存：{host: (ip, timestamp)}
+_dns_cache: Dict[str, Tuple[str, float]] = {}
+_dns_lock = threading.Lock()
 
 
 def _is_ipv4(s: str) -> bool:
@@ -26,8 +31,11 @@ def _is_ipv4(s: str) -> bool:
 
 
 def _resolve_via_dns(host: str, dns_server: str = _CUSTOM_DNS) -> str:
-    if host in _dns_cache:
-        return _dns_cache[host]
+    now = time.time()
+    with _dns_lock:
+        cached = _dns_cache.get(host)
+        if cached and (now - cached[1]) < _DNS_CACHE_TTL:
+            return cached[0]
     try:
         result = subprocess.run(
             ["dig", f"@{dns_server}", "+short", host],
@@ -36,7 +44,8 @@ def _resolve_via_dns(host: str, dns_server: str = _CUSTOM_DNS) -> str:
         for line in result.stdout.strip().split("\n"):
             line = line.strip()
             if line and _is_ipv4(line):
-                _dns_cache[host] = line
+                with _dns_lock:
+                    _dns_cache[host] = (line, now)
                 return line
     except (subprocess.SubprocessError, OSError, ValueError):
         pass
@@ -45,6 +54,11 @@ def _resolve_via_dns(host: str, dns_server: str = _CUSTOM_DNS) -> str:
 
 @contextlib.contextmanager
 def _patch_trello_dns():
+    """临时替换 socket.getaddrinfo 以使用自定义 DNS 解析 Trello 域名。
+
+    注意：由于修改全局 socket 函数，此上下文管理器不是线程安全的。
+    仅在单线程场景下使用。多线程环境应使用 httpx 自定义 transport。
+    """
     original = socket.getaddrinfo
 
     def _patched(host, port, family=0, type=0, proto=0, flags=0):
@@ -176,7 +190,7 @@ class TrelloClient:
         try:
             with _patch_trello_dns():
                 with request.urlopen(req, timeout=30) as resp:
-                    raw = resp.read().decode("utf-8")
+                    raw = resp.read().decode("utf-8", errors="replace")
         except error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             raise TrelloClientError(f"Trello HTTP {exc.code}: {detail}") from exc

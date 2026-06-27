@@ -51,18 +51,25 @@ class FeishuClient:
         last_error = None
 
         for attempt in range(retries):
+            proc = None
             try:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-                # 优先解析 JSON — 即使退出码非零，stdout 也可能包含结构化的错误信息
-                stdout = (result.stdout or "").strip()
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                try:
+                    stdout_text, stderr_text = proc.communicate(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.communicate()  # 回收僵尸进程
+                    raise
+                if proc.returncode != 0 and not stdout_text.strip():
+                    stderr = (stderr_text or "")[:300]
+                    raise FeishuClientError(
+                        f"lark-cli 返回 {proc.returncode}: {stderr or stdout_text[:200]}")
+
+                stdout = stdout_text.strip()
                 if stdout:
                     try:
                         data = json.loads(stdout)
                     except json.JSONDecodeError:
-                        if result.returncode != 0:
-                            stderr = (result.stderr or "")[:300]
-                            raise FeishuClientError(
-                                f"lark-cli 返回 {result.returncode}: {stderr or stdout[:200]}")
                         return {}
                 else:
                     data = {}
@@ -86,6 +93,11 @@ class FeishuClient:
                 if attempt < retries - 1:
                     _time.sleep(1.2 ** attempt)
                     continue
+            finally:
+                # 确保无孤儿进程
+                if proc is not None and proc.poll() is None:
+                    proc.kill()
+                    proc.communicate()
 
         raise FeishuClientError(f"命令超时/失败 ({retries}次): {last_error}")
 

@@ -20,13 +20,23 @@ class VectorIndex:
         self._path = index_path
         self._data: Dict[str, Dict] = {}
         self._loaded = False
+        # 缓存矩阵（避免每次 search 重建）
+        self._matrix_cache: np.ndarray | None = None
+        self._matrix_ids: List[str] = []
+        self._valid_mask: np.ndarray | None = None
 
     def load(self) -> bool:
         bin_dir = self._binary_dir()
         if bin_dir.exists() and (bin_dir / _VECTORS_NPY).exists():
-            return self._load_binary()
+            ok = self._load_binary()
+            if ok:
+                self._invalidate_cache()
+            return ok
         if self._path.exists():
-            return self._load_legacy_json()
+            ok = self._load_legacy_json()
+            if ok:
+                self._invalidate_cache()
+            return ok
         return False
 
     def _binary_dir(self) -> Path:
@@ -84,9 +94,11 @@ class VectorIndex:
     def upsert(self, chunk_id: str, vector: List[float], text: str = "") -> None:
         self._data[chunk_id] = {"vector": vector, "text": text}
         self._loaded = True
+        self._invalidate_cache()
 
     def remove(self, chunk_id: str) -> None:
         self._data.pop(chunk_id, None)
+        self._invalidate_cache()
 
     def exists(self, chunk_id: str) -> bool:
         return chunk_id in self._data
@@ -94,27 +106,50 @@ class VectorIndex:
     def size(self) -> int:
         return len(self._data)
 
+    def _invalidate_cache(self) -> None:
+        """标记缓存矩阵为过期（upsert/remove 后调用）。"""
+        self._matrix_cache = None
+        self._matrix_ids = []
+        self._valid_mask = None
+
+    def _ensure_matrix(self) -> None:
+        """按需构建缓存矩阵（首次 search 或缓存失效时调用）。"""
+        if self._matrix_cache is not None and len(self._matrix_cache) == len(self._data):
+            return
+        if not self._data:
+            self._matrix_cache = None
+            self._matrix_ids = []
+            self._valid_mask = None
+            return
+        self._matrix_ids = list(self._data.keys())
+        dim = len(next(iter(self._data.values())).get("vector", []))
+        if dim == 0:
+            self._matrix_cache = None
+            return
+        self._matrix_cache = np.zeros((len(self._matrix_ids), dim), dtype=np.float32)
+        valid_mask = np.ones(len(self._matrix_ids), dtype=bool)
+        for idx, cid in enumerate(self._matrix_ids):
+            vec = self._data[cid].get("vector", [])
+            if len(vec) == dim:
+                self._matrix_cache[idx] = np.array(vec, dtype=np.float32)
+            else:
+                valid_mask[idx] = False
+        self._valid_mask = valid_mask
+
     def search(self, query_vector: List[float], top_k: int = 10) -> List[Tuple[str, float]]:
         if not self._data:
             return []
-        chunk_ids = list(self._data.keys())
+        self._ensure_matrix()
+        if self._matrix_cache is None or self._valid_mask is None:
+            return []
+        if not self._valid_mask.any():
+            return []
         qvec = np.array(query_vector, dtype=np.float32)
         qnorm = float(np.linalg.norm(qvec))
         if qnorm == 0:
             return []
-        dim = len(qvec)
-        matrix = np.zeros((len(chunk_ids), dim), dtype=np.float32)
-        valid_mask = np.ones(len(chunk_ids), dtype=bool)
-        for idx, cid in enumerate(chunk_ids):
-            vec = self._data[cid].get("vector", [])
-            if len(vec) == dim:
-                matrix[idx] = np.array(vec, dtype=np.float32)
-            else:
-                valid_mask[idx] = False
-        if not valid_mask.any():
-            return []
-        valid_vecs = matrix[valid_mask]
-        valid_ids = [cid for i, cid in enumerate(chunk_ids) if valid_mask[i]]
+        valid_vecs = self._matrix_cache[self._valid_mask]
+        valid_ids = [cid for i, cid in enumerate(self._matrix_ids) if self._valid_mask[i]]
         vnorms = np.linalg.norm(valid_vecs, axis=1)
         vnorms[vnorms == 0] = 1e-9
         dots = np.dot(valid_vecs, qvec)

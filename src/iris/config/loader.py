@@ -72,8 +72,15 @@ def resolve_env_vars(
     """
     if isinstance(data, str):
         if _ENV_PATTERN.search(data):
+            if seen is None:
+                seen = set()
+
             def _replace(m: re.Match) -> str:
                 var_name = m.group(1)
+                # 循环检测
+                if var_name in seen:
+                    return m.group(0)
+                seen.add(var_name)
                 # OS 环境变量优先
                 val = os.environ.get(var_name)
                 if val is not None:

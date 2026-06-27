@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List
@@ -118,7 +119,6 @@ class PDFExtractor:
     def _infer_level(self, text: str, font_size: float, is_bold: bool) -> int:
         if len(text) > 150:
             return 0
-        import re
         if re.match(r'^[\d\s\.\,\;\:\-\(\)\[\]\/]+$', text):
             return 0
         if font_size >= 16 and is_bold:

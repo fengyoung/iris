@@ -76,9 +76,9 @@ class ModelManager:
     def get_active_model_config(self, role: str) -> Dict[str, Any]:
         """获取指定角色的当前活跃模型完整配置。"""
         model_id = self.get_active_model_id(role)
-        config = self._models[role]["models"][model_id]
-        # 注入当前选中的 model_id 以便外部引用
-        config["_model_id"] = model_id
+        original = self._models[role]["models"][model_id]
+        # 返回浅拷贝并注入 _model_id，避免修改内部状态
+        config = dict(original, _model_id=model_id)
         return config
 
     def switch_model(self, role: str, model_id: str) -> bool:

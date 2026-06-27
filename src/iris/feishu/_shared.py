@@ -99,11 +99,17 @@ def save_dedup_index(path: Path, index: Dict[str, Any]) -> None:
 
 
 def upsert_dedup_item(index: Dict[str, Any], dedup_key: str, item: Dict[str, Any]) -> None:
-    """在排重索引中 upsert 一条记录（按 dedup_key 去重）。"""
-    index["items"] = [it for it in index.get("items", [])
-                      if it.get("dedup_key") != dedup_key
-                      and it.get("source_url") != item.get("source_url", "")]
-    index.setdefault("items", []).append(item)
+    """在排重索引中 upsert 一条记录（按 dedup_key 去重；若 source_url 非空也排重）。"""
+    new_source_url = item.get("source_url", "")
+    kept = []
+    for it in index.get("items", []):
+        if it.get("dedup_key") == dedup_key:
+            continue  # 按 dedup_key 去重
+        if new_source_url and it.get("source_url") == new_source_url:
+            continue  # 按 source_url 去重（仅当两者都非空时）
+        kept.append(it)
+    kept.append(item)
+    index["items"] = kept
 
 
 def sanitize_title(title: str, max_len: int = 60) -> str:

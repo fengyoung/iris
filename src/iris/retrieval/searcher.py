@@ -66,6 +66,11 @@ class LocalRetriever:
         self._chunks: List[ChunkRecord] = []
         self._loaded = False
         self._by_source: Dict[str, List[ChunkRecord]] = {}
+        # 全局 BM25 统计量（_ensure_loaded 后填充）
+        self._total_docs: int = 0
+        self._avg_doc_len: float = 0.0
+        self._df: Dict[str, int] = {}  # document frequency per term
+        self._corpus_stats_computed: bool = False
 
     def search(self, query: str, *, top_k: int = 10, query_plan: QueryPlan | None = None) -> RetrievalResult:
         self._ensure_loaded()
@@ -74,7 +79,11 @@ class LocalRetriever:
         scored: List[Tuple[RetrievalHit, float, str]] = []
 
         for chunk in self._chunks:
-            score, matched = _score_chunk(query, query_tokens, chunk)
+            score, matched = _score_chunk(query, query_tokens, chunk,
+                                          total_docs=self._total_docs,
+                                          avg_doc_len=self._avg_doc_len,
+                                          df=self._df,
+                                          query_plan=query_plan)
             if score <= 0:
                 continue
             explanation = f"BM25 score={score:.2f}"
@@ -90,6 +99,7 @@ class LocalRetriever:
         # 优先尝试 SQLite（FTS5 全文搜索，性能更高）
         if self._try_load_sqlite():
             self._loaded = True
+            self._compute_corpus_stats()
             return
         # 回退 JSON
         data_source = self._config.data_source
@@ -110,6 +120,23 @@ class LocalRetriever:
                 except (json.JSONDecodeError, OSError):
                     continue
         self._loaded = True
+        self._compute_corpus_stats()
+
+    def _compute_corpus_stats(self) -> None:
+        """计算全局 BM25 统计量：文档总数、平均长度、词项文档频率。"""
+        if self._corpus_stats_computed or not self._chunks:
+            return
+        total_len = 0
+        df: Dict[str, set] = defaultdict(set)
+        for i, chunk in enumerate(self._chunks):
+            tokens = _tokenize(chunk.content_preview)
+            total_len += len(tokens)
+            for t in set(tokens):
+                df[t].add(i)
+        self._total_docs = len(self._chunks)
+        self._avg_doc_len = total_len / max(self._total_docs, 1)
+        self._df = {t: len(docs) for t, docs in df.items()}
+        self._corpus_stats_computed = True
 
     def _try_load_sqlite(self) -> bool:
         """尝试从 SQLite ChunkStore 加载（FTS5 全文搜索加速）。"""
@@ -133,7 +160,10 @@ def _tokenize(text: str) -> List[str]:
     return [match.group(0).lower() for match in TOKEN_RE.finditer(text)]
 
 
-def _score_chunk(query: str, query_tokens: List[str], chunk: ChunkRecord) -> Tuple[float, List[str]]:
+def _score_chunk(query: str, query_tokens: List[str], chunk: ChunkRecord,
+                 *, total_docs: int = 0, avg_doc_len: float = 0.0,
+                 df: Dict[str, int] | None = None,
+                 query_plan: QueryPlan | None = None) -> Tuple[float, List[str]]:
     title_lower = chunk.title.lower()
     content_lower = chunk.content_preview.lower()
     section_lower = " ".join(chunk.section_path).lower()
@@ -142,22 +172,38 @@ def _score_chunk(query: str, query_tokens: List[str], chunk: ChunkRecord) -> Tup
     if not query_lower:
         return 0.0, []
 
+    # ── query_plan 权重调整 ──
+    title_bonus = 5.0
+    title_token_bonus = 3.0
+    section_bonus = 3.0
+    section_token_bonus = 2.0
+    if query_plan is not None:
+        # 高优先级 focus_areas 提升标题权重
+        focus_mult = 1.0 + 0.5 * len([a for a in query_plan.focus_areas if a == "high"])
+        title_bonus *= focus_mult
+        title_token_bonus *= focus_mult
+        # entity_weights 如果指定了特定实体权重，额外加分
+        if query_plan.entity_weights:
+            entity_mult = 1.0 + 0.2 * len(query_plan.entity_weights)
+            section_bonus *= entity_mult
+            section_token_bonus *= entity_mult
+
     score = 0.0
     matched: List[str] = []
 
     if query_lower in title_lower:
-        score += 5.0
+        score += title_bonus
     for token in query_tokens:
         if token in title_lower:
-            score += 3.0
+            score += title_token_bonus
             if token not in matched:
                 matched.append(token)
 
     if query_lower in section_lower:
-        score += 3.0
+        score += section_bonus
     for token in query_tokens:
         if token in section_lower:
-            score += 2.0
+            score += section_token_bonus
             if token not in matched:
                 matched.append(token)
 
@@ -167,15 +213,19 @@ def _score_chunk(query: str, query_tokens: List[str], chunk: ChunkRecord) -> Tup
         freq[token] += 1
 
     doc_len = len(content_tokens)
-    avg_doc_len = max(doc_len, 50)
+    N = max(total_docs, 1)
+    avgdl = avg_doc_len if avg_doc_len > 0 else max(doc_len, 50)
     k1 = 1.5
     b = 0.75
+    df_map = df if df is not None else {}
 
     for qt in query_tokens:
         tf = freq.get(qt, 0)
         if tf > 0:
-            idf = math.log((len(content_tokens) + 1) / (tf + 0.5))
-            bm25 = idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * doc_len / avg_doc_len))
+            dft = df_map.get(qt, 1)
+            idf = math.log((N - dft + 0.5) / (dft + 0.5) + 1.0)
+            norm = 1 - b + b * doc_len / avgdl
+            bm25 = idf * (tf * (k1 + 1)) / (tf + k1 * norm)
             score += bm25
             if qt not in matched:
                 matched.append(qt)

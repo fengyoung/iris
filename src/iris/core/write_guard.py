@@ -20,33 +20,45 @@ class WriteGuardError(PermissionError):
     """写入路径不在允许范围内。"""
 
 
+_ESSENTIAL_SUBDIRS = ("data", "temp", "output", "memory", "logs")
+
+
 def resolve_allowed_paths(bundle: ConfigBundle) -> List[Path]:
     """从 app config 解析允许的写入路径列表（全部 resolve 为绝对路径）。
 
     优先级：
-    1. safety.allowed_write_paths（最精确）
-    2. 默认允许：output_dir, temp_dir, memory_dir, data_dir
+    1. safety.allowed_write_paths（用户自定义）
+    2. 兜底：output_dir, temp_dir, memory_dir, data_dir（来自 paths 段）
+    内部关键目录（data/temp/output/memory/logs）始终附加在列表中。
     """
     safety = bundle.app.get("safety", {})
     raw_paths = safety.get("allowed_write_paths", [])
+
+    resolved: List[Path] = []
     if raw_paths:
-        resolved: List[Path] = []
         for raw in raw_paths:
             p = Path(str(raw))
             if not p.is_absolute():
                 p = bundle.root / p
             resolved.append(p.resolve())
-        return resolved
+    else:
+        # 兜底：从 paths 段推导
+        paths_cfg = bundle.app.get("paths", {})
+        defaults = [
+            bundle.root / paths_cfg.get("output_dir", "./output"),
+            bundle.root / paths_cfg.get("temp_dir", "./temp"),
+            bundle.root / paths_cfg.get("memory_dir", "./memory"),
+            bundle.root / "data",
+        ]
+        resolved = [p.resolve() for p in defaults]
 
-    # 兜底：从 paths 段推导
-    paths_cfg = bundle.app.get("paths", {})
-    defaults = [
-        bundle.root / paths_cfg.get("output_dir", "./output"),
-        bundle.root / paths_cfg.get("temp_dir", "./temp"),
-        bundle.root / paths_cfg.get("memory_dir", "./memory"),
-        bundle.root / "data",
-    ]
-    return [p.resolve() for p in defaults]
+    # 内部关键目录始终附加（即使有用户自定义路径）
+    for subdir in _ESSENTIAL_SUBDIRS:
+        guard = (bundle.root / subdir).resolve()
+        if guard not in resolved:
+            resolved.append(guard)
+
+    return resolved
 
 
 def validate_write_path(target_path: Path | str, bundle: ConfigBundle) -> Path:
@@ -69,15 +81,6 @@ def validate_write_path(target_path: Path | str, bundle: ConfigBundle) -> Path:
         try:
             target.relative_to(base)
             return target  # 在允许范围内
-        except ValueError:
-            continue
-
-    # 额外检查：是否在 project root 下的 data/ 或 temp/ 或 output/
-    for subdir in ("data", "temp", "output", "memory", "logs"):
-        guard = (bundle.root / subdir).resolve()
-        try:
-            target.relative_to(guard)
-            return target
         except ValueError:
             continue
 

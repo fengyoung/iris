@@ -10,6 +10,9 @@ from typing import Any, Dict
 
 from iris.config.loader import ConfigBundle
 
+# 日志文件大小限制（超过后自动归档）
+_MAX_LOG_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
+
 
 class IrisLogger:
     """按 jsonl 写入运行日志，便于排查路由、检索与回退。"""
@@ -23,6 +26,11 @@ class IrisLogger:
         if not self._enabled:
             return
         self._log_path.parent.mkdir(parents=True, exist_ok=True)
+        # 检查日志文件大小，超过阈值自动归档
+        if self._log_path.exists() and self._log_path.stat().st_size > _MAX_LOG_SIZE_BYTES:
+            archive = self._log_path.with_suffix(".jsonl.bak")
+            archive.write_text(self._log_path.read_text(encoding="utf-8"), encoding="utf-8")
+            self._log_path.write_text("", encoding="utf-8")
         record = {
             "ts": datetime.now().isoformat(timespec="seconds"),
             "event": event,
@@ -43,4 +51,6 @@ def _normalize(value: Any) -> Any:
         return {key: _normalize(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_normalize(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        return sorted(_normalize(item) for item in value)
     return value

@@ -150,21 +150,24 @@ def _extract_markdown_title(path: Path) -> str:
 def _extract_pdf_title(path: Path) -> str:
     try:
         import fitz
+    except ImportError:
+        return path.stem
+    try:
         doc = fitz.open(str(path))
-        meta = doc.metadata
-        title = meta.get("title", "").strip()
-        if title:
+        try:
+            meta = doc.metadata
+            title = meta.get("title", "").strip()
+            if title:
+                return title
+            if len(doc) > 0:
+                page = doc[0]
+                blocks = page.get_text("text").strip().split("\n")
+                for line in blocks[:3]:
+                    line = line.strip()
+                    if line and len(line) >= 2:
+                        return line[:80]
+        finally:
             doc.close()
-            return title
-        if len(doc) > 0:
-            page = doc[0]
-            blocks = page.get_text("text").strip().split("\n")
-            doc.close()
-            for line in blocks[:3]:
-                line = line.strip()
-                if line and len(line) >= 2:
-                    return line[:80]
-        doc.close()
     except Exception:
         pass
     return path.stem

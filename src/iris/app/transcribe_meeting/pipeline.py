@@ -255,7 +255,12 @@ FILENAME: <文件名>"""
 
     def _transcribe(self, audio: Path, transcript_path: Path, model_name: str) -> int:
         import whisper
-        model = whisper.load_model(model_name)
+        try:
+            import torch
+            device = "mps" if torch.backends.mps.is_available() else "cpu"
+        except Exception:
+            device = "cpu"
+        model = whisper.load_model(model_name, device=device)
         result = model.transcribe(str(audio), language="zh")
         text = result.get("text", "").strip()
         word_count = len(text)
@@ -276,71 +281,13 @@ FILENAME: <文件名>"""
 
     def _load_wiki_context(self) -> tuple[str, int]:
         """从新 LLM-WIKI 结构加载页面上下文。"""
-        fragments: List[str] = []
-        count = 0
+        from iris.wiki.context_loader import WikiContextLoader
         if not self._wiki_root.exists():
             return "# Wiki 上下文\n\n（Wiki 目录不存在）", 0
-
-        # 加载 01-领域 页面
-        domain_dir = self._wiki_root / "01-领域"
-        if domain_dir.exists():
-            for f in sorted(domain_dir.iterdir()):
-                if f.name.endswith(".md"):
-                    content = self._read_wiki_page(f)
-                    if content:
-                        name = f.stem.replace("领域-", "")
-                        fragments.append(f"## 领域：{name}\n{content}")
-                        count += 1
-
-        # 加载 02-概念 页面（含 ASR 校正表）
-        concept_dir = self._wiki_root / "02-概念"
-        if concept_dir.exists():
-            for f in sorted(concept_dir.iterdir()):
-                if f.name.endswith(".md"):
-                    content = self._read_wiki_page(f)
-                    if content:
-                        name = f.stem.replace("概念-", "")
-                        fragments.append(f"## 概念：{name}\n{content}")
-                        count += 1
-
-        # 加载 03-项目 页面
-        proj_dir = self._wiki_root / "03-项目"
-        if proj_dir.exists():
-            for f in sorted(proj_dir.iterdir()):
-                if f.name.endswith(".md"):
-                    content = self._read_wiki_page(f)
-                    if content:
-                        name = f.stem.replace("项目-", "")
-                        fragments.append(f"## 项目：{name}\n{content}")
-                        count += 1
-
-        # 加载 04-人物 页面
-        person_dir = self._wiki_root / "04-人物"
-        if person_dir.exists():
-            for f in sorted(person_dir.iterdir()):
-                if f.name.endswith(".md"):
-                    content = self._read_wiki_page(f)
-                    if content:
-                        name = f.stem.replace("人物-", "")
-                        fragments.append(f"## 人物：{name}\n{content}")
-                        count += 1
-
-        return "\n\n".join(fragments), count
-
-    @staticmethod
-    def _read_wiki_page(path: Path) -> str:
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            return ""
-        if text.startswith("---"):
-            parts = text.split("---", 2)
-            if len(parts) >= 3:
-                text = parts[2].strip()
-        max_chars = 3000
-        if len(text) > max_chars:
-            text = text[:max_chars] + "\n\n...（截断）"
-        return text
+        loader = WikiContextLoader(self._wiki_root)
+        pages = loader.load_pages()
+        ctx = loader.load_context(max_chars_per_page=3000)
+        return ctx, len(pages)
 
     def _call_llm(self, raw_transcript: str, wiki_context: str,
                   meeting_type: str = "", meeting_topic: str = "",

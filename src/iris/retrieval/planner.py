@@ -6,13 +6,18 @@ import json
 import logging
 import re
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("iris.retrieval.planner")
 
+# 动态生成年份范围（当前年及之前 6 年）
+_current_year = datetime.now().year
+_YEAR_RANGE = "|".join(str(y) for y in range(_current_year - 6, _current_year + 1))
+
 TIME_SCOPE_PATTERNS = [
     (re.compile(r"最近|近期|当前|现在|本周|本月|最新"), "recent"),
-    (re.compile(r"去年|今年|202\d|Q[1-4]|季度|时间线|演进"), "historical"),
+    (re.compile(rf"去年|今年|(?:{_YEAR_RANGE})|Q[1-4]|季度|时间线|演进"), "historical"),
 ]
 TERM_RE = re.compile(r"[A-Z]{2,}[A-Za-z0-9\-]*")
 TOKEN_RE = re.compile(r"[A-Za-z0-9_\-一-鿿]+")

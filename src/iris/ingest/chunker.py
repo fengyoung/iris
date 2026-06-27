@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterable, List
 
 from iris.config.loader import ConfigBundle
 from iris.ingest.scanner import DocumentRecord, MarkdownScanner, ScanSummary
+from iris.utils.validation import safe_int
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 TOKEN_RE = re.compile(r"[A-Za-z0-9_\-一-鿿]+")
@@ -89,10 +90,9 @@ class MarkdownChunker:
         self._config = config
         self._scanner = MarkdownScanner(config)
         ingestion = config.data_source.get("ingestion", {})
-        self._max_chunk_chars = int(ingestion.get("max_chunk_chars", 1200))
-        self._max_preview_chars = int(ingestion.get("max_preview_chars", 180))
+        self._max_chunk_chars = safe_int(ingestion.get("max_chunk_chars", 1200), 1200)
+        self._max_preview_chars = safe_int(ingestion.get("max_preview_chars", 180), 180)
         self._metadata_dir = config.root / "data" / "metadata"
-        self._summary_path = self._metadata_dir / f"{config.data_source['default_source']}_chunk_summary.json"
 
     def build_default_source_chunks(self) -> ChunkSummary:
         return self._build_chunks_from_scan(self._scanner.scan_default_source())

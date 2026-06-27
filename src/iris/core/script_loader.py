@@ -29,18 +29,23 @@ def load_script_module(script_name: str, project_root: Path) -> ModuleType:
 
     module_name = script_name.replace(".py", "")
 
-    # 确保 project root 在 sys.path 中
+    # 确保 project root 在 sys.path 中（用完恢复）
+    path_added = False
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
+        path_added = True
+    try:
+        spec = importlib.util.spec_from_file_location(module_name, script_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"无法加载脚本: {script_path}")
 
-    spec = importlib.util.spec_from_file_location(module_name, script_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"无法加载脚本: {script_path}")
-
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = mod
+        spec.loader.exec_module(mod)
+        return mod
+    finally:
+        if path_added:
+            sys.path.pop(0)
 
 
 def run_delegated_script(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import re
 import uuid
@@ -64,7 +65,7 @@ def _build_xmind_bytes(tree: MindmapNode) -> bytes:
                 add_children(child, node.children)
     add_children(topic, tree.children)
     xml_bytes = ET.tostring(root_xml, xml_declaration=True, encoding="UTF-8")
-    buf = zipfile.ZipIO()
+    buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("content.xml", xml_bytes)
         zf.writestr("META-INF/manifest.xml", '<?xml version="1.0" encoding="UTF-8"?><manifest xmlns="urn:xmind:xmap:xmlns:manifest:1.0"><file-entry full-path="content.xml" media-type="text/xml"/></manifest>')

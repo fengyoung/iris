@@ -8,22 +8,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from iris.config.loader import ConfigBundle
+from ._constants import PAGE_TYPE_CONFIG, get_wiki_dir, get_wiki_prefix
 
-# 页面类型 → 目录映射
-PAGE_TYPE_DIRS = {
-    "domain": "01-领域",
-    "concept": "02-概念",
-    "project": "03-项目",
-    "person": "04-人物",
-}
-
-# 文件名前缀 → 页面类型
-PREFIX_TO_TYPE = {
-    "领域-": "domain",
-    "概念-": "concept",
-    "项目-": "project",
-    "人物-": "person",
-}
+# 向下兼容别名
+PAGE_TYPE_DIRS = {k: v[0] for k, v in PAGE_TYPE_CONFIG.items()}
+PREFIX_TO_TYPE = {v[1]: k for k, v in PAGE_TYPE_CONFIG.items()}
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9_\-\一-鿿]+")
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
@@ -117,6 +106,8 @@ class WikiSearcher:
 def _read_wiki_page(path: Path) -> Tuple[str, str, str, str, str]:
     """读取 Wiki 页面，解析 frontmatter 提取元数据。"""
     text = path.read_text(encoding="utf-8")
+    # 统一换行符（防止 Windows \r\n 破坏 frontmatter 正则）
+    text = text.replace("\r\n", "\n")
     title = _infer_title_from_filename(path)
     page_type = "domain"  # default
     status = "draft"

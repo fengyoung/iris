@@ -325,33 +325,31 @@ def handle_wiki_update(args, bundle, logger) -> int:
 def handle_build_asr_prompt(args, bundle, logger) -> int:
     """从 Wiki 知识库构建 ASR 校正提示词。"""
     from pathlib import Path as _Pt
-    wiki_root = _Pt(bundle.wiki["wiki_root"]).resolve() if bundle.wiki else _Pt()
+    from iris.wiki.context_loader import WikiContextLoader
+    from iris.wiki._constants import get_wiki_dir
+
+    if not bundle.wiki or not bundle.wiki.get("wiki_root"):
+        _emit_output(args.command, {"error": "Wiki 配置缺失"}, pretty=args.pretty)
+        return 1
+    wiki_root = _Pt(bundle.wiki["wiki_root"]).resolve()
     if not wiki_root.exists():
         _emit_output(args.command, {"error": "Wiki 根目录不存在"}, pretty=args.pretty)
         return 1
 
-    sections: dict[str, str] = {}
-    page_count = 0
-    for subdir in ("02-概念", "01-领域", "03-项目", "04-人物"):
-        d = wiki_root / subdir
-        if not d.exists():
-            continue
-        for f in sorted(d.glob("*.md")):
-            try:
-                text = f.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                continue
-            # 移除 frontmatter
-            if text.startswith("---"):
-                parts = text.split("---", 2)
-                text = parts[2].strip() if len(parts) >= 3 else text
-            # 截断长页面
-            if len(text) > 2000:
-                text = text[:2000] + "\n\n..."
-            key = f"{subdir}/{f.stem}"
-            sections[key] = text
-            page_count += 1
+    loader = WikiContextLoader(wiki_root)
+    # ASR 提示词优先加载概念（技术术语），再加载领域/项目/人物
+    sort_order = ["concept", "domain", "project", "person"]
+    pages = loader.load_pages(sort_order=sort_order)
 
+    sections: dict[str, str] = {}
+    for page in pages:
+        body = page.body
+        if len(body) > 2000:
+            body = body[:2000] + "\n\n..."
+        key = f"{get_wiki_dir(page.page_type)}/{page.path.stem}"
+        sections[key] = body
+
+    page_count = len(pages)
     # 构建 ASR 校正提示词
     lines = [
         "# ASR 校正词汇表",
@@ -392,12 +390,20 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
 
 def _load_batch_items(path: Path):
     import json
+    import sys
     items = []
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
+    for idx, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         line = raw_line.strip()
         if not line:
             continue
-        payload = json.loads(line)
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError as exc:
+            print(f"[警告] 第 {idx} 行 JSON 解析失败: {exc}", file=sys.stderr)
+            continue
+        if "query" not in payload:
+            print(f"[警告] 第 {idx} 行缺少必填字段 query，已跳过", file=sys.stderr)
+            continue
         from iris.wiki import BatchWikiItem
         items.append(BatchWikiItem(query=payload["query"], title=payload.get("title", payload["query"]),
                                     page_type=payload.get("page_type", "domain")))
@@ -406,13 +412,21 @@ def _load_batch_items(path: Path):
 
 def _load_review_items(path: Path):
     import json
+    import sys
     items = []
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
+    for idx, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         line = raw_line.strip()
         if not line:
             continue
-        payload = json.loads(line)
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError as exc:
+            print(f"[警告] 第 {idx} 行 JSON 解析失败: {exc}", file=sys.stderr)
+            continue
         if not payload.get("selected", False):
+            continue
+        if "query" not in payload:
+            print(f"[警告] 第 {idx} 行缺少必填字段 query，已跳过", file=sys.stderr)
             continue
         from iris.wiki import BatchWikiItem
         items.append(BatchWikiItem(query=payload["query"], title=payload.get("title", payload["query"]),
@@ -464,7 +478,9 @@ def handle_build_vector_index(args, bundle, logger) -> int:
 def handle_transcribe_meeting(args, bundle, logger) -> int:
     from iris.app.transcribe_meeting import TranscribeMeetingPipeline
     if not args.audio_file and not args.transcript_file:
-        raise ValueError("transcribe-meeting 需要 --audio-file 或 --transcript-file")
+        import sys
+        print("transcribe-meeting 需要 --audio-file 或 --transcript-file", file=sys.stderr)
+        return 1
     pipeline = TranscribeMeetingPipeline(bundle)
 
     # --to-source 模式：LLM 动态路由到 SOURCE 对应子目录
@@ -612,7 +628,11 @@ def _expand_file_list(files_expr: str):
         if abs_p in seen:
             continue
         pp = Path(p)
-        if pp.is_dir() or not pp.exists():
+        if pp.is_dir():
+            continue
+        if not pp.exists():
+            import sys
+            print(f"[警告] 文件不存在，已跳过: {p}", file=sys.stderr)
             continue
         seen.add(abs_p)
         result.append(p)
@@ -659,15 +679,16 @@ def handle_daily_start(args, bundle, logger) -> int:
             embedder = build_embedder_from_config(bundle.llm)
             if embedder:
                 import json as _vi_json
-                summary_path = bundle.root / "data" / "metadata" / "work_docs_main_chunk_summary.json"
+                ds_name = (bundle.data_source or {}).get("default_source", "work_docs_main")
+                summary_path = bundle.root / "data" / "metadata" / f"{ds_name}_chunk_summary.json"
                 if summary_path.exists():
                     vi_payload = _vi_json.loads(summary_path.read_text(encoding="utf-8"))
                     from iris.ingest.chunker import ChunkRecord as _ChunkRecord
                     vi_chunks = [_ChunkRecord(**item) for item in vi_payload["chunks"]]
-                    index_path = bundle.root / "data" / "metadata" / "work_docs_main_vector_index"
+                    index_path = bundle.root / "data" / "metadata" / f"{ds_name}_vector_index"
                     existing = VectorIndex(index_path)
                     existing.load()
-                    idx = build_vector_index("work_docs_main", vi_chunks, embedder, index_path, existing_index=existing)
+                    idx = build_vector_index(ds_name, vi_chunks, embedder, index_path, existing_index=existing)
                     vector_index_result = {"status": "ok", "indexed": idx.size()}
                 else:
                     vector_index_result = {"status": "skipped", "reason": "no_chunk_summary"}

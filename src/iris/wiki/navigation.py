@@ -11,14 +11,10 @@ from typing import Any, Dict, List, Optional
 from iris.config.loader import ConfigBundle
 
 from .searcher import WikiSearcher, _read_wiki_page, _infer_title_from_filename, FRONTMATTER_RE
+from ._constants import PAGE_TYPE_CONFIG as _PTC, get_wiki_dir, get_display_name, get_all_types
 
-# 页面类型配置
-PAGE_TYPE_CONFIG = {
-    "domain": {"dir": "01-领域", "name": "领域"},
-    "concept": {"dir": "02-概念", "name": "概念"},
-    "project": {"dir": "03-项目", "name": "项目"},
-    "person": {"dir": "04-人物", "name": "人物"},
-}
+# 向下兼容别名
+PAGE_TYPE_CONFIG = {k: {"dir": v[0], "name": v[2]} for k, v in _PTC.items()}
 
 
 @dataclass(frozen=True)
@@ -366,7 +362,7 @@ def lint_wiki(wiki_root: Path, data_root: Optional[Path] = None) -> Dict[str, An
             chunks = chunk_data.get("chunks", [])
             index_info["total_chunks"] = len(chunks)
             # 按来源文件统计
-            sources = set(c.get("document_path", "") for c in chunks)
+            sources = set(c.get("relative_path", "") for c in chunks)
             index_info["chunked_documents"] = len(sources)
             # chunk 文档覆盖比例
             if index_info.get("source_documents", 0) > 0:

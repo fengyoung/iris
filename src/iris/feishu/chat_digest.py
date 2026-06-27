@@ -221,6 +221,8 @@ class ChatDigester:
             start = now - timedelta(days=days)
             return start.isoformat(), now.isoformat()
         except ValueError:
+            import sys
+            print(f"[chat-digest] 无法解析时间范围 '{time_range}'，使用默认 {DEFAULT_RANGE_DAYS} 天", file=sys.stderr)
             start = now - timedelta(days=DEFAULT_RANGE_DAYS)
             return start.isoformat(), now.isoformat()
 
@@ -416,33 +418,28 @@ SUMMARY:
     def _resolve_wiki_root(self) -> Path:
         if self._bundle.wiki:
             return Path(self._bundle.wiki["wiki_root"]).resolve()
-        return Path()
+        raise ValueError("Wiki 配置缺失：请在 config/wiki.json 中设置 wiki_root")
 
     def _load_wiki_context(self) -> str:
-        fragments: List[str] = []
+        from iris.wiki.context_loader import WikiContextLoader
         root = self._wiki_root
         if not root.exists():
             return ""
-        for sub_dir in ("01-领域", "02-概念", "03-项目"):
-            d = root / sub_dir
-            if d.exists():
-                for f in sorted(d.iterdir()):
-                    if f.name.endswith(".md"):
-                        text = f.read_text(encoding="utf-8", errors="replace")
-                        if text.startswith("---"):
-                            parts = text.split("---", 2)
-                            text = parts[2].strip() if len(parts) >= 3 else text
-                        text = text[:2000] + ("\n\n...（截断）" if len(text) > 2000 else "")
-                        if text.strip():
-                            fragments.append(f"## {f.stem}\n{text}")
-        return "\n\n".join(fragments[:10])
+        loader = WikiContextLoader(root)
+        return loader.load_context(
+            page_types=["domain", "concept", "project"],  # 跳过人物
+            max_chars_per_page=2000,
+            max_pages=10,
+            label_prefix=False,
+        )
 
     # ── 排重 ────────────────────────────────────────────────
 
     def _check_dedup(self, dedup_key: str) -> Optional[Dict[str, Any]]:
         index = load_dedup_index(self._dedup_path)
-        return next((item for item in index.get("items", [])
-                     if item.get("dedup_key") == dedup_key), None)
+        # 构建查找字典避免 O(n) 线性扫描
+        lookup = {it.get("dedup_key"): it for it in index.get("items", []) if it.get("dedup_key")}
+        return lookup.get(dedup_key)
 
     def _update_dedup(self, dedup_key: str, identifier: str, target_name: str,
                        time_start: str, time_end: str,

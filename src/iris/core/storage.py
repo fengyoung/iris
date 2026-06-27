@@ -106,8 +106,9 @@ class ChunkStore:
         try:
             conn.executescript(self.FTS_SCHEMA)
             conn.executescript(self.FTS_TRIGGERS)
-        except sqlite3.OperationalError:
-            pass
+        except sqlite3.OperationalError as exc:
+            import sys
+            print(f"[ChunkStore] FTS5 初始化失败（全文搜索将降级为 LIKE 查询）: {exc}", file=sys.stderr)
         conn.commit()
 
     def close(self) -> None:

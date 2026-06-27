@@ -14,30 +14,12 @@ from iris.retrieval.searcher import LocalRetriever
 from iris.utils.logging import IrisLogger
 
 from .searcher import WikiSearcher, FRONTMATTER_RE
+from ._constants import PAGE_TYPE_CONFIG, get_display_name, get_wiki_dir, get_wiki_prefix
 
-# 页面类型 → 中文名
-TYPE_NAMES = {
-    "domain": "领域",
-    "concept": "概念",
-    "project": "项目",
-    "person": "人物",
-}
-
-# 页面类型 → 目录名
-PAGE_DIRS = {
-    "domain": "01-领域",
-    "concept": "02-概念",
-    "project": "03-项目",
-    "person": "04-人物",
-}
-
-# 页面类型 → 文件名前缀
-PAGE_PREFIXES = {
-    "domain": "领域-",
-    "concept": "概念-",
-    "project": "项目-",
-    "person": "人物-",
-}
+# 向下兼容别名
+TYPE_NAMES = {k: v[2] for k, v in PAGE_TYPE_CONFIG.items()}
+PAGE_DIRS = {k: v[0] for k, v in PAGE_TYPE_CONFIG.items()}
+PAGE_PREFIXES = {k: v[1] for k, v in PAGE_TYPE_CONFIG.items()}
 
 
 @dataclass(frozen=True)
@@ -76,7 +58,9 @@ class WikiGenerator:
         self._retriever = LocalRetriever(config)
         self._llm_provider = EnvironmentConfiguredLLMProvider(config)
         self._template_root = config.root / "templates" / "wiki"
-        self._wiki_root = Path(config.wiki["wiki_root"]).resolve() if config.wiki else Path()
+        if not config.wiki or not config.wiki.get("wiki_root"):
+            raise ValueError("Wiki 配置缺失：请在 config/wiki.json 中设置 wiki_root")
+        self._wiki_root = Path(config.wiki["wiki_root"]).resolve()
         self._wiki_searcher = WikiSearcher(config) if config.wiki else None
         self._logger = IrisLogger(config)
 
@@ -231,16 +215,6 @@ class WikiGenerator:
 
 请输出完整的 Markdown。"""
 
-        try:
-            response = self._llm_provider.generate(
-                LLMRequest(prompt=prompt, route_context={"input_type": "text", "task_type": "qa",
-                                                          "complexity": "standard", "use_case": "wiki_generate"})
-            )
-            return self._strip_code_fence(response.text)
-        except LLMProviderError as exc:
-            return self._fallback_markdown(page_type=page_type, title=title, query=query,
-                                           evidence=evidence, related=related)
-
     @staticmethod
     def _strip_code_fence(text: str) -> str:
         """去除 LLM 返回内容中的 ```markdown 代码块包裹和对话前缀，提取纯 Markdown。"""
@@ -309,7 +283,9 @@ sources:
 
     def _parse_frontmatter_field(self, content: str, field: str) -> str:
         """从 YAML frontmatter 中提取指定字段的值。"""
-        fm_match = FRONTMATTER_RE.match(content)
+        # 统一换行符
+        normalized = content.replace("\r\n", "\n")
+        fm_match = FRONTMATTER_RE.match(normalized)
         if not fm_match:
             return ""
         for line in fm_match.group(1).splitlines():
@@ -419,10 +395,20 @@ sources:
     def _validate_update_output(new_content: str, existing_content: str, expected_title: str) -> str:
         """校验 LLM 输出：确保 frontmatter 完整且 title 未被篡改。"""
         import re as _re
+        # 统一换行符（防止 Windows \r\n 破坏正则匹配）
+        normalized = new_content.replace("\r\n", "\n")
+        existing_normalized = existing_content.replace("\r\n", "\n")
         fm = _re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
-        m = fm.match(new_content)
+        m = fm.match(normalized)
         if not m:
-            return existing_content  # frontmatter 损坏 → 回退
+            # 尝试用现有 frontmatter 包裹正文以挽救更新
+            existing_fm = fm.match(existing_normalized)
+            if existing_fm:
+                body_start = normalized.find("\n---", 3)
+                if body_start > 0:
+                    recovered = existing_fm.group(0).rstrip() + normalized[body_start:]
+                    return recovered
+            return existing_content  # 无法修复 → 回退
 
         # 提取新内容中的 title
         new_title = ""
@@ -454,62 +440,36 @@ sources:
         if not found:
             return {"status": "not_found", "title": title}
         path, existing_type, existing_content = found
-        last_updated = self._parse_frontmatter_field(existing_content, "updated")
-
-        # 检索最新证据
-        result = self._retriever.search(title, top_k=top_k)
-        evidence_text = self._format_evidence(result.hits)
-
-        # 查找关联页面
-        slug = _slugify_title(title)
-        related = self._compute_related_pages(title, title, exclude_slug=slug) if self._wiki_searcher else "暂无"
-
-        # LLM 增量更新
-        new_content = self._generate_incremental_update(
-            existing_content=existing_content, title=title, page_type=existing_type,
-            evidence=evidence_text, last_updated=last_updated, related=related,
+        return self._update_page_with_content(
+            title=title, page_type=existing_type, path=path,
+            existing_content=existing_content, top_k=top_k,
         )
-
-        if new_content is None:
-            return {"status": "error", "title": title, "reason": "LLM 调用失败"}
-
-        # ── 输出校验：确保 LLM 没有损坏 frontmatter ──
-        validated = self._validate_update_output(new_content, existing_content, title)
-        if validated != new_content:
-            self._logger.log("wiki_update_validation", {"title": title, "action": validated})
-            new_content = validated
-
-        if new_content.strip() == existing_content.strip():
-            return {"status": "no_changes", "title": title, "path": str(path)}
-
-        # 备份并写入
-        draft = WikiPageDraft(page_type=existing_type, title=title, slug=slug,
-                              output_path=str(path), markdown=new_content)
-        write_result = self.write_page(draft, overwrite=True, backup=True)
-
-        self._logger.log("wiki_update_page", {"title": title, "path": str(path),
-                                                "action": write_result.action})
-        return {
-            "status": "updated",
-            "title": title,
-            "path": str(path),
-            "action": write_result.action,
-            "backup_path": write_result.backup_path,
-        }
 
     def update_all_pages(self, *, top_k: int = 8) -> Dict[str, Any]:
         """遍历并增量更新所有现有 Wiki 页面。"""
         if not self._wiki_root.exists():
             return {"status": "error", "reason": "Wiki 目录不存在"}
-        results: List[Dict[str, Any]] = []
+
+        # 先构建 title→(path, type, content) 索引，避免每个页面重复扫描全部文件
+        page_index: Dict[str, Tuple[Path, str, str]] = {}
         for path in sorted(self._wiki_root.rglob("*.md")):
             if path.name in ("index.md", "changelog.md") or ".bak." in path.name:
                 continue
-            title = self._parse_frontmatter_field(path.read_text(encoding="utf-8"), "title")
+            content = path.read_text(encoding="utf-8")
+            title = self._parse_frontmatter_field(content, "title")
             if not title:
                 continue
-            r = self.update_page(title=title, top_k=top_k)
+            pt = self._parse_frontmatter_field(content, "type") or "domain"
+            page_index[title] = (path, pt, content)
+
+        results: List[Dict[str, Any]] = []
+        for title, (path, page_type, content) in page_index.items():
+            r = self._update_page_with_content(
+                title=title, page_type=page_type, path=path,
+                existing_content=content, top_k=top_k,
+            )
             results.append(r)
+
         updated = [r for r in results if r.get("status") == "updated"]
         unchanged = [r for r in results if r.get("status") == "no_changes"]
         not_found = [r for r in results if r.get("status") == "not_found"]
@@ -521,6 +481,49 @@ sources:
             "not_found": len(not_found),
             "errors": len(errors),
             "details": results,
+        }
+
+    def _update_page_with_content(
+        self, *, title: str, page_type: str, path: Path,
+        existing_content: str, top_k: int,
+    ) -> Dict[str, Any]:
+        """增量更新单个页面（已有内容和路径，避免重复扫描文件）。"""
+        last_updated = self._parse_frontmatter_field(existing_content, "updated")
+
+        result = self._retriever.search(title, top_k=top_k)
+        evidence_text = self._format_evidence(result.hits)
+
+        slug = _slugify_title(title)
+        related = self._compute_related_pages(title, title, exclude_slug=slug) if self._wiki_searcher else "暂无"
+
+        new_content = self._generate_incremental_update(
+            existing_content=existing_content, title=title, page_type=page_type,
+            evidence=evidence_text, last_updated=last_updated, related=related,
+        )
+
+        if new_content is None:
+            return {"status": "error", "title": title, "reason": "LLM 调用失败"}
+
+        validated = self._validate_update_output(new_content, existing_content, title)
+        if validated != new_content:
+            self._logger.log("wiki_update_validation", {"title": title, "action": validated})
+            new_content = validated
+
+        if new_content.strip() == existing_content.strip():
+            return {"status": "no_changes", "title": title, "path": str(path)}
+
+        draft = WikiPageDraft(page_type=page_type, title=title, slug=slug,
+                              output_path=str(path), markdown=new_content)
+        write_result = self.write_page(draft, overwrite=True, backup=True)
+
+        self._logger.log("wiki_update_page", {"title": title, "path": str(path),
+                                                "action": write_result.action})
+        return {
+            "status": "updated",
+            "title": title,
+            "path": str(path),
+            "action": write_result.action,
+            "backup_path": write_result.backup_path,
         }
 
 

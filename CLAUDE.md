@@ -1,4 +1,4 @@
-# Iris 3.3 — 项目执行说明
+# Iris 3.4 — 项目执行说明
 
 > 工作知识助手，从 Iris v2.7.1 重构升级而来。
 > 个人知识库（Obsidian Wiki）重新设计 + 新增飞书团队知识库操作能力。
@@ -245,8 +245,8 @@ JSON 配置中使用 `${VAR_NAME}` 引用环境变量或 .env 中的值。
 
 | 层 | 位置 | 格式 | 含义 | 当前值 |
 |----|------|------|------|--------|
-| **产品版本** | `pyproject.toml` | SemVer X.Y.Z | 软件发布版本 | 3.3.0 |
-| **协议版本** | `src/iris/__init__.py` | MAJOR.MINOR | CLI 命令集 / agent-spec 格式 | 3.3 |
+| **产品版本** | `pyproject.toml` | SemVer X.Y.Z | 软件发布版本 | 3.4.0 |
+| **协议版本** | `src/iris/__init__.py` | MAJOR.MINOR | CLI 命令集 / agent-spec 格式 | 3.4 |
 | **数据版本** | `config/*.json` | 各自独立 | 配置文件 Schema | 3.3 |
 
 > 三层解耦：只有真正发生变化的层才递增版本号。
@@ -264,7 +264,7 @@ JSON 配置中使用 `${VAR_NAME}` 引用环境变量或 .env 中的值。
 
 ```
 iris3/
-├── pyproject.toml          # 3.3.0，依赖：PyMuPDF / python-docx / numpy
+├── pyproject.toml          # 3.4.0，依赖：PyMuPDF / python-docx / numpy
 ├── README.md
 ├── CLAUDE.md               # 本文件
 ├── .env.example            # 环境变量模板
@@ -279,11 +279,11 @@ iris3/
 │   ├── app/transcribe_meeting/ # 步骤 2 — 会议转录
 │   ├── trello/             # 步骤 1 — Trello 集成
 │   ├── complex_input/      # 步骤 1 — 图文处理
-│   ├── utils/              # 步骤 1 — 工具
+│   ├── utils/              # 步骤 1 — 工具（🆕 v3.4: validation 输入校验）
 │   ├── ingest/             # 步骤 2 — 数据源扫描/切块
 │   ├── retrieval/          # 步骤 2 — 混合检索
 │   ├── qa/                 # 步骤 2 — 问答
-│   ├── wiki/               # 步骤 2 — Wiki 体系
+│   ├── wiki/               # 步骤 2 — Wiki 体系（🆕 v3.4: context_loader, _constants）
 │   ├── analysis/           # 步骤 2 — 报告/思维导图/双周报
 │   ├── output/             # 步骤 1 — 输出格式化
 │   └── feishu/             # 步骤 3 — 飞书文档/聊天提炼
@@ -296,3 +296,55 @@ iris3/
 ├── tests/                  # 单元测试（59 用例）
 └── memory/                 # Claude 工作记忆
 ```
+
+---
+
+## 🆕 v3.4 变更（2026-06-27）
+
+### 新增模块
+| 模块 | 文件 | 说明 |
+|------|------|------|
+| Wiki 常量 | `src/iris/wiki/_constants.py` | 页面类型单一数据源，消除 4 文件映射重复 |
+| Wiki 上下文加载 | `src/iris/wiki/context_loader.py` | 统一 Wiki 页面加载，替换 4 处独立实现 |
+| 输入校验 | `src/iris/utils/validation.py` | 安全类型转换、JSON 解析、必填字段校验 |
+
+### Critical Bug 修复（6 项）
+- XMind 导出：`zipfile.ZipIO()` → `io.BytesIO()`（原代码完全无法运行）
+- BM25 检索算法重写：正确的 IDF 公式 + 语料库级统计量
+- 向量索引矩阵缓存：避免每次 `search()` 重建 numpy 矩阵
+- `query_plan` 参数接入：之前接收后从未使用
+- Wiki 覆盖度统计字段修正：`document_path` → `relative_path`
+- `_build_person_prompt` return 后死代码删除
+
+### 第二轮审查修复（2 Critical + 3 High）
+- `ModelManagerError` 未导入 → 异常路径 `NameError` 崩溃
+- Trello DNS 全局 monkey-patch 线程安全：Lock + TTL
+- 飞书客户端孤儿子进程清理：`subprocess.Popen` + `finally kill`
+- frontmatter 损坏永久卡死修复 + `\r\n` 换行符兼容
+
+### 检索质量改进
+- BM25 评分：IDF 从 `log(doc_len/tf)` 修正为 `log((N-df)/df)`
+- 向量索引：矩阵缓存避免每次搜索 O(n) 重建
+- `query_plan` 权重调整：高优先级 focus_areas 提升标题/段落权重
+
+### 健壮性增强
+- `write_guard` 统一：用户自定义路径与内部关键目录合并处理
+- `model_manager` 浅拷贝：防止就地修改共享配置字典
+- 排重过滤器安全修复：`source_url` 为空时不再误删条目
+- 飞书客户端进程生命周期管理：`Popen.kill()` + `communicate()`
+- FTS5 初始化失败记录 warning 日志
+- PDF 标题提取 `fitz` 缺失回退保护
+- JSONL 输入解析错误提示（含行号）
+- `\r\n` 换行符统一处理（frontmatter / YAML 解析兼容 Windows）
+- 日志 10MB 自动归档 + set/frozenset 序列化
+
+### 性能优化
+- `update_all_pages` O(n²) → O(n)：预建 title→path 索引
+- PDF 提取 `import re` 模块级迁移（热路径优化）
+- Whisper MPS 加速检测（Apple Silicon）
+- 提示词模板内存缓存
+- DNS 缓存 TTL 机制（Trello）
+
+### Wiki 常量统一
+- 页面类型配置（目录/前缀/显示名）从 4 处硬编码收敛到 `_constants.py` 单一数据源
+- `discovery.py` / `generator.py` / `navigation.py` / `searcher.py` 统一引用

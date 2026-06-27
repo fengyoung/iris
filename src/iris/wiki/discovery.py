@@ -8,8 +8,9 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from iris.config.loader import ConfigBundle
-from iris.ingest.chunker import ChunkSlim, MarkdownChunker
+from iris.ingest.chunker import ChunkSlim
 
+from ._constants import get_wiki_dir, get_wiki_prefix
 from .discovery_rules import GENERIC_TERM_SUPPRESS, PERSON_PATTERNS
 from .discovery_types import CandidateItem
 from .discovery_utils import (
@@ -28,16 +29,6 @@ class CandidateDiscovery:
     def __init__(self, config: ConfigBundle):
         self._config = config
         self._metadata_root = config.root / "data" / "metadata"
-        self._rules = self._load_rules()
-
-    def _load_rules(self) -> Dict[str, Any]:
-        rules_path = self._config.root / "config" / "wiki_discovery_rules.json"
-        if not rules_path.exists():
-            return {}
-        try:
-            return json.loads(rules_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return {}
 
     def discover(self, *, limit: int = 20, incremental: bool = False) -> List[CandidateItem]:
         chunks = self._load_chunks()
@@ -76,7 +67,9 @@ class CandidateDiscovery:
                 term_clean = term.strip().strip("()[]（）【】")
                 if not term_clean or not is_high_value_term(term_clean):
                     continue
-                if not any(t in term_clean for t in GENERIC_TERM_SUPPRESS) and len(term_clean) >= 2:
+                # 短词精确匹配，长词/短语允许子串匹配（避免短如 "AI" 误杀 "MAIN" 等合法术语）
+                if not any((t == term_clean) if len(t) <= 3 else (t in term_clean)
+                          for t in GENERIC_TERM_SUPPRESS) and len(term_clean) >= 2:
                     concept_counter[term_clean] += 1
                     evidence_counter[term_clean] += 1
                     append_sample(sample_paths.setdefault(term_clean, []), chunk.relative_path)
@@ -153,17 +146,14 @@ class CandidateDiscovery:
         if not self._config.wiki:
             return None
         wiki_root = Path(self._config.wiki["wiki_root"])
-        dir_map = {"domain": "01-领域", "concept": "02-概念", "project": "03-项目", "person": "04-人物"}
-        prefix_map = {"domain": "领域-", "concept": "概念-", "project": "项目-", "person": "人物-"}
-        subdir = dir_map.get(item.page_type, "01-领域")
-        prefix = prefix_map.get(item.page_type, "领域-")
+        subdir = get_wiki_dir(item.page_type)
+        prefix = get_wiki_prefix(item.page_type)
         expected = wiki_root / subdir / f"{prefix}{item.title}.md"
         if expected.exists():
             return expected
         return None
 
     def _load_chunks(self):
-        chunker = MarkdownChunker(self._config)
         chunks = []
         for source_name, cfg in self._config.data_source.get("sources", {}).items():
             if cfg.get("enabled", True):

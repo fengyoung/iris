@@ -151,7 +151,7 @@ class AnalysisReportService:
 
     def _load_wiki_for_report(self) -> str:
         """加载 Wiki 页面上下文 + OP 规划文档，用于双周报背景知识。"""
-        from pathlib import Path as _Pt
+        from iris.wiki.context_loader import WikiContextLoader
         fragments = []
 
         # 0. 优先加载 OP 规划作为主框架
@@ -159,29 +159,17 @@ class AnalysisReportService:
         if op_text:
             fragments.append(f"## OP规划（双周报必须对齐此框架）\n{op_text}")
 
-        # 1. Wiki 页面
-        wiki_root = _Pt(self._config.wiki["wiki_root"]).resolve() if self._config.wiki else _Pt()
-        if wiki_root.exists():
-            for subdir, label in [("01-领域", "领域"), ("03-项目", "项目"), ("04-人物", "人物")]:
-                d = wiki_root / subdir
-                if not d.exists():
-                    continue
-                for f in sorted(d.glob("*.md")):
-                    try:
-                        text = f.read_text(encoding="utf-8")
-                    except (OSError, UnicodeDecodeError):
-                        continue
-                    if text.startswith("---"):
-                        parts = text.split("---", 2)
-                        text = parts[2].strip() if len(parts) >= 3 else text
-                    if len(text) > 1500:
-                        text = text[:1500] + "\n\n..."
-                    name = f.stem
-                    for prefix in ("领域-", "项目-", "人物-"):
-                        if name.startswith(prefix):
-                            name = name[len(prefix):]
-                            break
-                    fragments.append(f"## {label}：{name}\n{text[:1500]}")
+        # 1. Wiki 页面（跳过概念，仅领域/项目/人物）
+        if self._config.wiki and self._config.wiki.get("wiki_root"):
+            wiki_root = Path(self._config.wiki["wiki_root"]).resolve()
+            if wiki_root.exists():
+                loader = WikiContextLoader(wiki_root)
+                ctx = loader.load_context(
+                    page_types=["domain", "project", "person"],
+                    max_chars_per_page=1500,
+                )
+                if ctx:
+                    fragments.append(ctx)
 
         return "\n\n".join(fragments) if fragments else "（无背景知识）"
 

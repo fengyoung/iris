@@ -14,7 +14,7 @@ from urllib import error, request
 logger = logging.getLogger(__name__)
 
 from iris.config.loader import ConfigBundle
-from iris.llm.model_manager import ModelManager
+from iris.llm.model_manager import ModelManager, ModelManagerError
 from iris.llm.router import ModelRouter, RoutingDecision
 
 
@@ -114,7 +114,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
                 elif provider_name == "anthropic":
                     text = self._call_anthropic(
                         api_base_url, api_key, model_config["model"],
-                        request_data.prompt,
+                        request_data.prompt, max_tokens=max_tokens,
                     )
                 else:
                     last_error = LLMProviderError(f"暂不支持的 provider: {provider_name}")
@@ -294,11 +294,12 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         )
         return _extract_chat_completions_text(data)
 
-    def _call_anthropic(self, api_base_url: str, api_key: str, model: str, prompt: str) -> str:
+    def _call_anthropic(self, api_base_url: str, api_key: str, model: str, prompt: str,
+                        max_tokens: Optional[int] = None) -> str:
         endpoint = _join_url(api_base_url, "/messages")
         payload = {
             "model": model,
-            "max_tokens": 1200,
+            "max_tokens": max_tokens or 4096,
             "messages": [
                 {
                     "role": "user",
