@@ -323,11 +323,23 @@ def handle_wiki_update(args, bundle, logger) -> int:
 
 
 def handle_build_asr_prompt(args, bundle, logger) -> int:
-    """从 Wiki 知识库构建 ASR 校正提示词。"""
+    """从 Wiki 知识库构建 ASR 校正系统提示词（供 vocotype 等工具的 LLM 校正环节使用）。
+
+    流程：
+    1. 加载 Wiki 页面 → 规则提取术语（纯本地）
+    2. 调用 base_model 批量生成 ASR 误识别映射（一次 LLM 调用）
+    3. 渲染为紧凑的系统提示词
+    4. 版本管理（三段式版本号，基于内容指纹自动检测变化）
+    """
     from pathlib import Path as _Pt
     from iris.wiki.context_loader import WikiContextLoader
-    from iris.wiki._constants import get_wiki_dir
+    from iris.wiki.term_extractor import (
+        TermExtractor, render_asr_prompt, determine_new_version,
+        load_version, save_version,
+    )
+    from iris.llm import EnvironmentConfiguredLLMProvider
 
+    # 1. 校验 Wiki 配置
     if not bundle.wiki or not bundle.wiki.get("wiki_root"):
         _emit_output(args.command, {"error": "Wiki 配置缺失"}, pretty=args.pretty)
         return 1
@@ -336,49 +348,70 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
         _emit_output(args.command, {"error": "Wiki 根目录不存在"}, pretty=args.pretty)
         return 1
 
+    # 2. 加载所有 Wiki 页面（人名和术语优先，去重时保留）
     loader = WikiContextLoader(wiki_root)
-    # ASR 提示词优先加载概念（技术术语），再加载领域/项目/人物
-    sort_order = ["concept", "domain", "project", "person"]
+    sort_order = ["person", "concept", "project", "domain"]
     pages = loader.load_pages(sort_order=sort_order)
 
-    sections: dict[str, str] = {}
-    for page in pages:
-        body = page.body
-        if len(body) > 2000:
-            body = body[:2000] + "\n\n..."
-        key = f"{get_wiki_dir(page.page_type)}/{page.path.stem}"
-        sections[key] = body
+    if not pages:
+        _emit_output(args.command, {"error": "Wiki 目录为空，无页面可提取"}, pretty=args.pretty)
+        return 1
 
-    page_count = len(pages)
-    # 构建 ASR 校正提示词
-    lines = [
-        "# ASR 校正词汇表",
-        f"## 来源：LLM-WIKI 知识库（{page_count} 页）",
-        "## 使用说明",
-        "将此内容作为 Whisper ASR 的后处理上下文，用于校正转写中的同音/近音误识别。",
-        "特别注意以下类别：",
-        "- **人名**（来自 04-人物）：确保姓名拼写准确",
-        "- **项目名**（来自 03-项目）：如 Alpha、Beta 等",
-        "- **技术术语**（来自 02-概念）：如 OCR、MMoE、BM25 等",
-        "- **领域知识**（来自 01-领域）：确保领域上下文准确",
-        "",
-    ]
-    for key, content in sections.items():
-        lines.append(f"### {key}")
-        lines.append(content)
-        lines.append("")
+    # 3. 阶段 1：规则提取术语
+    extractor = TermExtractor(pages)
+    terms = extractor.extract_terms()
 
-    prompt = "\n".join(lines)
+    # 4. 版本判定
+    data_dir = bundle.root / "data"
+    bump = getattr(args, "bump", "auto") or "auto"
+    new_version = determine_new_version(pages, data_dir, bump=bump)
 
+    # auto 模式下指纹无变化则跳过 LLM 调用
+    if bump == "auto":
+        old = load_version(data_dir)
+        if old and old.fingerprint == new_version.fingerprint:
+            _emit_output(args.command, {
+                "version": old.version,
+                "message": "Wiki 内容无变化，prompt 无需更新",
+                "wiki_page_count": len(pages),
+                "term_count": len(terms),
+            }, pretty=args.pretty)
+            return 0
+
+    # 填充版本中的术语计数
+    new_version.term_count = len(terms)
+    new_version.wiki_page_count = len(pages)
+
+    # 5. 阶段 2：LLM 批量生成误识别映射
+    provider = EnvironmentConfiguredLLMProvider(bundle)
+    terms = extractor.generate_misreadings(terms, provider)
+
+    # 6. 渲染 prompt
+    output_format = getattr(args, "output_format", "standard") or "standard"
+    # "md" / "docx" 是 --output-format 的默认值，对 asr-prompt 映射到 standard
+    if output_format in ("md", "docx"):
+        output_format = "standard"
+    prompt = render_asr_prompt(terms, new_version, output_format=output_format)
+
+    # 7. 输出到文件
     if args.output_file:
         out = _Pt(args.output_file)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(prompt, encoding="utf-8")
 
+    # 8. 持久化版本
+    save_version(data_dir, new_version)
+
     _emit_output(args.command, {
-        "page_count": page_count,
+        "version": new_version.version,
+        "fingerprint": new_version.fingerprint[:8],
+        "wiki_page_count": new_version.wiki_page_count,
+        "term_count": new_version.term_count,
         "prompt_chars": len(prompt),
-        "sections": list(sections.keys()),
+        "terms_by_category": {
+            cat: len([t for t in terms if t.category == cat])
+            for cat in ["person", "concept", "project", "domain_term"]
+        },
     }, pretty=args.pretty)
     if args.pretty:
         print(f"\n{prompt[:2000]}")

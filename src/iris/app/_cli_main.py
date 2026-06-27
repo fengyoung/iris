@@ -72,7 +72,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mode", default="local", choices=["local", "llm"], help="search/ask/report/mindmap 模式")
     parser.add_argument("--format", default="mermaid", choices=["mermaid", "xmind", "both"], help="build-mindmap 格式")
     parser.add_argument("--two-stage", action="store_true", help="build-report 两阶段审查")
-    parser.add_argument("--output-format", default="md", choices=["md", "docx"], help="build-report 输出格式")
+    parser.add_argument("--output-format", default="md", choices=["md", "docx", "standard", "compact"],
+                        help="build-report 输出格式 / build-asr-prompt prompt 格式")
     # 会议转录
     parser.add_argument("--audio-file", default="", help="transcribe-meeting 录音文件路径")
     parser.add_argument("--transcript-file", default="", help="transcribe-meeting 已有转写文本路径")
@@ -101,6 +102,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--export-review", default="", help="discover-wiki 导出审核 JSONL")
     parser.add_argument("--export-review-md", default="", help="discover-wiki 导出审核 Markdown")
     parser.add_argument("--fix", action="store_true", help="wiki-lint 自动修复模式")
+    parser.add_argument("--bump", default="auto", choices=["auto", "major", "minor", "patch"],
+                        help="build-asr-prompt 版本号递增方式")
     # 飞书文档转换
     parser.add_argument("--url", default="", help="feishu-doc-convert 飞书文档 URL（逗号分隔多文档）")
     parser.add_argument("--from-config", action="store_true", help="feishu-doc-convert / chat-digest 从配置文件读取目标列表")
