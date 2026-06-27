@@ -72,6 +72,9 @@ class WikiContextLoader:
             if not dir_path.exists():
                 continue
             for md_file in sorted(dir_path.glob("*.md")):
+                # 跳过 Obsidian 备份文件（*.bak.1.md, *.bak.2.md 等）
+                if ".bak." in md_file.stem:
+                    continue
                 try:
                     title, found_type, status, summary, body = _read_wiki_page(md_file)
                     if not title:

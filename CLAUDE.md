@@ -19,9 +19,9 @@
 
 | 维度 | 数据 |
 |------|------|
-| 源代码 | 12,559 行，79 个文件，18 个模块 |
+| 源代码 | 13,586 行，83 个文件，18 个模块 |
 | CLI 命令 | 43 个 |
-| 单元测试 | 59 个 |
+| 单元测试 | 97 个 |
 | 数据源 | 594 个文档，3,402 个 Chunk |
 | 向量索引 | 5,810 条，25 MB |
 | Wiki 页面 | 30 页（领域 6 / 概念 7 / 项目 8 / 人物 9） |
@@ -142,7 +142,7 @@ sources:
 | `wiki-lint` | 6 维健康检查（断链/孤立/草稿/过期/摘要/出链） |
 | `wiki-lint --fix` | 自动修复 frontmatter、噪音链接、draft 状态 |
 | `wiki-update` | 🆕 增量更新（daily-start 自动集成） |
-| `build-asr-prompt` | 🆕 从 Wiki 构建 ASR 校正词汇表 |
+| `build-asr-prompt` | 🆕 LLM 驱动：术语提取 → 批量误识别生成 → ASR 校正提示词（支持 --bump / --output-format） |
 
 ### 人物提取（🆕 v3.1）
 
@@ -283,7 +283,7 @@ iris3/
 │   ├── ingest/             # 步骤 2 — 数据源扫描/切块
 │   ├── retrieval/          # 步骤 2 — 混合检索
 │   ├── qa/                 # 步骤 2 — 问答
-│   ├── wiki/               # 步骤 2 — Wiki 体系（🆕 v3.4: context_loader, _constants）
+│   ├── wiki/               # 步骤 2 — Wiki 体系（🆕 v3.4: context_loader, _constants; 🆕 v3.4.1: term_extractor）
 │   ├── analysis/           # 步骤 2 — 报告/思维导图/双周报
 │   ├── output/             # 步骤 1 — 输出格式化
 │   └── feishu/             # 步骤 3 — 飞书文档/聊天提炼
@@ -293,7 +293,7 @@ iris3/
 │       └── chat_digest.py  #   聊天记录 AI 提炼 + 结构化输出
 ├── scripts/                # CLI 入口 + 委托脚本
 ├── templates/              # Prompt / Wiki 模板
-├── tests/                  # 单元测试（59 用例）
+├── tests/                  # 单元测试（97 用例，包含 term_extractor 38 用例）
 └── memory/                 # Claude 工作记忆
 ```
 
@@ -348,3 +348,29 @@ iris3/
 ### Wiki 常量统一
 - 页面类型配置（目录/前缀/显示名）从 4 处硬编码收敛到 `_constants.py` 单一数据源
 - `discovery.py` / `generator.py` / `navigation.py` / `searcher.py` 统一引用
+
+---
+
+## 🆕 v3.4.1 变更（2026-06-27 合并）
+
+### build-asr-prompt 重写
+`build-asr-prompt` 从 **Wiki 页面拼贴**改造为 **LLM 驱动的术语提炼 + 误识别生成**引擎：
+
+| 维度 | 旧实现 | 新实现 |
+|------|--------|--------|
+| 核心逻辑 | 简单拼贴 Wiki 页面正文 | `wiki/term_extractor.py`（619 行）全流程 |
+| 术语来源 | 无结构提取 | person/concept/project/domain 4 类型结构化提取 |
+| 误识别生成 | 无 | base_model 一次批量调用生成常见误识别 |
+| 版本管理 | 无 | 三段式（MAJOR.MINOR.PATCH）+ 内容指纹自动检测 |
+| 输出格式 | 单一格式 | standard / compact 两种 render 格式 |
+| CLI 参数 | 无版本控制 | `--bump auto\|major\|minor\|patch`、`--output-format` |
+
+### 新增文件
+| 文件 | 行数 | 说明 |
+|------|------|------|
+| `src/iris/wiki/term_extractor.py` | 619 | TermExtractor 术语提取器、LLM 批量误识别生成、prompt 渲染、版本管理 |
+| `tests/test_term_extractor.py` | 432 | 38 个单元测试覆盖术语提取、LLM prompt 构建、响应解析、版本管理、渲染输出 |
+
+### handler 重构
+- `handle_build_asr_prompt` 从 80 行简化为 45 行：调用 TermExtractor 管线化流程
+- 新增 `--bump`、`--output-format` CLI 参数

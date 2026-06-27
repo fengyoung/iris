@@ -370,12 +370,25 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
     if bump == "auto":
         old = load_version(data_dir)
         if old and old.fingerprint == new_version.fingerprint:
-            _emit_output(args.command, {
+            output_path = None
+            # 用户指定了 --output-file：从版本缓存写入文件
+            if args.output_file and old.prompt_text:
+                out = _Pt(args.output_file)
+                clean_stem = _strip_version_suffix(out.stem)
+                version_tag = f"v{old.version}"
+                out = out.with_name(f"{clean_stem}_{version_tag}{out.suffix}")
+                out.parent.mkdir(parents=True, exist_ok=True)
+                out.write_text(old.prompt_text, encoding="utf-8")
+                output_path = str(out)
+            payload = {
                 "version": old.version,
                 "message": "Wiki 内容无变化，prompt 无需更新",
                 "wiki_page_count": len(pages),
                 "term_count": len(terms),
-            }, pretty=args.pretty)
+            }
+            if output_path:
+                payload["output_file"] = output_path
+            _emit_output(args.command, payload, pretty=args.pretty)
             return 0
 
     # 填充版本中的术语计数
@@ -393,17 +406,35 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
         output_format = "standard"
     prompt = render_asr_prompt(terms, new_version, output_format=output_format)
 
-    # 7. 输出到文件
+    # 7. 输出到文件（文件名自动嵌入版本号）
+    output_path = None
     if args.output_file:
         out = _Pt(args.output_file)
+        stem = out.stem
+        # 移除旧版本号后缀（如 _v1.2.3），避免叠加
+        clean_stem = _strip_version_suffix(stem)
+        version_tag = f"v{new_version.version}"
+        out = out.with_name(f"{clean_stem}_{version_tag}{out.suffix}")
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(prompt, encoding="utf-8")
+        output_path = str(out)
+    else:
+        # 无 --output-file 时，自动生成到 output/ 目录
+        from iris.app.cli.helpers import _resolve_output_path
+        auto_path = _resolve_output_path("", "asr_prompt", ".md")
+        version_tag = f"v{new_version.version}"
+        out = auto_path.with_name(f"{auto_path.stem}_{version_tag}{auto_path.suffix}")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(prompt, encoding="utf-8")
+        output_path = str(out)
 
-    # 8. 持久化版本
+    # 8. 持久化版本（含 prompt 文本，供 auto 缓存使用）
+    new_version.prompt_text = prompt
     save_version(data_dir, new_version)
 
     _emit_output(args.command, {
         "version": new_version.version,
+        "output_file": output_path,
         "fingerprint": new_version.fingerprint[:8],
         "wiki_page_count": new_version.wiki_page_count,
         "term_count": new_version.term_count,
@@ -928,6 +959,21 @@ def handle_secrets_delete(args, bundle, logger) -> int:
     ok = delete_secret(key)
     _emit_output("secrets-delete", {"key": key, "deleted": ok}, pretty=args.pretty)
     return 0 if ok else 1
+
+
+# ── 辅助函数 ─────────────────────────────────────────────
+
+import re as _re
+
+_VERSION_SUFFIX_PATTERN = _re.compile(r"_v\d+\.\d+\.\d+$")
+
+
+def _strip_version_suffix(stem: str) -> str:
+    """移除文件名中的版本号后缀，避免叠加。
+
+    如 "asr_prompt_v1.0.0" → "asr_prompt"
+    """
+    return _VERSION_SUFFIX_PATTERN.sub("", stem)
 
 
 # ── 命令分发表 ─────────────────────────────────────────────

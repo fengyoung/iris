@@ -21,18 +21,67 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, TYPE_CHECKING
 
-from ._constants import get_wiki_prefix
+from ._constants import get_all_types, get_wiki_prefix
 from .context_loader import WikiPageInfo
 from .discovery_utils import extract_terms, is_high_value_term, normalized_key
 
 if TYPE_CHECKING:
     from iris.llm.provider import EnvironmentConfiguredLLMProvider
+
+
+# ── 正则常量 ──────────────────────────────────────────────
+_HEADING_RE = re.compile(r"^##\s+(.+)$", re.MULTILINE)
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+_WIKI_LINK_RE = re.compile(r"\[\[([^\[\]]+?)\]\]")
+
+# 排除的章节标题（无 ASR 价值）
+_SKIP_HEADINGS = frozenset({
+    "摘要", "正文", "概述", "总结", "背景", "目标", "结论",
+    "参考来源", "关联页面", "当前结论", "相关依据",
+})
+
+
+# 领域术语噪音模式：纯数字、百分比、数值+单位、单字母等
+_NOISE_TERM_RE = re.compile(
+    r"^\d+[分%]?$|"              # "100", "100分"
+    r"^\d+\.\d+[%+]?$|"         # "0.38", "48.14%", "55%+"
+    r"^\d+\s*张图片|"            # "2000 张图片"
+    r"^\d+\s*台手机|"            # "2000 台手机"
+    r"^\d+\s*(台|个|张|款|套|分|%|款)\s*$|"  # "19 台", "1个"
+    r"\d+\s*[/%]\s*\d+[+]?$|"   # "22/33", "55%+"
+    r"^[①②③④⑤⑥⑦⑧⑨⑩]|"       # 列表编号开头
+    r"^[A-Za-z0-9]{,2}$|"       # "V21", "h1" 等
+    r"^V?\d+(?:\.\d+)+$|"       # "1.0.1", "V2.1"
+    r"^\d+年\d+月\d+日$|"       # "2026年6月2日" — 日期
+    r"^\d+个(百分)?点$|"         # "5个百分点", "1个百分点", "3百分点"
+    r"是\s*.*的\s*"             # "脏污是...的" — 判断句型
+)
+
+
+def _is_noise_term(term: str) -> bool:
+    """判断术语是否为噪音（数字/百分比/短字母等）。"""
+    return bool(_NOISE_TERM_RE.match(term.strip()))
+
+
+def _truncate_context(text: str, max_chars: int = 40) -> str:
+    """截断 context 到指定长度（优先在句号处断句）。"""
+    if not text:
+        return ""
+    clean = text.strip()
+    if len(clean) <= max_chars:
+        return clean
+    for sep in ("。", "；", ". ", "，", ","):
+        idx = clean.find(sep)
+        if 0 < idx <= max_chars:
+            return clean[:idx + 1]
+    return clean[:max_chars].rstrip() + "…"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -71,6 +120,7 @@ class AsrPromptVersion:
     wiki_page_count: int
     term_count: int
     fingerprint: str
+    prompt_text: str = ""
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -123,8 +173,12 @@ class TermExtractor:
         term = self._term_from_filename(page, "person")
         if not term:
             return None
-        context = self._extract_role_context(page) or page.summary or ""
-        return AsrTerm(term=term, category="person", context=context)
+        context = (
+            self._extract_role_context(page)
+            or page.summary
+            or ""
+        )
+        return AsrTerm(term=term, category="person", context=_truncate_context(context, 40))
 
     def _extract_from_concept(self, page: WikiPageInfo) -> Optional[AsrTerm]:
         """从概念页面提取：文件名去前缀为 term，优先取 ## 定义 段首句为 context。"""
@@ -136,32 +190,84 @@ class TermExtractor:
             or page.summary
             or ""
         )
-        return AsrTerm(term=term, category="concept", context=context)
+        return AsrTerm(term=term, category="concept", context=_truncate_context(context, 40))
 
     def _extract_from_project(self, page: WikiPageInfo) -> Optional[AsrTerm]:
         """从项目页面提取：文件名去前缀为 term，summary 首句为 context。"""
         term = self._term_from_filename(page, "project")
         if not term:
             return None
-        return AsrTerm(term=term, category="project", context=page.summary or "")
+        return AsrTerm(term=term, category="project", context=_truncate_context(page.summary or "", 40))
 
     def _extract_from_domain(self, page: WikiPageInfo) -> List[AsrTerm]:
-        """从领域页面提取专有名词：对 body 调用 discovery 的术语提取管线。"""
+        """从领域页面提取专有名词：提取标题、## 章节标题、**粗体**、[[Wiki链接]]。
+
+        不再使用正文全文的贪婪正则匹配（会导致碎片句子被当作术语），
+        改为从结构化元素中提取高价值名词。
+        """
         results: List[AsrTerm] = []
-        candidates = extract_terms(page.body)
-        for cand in candidates:
-            if not is_high_value_term(cand):
+        seen: set = set()
+        title = page.title or ""
+        body = page.body
+        ctx = _truncate_context(title, 40)
+
+        # 1. 页面标题本身作为首个术语
+        if title and len(title) >= 2:
+            results.append(AsrTerm(term=title, category="domain_term", context=ctx))
+            seen.add(normalized_key(title))
+
+        # 2. 提取 ## 章节标题
+        for m in _HEADING_RE.finditer(body):
+            h_text = m.group(1).strip()
+            if not h_text or len(h_text) < 2 or h_text in _SKIP_HEADINGS:
                 continue
-            # 排除过短或纯标点
-            clean = cand.strip()
-            if len(clean) < 2:
+            if _is_noise_term(h_text):
                 continue
-            results.append(AsrTerm(
-                term=clean,
-                category="domain_term",
-                context=page.title or "",
-            ))
-        return results
+            key = normalized_key(h_text)
+            if key not in seen and is_high_value_term(h_text):
+                seen.add(key)
+                results.append(AsrTerm(term=h_text, category="domain_term", context=ctx))
+
+        # 3. 提取 **粗体** 内容（通常是关键术语/项目名）
+        for m in _BOLD_RE.finditer(body):
+            bold = m.group(1).strip()
+            if not bold or len(bold) < 2:
+                continue
+            if _is_noise_term(bold):
+                continue
+            # 过长的粗体内容（超过 20 字）通常是句子而非术语
+            if len(bold) > 20:
+                continue
+            # 包含"是…的"判断句式的不是术语
+            if "是" in bold and len(bold) > 10:
+                continue
+            key = normalized_key(bold)
+            if key not in seen and is_high_value_term(bold):
+                seen.add(key)
+                results.append(AsrTerm(term=bold, category="domain_term", context=ctx))
+
+        # 4. 提取 [[Wiki 链接]]（出链目标通常是相关概念/项目）
+        for m in _WIKI_LINK_RE.finditer(body):
+            link = m.group(1).strip()
+            if not link or len(link) < 2:
+                continue
+            # 排除 internal links 格式 [[链接|显示名]] → 取链接部分
+            if "|" in link:
+                link = link.split("|")[0].strip()
+            # 去掉页面类型前缀（如 "概念-BM25" → "BM25"），避免噪音
+            for ptype in get_all_types():
+                prefix = get_wiki_prefix(ptype)
+                if link.startswith(prefix):
+                    link = link[len(prefix):]
+                    break
+            key = normalized_key(link)
+            if key not in seen and is_high_value_term(link):
+                seen.add(key)
+                results.append(AsrTerm(term=link, category="domain_term", context=ctx))
+
+        # 每页最多 15 个术语，防止膨胀
+        # 优先级：标题 > 标题段落 > 粗体 > Wiki 链接
+        return results[:15]
 
     def _deduplicate(self, terms: List[AsrTerm]) -> List[AsrTerm]:
         """按 term 去重，保留最先出现的类别。"""
@@ -220,6 +326,8 @@ class TermExtractor:
 
     # ── 阶段 2：LLM 批量误识别生成 ──────────────────────────
 
+    _BATCH_SIZE = 50  # 每批最多 50 个术语，确保 JSON 响应不超 max_tokens
+
     def generate_misreadings(
         self,
         terms: List[AsrTerm],
@@ -227,7 +335,7 @@ class TermExtractor:
     ) -> List[AsrTerm]:
         """调用 base_model 批量生成所有术语的 ASR 误识别。
 
-        将所有术语打包为一条 prompt，一次 LLM 调用返回全部结果。
+        按 _BATCH_SIZE 分批调用，避免 LLM 输出截断导致 JSON 解析失败。
         LLM 调用失败时 mis_asr 保持空列表，不影响后续渲染。
 
         Args:
@@ -240,24 +348,30 @@ class TermExtractor:
         if not terms:
             return terms
 
-        prompt = self._build_misreadings_prompt(terms)
+        from iris.llm import LLMRequest
 
-        try:
-            from iris.llm import LLMRequest
-            response = provider.generate(
-                LLMRequest(
-                    prompt=prompt,
-                    route_context={"task_type": "asr_misreading", "input_type": "text"},
-                ),
-                temperature=0.3,
-                max_tokens=4096,
-            )
-            self._parse_misreadings_response(response.text, terms)
-        except Exception as exc:
-            print(
-                f"[warn] ASR 误识别 LLM 调用失败，将继续生成不含误识别列的 prompt: {exc}",
-                file=sys.stderr,
-            )
+        for start in range(0, len(terms), self._BATCH_SIZE):
+            batch = terms[start:start + self._BATCH_SIZE]
+            prompt = self._build_misreadings_prompt(batch)
+
+            try:
+                response = provider.generate(
+                    LLMRequest(
+                        prompt=prompt,
+                        route_context={
+                            "task_type": "asr_misreading",
+                            "input_type": "text",
+                        },
+                    ),
+                    temperature=0.3,
+                    max_tokens=8192,
+                )
+                self._parse_misreadings_response(response.text, batch)
+            except Exception as exc:
+                print(
+                    f"[warn] 第 {start//self._BATCH_SIZE + 1} 批 ASR 误识别生成失败: {exc}",
+                    file=sys.stderr,
+                )
 
         return terms
 
@@ -292,8 +406,12 @@ class TermExtractor:
 [
   {{"term": "张三", "category": "person", "mis_asr": ["张珊", "章三", "章山"]}},
   {{"term": "BM25", "category": "concept", "mis_asr": ["bm二十五", "必爱姆25"]}},
+  {{"term": "质检自动化", "category": "domain_term", "mis_asr": ["质检智能画", "质检制能化", "质检智慧化"]}},
   ...
-]"""
+]
+
+注意：category 必须严格使用 person / concept / project / domain_term 四种之一，不要自行改写。
+"""  # 结束 _build_misreadings_prompt 的 f-string
 
     @staticmethod
     def _parse_misreadings_response(response_text: str, terms: List[AsrTerm]) -> None:
@@ -314,12 +432,20 @@ class TermExtractor:
                 lines = lines[:-1]
             text = "\n".join(lines).strip()
 
+        # 如果 JSON 被截断（max_tokens 不足），尝试关闭末尾的数组/对象
+        # 防止 LLM 输出 4096 tokens 时被截断在 JSON 中间导致全部解析失败
+        if not text.endswith("]"):
+            # 找到最后一个完整的 } 对象，补上 ]
+            last_close = text.rfind("}")
+            if last_close > 0:
+                text = text[:last_close + 1] + "]"
+
         try:
             data = json.loads(text)
         except json.JSONDecodeError:
             # 尝试提取第一个 JSON 数组
             import re
-            m = re.search(r"\[.*\]", text, re.DOTALL)
+            m = re.search(r"\[(?:[^\[\]]|\[[^\]]*\])*\]", text, re.DOTALL) or re.search(r"\[.*?\]", text, re.DOTALL)
             if m:
                 try:
                     data = json.loads(m.group(0))
@@ -331,20 +457,29 @@ class TermExtractor:
         if not isinstance(data, list):
             return
 
-        # 构建查找索引
+        # 构建查找索引（含 category 别名兼容：LLM 可能返回 "domain" 代替 "domain_term"）
+        CATEGORY_ALIASES = {"domain": "domain_term"}
         index: Dict[str, AsrTerm] = {}
         for t in terms:
-            key = f"{t.term}|{t.category}"
-            index[key] = t
+            index[f"{t.term}|{t.category}"] = t
 
         for item in data:
             if not isinstance(item, dict):
                 continue
-            key = f"{item.get('term', '')}|{item.get('category', '')}"
-            if key in index:
+            raw_cat = item.get("category", "")
+            resolved_cat = CATEGORY_ALIASES.get(raw_cat, raw_cat)
+            key = f"{item.get('term', '')}|{resolved_cat}"
+            term_obj = index.get(key)
+            if term_obj is None:
+                # 模糊匹配：仅按 term 名称匹配
+                for k, t in index.items():
+                    if k.startswith(f"{item.get('term', '')}|"):
+                        term_obj = t
+                        break
+            if term_obj:
                 mis = item.get("mis_asr", [])
                 if isinstance(mis, list):
-                    index[key].mis_asr = [str(x) for x in mis[:5]]
+                    term_obj.mis_asr = [str(x) for x in mis[:5]]
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -522,6 +657,7 @@ def load_version(data_dir: Path) -> Optional[AsrPromptVersion]:
             wiki_page_count=data.get("wiki_page_count", 0),
             term_count=data.get("term_count", 0),
             fingerprint=data.get("fingerprint", ""),
+            prompt_text=data.get("prompt_text", ""),
         )
     except (json.JSONDecodeError, KeyError, OSError):
         return None
@@ -540,6 +676,7 @@ def save_version(data_dir: Path, version: AsrPromptVersion) -> None:
         "wiki_page_count": version.wiki_page_count,
         "term_count": version.term_count,
         "fingerprint": version.fingerprint,
+        "prompt_text": version.prompt_text,
     }
 
     with FileLock(str(path)):
