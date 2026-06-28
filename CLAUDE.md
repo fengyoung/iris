@@ -19,7 +19,7 @@
 
 | 维度 | 数据 |
 |------|------|
-| 源代码 | 13,586 行，83 个文件，18 个模块 |
+| 源代码 | 13,772 行，83 个文件，18 个模块 |
 | CLI 命令 | 43 个 |
 | 单元测试 | 97 个 |
 | 数据源 | 594 个文档，3,402 个 Chunk |
@@ -358,7 +358,7 @@ iris3/
 
 | 维度 | 旧实现 | 新实现 |
 |------|--------|--------|
-| 核心逻辑 | 简单拼贴 Wiki 页面正文 | `wiki/term_extractor.py`（619 行）全流程 |
+| 核心逻辑 | 简单拼贴 Wiki 页面正文 | `wiki/term_extractor.py`（756 行）全流程 |
 | 术语来源 | 无结构提取 | person/concept/project/domain 4 类型结构化提取 |
 | 误识别生成 | 无 | base_model 一次批量调用生成常见误识别 |
 | 版本管理 | 无 | 三段式（MAJOR.MINOR.PATCH）+ 内容指纹自动检测 |
@@ -368,7 +368,7 @@ iris3/
 ### 新增文件
 | 文件 | 行数 | 说明 |
 |------|------|------|
-| `src/iris/wiki/term_extractor.py` | 619 | TermExtractor 术语提取器、LLM 批量误识别生成、prompt 渲染、版本管理 |
+| `src/iris/wiki/term_extractor.py` | 756 | TermExtractor 术语提取器、LLM 批量误识别生成、prompt 渲染、版本管理 |
 | `tests/test_term_extractor.py` | 432 | 38 个单元测试覆盖术语提取、LLM prompt 构建、响应解析、版本管理、渲染输出 |
 
 ### handler 重构

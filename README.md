@@ -1,10 +1,10 @@
-# Iris 3.3
+# Iris 3.4
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
 
-**v3.3.0** — 步骤 3 完成，飞书文档/聊天提炼功能上线。
+**v3.4.0** — 全面代码审查修复 + 架构改进，ASR prompt 重写。
 
 ## 开发路线
 
@@ -71,4 +71,4 @@ SOURCE/                     LLM-WIKI/
 - OpenAI 兼容 LLM API（DeepSeek / 百炼 / Qwen 等）
 - lark-cli（飞书接口，步骤 3）
 - macOS Keychain（可选密钥存储）
-- 59 个单元测试
+- 97 个单元测试
