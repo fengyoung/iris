@@ -1,4 +1,4 @@
-# Iris 3.7 — 项目执行说明
+# Iris 3.8 — 项目执行说明
 
 > 工作知识助手，从 Iris v2.7.1 重构升级而来。
 > 个人知识库（Obsidian Wiki）重新设计 + 新增飞书团队知识库操作能力。
@@ -245,9 +245,9 @@ JSON 配置中使用 `${VAR_NAME}` 引用环境变量或 .env 中的值。
 
 | 层 | 位置 | 格式 | 含义 | 当前值 |
 |----|------|------|------|--------|
-| **产品版本** | `pyproject.toml` | SemVer X.Y.Z | 软件发布版本 | 3.7.0 |
-| **协议版本** | `src/iris/__init__.py` | MAJOR.MINOR | CLI 命令集 / agent-spec 格式 | 3.6 |
-| **数据版本** | `config/*.json` | 各自独立 | 配置文件 Schema | 3.3 |
+| **产品版本** | `pyproject.toml` | SemVer X.Y.Z | 软件发布版本 | 3.8.0 |
+| **协议版本** | `src/iris/__init__.py` | MAJOR.MINOR | CLI 命令集 / agent-spec 格式 | 3.7 |
+| **数据版本** | `config/*.json` | 各自独立 | 配置文件 Schema | 3.4 |
 
 > 三层解耦：只有真正发生变化的层才递增版本号。
 
@@ -264,7 +264,7 @@ JSON 配置中使用 `${VAR_NAME}` 引用环境变量或 .env 中的值。
 
 ```
 iris3/
-├── pyproject.toml          # 3.7.0，依赖：PyMuPDF / python-docx / numpy / pydantic>=2.0
+├── pyproject.toml          # 3.8.0，依赖：PyMuPDF / python-docx / numpy / pydantic>=2.0
 ├── README.md
 ├── CLAUDE.md               # 本文件
 ├── .env.example            # 环境变量模板
@@ -272,7 +272,8 @@ iris3/
 ├── data/                   # 运行时数据（全 gitignore）
 ├── src/iris/
 │   ├── config/             # 步骤 1 — 配置加载（🆕 v3.7: models.py Pydantic v2 类型安全）
-│   ├── llm/                # 步骤 1 — LLM Provider + 路由
+│   ├── complex_input/       # 步骤 1 — 复杂输入（🆕 v3.8: 三阶段流水线 + 多文件类型检测）
+│   ├── llm/                # 步骤 1 — LLM Provider + 路由（🆕 v3.8: LLMService 统一入口）
 │   ├── memory/             # 步骤 1 — 记忆系统
 │   ├── core/               # 步骤 1 — 核心抽象（Protocol、锁、写保护、存储）
 │   ├── app/cli/            # 步骤 1 — CLI 框架（41 命令）
@@ -562,3 +563,76 @@ templates/wiki/generate_person.txt   ← 人物 Wiki Prompt 模板
 | 配置类型安全 | ❌ 纯 dict | ✅ Pydantic v2 |
 | Wiki 内容校验 | ❌ 无 | ✅ 准确性 + 全面性 |
 | 依赖数 | 3 | **4**（+pydantic） |
+
+
+## 🆕 v3.8.0 变更（2026-06-29）
+
+### 复杂输入三阶段重构 + LLMService 统一入口
+
+基于设计讨论（团队成员J + Claude Code），对复杂输入模块和 LLM 调用架构进行全面升级。
+
+### 1. 复杂输入：双阶段 → 三阶段流水线（`complex_input/pipeline.py`）
+
+| 组件 | 改进前 (v3.7.0) | 改进后 (v3.8.0) |
+|------|:---:|------|
+| 阶段数 | 2（adv→理解, base→整合） | **3**（base→指令, adv→理解, base→整合） |
+| Stage 1 prompt | 硬编码 `STAGE1_PROMPT` | **base_model 根据 query + file_type 动态生成** |
+| 文件类型检测 | 仅图片 | **image / pdf / document / video 多类型** |
+| 非图片处理 | ❌ 无 | ✅ 明确提示 "暂不支持"（为后续扩展留接口） |
+| 错误隔离 | 单层 try/except | **三层独立异常处理 + 降级传递** |
+
+**三阶段流程**：
+```
+Stage 1  base_model  → 生成 adv_model 分析指令（新增 prompt_gen 路由规则）
+Stage 2  adv_model   → 多模态理解非文本内容
+Stage 3  base_model  → 整合润色输出
+```
+
+### 2. LLMService 统一入口（`llm/service.py`, 121 行）
+
+| 特性 | 说明 |
+|------|------|
+| 统一创建 | 消除各模块各自 `EnvironmentConfiguredLLMProvider(config)` 的重复模式 |
+| 便捷方法 | `generate()` / `generate_multimodal()` 封装路由上下文和异常处理 |
+| 兼容过渡 | `get_provider()` 返回完整实例供高级用法 |
+
+### 3. 检测器扩展（`complex_input/detector.py`）
+
+- **文件类型分类**：`_classify_file()` 按扩展名映射到 image/pdf/document/video/unknown
+- **全局常量**：`utils/constants.py` 新增 `FILE_TYPE_*`、`PDF_EXTENSIONS`、`DOCUMENT_EXTENSIONS`、`VIDEO_EXTENSIONS`、`COMPLEX_EXTENSIONS`
+- **安全修复**：超大图片先做大小检查再加入 `resolved`，消除 `file_count` 与 `encoded_images` 不一致
+- **安全修复**：`str.format()` → `_safe_format()`，消除用户输入含花括号时的 KeyError 崩溃风险
+
+### 4. 路由规则扩展（`config/llm.json`）
+
+新增 1 条路由规则（7→8）：
+
+| 规则 | 优先级 | 匹配条件 | 路由目标 |
+|------|:------:|------|:------:|
+| `prompt_gen_go_base` | 7 | `task_type=prompt_gen` | base_model → adv_model |
+
+### 5. 代码质量修复（v3.8 审查 7 项）
+
+| # | 严重度 | 问题 | 修复 |
+|---|:------:|------|------|
+| C1 | Critical | 超大图片路径泄露进 resolved | 重构循环顺序 |
+| C2 | Critical | `str.format()` 花括号崩溃 | `_safe_format()` 逐字段 replace |
+| C3 | Critical | 方法体内 `from pathlib import Path` | 移到模块顶部 |
+| H1 | High | 非图片文件处理返回空壳 | 返回 `[Stage2 跳过]` 明确提示 |
+| H2 | High | 内部方法返回裸 `tuple` | `Tuple[str, Optional[str]]` |
+| M1 | Medium | `known_type` 参数语义不清 | 重命名为 `force_type` |
+| M2 | Medium | 纯文本误入 pipeline 静默失败 | 添加 `logger.warning` |
+
+### 关键指标
+
+| 维度 | 改进前 (v3.7.0) | 改进后 (v3.8.0) |
+|------|:---:|:---:|
+| 源代码行数 | 16,183 | **16,620** |
+| 源文件数 | 92 | **93** |
+| 模块数 | 19 | 19 |
+| CLI 命令 | 39 | 40 |
+| 单元测试 | 161 | 161 |
+| 路由规则 | 7 | **8** |
+| Pipeline 阶段 | 2 | **3** |
+| LLM 统一入口 | ❌ 各自创建 | ✅ `LLMService` |
+| 文件类型支持 | 仅图片 | image / pdf / document / video |

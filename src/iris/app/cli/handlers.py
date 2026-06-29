@@ -99,9 +99,8 @@ def handle_search(args, bundle, logger) -> int:
 def handle_ask(args, bundle, logger) -> int:
     image_paths = _parse_image_list(args.image)
     if image_paths:
-        from iris.complex_input import ComplexInputPipeline
         pipeline = ComplexInputPipeline(bundle)
-        result = pipeline.process(args.query, image_paths=image_paths)
+        result = pipeline.process(args.query, file_paths=image_paths)
         _emit_output(args.command, result.to_dict(), pretty=args.pretty)
         return 0
     from iris.qa import QAService
@@ -978,7 +977,7 @@ def handle_process(args, bundle, logger) -> int:
         raise ValueError("process 需要 --query")
     image_paths = _parse_image_list(args.image)
     pipeline = ComplexInputPipeline(bundle)
-    result = pipeline.process(args.query, image_paths=image_paths or None, output_path=args.output_file or None)
+    result = pipeline.process(args.query, file_paths=image_paths or None, output_path=args.output_file or None)
     _emit_output(args.command, result.to_dict(), pretty=args.pretty)
     return 0
 

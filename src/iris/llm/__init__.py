@@ -10,6 +10,7 @@ from .provider import (
     NullLLMProvider,
 )
 from .router import ModelRouter, RoutingDecision
+from .service import LLMService
 
 __all__ = [
     "BaseLLMProvider",
@@ -17,6 +18,7 @@ __all__ = [
     "LLMProviderError",
     "LLMRequest",
     "LLMResponse",
+    "LLMService",
     "ModelManager",
     "ModelManagerError",
     "ModelRouter",

@@ -1,5 +1,5 @@
 {
-  "version": "3.3",
+  "version": "3.4",
   "default_strategy": {
     "default_model_role": "base_model",
     "fallback_model_role": "adv_model",
@@ -163,6 +163,15 @@
         "route_to": "adv_model",
         "fallback_to": "base_model",
         "description": "图文混合输入走增强模型"
+      },
+      {
+        "name": "prompt_gen_go_base",
+        "enabled": true,
+        "priority": 7,
+        "match": {"task_type": "prompt_gen"},
+        "route_to": "base_model",
+        "fallback_to": "adv_model",
+        "description": "生成 adv_model 指令走 base_model"
       },
       {
         "name": "complex_analysis_go_adv",

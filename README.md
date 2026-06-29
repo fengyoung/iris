@@ -1,10 +1,10 @@
-# Iris 3.7
+# Iris 3.8
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
 
-**v3.7.0** — iris2 能力迁移：Pydantic 配置校验 + Wiki 深度评估，161 测试。
+**v3.8.0** — 复杂输入三阶段重构 + LLMService 统一入口，161 测试。
 
 ## 开发路线
 
@@ -71,9 +71,9 @@ SOURCE/                     LLM-WIKI/
 | 角色 | 默认模型 | 提供商 | 能力 | 降级链 |
 |------|---------|--------|------|--------|
 | `base_model` | deepseek-v4-flash | DeepSeek | 纯文本 | → deepseek-v4-pro |
-| `adv_model` | qwen3.6-plus | 百炼 | 文本 + 图片 🌐 | → qwen3.7-plus → qwen3.5-plus |
+| `adv_model` | qwen3.7-plus | 百炼 | 文本 + 图片 🌐 | → qwen3.6-plus → qwen3.5-plus |
 
-路由规则（7 条）：用户显式指定 → 多模态输入 → 复杂分析 → Wiki 重建 → 问答 → 文本兜底。
+路由规则（8 条）：用户显式指定 → 多模态输入 → Prompt 生成 → 复杂分析 → Wiki 重建 → 问答 → 文本兜底。
 
 ## 技术栈
 
@@ -88,6 +88,7 @@ SOURCE/                     LLM-WIKI/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.8.0** | 2026-06-29 | 复杂输入三阶段重构 + LLMService 统一入口 + 8 路由规则，161 测试 |
 | **v3.7.0** | 2026-06-29 | iris2 迁移：Pydantic v2 配置校验 + Wiki 深度评估，161 测试 |
 | **v3.6.0** | 2026-06-29 | 全面审查：6 Critical + 14 High 修复，5 项架构重构，138 测试 |
 | v3.5.0 | 2026-06-29 | build-asr-prompt 三段 LLM Pipeline（热词 + 误识别 + Prompt） |

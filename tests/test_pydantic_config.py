@@ -92,13 +92,16 @@ class TestConfigBundleV2:
         assert v2.wiki is not None
 
         # LLM 配置正确
-        assert v2.llm.version == "3.3"
+        assert v2.llm.version == "3.4"
         assert len(v2.llm.models) >= 2
         assert v2.llm.models["adv_model"].default_model_id == "qwen3.6-plus"
         assert v2.llm.default_strategy.allow_auto_upgrade is True
 
-        # 路由规则
-        assert len(v2.llm.routing.rules) == 7
+        # 路由规则（v3.8 新增 prompt_gen_go_base → 8 条）
+        assert len(v2.llm.routing.rules) == 8
+        # 验证新增规则
+        rule_names = [r.name for r in v2.llm.routing.rules]
+        assert "prompt_gen_go_base" in rule_names
 
         # Wiki 配置
         assert len(v2.wiki.page_types) == 4
