@@ -1,4 +1,4 @@
-# Iris 3.6 — 项目执行说明
+# Iris 3.7 — 项目执行说明
 
 > 工作知识助手，从 Iris v2.7.1 重构升级而来。
 > 个人知识库（Obsidian Wiki）重新设计 + 新增飞书团队知识库操作能力。
@@ -19,9 +19,9 @@
 
 | 维度 | 数据 |
 |------|------|
-| 源代码 | 14,688 行，89 个文件，18 个模块 |
-| CLI 命令 | 43 个 |
-| 单元测试 | 138 个（10 个测试文件） |
+| 源代码 | 16,183 行，92 个文件，19 个模块 |
+| CLI 命令 | 44 个 |
+| 单元测试 | 161 个（13 个测试文件） |
 | 数据源 | 594 个文档，3,402 个 Chunk |
 | 向量索引 | 5,810 条，25 MB |
 | Wiki 页面 | 30 页（领域 6 / 概念 7 / 项目 8 / 人物 9） |
@@ -245,8 +245,8 @@ JSON 配置中使用 `${VAR_NAME}` 引用环境变量或 .env 中的值。
 
 | 层 | 位置 | 格式 | 含义 | 当前值 |
 |----|------|------|------|--------|
-| **产品版本** | `pyproject.toml` | SemVer X.Y.Z | 软件发布版本 | 3.6.0 |
-| **协议版本** | `src/iris/__init__.py` | MAJOR.MINOR | CLI 命令集 / agent-spec 格式 | 3.5 |
+| **产品版本** | `pyproject.toml` | SemVer X.Y.Z | 软件发布版本 | 3.7.0 |
+| **协议版本** | `src/iris/__init__.py` | MAJOR.MINOR | CLI 命令集 / agent-spec 格式 | 3.6 |
 | **数据版本** | `config/*.json` | 各自独立 | 配置文件 Schema | 3.3 |
 
 > 三层解耦：只有真正发生变化的层才递增版本号。
@@ -264,14 +264,14 @@ JSON 配置中使用 `${VAR_NAME}` 引用环境变量或 .env 中的值。
 
 ```
 iris3/
-├── pyproject.toml          # 3.6.0，依赖：PyMuPDF / python-docx / numpy
+├── pyproject.toml          # 3.7.0，依赖：PyMuPDF / python-docx / numpy / pydantic>=2.0
 ├── README.md
 ├── CLAUDE.md               # 本文件
 ├── .env.example            # 环境变量模板
 ├── config/                 # 配置（*.json gitignored, *.example 版本控制）
 ├── data/                   # 运行时数据（全 gitignore）
 ├── src/iris/
-│   ├── config/             # 步骤 1 — 配置加载
+│   ├── config/             # 步骤 1 — 配置加载（🆕 v3.7: models.py Pydantic v2 类型安全）
 │   ├── llm/                # 步骤 1 — LLM Provider + 路由
 │   ├── memory/             # 步骤 1 — 记忆系统
 │   ├── core/               # 步骤 1 — 核心抽象（Protocol、锁、写保护、存储）
@@ -285,6 +285,7 @@ iris3/
 │   ├── qa/                 # 步骤 2 — 问答
 │   ├── wiki/               # 步骤 2 — Wiki 体系（🆕 v3.6: asr_hotwords, asr_prompt_optimizer, asr_formatter, asr_version 拆分自 term_extractor）
 │   ├── analysis/           # 步骤 2 — 报告/思维导图/双周报
+│   ├── evaluation/         # 🆕 v3.7 — Wiki 深度评估（准确性 + 全面性，从 iris2 迁移）
 │   ├── output/             # 步骤 1 — 输出格式化
 │   └── feishu/             # 步骤 3 — 飞书文档/聊天提炼
 │       ├── client.py       #   lark-cli 封装（文档/IM/图片/通讯录）
@@ -293,7 +294,7 @@ iris3/
 │       └── chat_digest.py  #   聊天记录 AI 提炼 + 结构化输出
 ├── scripts/                # CLI 入口 + 委托脚本
 ├── templates/              # Prompt / Wiki 模板（🆕 v3.6: wiki/generate_*.txt Prompt 外部化）
-├── tests/                  # 单元测试（138 用例，10 个测试文件，含 41 个新增）
+├── tests/                  # 单元测试（161 用例，13 个测试文件）
 └── memory/                 # Claude 工作记忆
 ```
 
@@ -501,3 +502,63 @@ templates/wiki/generate_person.txt   ← 人物 Wiki Prompt 模板
 | API Key 暴露面 | 全模块 | 仅 provider 内部 |
 | BM25 统计基准 | ~180 字符 | 全文 |
 | Trello 线程安全 | ❌ | ✅ |
+
+
+## 🆕 v3.7.0 变更（2026-06-29）
+
+### iris2 → iris3 能力迁移
+
+基于 iris2 对比分析，将 iris2 的两项独有能力迁移到 iris3。
+
+### 1. Pydantic v2 配置校验（`config/models.py`, 270 行）
+
+| 特性 | 说明 |
+|------|------|
+| 模型类数 | 20+ 个 BaseModel |
+| 字段约束 | `gt`/`ge`/`le` 范围校验、`Literal` 类型限定 |
+| 自定义校验 | `api_base_url` 非空、`data_source` 至少一个启用 |
+| 渐进迁移 | `ConfigBundleV2.from_config_bundle()` 从现有 dict 无缝转换 |
+| 新增依赖 | `pydantic>=2.0` |
+
+**关键改进**：配置拼写错误/数值越界在启动时即可发现，IDE 自动补全配置字段。
+
+### 2. 深度评估模块（`evaluation/deep_eval.py`, 1,093 行）
+
+| 组件 | 功能 |
+|------|------|
+| `SourceLocator` | chunk JSONL 索引加载、按路径/行号定位、同目录发现 |
+| `AccuracyVerifier` | LLM 驱动逐条引用准确性校验（consistent/inconsistent/unverifiable/source_missing） |
+| `ComprehensivenessVerifier` | 路径相似度发现未引用但相关的源文件 |
+| `DeepEvaluator` | 主编排器：逐页评估 → 汇总 + 分级修复建议（P0/P1/P2） |
+| CLI 命令 | `deep-eval`（`--page-filter` / `--sample-rate` / `--pretty`） |
+
+**与 `wiki-lint` 互补**：`wiki-lint` 检查结构（断链/过期/draft），`deep-eval` 校验内容（引用准确性/知识覆盖）。
+
+### 3. 适配项
+
+| iris2 原始 | iris3 适配 |
+|------|------|
+| 3 种 Wiki 类型 | 4 种（+person） |
+| 2 个 chunk 源 | 1 个（work_docs_main） |
+| 无 index/changelog 配置 | 新增 `IndexConfig` / `ChangelogConfig` |
+| 无飞书配置 | 新增 `FeishuIngestConfig` |
+
+### 测试
+
+```
+138 → 161 测试 (+23)
+新增: test_pydantic_config.py (10), test_deep_eval.py (13)
+```
+
+### 关键指标
+
+| 维度 | 改进前 (v3.6.0) | 改进后 (v3.7.0) |
+|------|:---:|:---:|
+| 源代码行数 | 14,688 | **16,183** |
+| 源文件数 | 89 | **92** |
+| 模块数 | 18 | **19** |
+| CLI 命令 | 38 | **39** |
+| 单元测试 | 138 | **161** |
+| 配置类型安全 | ❌ 纯 dict | ✅ Pydantic v2 |
+| Wiki 内容校验 | ❌ 无 | ✅ 准确性 + 全面性 |
+| 依赖数 | 3 | **4**（+pydantic） |

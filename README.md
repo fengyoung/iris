@@ -1,10 +1,10 @@
-# Iris 3.6
+# Iris 3.7
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
 
-**v3.6.0** — 全面代码审查修复 + 5 项架构重构，138 测试。
+**v3.7.0** — iris2 能力迁移：Pydantic 配置校验 + Wiki 深度评估，161 测试。
 
 ## 开发路线
 
@@ -44,7 +44,7 @@ python scripts/run_cli.py daily-start
 | 数据管道 | `scan-source`, `build-chunks`, `build-vector-index` | 文档扫描 / 切块 / 向量索引 |
 | 检索问答 | `search`, `ask` | 混合检索（BM25 全文 + 向量）+ LLM 问答 |
 | Wiki | `discover-wiki`, `build-wiki`, `wiki-update` | 发现 / 生成 / 增量更新 |
-| 健康检查 | `wiki-lint`, `wiki-lint --fix` | 6 维质量检查 + 自动修复 |
+| 质量保障 | `wiki-lint`, `wiki-lint --fix`, `deep-eval` | 结构检查 + 内容准确性/全面性校验 |
 | 报告 | `build-report`, `build-mindmap`, `build-biweekly-report` | 专题报告 / 思维导图 / 双周报 |
 | 会议 | `transcribe-meeting`, `batch-transcribe`, `build-asr-prompt` | 转录纪要 / 批量处理 / ASR 三段校正 |
 | 飞书 | `feishu-doc-convert`, `chat-digest` | 文档转换 / 聊天记录提炼 |
@@ -79,14 +79,16 @@ SOURCE/                     LLM-WIKI/
 
 - Python 3.9+
 - OpenAI 兼容 LLM API（DeepSeek / 百炼 Qwen 3.5/3.6/3.7 Plus 多模态）
+- Pydantic v2（配置类型安全校验）
 - lark-cli（飞书接口，步骤 3）
 - macOS Keychain（可选密钥存储）
-- 138 个单元测试（10 个测试文件）
+- 161 个单元测试（13 个测试文件）
 
 ## 版本历史
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.7.0** | 2026-06-29 | iris2 迁移：Pydantic v2 配置校验 + Wiki 深度评估，161 测试 |
 | **v3.6.0** | 2026-06-29 | 全面审查：6 Critical + 14 High 修复，5 项架构重构，138 测试 |
 | v3.5.0 | 2026-06-29 | build-asr-prompt 三段 LLM Pipeline（热词 + 误识别 + Prompt） |
 | v3.4.0 | 2026-06-27 | 代码审查修复（6 Critical Bug）+ BM25 重写 + 性能优化 |
