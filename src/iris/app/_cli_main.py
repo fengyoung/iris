@@ -104,6 +104,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fix", action="store_true", help="wiki-lint 自动修复模式")
     parser.add_argument("--bump", default="auto", choices=["auto", "major", "minor", "patch"],
                         help="build-asr-prompt 版本号递增方式")
+    parser.add_argument("--asr-mode", default="all", choices=["all", "hotwords", "replace-dict", "prompt"],
+                        help="build-asr-prompt 输出模式")
+    parser.add_argument("--max-hotwords", type=int, default=490,
+                        help="build-asr-prompt 热词最大数量")
+    parser.add_argument("--max-mappings", type=int, default=990,
+                        help="build-asr-prompt 替换映射最大数量")
+    parser.add_argument("--max-chars", type=int, default=20,
+                        help="build-asr-prompt 热词/映射最大字符数")
     # 飞书文档转换
     parser.add_argument("--url", default="", help="feishu-doc-convert 飞书文档 URL（逗号分隔多文档）")
     parser.add_argument("--from-config", action="store_true", help="feishu-doc-convert / chat-digest 从配置文件读取目标列表")

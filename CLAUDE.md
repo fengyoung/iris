@@ -142,7 +142,7 @@ sources:
 | `wiki-lint` | 6 维健康检查（断链/孤立/草稿/过期/摘要/出链） |
 | `wiki-lint --fix` | 自动修复 frontmatter、噪音链接、draft 状态 |
 | `wiki-update` | 🆕 增量更新（daily-start 自动集成） |
-| `build-asr-prompt` | 🆕 LLM 驱动：术语提取 → 批量误识别生成 → ASR 校正提示词（支持 --bump / --output-format） |
+| `build-asr-prompt` | 🆕 v3.5 三段 LLM Pipeline：热词提取 → 误识别生成 → 策略 Prompt（支持 `--asr-mode` / `--bump`） |
 
 ### 人物提取（🆕 v3.1）
 
@@ -283,7 +283,7 @@ iris3/
 │   ├── ingest/             # 步骤 2 — 数据源扫描/切块
 │   ├── retrieval/          # 步骤 2 — 混合检索
 │   ├── qa/                 # 步骤 2 — 问答
-│   ├── wiki/               # 步骤 2 — Wiki 体系（🆕 v3.4: context_loader, _constants; 🆕 v3.4.1: term_extractor）
+│   ├── wiki/               # 步骤 2 — Wiki 体系（🆕 v3.4: context_loader, _constants; 🆕 v3.5: term_extractor 1,300 行三段 LLM Pipeline）
 │   ├── analysis/           # 步骤 2 — 报告/思维导图/双周报
 │   ├── output/             # 步骤 1 — 输出格式化
 │   └── feishu/             # 步骤 3 — 飞书文档/聊天提炼
@@ -351,26 +351,72 @@ iris3/
 
 ---
 
-## 🆕 v3.4.1 变更（2026-06-27 合并）
+## 🆕 v3.5.0 变更（2026-06-29）
 
-### build-asr-prompt 重写
-`build-asr-prompt` 从 **Wiki 页面拼贴**改造为 **LLM 驱动的术语提炼 + 误识别生成**引擎：
+### build-asr-prompt 三段 LLM Pipeline 重写
 
-| 维度 | 旧实现 | 新实现 |
-|------|--------|--------|
-| 核心逻辑 | 简单拼贴 Wiki 页面正文 | `wiki/term_extractor.py`（756 行）全流程 |
-| 术语来源 | 无结构提取 | person/concept/project/domain 4 类型结构化提取 |
-| 误识别生成 | 无 | base_model 一次批量调用生成常见误识别 |
-| 版本管理 | 无 | 三段式（MAJOR.MINOR.PATCH）+ 内容指纹自动检测 |
-| 输出格式 | 单一格式 | standard / compact 两种 render 格式 |
-| CLI 参数 | 无版本控制 | `--bump auto\|major\|minor\|patch`、`--output-format` |
+`build-asr-prompt` 从单阶段术语提取升级为**三段式 LLM Pipeline**，产出三种语音转写优化资源：
 
-### 新增文件
-| 文件 | 行数 | 说明 |
-|------|------|------|
-| `src/iris/wiki/term_extractor.py` | 756 | TermExtractor 术语提取器、LLM 批量误识别生成、prompt 渲染、版本管理 |
-| `tests/test_term_extractor.py` | 432 | 38 个单元测试覆盖术语提取、LLM prompt 构建、响应解析、版本管理、渲染输出 |
+| 阶段 | 功能 | LLM 调用 | 产出 |
+|:----:|------|:--------:|------|
+| Phase 1 | **LLM 热词提取**（深度理解 30 个 Wiki 页面） | 5 批 | `asr-hotwords-{date}-{time}.txt` |
+| Phase 2 | **LLM 误识别生成**（拼音混淆 + 中英混排模式） | 8 批 | `asr-replace-dict-{date}-{time}.json` |
+| Phase 3 | **LLM Prompt 优化**（策略指引，非术语列表） | 1 次 | `asr-prompt-v{ver}-{date}-{time}.md` |
 
-### handler 重构
-- `handle_build_asr_prompt` 从 80 行简化为 45 行：调用 TermExtractor 管线化流程
-- 新增 `--bump`、`--output-format` CLI 参数
+#### 产品定位
+
+| 产出 | 职责 | 限制 | 格式 |
+|------|------|:----:|------|
+| **热词表** | ASR boosting 热词增强 | ≤490 条，≤20 字符或 ≤10 中文字 | txt，每行一个 |
+| **替换词典** | 确定性词→词映射 | ≤990 条，两端均 ≤20 字符 | JSON `{"replace_map": {}}` |
+| **校正 Prompt** | LLM 语境消歧 + 流畅润色 + 输出规范 | ≤1200 汉字 | Markdown |
+
+> **设计原则**：替换词典负责确定性映射，Prompt 负责策略指引——**不互相重复**。
+
+#### CLI 参数
+
+```bash
+# 全流程（默认）
+iris build-asr-prompt --asr-mode all --bump minor
+
+# 单独生成
+iris build-asr-prompt --asr-mode hotwords   # 仅热词
+iris build-asr-prompt --asr-mode replace-dict  # 仅替换词典
+iris build-asr-prompt --asr-mode prompt     # 仅校正 Prompt
+
+# 控制参数
+iris build-asr-prompt --asr-mode all \
+  --max-hotwords 490 --max-mappings 990 --max-chars 20
+```
+
+#### Phase 1：LLM 热词提取
+
+- **领域上下文注入**：告诉 LLM 这是ExampleOrg技术研发部场景（二手商品质检 AI、搜索推荐、大模型）
+- **全量正文分析**：不再截断 600 字符，传完整章节/粗体/Wiki 链接结构
+- **强质量过滤**：自动过滤括号不完整、超长、句子片段等噪音
+- **LLMHotwordExtractor** 类负责分批次调用和去重合并
+
+#### Phase 2：LLM 误识别生成
+
+- **拼音混淆模式完整版**：zh↔z, ch↔c, sh↔s, n↔l, r↔l, h↔f, an↔ang, en↔eng, in↔ing, **ian↔ie**, eng↔ong
+- **中英混排专项指导**：数字读法混淆（3.0→三点零/三零/30）、字母音译、大小写变体
+- **Phase 1 热词反馈**：`hotwords_to_terms()` 将热词补充进术语列表，统一生成误识别
+
+#### Phase 3：LLM Prompt 优化
+
+- **策略型 Prompt**（非术语列表）：包含校正策略、润色规则、输出格式三个章节
+- **与替换词典互补**：不逐条复述术语映射，聚焦语境消歧和流畅度
+
+#### 改进统计
+
+| 维度 | 改进前 (v3.4.1) | 改进后 (v3.5.0) |
+|------|:---:|:---:|
+| term_extractor.py | 756 行 | **1,300 行** |
+| 热词提取 | ❌ 无（外挂脚本） | ✅ Phase 1 原生集成 |
+| 替换词典 | ❌ 无（外挂脚本） | ✅ Phase 2 原生集成 |
+| Prompt 风格 | 术语全量抄表 | ✅ 策略指引型 |
+| 领域上下文 | ❌ 无 | ✅ 转转/二手商品/质检 AI |
+| 拼音模式 | 4 种 | 12 种（含 ian→ie 等） |
+| Phase 1→2 数据融合 | ❌ 无 | ✅ hotwords_to_terms 桥接 |
+| 质量过滤 | ❌ 无 | ✅ 括号完整性 + 长度 + 中文字数 |
+| 单元测试 | 38 个 | 38 个（全部通过） |

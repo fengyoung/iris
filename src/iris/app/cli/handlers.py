@@ -323,23 +323,32 @@ def handle_wiki_update(args, bundle, logger) -> int:
 
 
 def handle_build_asr_prompt(args, bundle, logger) -> int:
-    """从 Wiki 知识库构建 ASR 校正系统提示词（供 vocotype 等工具的 LLM 校正环节使用）。
+    """从 Wiki 知识库构建语音转写优化资源。
 
-    流程：
-    1. 加载 Wiki 页面 → 规则提取术语（纯本地）
-    2. 调用 base_model 批量生成 ASR 误识别映射（一次 LLM 调用）
-    3. 渲染为紧凑的系统提示词
-    4. 版本管理（三段式版本号，基于内容指纹自动检测变化）
+    --mode 支持四种模式：
+      all          全流程（热词 + 替换词典 + 校正提示词）
+      hotwords     仅热词提取 → asr-hotwords-{date}-{time}.txt
+      replace-dict 仅替换词典 → asr-replace-dict-{date}-{time}.json
+      prompt       仅校正提示词 → asr-prompt-v{ver}-{date}-{time}.md
+
+    Phase 1: LLM 热词提取（分 5 批 LLM 调用）
+    Phase 2: LLM 误识别映射生成（分 8 批 LLM 调用）
+    Phase 3: LLM Prompt 优化压缩（1 次 LLM 调用）
     """
+    import sys
     from pathlib import Path as _Pt
+    from datetime import datetime, timezone
+    from typing import List
     from iris.wiki.context_loader import WikiContextLoader
     from iris.wiki.term_extractor import (
         TermExtractor, render_asr_prompt, determine_new_version,
-        load_version, save_version,
+        load_version, save_version, format_hotwords_file,
+        format_replace_dict, LLMHotwordExtractor, LLMPromptOptimizer,
+        hotwords_to_terms,
     )
     from iris.llm import EnvironmentConfiguredLLMProvider
 
-    # 1. 校验 Wiki 配置
+    # ── 0. 校验 Wiki ────────────────────────────────────
     if not bundle.wiki or not bundle.wiki.get("wiki_root"):
         _emit_output(args.command, {"error": "Wiki 配置缺失"}, pretty=args.pretty)
         return 1
@@ -348,7 +357,6 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
         _emit_output(args.command, {"error": "Wiki 根目录不存在"}, pretty=args.pretty)
         return 1
 
-    # 2. 加载所有 Wiki 页面（人名和术语优先，去重时保留）
     loader = WikiContextLoader(wiki_root)
     sort_order = ["person", "concept", "project", "domain"]
     pages = loader.load_pages(sort_order=sort_order)
@@ -357,95 +365,121 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
         _emit_output(args.command, {"error": "Wiki 目录为空，无页面可提取"}, pretty=args.pretty)
         return 1
 
-    # 3. 阶段 1：规则提取术语
-    extractor = TermExtractor(pages)
-    terms = extractor.extract_terms()
-
-    # 4. 版本判定
+    mode = getattr(args, "asr_mode", "all") or "all"
+    today = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     data_dir = bundle.root / "data"
-    bump = getattr(args, "bump", "auto") or "auto"
-    new_version = determine_new_version(pages, data_dir, bump=bump)
-
-    # auto 模式下指纹无变化则跳过 LLM 调用
-    if bump == "auto":
-        old = load_version(data_dir)
-        if old and old.fingerprint == new_version.fingerprint:
-            output_path = None
-            # 用户指定了 --output-file：从版本缓存写入文件
-            if args.output_file and old.prompt_text:
-                out = _Pt(args.output_file)
-                clean_stem = _strip_version_suffix(out.stem)
-                version_tag = f"v{old.version}"
-                out = out.with_name(f"{clean_stem}_{version_tag}{out.suffix}")
-                out.parent.mkdir(parents=True, exist_ok=True)
-                out.write_text(old.prompt_text, encoding="utf-8")
-                output_path = str(out)
-            payload = {
-                "version": old.version,
-                "message": "Wiki 内容无变化，prompt 无需更新",
-                "wiki_page_count": len(pages),
-                "term_count": len(terms),
-            }
-            if output_path:
-                payload["output_file"] = output_path
-            _emit_output(args.command, payload, pretty=args.pretty)
-            return 0
-
-    # 填充版本中的术语计数
-    new_version.term_count = len(terms)
-    new_version.wiki_page_count = len(pages)
-
-    # 5. 阶段 2：LLM 批量生成误识别映射
     provider = EnvironmentConfiguredLLMProvider(bundle)
-    terms = extractor.generate_misreadings(terms, provider)
 
-    # 6. 渲染 prompt
-    output_format = getattr(args, "output_format", "standard") or "standard"
-    # "md" / "docx" 是 --output-format 的默认值，对 asr-prompt 映射到 standard
-    if output_format in ("md", "docx"):
-        output_format = "standard"
-    prompt = render_asr_prompt(terms, new_version, output_format=output_format)
+    # ── Phase 1：LLM 热词提取 ────────────────────────────
+    hotwords: List[str] = []
+    if mode in ("all", "hotwords"):
+        print("[asr] Phase 1: LLM 热词提取...", file=sys.stderr)
+        hotword_extractor = LLMHotwordExtractor(pages)
+        max_hotwords = getattr(args, "max_hotwords", 490) or 490
+        hotwords = hotword_extractor.extract(provider, max_hotwords=max_hotwords)
 
-    # 7. 输出到文件（文件名自动嵌入版本号）
-    output_path = None
-    if args.output_file:
-        out = _Pt(args.output_file)
-        stem = out.stem
-        # 移除旧版本号后缀（如 _v1.2.3），避免叠加
-        clean_stem = _strip_version_suffix(stem)
-        version_tag = f"v{new_version.version}"
-        out = out.with_name(f"{clean_stem}_{version_tag}{out.suffix}")
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(prompt, encoding="utf-8")
-        output_path = str(out)
+        hotwords_path = f"asr-hotwords-{today}.txt"
+        if args.output_file and mode != "all":
+            hotwords_path = args.output_file
+        hotwords_file = format_hotwords_file(
+            hotwords, bundle.root / "output" / hotwords_path
+        )
     else:
-        # 无 --output-file 时，自动生成到 output/ 目录
-        from iris.app.cli.helpers import _resolve_output_path
-        auto_path = _resolve_output_path("", "asr_prompt", ".md")
-        version_tag = f"v{new_version.version}"
-        out = auto_path.with_name(f"{auto_path.stem}_{version_tag}{auto_path.suffix}")
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(prompt, encoding="utf-8")
-        output_path = str(out)
+        hotwords_file = ""
 
-    # 8. 持久化版本（含 prompt 文本，供 auto 缓存使用）
-    new_version.prompt_text = prompt
-    save_version(data_dir, new_version)
+    # ── Phase 2：术语提取 + 替换词典 ─────────────────────
+    terms: List = []
+    replace_dict_file = ""
+    if mode in ("all", "replace-dict", "prompt"):
+        # 规则提取术语
+        extractor = TermExtractor(pages)
+        terms = extractor.extract_terms()
 
-    _emit_output(args.command, {
-        "version": new_version.version,
-        "output_file": output_path,
-        "fingerprint": new_version.fingerprint[:8],
-        "wiki_page_count": new_version.wiki_page_count,
-        "term_count": new_version.term_count,
-        "prompt_chars": len(prompt),
-        "terms_by_category": {
-            cat: len([t for t in terms if t.category == cat])
-            for cat in ["person", "concept", "project", "domain_term"]
-        },
-    }, pretty=args.pretty)
-    if args.pretty:
-        print(f"\n{prompt[:2000]}")
+        # Phase 1 热词补充：将 LLM 提取的热词也纳入误识别生成
+        if hotwords and mode == "all":
+            terms = hotwords_to_terms(hotwords, terms)
+
+        # 版本判定
+        bump = getattr(args, "bump", "auto") or "auto"
+        new_version = determine_new_version(pages, data_dir, bump=bump)
+
+        if mode in ("all", "replace-dict"):
+            # LLM 生成误识别映射
+            print(f"[asr] Phase 2: 术语 {len(terms)} 个 → LLM 误识别生成...",
+                  file=sys.stderr)
+            terms = extractor.generate_misreadings(terms, provider)
+
+            max_mappings = getattr(args, "max_mappings", 990) or 990
+            max_chars = getattr(args, "max_chars", 20) or 20
+            replace_path = f"asr-replace-dict-{today}.json"
+            if args.output_file and mode == "replace-dict":
+                replace_path = args.output_file
+            replace_dict_file = format_replace_dict(
+                terms, bundle.root / "output" / replace_path,
+                max_mappings=max_mappings, max_chars=max_chars,
+            )
+
+    # ── Phase 3：LLM Prompt 优化 ────────────────────────
+    prompt = ""
+    output_path = ""
+    if mode in ("all", "prompt"):
+        if not terms:
+            # 需要 terms 数据，先提取
+            extractor = TermExtractor(pages)
+            terms = extractor.extract_terms()
+            bump = getattr(args, "bump", "auto") or "auto"
+            new_version = determine_new_version(pages, data_dir, bump=bump)
+            terms = extractor.generate_misreadings(terms, provider)
+
+        print("[asr] Phase 3: LLM Prompt 优化压缩...", file=sys.stderr)
+        new_version.term_count = len(terms)
+        new_version.wiki_page_count = len(pages)
+
+        # LLM 优化器生成紧凑 prompt
+        optimizer = LLMPromptOptimizer()
+        prompt = optimizer.optimize(hotwords, terms, provider)
+        if not prompt:
+            prompt = render_asr_prompt(
+                terms, new_version, output_format="standard"
+            )
+
+        # 写入文件
+        if args.output_file:
+            out = _Pt(args.output_file)
+            clean_stem = _strip_version_suffix(out.stem)
+            version_tag = f"v{new_version.version}"
+            out = out.with_name(f"{clean_stem}_{version_tag}{out.suffix}")
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(prompt, encoding="utf-8")
+            output_path = str(out)
+        else:
+            auto_path = bundle.root / "output" / f"asr-prompt-v{new_version.version}-{today}.md"
+            auto_path.parent.mkdir(parents=True, exist_ok=True)
+            auto_path.write_text(prompt, encoding="utf-8")
+            output_path = str(auto_path)
+
+        # 持久化版本
+        new_version.prompt_text = prompt
+        save_version(data_dir, new_version)
+
+    # ── 输出报告 ─────────────────────────────────────────
+    payload: Dict[str, Any] = {}
+    if hotwords_file:
+        payload["hotwords_file"] = hotwords_file
+        payload["hotword_count"] = len(hotwords)
+    if replace_dict_file:
+        payload["replace_dict_file"] = replace_dict_file
+        if terms:
+            payload["replace_mapping_count"] = sum(
+                len(t.mis_asr) for t in terms
+            )
+    if prompt:
+        payload["version"] = new_version.version
+        payload["output_file"] = output_path
+        payload["fingerprint"] = new_version.fingerprint[:8]
+        payload["prompt_chars"] = len(prompt)
+
+    _emit_output(args.command, payload, pretty=args.pretty)
     return 0
 
 
