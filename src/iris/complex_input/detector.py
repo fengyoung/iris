@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import base64
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List
 
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
-MIME_MAP = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-            ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp"}
+from iris.utils.constants import IMAGE_EXTENSIONS, IMAGE_MIME_MAP as MIME_MAP
+
+logger = logging.getLogger(__name__)
+
+# 单张图片最大大小（20 MB），超过则跳过并警告
+_MAX_IMAGE_BYTES = 20 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -38,6 +42,9 @@ class InputDetector:
         for raw in image_paths:
             p = Path(raw).expanduser().resolve()
             if not p.exists() or p.suffix.lower() not in IMAGE_EXTENSIONS:
+                continue
+            if p.stat().st_size > _MAX_IMAGE_BYTES:
+                logger.warning("跳过超大图片 %s (%.1f MB > %.0f MB)", p.name, p.stat().st_size / (1024*1024), _MAX_IMAGE_BYTES / (1024*1024))
                 continue
             resolved.append(str(p))
             mime = MIME_MAP[p.suffix.lower()]

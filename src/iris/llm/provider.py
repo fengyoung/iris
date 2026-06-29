@@ -43,14 +43,38 @@ class LLMResponse:
 
 
 class BaseLLMProvider:
-    """LLM provider 接口。"""
+    """LLM provider 抽象基类 — 所有 LLM 提供者必须实现此接口。
 
-    def generate(self, request: LLMRequest) -> LLMResponse:
+    与 core.protocols.LLMProvider Protocol 保持签名一致，
+    使用 NotImplementedError 而非 abc.ABC 以保持与 Protocol 的兼容性。
+    """
+
+    def generate(
+        self,
+        request: LLMRequest,
+        *,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        max_retries: Optional[int] = None,
+    ) -> LLMResponse:
         raise NotImplementedError
 
     def generate_multimodal(
-        self, content_parts: list[dict], route_context: dict
+        self,
+        content_parts: list[dict],
+        route_context: dict,
+        *,
+        temperature: Optional[float] = None,
+        max_retries: Optional[int] = None,
     ) -> str:
+        raise NotImplementedError
+
+    def has_credentials_for_role(self, role: str) -> bool:
+        """子类可覆盖。"""
+        return False
+
+    def resolve(self, route_context: Dict[str, Any]) -> Any:
+        """子类可覆盖。"""
         raise NotImplementedError
 
 
@@ -65,8 +89,12 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         self._model_manager = ModelManager(config.llm["models"], config.root / "data")
 
     def get_active_model_config(self, role: str) -> Dict[str, Any]:
-        """获取指定角色的当前活跃模型完整配置。"""
-        return self._model_manager.get_active_model_config(role)
+        """获取指定角色的当前活跃模型配置（不含 api_key）。"""
+        return self._model_manager.get_active_model_config(role, sensitive=False)
+
+    def _get_active_model_config_sensitive(self, role: str) -> Dict[str, Any]:
+        """[内部] 获取活跃模型完整配置（含 api_key），仅供 provider 内部 API 调用使用。"""
+        return self._model_manager.get_active_model_config(role, sensitive=True)
 
     def get_model_manager(self) -> ModelManager:
         """返回内部的 ModelManager 实例，供外部查询/切换模型。"""
@@ -78,70 +106,35 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         *,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        max_retries: Optional[int] = None,
     ) -> LLMResponse:
         decision = self._router.route(request_data.route_context)
 
-        # 构建降级链：同角色 priority 降序 → 跨角色 fallback
-        fallback_chain = self._build_fallback_chain(decision)
-        tried_models: List[str] = []
-        last_error: Optional[Exception] = None
-
-        for role, model_id, model_config in fallback_chain:
-            model_key = f"{role}/{model_id}"
-            if model_key in tried_models:
-                continue
-            tried_models.append(model_key)
-
-            provider_name = str(model_config["provider"]).lower()
-            api_key = model_config.get("api_key", "")
-            api_base_url = model_config["api_base_url"]
-
-            if not api_key:
-                last_error = LLMProviderError(
-                    f"llm.json 中 {role}.{model_id}.api_key 为空"
+        def _try_call(api_base: str, api_key: str, model_name: str, cfg: Dict[str, Any]) -> str:
+            """文本 API 调用闭包，捕获 prompt / temperature / max_tokens。"""
+            provider_name = str(cfg["provider"]).lower()
+            timeout = cfg.get("timeout_seconds", 60)
+            effective_retries = max_retries if max_retries is not None else cfg.get("max_retries", 0)
+            if provider_name in self.OPENAI_COMPATIBLE_PROVIDERS:
+                return self._call_openai_compatible(
+                    api_base, api_key, model_name, request_data.prompt,
+                    temperature=temperature, max_tokens=max_tokens,
+                    timeout=timeout, max_retries=effective_retries,
                 )
-                continue
-
-            try:
-                if provider_name in self.OPENAI_COMPATIBLE_PROVIDERS:
-                    timeout = model_config.get("timeout_seconds", 60)
-                    max_retries = model_config.get("max_retries", 0)
-                    text = self._call_openai_compatible(
-                        api_base_url, api_key, model_config["model"], request_data.prompt,
-                        temperature=temperature, max_tokens=max_tokens,
-                        timeout=timeout, max_retries=max_retries,
-                    )
-                elif provider_name == "anthropic":
-                    text = self._call_anthropic(
-                        api_base_url, api_key, model_config["model"],
-                        request_data.prompt, max_tokens=max_tokens,
-                    )
-                else:
-                    last_error = LLMProviderError(f"暂不支持的 provider: {provider_name}")
-                    continue
-
-                # 成功：如果是降级模型，记录日志
-                if role != decision.selected_role or model_id != self._model_manager.get_active_model_id(role):
-                    logger.warning("模型降级: %s/%s → %s/%s", decision.selected_role, self._model_manager.get_active_model_id(decision.selected_role), role, model_id)
-
-                return LLMResponse(
-                    text=text,
-                    selected_role=role,
-                    provider=provider_name,
-                    model=model_config["model"],
-                    api_base_url=api_base_url,
-                    matched_rule=decision.matched_rule,
+            elif provider_name == "anthropic":
+                return self._call_anthropic(
+                    api_base, api_key, model_name,
+                    request_data.prompt, max_tokens=max_tokens,
                 )
+            raise LLMProviderError(f"暂不支持的 provider: {provider_name}")
 
-            except LLMProviderError as exc:
-                last_error = exc
-                continue
-            except Exception as exc:
-                last_error = LLMProviderError(f"模型 {model_key} 调用异常: {exc}")
-                continue
-
-        raise LLMProviderError(
-            f"LLM 调用失败，已尝试全部降级链 ({', '.join(tried_models)}): {last_error}"
+        text, role, provider_name, model_name, api_base = self._fallback_loop(
+            decision, _try_call,
+        )
+        return LLMResponse(
+            text=text, selected_role=role, provider=provider_name,
+            model=model_name, api_base_url=api_base,
+            matched_rule=decision.matched_rule,
         )
 
     def _build_fallback_chain(
@@ -149,40 +142,58 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
     ) -> List[tuple]:
         """构建模型降级链：(role, model_id, model_config) 列表。
 
-        1. 同角色内按 priority 降序（活跃模型优先）
-        2. 跨角色 fallback 按 priority 降序
+        1. 同角色内按 priority 降序（allow_auto_upgrade=false 时仅活跃模型）
+        2. 跨角色 fallback 按 priority 降序（allow_auto_downgrade=false 时跳过）
         """
         chain: List[tuple] = []
         seen_roles: set = set()
         primary_role = decision.selected_role
         fallback_role = decision.fallback_role
 
-        for model_id, cfg in self._model_manager.get_models_by_priority(primary_role):
-            chain.append((primary_role, model_id, cfg))
+        if decision.allow_auto_upgrade:
+            for model_id, cfg in self._model_manager.get_models_by_priority(primary_role):
+                chain.append((primary_role, model_id, cfg))
+        else:
+            # 仅使用当前活跃模型，不尝试同角色其他模型
+            active_cfg = self._model_manager.get_active_model_config(primary_role, sensitive=True)
+            active_id = self._model_manager.get_active_model_id(primary_role)
+            chain.append((primary_role, active_id, active_cfg))
         seen_roles.add(primary_role)
 
-        if fallback_role and fallback_role not in seen_roles:
+        if fallback_role and fallback_role not in seen_roles and decision.allow_auto_downgrade:
             for model_id, cfg in self._model_manager.get_models_by_priority(fallback_role):
                 chain.append((fallback_role, model_id, cfg))
             seen_roles.add(fallback_role)
 
         return chain
 
-    def generate_multimodal(
+    def _fallback_loop(
         self,
-        content_parts: list[dict],
-        route_context: Dict[str, Any],
+        decision: RoutingDecision,
+        call_fn,
         *,
-        temperature: Optional[float] = None,
-    ) -> str:
-        decision = self._router.route(route_context)
+        model_filter=None,
+        error_label: str = "LLM",
+    ):
+        """共享降级循环：路由 → 遍历降级链 → 调用 call_fn → 成功返回。
 
+        被 generate() 和 generate_multimodal() 共享，消除 ~85% 重复代码。
+
+        Args:
+            decision: 路由决策（含 selected_role / fallback_role）
+            call_fn: (api_base, api_key, model_name, config) -> str
+            model_filter: 可选 (config) -> bool，多模态调用传入以跳过纯文本模型
+            error_label: 错误消息中的调用类型前缀
+
+        Returns:
+            (text, role, provider_name, model_name, api_base_url)
+        """
         fallback_chain = self._build_fallback_chain(decision)
         tried_models: List[str] = []
         last_error: Optional[Exception] = None
 
         for role, model_id, model_config in fallback_chain:
-            if not model_config.get("multimodal", False):
+            if model_filter and not model_filter(model_config):
                 continue
 
             model_key = f"{role}/{model_id}"
@@ -190,27 +201,24 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
                 continue
             tried_models.append(model_key)
 
-            provider_name = str(model_config["provider"]).lower()
             api_key = model_config.get("api_key", "")
-            api_base_url = model_config["api_base_url"]
-
             if not api_key:
-                last_error = LLMProviderError(f"llm.json 中 {role}.{model_id}.api_key 为空")
-                continue
-            if provider_name not in self.OPENAI_COMPATIBLE_PROVIDERS:
-                last_error = LLMProviderError(f"多模态暂不支持 provider: {provider_name}")
+                last_error = LLMProviderError(
+                    f"llm.json 中 {role}.{model_id}.api_key 为空"
+                )
                 continue
 
+            api_base_url = model_config["api_base_url"]
             try:
-                timeout = model_config.get("timeout_seconds", 60)
-                max_retries = model_config.get("max_retries", 0)
-                text = self._call_openai_compatible_multimodal(
-                    api_base_url, api_key, model_config["model"], content_parts,
-                    temperature=temperature, timeout=timeout, max_retries=max_retries,
-                )
+                text = call_fn(api_base_url, api_key, model_config["model"], model_config)
+
                 if role != decision.selected_role or model_id != self._model_manager.get_active_model_id(role):
-                    logger.warning("模型降级: %s/%s → %s/%s", decision.selected_role, self._model_manager.get_active_model_id(decision.selected_role), role, model_id)
-                return text
+                    logger.warning("模型降级: %s/%s → %s/%s",
+                                   decision.selected_role,
+                                   self._model_manager.get_active_model_id(decision.selected_role),
+                                   role, model_id)
+
+                return text, role, str(model_config["provider"]).lower(), model_config["model"], api_base_url
 
             except LLMProviderError as exc:
                 last_error = exc
@@ -220,16 +228,51 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
                 continue
 
         raise LLMProviderError(
-            f"多模态 LLM 调用失败，已尝试全部降级链 ({', '.join(tried_models)}): {last_error}"
+            f"{error_label} 调用失败，已尝试全部降级链 ({', '.join(tried_models)}): {last_error}"
         )
+
+    def generate_multimodal(
+        self,
+        content_parts: list[dict],
+        route_context: Dict[str, Any],
+        *,
+        temperature: Optional[float] = None,
+        max_retries: Optional[int] = None,
+    ) -> str:
+        decision = self._router.route(route_context)
+
+        def _try_multimodal(api_base: str, api_key: str, model_name: str, cfg: Dict[str, Any]) -> str:
+            """多模态 API 调用闭包，捕获 content_parts。"""
+            provider_name = str(cfg["provider"]).lower()
+            if provider_name not in self.OPENAI_COMPATIBLE_PROVIDERS:
+                raise LLMProviderError(f"多模态暂不支持 provider: {provider_name}")
+            timeout = cfg.get("timeout_seconds", 60)
+            effective_retries = max_retries if max_retries is not None else cfg.get("max_retries", 0)
+            return self._call_openai_compatible_multimodal(
+                api_base, api_key, model_name, content_parts,
+                temperature=temperature, timeout=timeout, max_retries=effective_retries,
+            )
+
+        text, _role, _provider, _model, _api_base = self._fallback_loop(
+            decision, _try_multimodal,
+            model_filter=lambda cfg: cfg.get("multimodal", False),
+            error_label="多模态 LLM",
+        )
+        return text
 
     def resolve(self, route_context: Dict[str, Any]) -> RoutingDecision:
         return self._router.route(route_context)
 
     def has_credentials_for_role(self, role: str) -> bool:
+        """检查指定角色下是否有任何模型配置了有效 api_key。
+
+        扫描全部模型而非仅活跃模型，避免误报角色不可用。
+        """
         try:
-            model_config = self.get_active_model_config(role)
-            return bool(model_config.get("api_key", ""))
+            for _model_id, cfg in self._model_manager.get_models_by_priority(role):
+                if cfg.get("api_key", "").strip():
+                    return True
+            return False
         except (KeyError, ModelManagerError):
             return False
 
@@ -359,13 +402,20 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
 class NullLLMProvider(BaseLLMProvider):
     """不调用真实 LLM 的空实现。"""
 
-    def generate(self, request: LLMRequest) -> LLMResponse:
+    def generate(self, request: LLMRequest, *, temperature=None, max_tokens=None,
+                 max_retries=None) -> LLMResponse:
         raise LLMProviderError("当前 provider 为 NullLLMProvider，未启用真实 LLM")
 
-    def generate_multimodal(
-        self, content_parts: list[dict], route_context: dict
-    ) -> str:
+    def generate_multimodal(self, content_parts: list[dict], route_context: dict,
+                            *, temperature=None, max_retries=None) -> str:
         raise LLMProviderError("当前 provider 为 NullLLMProvider，未启用真实 LLM")
+
+    def has_credentials_for_role(self, role: str) -> bool:
+        return False
+
+    def resolve(self, route_context):
+        from iris.llm.router import RoutingDecision
+        return RoutingDecision(selected_role="base_model", fallback_role=None, matched_rule="__null__")
 
 
 def _join_url(base_url: str, suffix: str) -> str:

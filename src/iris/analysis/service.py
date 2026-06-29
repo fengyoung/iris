@@ -204,7 +204,6 @@ class AnalysisReportService:
 
         关键词驱动近两周证据检索，OP 更新后自动适配。
         """
-        import re
         keywords = []
         # 提取 OP 各层级的核心词（适配多种格式）
         # 方向标题：## 1、视觉检测 或 ## 方向一：质量...
@@ -240,7 +239,6 @@ class AnalysisReportService:
     def _retrieve_recent_evidence(self, query: str, top_k: int) -> str:
         """检索近两周的工作证据——多关键词并发搜索、按相关度合并去重。"""
         from iris.retrieval.searcher import LocalRetriever
-        import re as _re
         retriever = LocalRetriever(self._config)
 
         # 从 OP 文档中动态提取搜索关键词（不硬编码）
@@ -268,7 +266,7 @@ class AnalysisReportService:
         for i, hit in enumerate(top_hits, 1):
             source_info = f"{hit.relative_path}:{hit.line_start}"
             date_hint = ""
-            m = _re.search(r"(\d{8})", hit.relative_path)
+            m = re.search(r"(\d{8})", hit.relative_path)
             if m:
                 date_hint = f" [{m.group(1)[:4]}.{m.group(1)[4:6]}.{m.group(1)[6:8]}]"
             lines.append(f"### 证据 {i}{date_hint}")

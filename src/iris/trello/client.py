@@ -1,11 +1,15 @@
-"""Trello REST API 客户端。"""
+"""Trello REST API 客户端。
+
+DNS 解析使用独立子进程 dig + 线程安全缓存，通过 URL 重写（IP 替换域名）
++ 自定义 Host 头实现，避免全局 socket.getaddrinfo monkey-patch。
+"""
 
 from __future__ import annotations
 
-import contextlib
 import json
-import subprocess
 import socket
+import ssl
+import subprocess
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -17,7 +21,7 @@ _TRELLO_DOMAIN = "api.trello.com"
 _CUSTOM_DNS = "8.8.8.8"
 _DNS_CACHE_TTL = 3600  # DNS 缓存有效期（秒）
 
-# DNS 缓存：{host: (ip, timestamp)}
+# DNS 缓存：{host: (ip, timestamp)}，由 _dns_lock 保护
 _dns_cache: Dict[str, Tuple[str, float]] = {}
 _dns_lock = threading.Lock()
 
@@ -31,7 +35,8 @@ def _is_ipv4(s: str) -> bool:
 
 
 def _resolve_via_dns(host: str, dns_server: str = _CUSTOM_DNS) -> str:
-    now = time.time()
+    """通过 dig 命令解析主机名（线程安全，带 TTL 缓存）。"""
+    now = time.monotonic()
     with _dns_lock:
         cached = _dns_cache.get(host)
         if cached and (now - cached[1]) < _DNS_CACHE_TTL:
@@ -49,27 +54,21 @@ def _resolve_via_dns(host: str, dns_server: str = _CUSTOM_DNS) -> str:
                 return line
     except (subprocess.SubprocessError, OSError, ValueError):
         pass
+    # 降级：返回原始主机名，依赖系统 DNS
     return host
 
 
-@contextlib.contextmanager
-def _patch_trello_dns():
-    """临时替换 socket.getaddrinfo 以使用自定义 DNS 解析 Trello 域名。
+def _make_trello_url(path: str) -> str:
+    """构建 Trello API URL，将域名替换为解析后的 IP。
 
-    注意：由于修改全局 socket 函数，此上下文管理器不是线程安全的。
-    仅在单线程场景下使用。多线程环境应使用 httpx 自定义 transport。
+    返回 (url, host_header)，其中 url 用 IP 地址，host_header 保留原始域名
+    以通过 TLS SNI 和 HTTP Host 头校验。
     """
-    original = socket.getaddrinfo
-
-    def _patched(host, port, family=0, type=0, proto=0, flags=0):
-        resolved = _resolve_via_dns(host) if host == _TRELLO_DOMAIN else host
-        return original(resolved, port, family, type, proto, flags)
-
-    socket.getaddrinfo = _patched
-    try:
-        yield
-    finally:
-        socket.getaddrinfo = original
+    ip = _resolve_via_dns(_TRELLO_DOMAIN)
+    if ip != _TRELLO_DOMAIN:
+        # 使用 https://IP/path 并添加 Host header
+        return f"https://{ip}{path}"
+    return f"{TRELLO_API_BASE}{path}"
 
 
 class TrelloClientError(RuntimeError):
@@ -77,7 +76,11 @@ class TrelloClientError(RuntimeError):
 
 
 class TrelloClient:
-    """封装 Trello REST API 认证与请求。"""
+    """封装 Trello REST API 认证与请求。
+
+    DNS 解析通过 URL 重写实现，无全局 socket monkey-patch，
+    线程安全且 KeyboardInterrupt 安全。
+    """
 
     def __init__(self, api_key: str, token: str):
         self._key = api_key
@@ -94,6 +97,8 @@ class TrelloClient:
 
     def delete(self, path: str, **params: Any) -> Dict[str, Any]:
         return self._request("DELETE", path, params=params)
+
+    # ── Trello API 封装 ──────────────────────────────────────
 
     def list_organizations(self) -> List[Dict[str, Any]]:
         return self.get("/members/me/organizations")
@@ -128,21 +133,8 @@ class TrelloClient:
                 return lst
         return None
 
-    def create_list(self, board_id: str, name: str) -> Dict[str, Any]:
-        return self.post(f"/boards/{board_id}/lists", name=name)
-
-    def list_labels(self, board_id: str) -> List[Dict[str, Any]]:
-        return self.get(f"/boards/{board_id}/labels")
-
-    def find_label_by_color(self, board_id: str, color: str) -> Optional[Dict[str, Any]]:
-        labels = self.list_labels(board_id)
-        for label in labels:
-            if label.get("color") == color:
-                return label
-        return None
-
-    def create_label(self, board_id: str, name: str, color: str) -> Dict[str, Any]:
-        return self.post(f"/boards/{board_id}/labels", name=name, color=color)
+    def create_list(self, name: str, board_id: str) -> Dict[str, Any]:
+        return self.post("/lists", name=name, idBoard=board_id)
 
     def list_cards(self, list_id: str) -> List[Dict[str, Any]]:
         return self.get(f"/lists/{list_id}/cards")
@@ -150,22 +142,27 @@ class TrelloClient:
     def get_card(self, card_id: str) -> Dict[str, Any]:
         return self.get(f"/cards/{card_id}")
 
-    def create_card(self, list_id: str, name: str, desc: str = "", due: Optional[str] = None,
-                    id_labels: Optional[List[str]] = None) -> Dict[str, Any]:
-        params: Dict[str, Any] = {"idList": list_id, "name": name}
-        if desc:
-            params["desc"] = desc
+    def create_card(self, list_id: str, name: str, desc: str = "",
+                    due: Optional[str] = None) -> Dict[str, Any]:
+        params: Dict[str, Any] = {"idList": list_id, "name": name, "desc": desc}
         if due:
             params["due"] = due
-        if id_labels:
-            params["idLabels"] = ",".join(id_labels)
         return self.post("/cards", **params)
 
     def update_card(self, card_id: str, **fields: Any) -> Dict[str, Any]:
         return self.put(f"/cards/{card_id}", **fields)
 
-    def move_card(self, card_id: str, to_list_id: str) -> Dict[str, Any]:
-        return self.put(f"/cards/{card_id}", idList=to_list_id)
+    def add_comment(self, card_id: str, text: str) -> Dict[str, Any]:
+        return self.post(f"/cards/{card_id}/actions/comments", text=text)
+
+    def list_labels(self, board_id: str) -> List[Dict[str, Any]]:
+        return self.get(f"/boards/{board_id}/labels")
+
+    def create_label(self, board_id: str, name: str, color: str) -> Dict[str, Any]:
+        return self.post("/labels", name=name, color=color, idBoard=board_id)
+
+    def add_label_to_card(self, card_id: str, label_id: str) -> Dict[str, Any]:
+        return self.post(f"/cards/{card_id}/idLabels", value=label_id)
 
     def set_due_complete(self, card_id: str) -> Dict[str, Any]:
         return self.put(f"/cards/{card_id}", dueComplete=True)
@@ -180,17 +177,27 @@ class TrelloClient:
         result = self.get("/search", **params)
         return result.get("cards", [])
 
+    # ── 内部实现 ────────────────────────────────────────────
+
     def _request(self, method: str, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
         params = dict(params or {})
         params["key"] = self._key
         params["token"] = self._token
-        qs = "&".join(f"{_quote(k)}={_quote(_serialize(v))}" for k, v in params.items() if v is not None)
-        url = f"{TRELLO_API_BASE}{path}?{qs}"
+        qs = "&".join(f"{quote(k)}={quote(_serialize(v))}" for k, v in params.items()
+                       if v is not None)
+        full_path = f"/1{path}?{qs}"
+        url = _make_trello_url(full_path)
+
+        # 自定义 SSL context（TLS 1.2+，验证证书）
+        ssl_context = ssl.create_default_context()
+
         req = request.Request(url=url, method=method)
+        # 如果使用了 IP 直连，设置正确的 Host 头
+        req.add_header("Host", _TRELLO_DOMAIN)
+
         try:
-            with _patch_trello_dns():
-                with request.urlopen(req, timeout=30) as resp:
-                    raw = resp.read().decode("utf-8", errors="replace")
+            with request.urlopen(req, timeout=30, context=ssl_context) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
         except error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             raise TrelloClientError(f"Trello HTTP {exc.code}: {detail}") from exc
@@ -208,7 +215,3 @@ def _serialize(v: Any) -> str:
     if isinstance(v, bool):
         return "true" if v else "false"
     return str(v)
-
-
-def _quote(s: str) -> str:
-    return quote(s, safe="")

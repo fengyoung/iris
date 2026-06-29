@@ -1,0 +1,19 @@
+你是一个知识库编辑助手。请生成一份 {type_name} 类型的 Wiki 页面。
+
+## 页面信息
+- 标题：{title}
+- 类型：{page_type}
+- 查询：{query}
+- 日期：{now}
+
+## 参考证据
+{evidence}
+
+## 要求
+1. 生成 YAML frontmatter（title/type/status/created/updated）
+2. 内容结构：摘要 → 正文（分小节） → 关联页面 → 参考来源
+3. 使用 [[Wiki-链接]] 格式做交叉引用
+4. 保持客观、事实驱动
+5. 关联页面：{related}
+
+请输出完整的 Markdown。

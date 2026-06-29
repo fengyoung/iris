@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any, Dict
 
@@ -606,7 +607,7 @@ def handle_batch_transcribe(args, bundle, logger) -> int:
         raise ValueError("batch-transcribe 需要 --files 或 --dir")
     file_paths = _expand_file_list(args.files)
     if not file_paths:
-        print("未匹配到任何文件", file=__import__('sys').stderr)
+        print("未匹配到任何文件", file=sys.stderr)
         return 1
     pipeline = TranscribeMeetingPipeline(bundle)
     result = pipeline.run_batch(file_paths, output_dir=args.output_dir or None, whisper_model=args.whisper_model, force_retranscribe=args.force)
@@ -630,7 +631,7 @@ def handle_feishu_doc_convert(args, bundle, logger) -> int:
         urls = [u.strip() for u in urls_str.split(",") if u.strip()]
         results = converter.convert_batch(urls, force=force, dry_run=dry_run)
     else:
-        print("需要 --url <文档URL> 或 --from-config", file=__import__('sys').stderr)
+        print("需要 --url <文档URL> 或 --from-config", file=sys.stderr)
         return 1
 
     _emit_output(args.command, results, pretty=args.pretty)
@@ -639,7 +640,7 @@ def handle_feishu_doc_convert(args, bundle, logger) -> int:
     skipped = sum(1 for r in results if r.get("status") == "skipped")
     errors = sum(1 for r in results if r.get("status") == "error")
     if success:
-        print(f"✅ {success} 成功, {skipped} 跳过, {errors} 失败", file=__import__('sys').stderr)
+        print(f"✅ {success} 成功, {skipped} 跳过, {errors} 失败", file=sys.stderr)
     return 0 if errors == 0 else 1
 
 
@@ -659,12 +660,12 @@ def handle_chat_digest(args, bundle, logger) -> int:
     if interactive:
         groups = digester.list_available_groups()
         if not groups:
-            print("未找到可用的群聊", file=__import__('sys').stderr)
+            print("未找到可用的群聊", file=sys.stderr)
             return 1
-        print("📋 可提取的聊天目标：", file=__import__('sys').stderr)
+        print("📋 可提取的聊天目标：", file=sys.stderr)
         for i, g in enumerate(groups, 1):
-            print(f"  {i}. {g['name']}（{g.get('member_count', 0)} 人）", file=__import__('sys').stderr)
-        print("请输入序号（逗号分隔多选，留空全部）：", end=" ", file=__import__('sys').stderr)
+            print(f"  {i}. {g['name']}（{g.get('member_count', 0)} 人）", file=sys.stderr)
+        print("请输入序号（逗号分隔多选，留空全部）：", end=" ", file=sys.stderr)
         try:
             choice = input().strip()
         except (EOFError, KeyboardInterrupt):
@@ -680,7 +681,7 @@ def handle_chat_digest(args, bundle, logger) -> int:
             results.append(r)
         _emit_output(args.command, results, pretty=args.pretty)
         success = sum(1 for r in results if r.get("status") == "success")
-        print(f"✅ {success}/{len(results)} 成功", file=__import__('sys').stderr)
+        print(f"✅ {success}/{len(results)} 成功", file=sys.stderr)
         return 0
 
     if from_config:
@@ -690,7 +691,7 @@ def handle_chat_digest(args, bundle, logger) -> int:
 
     if not group and not user:
         print("需要 --group <群聊名> 或 --user <用户名> 或 --interactive 或 --from-config",
-              file=__import__('sys').stderr)
+              file=sys.stderr)
         return 1
 
     result = digester.digest(group=group or None, user=user or None,
@@ -698,13 +699,13 @@ def handle_chat_digest(args, bundle, logger) -> int:
     _emit_output(args.command, [result], pretty=args.pretty)
     if result.get("status") == "success":
         print(f"✅ {result.get('message_count', 0)} 条消息 → {result.get('route', '')}",
-              file=__import__('sys').stderr)
+              file=sys.stderr)
         return 0
     elif result.get("status") == "skipped":
-        print(f"⏭️ {result.get('reason', '')}", file=__import__('sys').stderr)
+        print(f"⏭️ {result.get('reason', '')}", file=sys.stderr)
         return 0
     else:
-        print(f"❌ {result.get('error', '')}", file=__import__('sys').stderr)
+        print(f"❌ {result.get('error', '')}", file=sys.stderr)
         return 1
 
 

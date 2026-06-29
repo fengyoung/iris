@@ -1,5 +1,5 @@
 {
-  "version": "3.2",
+  "version": "3.3",
   "default_strategy": {
     "default_model_role": "base_model",
     "fallback_model_role": "adv_model",
@@ -30,13 +30,7 @@
           "notes": "默认纯文本主力模型",
           "api_base_url": "https://api.deepseek.com/v1",
           "api_key": "${DEEPSEEK_API_KEY}"
-        }
-      }
-    },
-    "adv_model": {
-      "enabled": true,
-      "default_model_id": "deepseek-v4-pro",
-      "models": {
+        },
         "deepseek-v4-pro": {
           "provider": "Deepseek",
           "model": "deepseek-v4-pro",
@@ -47,14 +41,96 @@
           "top_p": 1.0,
           "timeout_seconds": 120,
           "max_retries": 2,
-          "priority": 10,
-          "cost_level": "medium",
+          "priority": 5,
+          "cost_level": "low",
           "reasoning_level": "advanced",
           "supported_inputs": ["text"],
-          "use_cases": ["qa", "analysis", "image_understanding"],
-          "notes": "增强推理模型",
+          "use_cases": ["qa", "summary", "analysis_complex", "wiki_generate", "conflict_resolution"],
+          "notes": "增强推理，用于复杂文本任务，base_model 降级链 fallback",
           "api_base_url": "https://api.deepseek.com/v1",
           "api_key": "${DEEPSEEK_API_KEY}"
+        }
+      }
+    },
+    "adv_model": {
+      "enabled": true,
+      "default_model_id": "qwen3.6-plus",
+      "models": {
+        "qwen3.7-plus": {
+          "provider": "Bailian",
+          "model": "qwen3.7-plus",
+          "display_name": "Qwen 3.7 Plus",
+          "multimodal": true,
+          "max_context_tokens": 200000,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 300,
+          "max_retries": 3,
+          "priority": 40,
+          "cost_level": "high",
+          "reasoning_level": "advanced",
+          "supported_inputs": ["text", "image"],
+          "use_cases": ["qa", "wiki_extract_multimodal", "wiki_rebuild", "analysis_complex", "image_understanding", "conflict_resolution"],
+          "notes": "多模态增强模型，最新版本。需要 BAILIAN_API_KEY",
+          "api_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "api_key": "${BAILIAN_API_KEY}"
+        },
+        "qwen3.7-plus-2026-05-26": {
+          "provider": "Bailian",
+          "model": "qwen3.7-plus-2026-05-26",
+          "display_name": "Qwen 3.7 Plus (2026-05-26 快照)",
+          "multimodal": true,
+          "max_context_tokens": 200000,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 300,
+          "max_retries": 3,
+          "priority": 35,
+          "cost_level": "high",
+          "reasoning_level": "advanced",
+          "supported_inputs": ["text", "image"],
+          "use_cases": ["qa", "wiki_extract_multimodal", "wiki_rebuild", "analysis_complex", "image_understanding", "conflict_resolution"],
+          "notes": "Qwen 3.7 Plus 2026-05-26 快照版，用于版本回退。需要 BAILIAN_API_KEY",
+          "api_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "api_key": "${BAILIAN_API_KEY}"
+        },
+        "qwen3.6-plus": {
+          "provider": "Bailian",
+          "model": "qwen3.6-plus",
+          "display_name": "Qwen 3.6 Plus",
+          "multimodal": true,
+          "max_context_tokens": 200000,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 300,
+          "max_retries": 3,
+          "priority": 25,
+          "cost_level": "high",
+          "reasoning_level": "advanced",
+          "supported_inputs": ["text", "image"],
+          "use_cases": ["qa", "wiki_extract_multimodal", "wiki_rebuild", "analysis_complex", "image_understanding", "conflict_resolution"],
+          "notes": "默认增强模型，文本+多模态混合。需要 BAILIAN_API_KEY",
+          "api_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "api_key": "${BAILIAN_API_KEY}"
+        },
+        "qwen3.5-plus": {
+          "provider": "Bailian",
+          "model": "qwen3.5-plus",
+          "display_name": "Qwen 3.5 Plus",
+          "multimodal": true,
+          "max_context_tokens": 200000,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 300,
+          "max_retries": 3,
+          "priority": 20,
+          "cost_level": "high",
+          "reasoning_level": "advanced",
+          "supported_inputs": ["text", "image"],
+          "use_cases": ["qa", "wiki_extract_multimodal", "wiki_rebuild", "analysis_complex", "image_understanding", "conflict_resolution"],
+          "notes": "多模态和复杂分析任务，adv_model 降级链 fallback。需要 BAILIAN_API_KEY",
+          "api_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "api_key": "${BAILIAN_API_KEY}"
         }
       }
     }
@@ -62,21 +138,67 @@
   "routing": {
     "rules": [
       {
-        "name": "default-qa",
+        "name": "user_force_adv_model",
         "enabled": true,
         "priority": 1,
+        "match": {"user_selected_role": "adv_model"},
+        "route_to": "adv_model",
+        "fallback_to": "base_model",
+        "description": "用户显式指定增强模型"
+      },
+      {
+        "name": "user_force_base_model",
+        "enabled": true,
+        "priority": 2,
+        "match": {"user_selected_role": "base_model"},
+        "route_to": "base_model",
+        "fallback_to": "adv_model",
+        "description": "用户显式指定基础模型"
+      },
+      {
+        "name": "multimodal_input_go_adv",
+        "enabled": true,
+        "priority": 5,
+        "match": {"input_type": "multimodal"},
+        "route_to": "adv_model",
+        "fallback_to": "base_model",
+        "description": "图文混合输入走增强模型"
+      },
+      {
+        "name": "complex_analysis_go_adv",
+        "enabled": true,
+        "priority": 8,
+        "match": {"task_type": "analysis", "complexity": "complex"},
+        "route_to": "adv_model",
+        "fallback_to": "base_model",
+        "description": "复杂分析走增强模型"
+      },
+      {
+        "name": "wiki_rebuild_go_adv",
+        "enabled": true,
+        "priority": 9,
+        "match": {"task_type": "wiki_rebuild"},
+        "route_to": "adv_model",
+        "fallback_to": "base_model",
+        "description": "Wiki 重建走增强模型"
+      },
+      {
+        "name": "default-qa",
+        "enabled": true,
+        "priority": 10,
         "match": {"task_type": "qa"},
         "route_to": "base_model",
         "fallback_to": "adv_model",
         "description": "默认问答路由到 base_model"
       },
       {
-        "name": "complex-analysis",
+        "name": "default_text_tasks_go_base",
         "enabled": true,
-        "priority": 10,
-        "match": {"complexity": "complex"},
-        "route_to": "adv_model",
-        "description": "复杂分析路由到 adv_model"
+        "priority": 100,
+        "match": {"input_type": "text"},
+        "route_to": "base_model",
+        "fallback_to": "adv_model",
+        "description": "常规纯文本任务走基础模型（兜底）"
       }
     ]
   },

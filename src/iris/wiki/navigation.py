@@ -36,30 +36,22 @@ class WikiNavigationBuilder:
         if not self._wiki_root.exists():
             return NavBuildResult(nav_path="", pages_written=0, errors=["Wiki 根目录不存在"])
 
+        from .context_loader import WikiContextLoader
+        loader = WikiContextLoader(self._wiki_root)
+
         pages: Dict[str, List[Dict[str, str]]] = {
             "领域": [], "概念": [], "项目": [], "人物": [],
         }
         errors: List[str] = []
 
-        for ptype, cfg in PAGE_TYPE_CONFIG.items():
-            dir_path = self._wiki_root / cfg["dir"]
-            if not dir_path.exists():
-                continue
-            for md_file in sorted(dir_path.glob("*.md")):
-                try:
-                    title, page_type, status, summary, body = _read_wiki_page(md_file)
-                    # 从文件名推断标题（若 frontmatter 未提供）
-                    if not title:
-                        title = _infer_title_from_filename(md_file)
-                    relative = str(md_file.relative_to(self._wiki_root))
-                    pages[cfg["name"]].append({
-                        "title": title,
-                        "path": relative,
-                        "summary": summary[:120] if summary else "",
-                        "status": status,
-                    })
-                except Exception as e:
-                    errors.append(f"读取失败: {md_file.name} - {e}")
+        for page_info in loader.load_pages():
+            type_name = get_display_name(page_info.page_type)
+            pages.setdefault(type_name, []).append({
+                "title": page_info.title,
+                "path": page_info.relative_path,
+                "summary": page_info.summary[:120] if page_info.summary else "",
+                "status": page_info.status,
+            })
 
         # 生成 index.md 内容
         lines = ["# LLM-WIKI 索引", f"> 自动维护 | 最后更新：{datetime.now().strftime('%Y-%m-%d %H:%M')}", ""]
@@ -158,6 +150,14 @@ EXTERNAL_CONCEPT_PATTERNS = [
 ]
 
 
+def _atomic_write(path: Path, text: str) -> None:
+    """原子写入：先写临时文件，再 os.rename（Unix 原子操作），避免崩溃损坏原文件。"""
+    import os
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(str(tmp), str(path))  # atomic on Unix
+
+
 def _is_wiki_broken_link(target: str, page_titles: dict) -> str | None:
     """判断一个 [[link]] 是否为真正的断裂 Wiki 链接。
 
@@ -247,7 +247,7 @@ def lint_wiki(wiki_root: Path, data_root: Optional[Path] = None) -> Dict[str, An
     # ── 扫描所有页面 ────────────────────────────────────
     all_links: Dict[str, List[str]] = {}
     page_titles: Dict[str, Path] = {}
-    page_info: Dict[str, dict] = {}
+    page_info_dict: Dict[str, dict] = {}
     page_count = 0
     no_frontmatter: List[str] = []
     no_summary: List[str] = []
@@ -256,62 +256,61 @@ def lint_wiki(wiki_root: Path, data_root: Optional[Path] = None) -> Dict[str, An
     old_pages: List[str] = []
     broken_links: List[str] = []
 
-    for ptype, cfg in PAGE_TYPE_CONFIG.items():
-        dir_path = wiki_root / cfg["dir"]
-        if not dir_path.exists():
+    from .context_loader import WikiContextLoader
+    loader = WikiContextLoader(wiki_root)
+    for page_info in loader.load_pages():
+        title = page_info.title
+        status = page_info.status
+        summary = page_info.summary
+        md_file = page_info.path
+
+        if not title:
+            no_frontmatter.append(str(md_file.relative_to(wiki_root)))
+
+        page_titles[title] = md_file
+        page_count += 1
+
+        try:
+            content = md_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
             continue
-        for md_file in sorted(dir_path.glob("*.md")):
-            if ".bak." in md_file.name:
-                continue
-            title, _, status, summary, _ = _read_wiki_page(md_file)
-            if not title:
-                title = _infer_title_from_filename(md_file)
-                no_frontmatter.append(str(md_file.relative_to(wiki_root)))
 
-            page_titles[title] = md_file
-            page_count += 1
+        # 提取链接
+        links = LINK_RE.findall(content)
+        actual_links = []
+        for link in links:
+            actual = link.split("|")[0].strip() if "|" in link else link.strip()
+            actual_links.append(actual)
+        all_links[title] = actual_links
 
+        if not actual_links:
+            zero_outbound.append(title)
+
+        # 摘要检查
+        if not summary:
+            no_summary.append(str(md_file.relative_to(wiki_root)))
+
+        # 过时检查（90天未更新）
+        updated_str = _parse_updated_from_content(content)
+        if updated_str:
             try:
-                content = md_file.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                continue
+                updated = datetime.fromisoformat(updated_str)
+                if updated.tzinfo is None:
+                    updated = updated.replace(tzinfo=timezone.utc)
+                days = (datetime.now(timezone.utc) - updated).days
+                if days > 90:
+                    old_pages.append(f"{title} ({days}天)")
+            except (ValueError, TypeError):
+                pass
 
-            # 提取链接
-            links = LINK_RE.findall(content)
-            actual_links = []
-            for link in links:
-                actual = link.split("|")[0].strip() if "|" in link else link.strip()
-                actual_links.append(actual)
-            all_links[title] = actual_links
+        # Draft 状态
+        if status == "draft":
+            rel = str(md_file.relative_to(wiki_root))
+            if rel not in stale_pages:
+                stale_pages.append(rel)
 
-            if not actual_links:
-                zero_outbound.append(title)
-
-            # 摘要检查
-            if not summary:
-                no_summary.append(str(md_file.relative_to(wiki_root)))
-
-            # 过时检查（90天未更新）
-            updated_str = _parse_updated_from_content(content)
-            if updated_str:
-                try:
-                    updated = datetime.fromisoformat(updated_str)
-                    if updated.tzinfo is None:
-                        updated = updated.replace(tzinfo=timezone.utc)
-                    days = (datetime.now(timezone.utc) - updated).days
-                    if days > 90:
-                        old_pages.append(f"{title} ({days}天)")
-                except (ValueError, TypeError):
-                    pass
-
-            # Draft 状态
-            if status == "draft":
-                rel = str(md_file.relative_to(wiki_root))
-                if rel not in stale_pages:
-                    stale_pages.append(rel)
-
-            page_info[title] = {
-                "path": str(md_file.relative_to(wiki_root)),
+        page_info_dict[title] = {
+            "path": str(md_file.relative_to(wiki_root)),
                 "type": ptype,
                 "status": status,
                 "outbound_count": len(actual_links),
@@ -483,7 +482,7 @@ def fix_wiki(wiki_root: Path) -> Dict[str, Any]:
             text = cleaned
             actions["noise_links_cleaned"].append(md_file.name)
 
-        md_file.write_text(text, encoding="utf-8")
+        _atomic_write(md_file, text)
 
     # 检查 status 是否被修复
     for md_file in sorted(wiki_root.rglob("*.md")):
@@ -493,7 +492,7 @@ def fix_wiki(wiki_root: Path) -> Dict[str, Any]:
         if "\nstatus: draft\n" in text or "\nstatus: 'draft'\n" in text:
             text = text.replace("\nstatus: draft\n", "\nstatus: review\n")
             text = text.replace("\nstatus: 'draft'\n", "\nstatus: review\n")
-            md_file.write_text(text, encoding="utf-8")
+            _atomic_write(md_file, text)
             if md_file.name not in actions["status_updated"]:
                 actions["status_updated"].append(md_file.name)
 

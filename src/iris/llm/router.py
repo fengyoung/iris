@@ -15,6 +15,8 @@ class RoutingDecision:
     selected_role: str
     fallback_role: Optional[str]
     matched_rule: str
+    allow_auto_upgrade: bool = True
+    allow_auto_downgrade: bool = True
 
 
 class ModelRouter:
@@ -24,8 +26,13 @@ class ModelRouter:
         self._llm = config.llm
         self._models = self._llm["models"]
         self._rules = sorted(self._llm["routing"]["rules"], key=lambda item: item["priority"])
-        self._default_role = self._llm["default_strategy"]["default_model_role"]
-        self._fallback_role = self._llm["default_strategy"]["fallback_model_role"]
+        strategy = self._llm["default_strategy"]
+        self._default_role = strategy["default_model_role"]
+        self._fallback_role = strategy["fallback_model_role"]
+        # 策略开关（v3.3 正式启用，之前只定义未使用）
+        self._allow_auto_upgrade = strategy.get("allow_auto_upgrade", True)
+        self._allow_auto_downgrade = strategy.get("allow_auto_downgrade", True)
+        self._prefer_lower_cost = strategy.get("prefer_lower_cost", True)
 
     def route(self, context: Dict[str, Any]) -> RoutingDecision:
         for rule in self._rules:
@@ -39,6 +46,8 @@ class ModelRouter:
                     selected_role=selected_role,
                     fallback_role=fallback_role,
                     matched_rule=rule["name"],
+                    allow_auto_upgrade=self._allow_auto_upgrade,
+                    allow_auto_downgrade=self._allow_auto_downgrade,
                 )
 
         self._ensure_role_enabled(self._default_role, self._fallback_role)
@@ -46,6 +55,8 @@ class ModelRouter:
             selected_role=self._default_role,
             fallback_role=self._fallback_role,
             matched_rule="__default__",
+            allow_auto_upgrade=self._allow_auto_upgrade,
+            allow_auto_downgrade=self._allow_auto_downgrade,
         )
 
     def _ensure_role_enabled(self, role: str, fallback_role: Optional[str]) -> None:

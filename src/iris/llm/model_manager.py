@@ -73,12 +73,19 @@ class ModelManager:
 
         return model_id
 
-    def get_active_model_config(self, role: str) -> Dict[str, Any]:
-        """获取指定角色的当前活跃模型完整配置。"""
+    def get_active_model_config(self, role: str, *, sensitive: bool = False) -> Dict[str, Any]:
+        """获取指定角色的当前活跃模型完整配置。
+
+        Args:
+            role: 模型角色名
+            sensitive: 若为 True，返回包含 api_key 的完整配置（仅供 provider 内部使用）
+        """
         model_id = self.get_active_model_id(role)
         original = self._models[role]["models"][model_id]
         # 返回浅拷贝并注入 _model_id，避免修改内部状态
         config = dict(original, _model_id=model_id)
+        if not sensitive:
+            config.pop("api_key", None)
         return config
 
     def switch_model(self, role: str, model_id: str) -> bool:

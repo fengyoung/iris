@@ -20,7 +20,7 @@ from iris.core.write_guard import safe_write_text
 # ── 常量 ────────────────────────────────────────────────────
 
 _IMAGE_PATTERN = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
-_PIC_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"}
+from iris.utils.constants import IMAGE_EXTENSIONS_WITH_SVG as _PIC_EXTENSIONS
 
 
 class FeishuDocConvertError(RuntimeError):

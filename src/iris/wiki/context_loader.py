@@ -10,12 +10,15 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from ._constants import get_wiki_dir, get_display_name, get_all_types
 from .searcher import _read_wiki_page, _infer_title_from_filename
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -88,7 +91,8 @@ class WikiContextLoader:
                         body=body,
                         relative_path=str(md_file.relative_to(self._root)),
                     ))
-                except Exception:
+                except Exception as exc:
+                    logger.warning("无法加载 Wiki 页面 %s: %s", md_file, exc)
                     continue
         return pages
 

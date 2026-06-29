@@ -102,14 +102,19 @@ def _extract_entities(query: str) -> List[str]:
 
 
 class LLMQueryPlanner:
-    """低置信度时调用 LLM 增强查询规划。"""
+    """低置信度时调用 LLM 增强查询规划。
+
+    当前为占位实现（步骤 2.3 简化阶段）：直接返回规则规划结果。
+    未来将在此处接入 LLM 对低置信度查询的语义增强和实体识别。
+    """
 
     def __init__(self, llm_provider, prompt_loader):
         self._llm_provider = llm_provider
         self._prompt_loader = prompt_loader
 
     def enhance(self, rule_plan: QueryPlan) -> QueryPlan:
-        return rule_plan  # 步骤 2.3 简化实现，总是回退到规则规划
+        """[占位] 返回规则规划结果，LLM 增强尚未启用。"""
+        return rule_plan
 
 
 def _extract_keywords(query: str) -> List[str]:

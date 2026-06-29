@@ -172,6 +172,11 @@ class WikiGenerator:
                                            evidence=evidence, related=related)
 
     def _build_generic_prompt(self, type_name, page_type, title, query, evidence, related, now):
+        template = self._load_template("wiki/generate_generic.txt")
+        if template:
+            return template.format(type_name=type_name, page_type=page_type, title=title,
+                                   query=query, evidence=evidence, related=related, now=now)
+        # 降级：内联 prompt
         return f"""你是一个知识库编辑助手。请生成一份 {type_name} 类型的 Wiki 页面。
 
 ## 页面信息
@@ -193,6 +198,11 @@ class WikiGenerator:
 请输出完整的 Markdown。"""
 
     def _build_person_prompt(self, title, query, evidence, related, now):
+        template = self._load_template("wiki/generate_person.txt")
+        if template:
+            return template.format(title=title, query=query, evidence=evidence,
+                                   related=related, now=now)
+        # 降级：内联 prompt
         return f"""你是一个知识库编辑助手。请为团队成员 **{title}** 生成一份人物 Wiki 页面。
 
 ## 参考证据（来自周报、会议纪要、项目文档）
@@ -214,6 +224,15 @@ class WikiGenerator:
 5. email 字段提取证据中的邮箱信息
 
 请输出完整的 Markdown。"""
+
+    @staticmethod
+    def _load_template(name: str) -> Optional[str]:
+        """从项目根目录的 templates/ 加载 Prompt 模板，不存在返回 None。"""
+        templates_dir = Path(__file__).resolve().parent.parent.parent.parent / "templates"
+        tmpl_path = templates_dir / name
+        if tmpl_path.exists():
+            return tmpl_path.read_text(encoding="utf-8")
+        return None
 
     @staticmethod
     def _strip_code_fence(text: str) -> str:
@@ -297,16 +316,17 @@ sources:
         """按标题查找已有 Wiki 页面，返回 (path, page_type, content)。"""
         if not self._wiki_root.exists():
             return None
-        for path in sorted(self._wiki_root.rglob("*.md")):
-            if path.name in ("index.md", "changelog.md") or ".bak." in path.name:
-                continue
-            content = path.read_text(encoding="utf-8")
-            page_title = self._parse_frontmatter_field(content, "title")
-            pt = self._parse_frontmatter_field(content, "type") or "domain"
-            if page_title == title:
-                if page_type and pt != page_type:
+        from .context_loader import WikiContextLoader
+        loader = WikiContextLoader(self._wiki_root)
+        for page_info in loader.load_pages():
+            if page_info.title == title:
+                if page_type and page_info.page_type != page_type:
                     continue
-                return (path, pt, content)
+                try:
+                    content = page_info.path.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    continue
+                return (page_info.path, page_info.page_type, content)
         return None
 
     def _generate_incremental_update(
@@ -450,17 +470,19 @@ sources:
         if not self._wiki_root.exists():
             return {"status": "error", "reason": "Wiki 目录不存在"}
 
-        # 先构建 title→(path, type, content) 索引，避免每个页面重复扫描全部文件
+        from .context_loader import WikiContextLoader
+        loader = WikiContextLoader(self._wiki_root)
+
+        # 构建 title→(path, type, content) 索引
         page_index: Dict[str, Tuple[Path, str, str]] = {}
-        for path in sorted(self._wiki_root.rglob("*.md")):
-            if path.name in ("index.md", "changelog.md") or ".bak." in path.name:
+        for page_info in loader.load_pages():
+            if not page_info.title:
                 continue
-            content = path.read_text(encoding="utf-8")
-            title = self._parse_frontmatter_field(content, "title")
-            if not title:
+            try:
+                content = page_info.path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
                 continue
-            pt = self._parse_frontmatter_field(content, "type") or "domain"
-            page_index[title] = (path, pt, content)
+            page_index[page_info.title] = (page_info.path, page_info.page_type, content)
 
         results: List[Dict[str, Any]] = []
         for title, (path, page_type, content) in page_index.items():

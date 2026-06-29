@@ -21,7 +21,7 @@ class FakeLLMProvider(BaseLLMProvider):
         self._multimodal_calls: List[Dict[str, Any]] = []
 
     def generate(self, request: LLMRequest, *, temperature: Optional[float] = None,
-                 max_tokens: Optional[int] = None) -> LLMResponse:
+                 max_tokens: Optional[int] = None, max_retries: Optional[int] = None) -> LLMResponse:
         call_record = {"prompt": request.prompt[:200], "route_context": request.route_context,
                        "temperature": temperature, "max_tokens": max_tokens}
         self._generate_calls.append(call_record)
@@ -32,7 +32,8 @@ class FakeLLMProvider(BaseLLMProvider):
         return LLMResponse(text=text, selected_role="base_model", provider="fake", model="fake-model",
                            api_base_url="http://fake.local", matched_rule=f"__fake_{use_case}__")
 
-    def generate_multimodal(self, content_parts: list[dict], route_context: Dict[str, Any]) -> str:
+    def generate_multimodal(self, content_parts: list[dict], route_context: Dict[str, Any],
+                            *, temperature: Optional[float] = None, max_retries: Optional[int] = None) -> str:
         self._multimodal_calls.append({"content_parts": content_parts, "route_context": route_context})
         if self._raise_on_generate:
             raise LLMProviderError("FakeLLMProvider 配置为抛出异常")

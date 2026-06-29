@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class ConfigError(ValueError):
@@ -65,22 +68,18 @@ def resolve_env_vars(
     env: Dict[str, str],
     seen: Optional[set] = None,
 ) -> Any:
-    """递归替换字符串中的所有 ${VAR} 占位符。
+    """替换字符串中的 ${VAR} 占位符（单层，不递归展开嵌套变量）。
 
-    按优先级依次查找：OS 环境变量 > .env 文件变量 > macOS Keychain。
-    未找到的占位符保留原样（不抛出）。
+    查找优先级：OS 环境变量 > .env 文件变量 > macOS Keychain。
+    未找到的占位符保留原样（不抛出异常）。
+
+    注意：仅做单层替换 —— 如果 ${A} 的值是 "${B}"，则 "${B}" 会保留
+    在结果中不会被二次展开。这是有意为之，避免不可预期的递归行为。
     """
     if isinstance(data, str):
         if _ENV_PATTERN.search(data):
-            if seen is None:
-                seen = set()
-
             def _replace(m: re.Match) -> str:
                 var_name = m.group(1)
-                # 循环检测
-                if var_name in seen:
-                    return m.group(0)
-                seen.add(var_name)
                 # OS 环境变量优先
                 val = os.environ.get(var_name)
                 if val is not None:
@@ -207,6 +206,7 @@ def load_config_bundle(
         wiki_config = resolve_env_vars(_load_json(wiki_config_path), env)
         wiki_config = resolve_path_vars(wiki_config, root)
     elif (config_root / "wiki.json.example").exists():
+        logger.warning("wiki.json 不存在，回退加载 wiki.json.example（占位符可能未解析）")
         wiki_config = resolve_env_vars(_load_json(config_root / "wiki.json.example"), env)
         wiki_config = resolve_path_vars(wiki_config, root)
 

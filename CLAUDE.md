@@ -1,4 +1,4 @@
-# Iris 3.4 — 项目执行说明
+# Iris 3.6 — 项目执行说明
 
 > 工作知识助手，从 Iris v2.7.1 重构升级而来。
 > 个人知识库（Obsidian Wiki）重新设计 + 新增飞书团队知识库操作能力。
@@ -19,9 +19,9 @@
 
 | 维度 | 数据 |
 |------|------|
-| 源代码 | 13,772 行，83 个文件，18 个模块 |
+| 源代码 | 14,688 行，89 个文件，18 个模块 |
 | CLI 命令 | 43 个 |
-| 单元测试 | 97 个 |
+| 单元测试 | 138 个（10 个测试文件） |
 | 数据源 | 594 个文档，3,402 个 Chunk |
 | 向量索引 | 5,810 条，25 MB |
 | Wiki 页面 | 30 页（领域 6 / 概念 7 / 项目 8 / 人物 9） |
@@ -245,8 +245,8 @@ JSON 配置中使用 `${VAR_NAME}` 引用环境变量或 .env 中的值。
 
 | 层 | 位置 | 格式 | 含义 | 当前值 |
 |----|------|------|------|--------|
-| **产品版本** | `pyproject.toml` | SemVer X.Y.Z | 软件发布版本 | 3.4.0 |
-| **协议版本** | `src/iris/__init__.py` | MAJOR.MINOR | CLI 命令集 / agent-spec 格式 | 3.4 |
+| **产品版本** | `pyproject.toml` | SemVer X.Y.Z | 软件发布版本 | 3.6.0 |
+| **协议版本** | `src/iris/__init__.py` | MAJOR.MINOR | CLI 命令集 / agent-spec 格式 | 3.5 |
 | **数据版本** | `config/*.json` | 各自独立 | 配置文件 Schema | 3.3 |
 
 > 三层解耦：只有真正发生变化的层才递增版本号。
@@ -264,7 +264,7 @@ JSON 配置中使用 `${VAR_NAME}` 引用环境变量或 .env 中的值。
 
 ```
 iris3/
-├── pyproject.toml          # 3.4.0，依赖：PyMuPDF / python-docx / numpy
+├── pyproject.toml          # 3.6.0，依赖：PyMuPDF / python-docx / numpy
 ├── README.md
 ├── CLAUDE.md               # 本文件
 ├── .env.example            # 环境变量模板
@@ -279,11 +279,11 @@ iris3/
 │   ├── app/transcribe_meeting/ # 步骤 2 — 会议转录
 │   ├── trello/             # 步骤 1 — Trello 集成
 │   ├── complex_input/      # 步骤 1 — 图文处理
-│   ├── utils/              # 步骤 1 — 工具（🆕 v3.4: validation 输入校验）
+│   ├── utils/              # 步骤 1 — 工具（🆕 v3.6: constants, llm_parsing）
 │   ├── ingest/             # 步骤 2 — 数据源扫描/切块
 │   ├── retrieval/          # 步骤 2 — 混合检索
 │   ├── qa/                 # 步骤 2 — 问答
-│   ├── wiki/               # 步骤 2 — Wiki 体系（🆕 v3.4: context_loader, _constants; 🆕 v3.5: term_extractor 1,300 行三段 LLM Pipeline）
+│   ├── wiki/               # 步骤 2 — Wiki 体系（🆕 v3.6: asr_hotwords, asr_prompt_optimizer, asr_formatter, asr_version 拆分自 term_extractor）
 │   ├── analysis/           # 步骤 2 — 报告/思维导图/双周报
 │   ├── output/             # 步骤 1 — 输出格式化
 │   └── feishu/             # 步骤 3 — 飞书文档/聊天提炼
@@ -292,8 +292,8 @@ iris3/
 │       ├── doc_convert.py  #   飞书文档→本地 Markdown + 路由归档
 │       └── chat_digest.py  #   聊天记录 AI 提炼 + 结构化输出
 ├── scripts/                # CLI 入口 + 委托脚本
-├── templates/              # Prompt / Wiki 模板
-├── tests/                  # 单元测试（97 用例，包含 term_extractor 38 用例）
+├── templates/              # Prompt / Wiki 模板（🆕 v3.6: wiki/generate_*.txt Prompt 外部化）
+├── tests/                  # 单元测试（138 用例，10 个测试文件，含 41 个新增）
 └── memory/                 # Claude 工作记忆
 ```
 
@@ -420,3 +420,84 @@ iris build-asr-prompt --asr-mode all \
 | Phase 1→2 数据融合 | ❌ 无 | ✅ hotwords_to_terms 桥接 |
 | 质量过滤 | ❌ 无 | ✅ 括号完整性 + 长度 + 中文字数 |
 | 单元测试 | 38 个 | 38 个（全部通过） |
+
+
+## 🆕 v3.6.0 变更（2026-06-29）
+
+### 全面代码审查 + 架构升级
+
+基于 5 个并行 agent 的全模块深度审查（83 个文件，14,000+ 行），完成 29 项修复 + 5 项架构重构。
+
+### Critical Bug 修复（6 项）
+
+| # | 问题 | 文件 | 修复 |
+|---|------|------|------|
+| C1 | API Key 在全系统中明文传播 | `model_manager.py` | `get_active_model_config(sensitive=False)` 默认脱敏 |
+| C2 | Protocol 与实际 LLM Provider 签名不一致 | `protocols.py`, `provider.py` | 统一为 `(LLMRequest, *, kwargs) -> LLMResponse` |
+| C3 | Trello DNS monkey-patch 全局状态污染 | `trello/client.py` | 移除 monkey-patch，改为 URL 重写 + Host header |
+| C4 | term_extractor.py:787 重复添加热词 | `term_extractor.py` | 删除 1 行 |
+| C5 | BM25 基于 180 字符 content_preview | `retrieval/searcher.py` | 改用 `chunk.content` 全文计算 |
+| C6 | Keychain set_secret 先删后加数据丢失 | `config/secrets.py` | 移除前置 delete 调用 |
+
+### High 问题修复（14 项）
+
+| # | 问题 | 修复 |
+|---|------|------|
+| H1 | 所有 LLM 调用无重试机制 | `generate()` / `generate_multimodal()` 加 `max_retries` 参数 |
+| H3 | generate/generate_multimodal 85% 重复 | 提取 `_fallback_loop()` 共享降级循环 |
+| H3 | has_credentials_for_role 只查活跃模型 | 扫描角色下全部模型 |
+| H5 | handlers.py 15+ 处 `__import__('sys')` | 统一为顶部 `import sys` |
+| H10 | _read_wiki_page 无文件读取容错 | try/except + 日志警告 |
+| M1 | default_strategy 死配置字段 | 实现 `allow_auto_upgrade/downgrade` 策略开关 |
+| M2 | resolve_env_vars 死循环检测 | 清理 seen 逻辑 + 文档说明单层替换 |
+| M5 | 日志归档竞态条件 | `os.rename` 原子归档 + `fcntl` 锁 |
+| M6 | QA token 预算用 len() 近似 | 改用 `estimate_tokens()` |
+| M12 | Stage1 失败消息注入 Stage2 输出 | 提前拦截 `[Stage1 失败]` 前缀 |
+| M14 | fix_wiki 非原子写入 | `_atomic_write()` + `os.replace()` |
+| M15 | 图片编码无大小限制 | 20MB 上限 + 跳过大图警告 |
+| — | 方法体内 `import re` × 4 处 | lifecycle/secrets/service 迁移到顶部 |
+
+### 架构重构（5 项）
+
+| 项 | 内容 | 效果 |
+|----|------|------|
+| **C2** | LLM Provider 双接口统一 | Protocol + BaseLLMProvider + Null/Fake 全部签名一致 |
+| **H2** | term_extractor.py 拆分 | 1,298 行 → 556 行，拆出 4 个模块 |
+| **H4** | WikiContextLoader 统一加载 | 5 处独立文件扫描收敛到 1 个入口 |
+| **H7** | Prompt 模板外部化 | 2 个 Wiki 模板 → `templates/wiki/*.txt` |
+| **C3** | Trello DNS → URL 重写 | 消除全局 socket.getaddrinfo monkey-patch |
+
+### 新文件
+
+```
+src/iris/utils/constants.py          ← 全局常量（IMAGE_EXTENSIONS, MIME_MAP）
+src/iris/utils/llm_parsing.py        ← LLM 响应解析（strip_code_fence, try_parse_json）
+src/iris/wiki/asr_hotwords.py        ← LLM 热词提取（Phase 2）
+src/iris/wiki/asr_prompt_optimizer.py ← LLM Prompt 优化器（Phase 3）
+src/iris/wiki/asr_formatter.py       ← ASR 输出格式化
+src/iris/wiki/asr_version.py         ← 版本管理
+templates/wiki/generate_generic.txt  ← 通用 Wiki Prompt 模板
+templates/wiki/generate_person.txt   ← 人物 Wiki Prompt 模板
+```
+
+### 测试
+
+```
+97 → 138 测试 (+41)
+新增: test_llm_security.py, test_provider_fallback.py,
+      test_retrieval_scoring.py, test_utils.py
+```
+
+### 关键指标
+
+| 维度 | 改进前 (v3.5.0) | 改进后 (v3.6.0) |
+|------|:---:|:---:|
+| 源代码行数 | 14,358 | 14,688 |
+| 源文件数 | 83 | 89 |
+| term_extractor.py | 1,298 行 | 556 行（-57%） |
+| Wiki 总行数 | 3,461 | ~3,480 |
+| provider.py 重复率 | ~85% | 0%（_fallback_loop 统一） |
+| 单元测试 | 97 | **138** |
+| API Key 暴露面 | 全模块 | 仅 provider 内部 |
+| BM25 统计基准 | ~180 字符 | 全文 |
+| Trello 线程安全 | ❌ | ✅ |

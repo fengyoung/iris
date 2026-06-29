@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,6 +10,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from iris.config.loader import ConfigBundle
 from ._constants import PAGE_TYPE_CONFIG, get_wiki_dir, get_wiki_prefix
+
+logger = logging.getLogger(__name__)
 
 # 向下兼容别名
 PAGE_TYPE_DIRS = {k: v[0] for k, v in PAGE_TYPE_CONFIG.items()}
@@ -104,8 +107,17 @@ class WikiSearcher:
 
 
 def _read_wiki_page(path: Path) -> Tuple[str, str, str, str, str]:
-    """读取 Wiki 页面，解析 frontmatter 提取元数据。"""
-    text = path.read_text(encoding="utf-8")
+    """读取 Wiki 页面，解析 frontmatter 提取元数据。
+
+    对编码错误、权限不足等异常返回安全默认值，避免单个损坏文件
+    导致整个搜索/导航/索引功能崩溃。
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, PermissionError, OSError) as exc:
+        logger.warning("无法读取 Wiki 页面 %s: %s", path, exc)
+        title = _infer_title_from_filename(path)
+        return title, "domain", "draft", "", ""
     # 统一换行符（防止 Windows \r\n 破坏 frontmatter 正则）
     text = text.replace("\r\n", "\n")
     title = _infer_title_from_filename(path)

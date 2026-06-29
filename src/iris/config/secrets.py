@@ -13,6 +13,7 @@ CLI 命令：
 
 from __future__ import annotations
 
+import re
 import subprocess
 from typing import List, Optional
 
@@ -63,17 +64,7 @@ def set_secret(key: str, value: str) -> None:
         KeychainError: 写入失败
     """
     try:
-        # 先尝试删除旧条目（若存在），忽略不存在时的错误
-        subprocess.run(
-            [
-                "security", "delete-generic-password",
-                "-s", KEYCHAIN_SERVICE,
-                "-a", key,
-            ],
-            capture_output=True,
-            timeout=10,
-        )
-        # 添加新条目
+        # -U 允许覆盖已有条目，无需先删后加（避免删除成功但写入失败导致数据丢失）
         result = subprocess.run(
             [
                 "security", "add-generic-password",
@@ -138,7 +129,6 @@ def list_secrets() -> List[str]:
         names: List[str] = []
         for line in result.stdout.split("\n"):
             if '"acct"' in line or "acct" in line:
-                import re
                 match = re.search(r'"acct"[^=]*=\s*"([^"]+)"', line)
                 if match:
                     names.append(match.group(1))

@@ -81,6 +81,9 @@ class ComplexInputPipeline:
             return f"[Stage1 失败] adv_model 调用出错: {exc}"
 
     def _stage2_text(self, query: str, stage1_output: str, images: List[EncodedImage]) -> str:
+        # Stage1 失败时直接返回友好提示，不将错误消息注入 Stage2 prompt
+        if stage1_output.startswith("[Stage1 失败]"):
+            return f"图片理解阶段不可用：{stage1_output}"
         image_note = f"（共 {len(images)} 张图片）" if images else ""
         prompt = f"""用户原始指令{image_note}：{query}
 

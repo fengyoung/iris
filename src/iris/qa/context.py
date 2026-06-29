@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Dict, List
 
 from iris.config.loader import ConfigBundle
+from iris.utils.tokenization import estimate_tokens
 
 from .models import AnswerBlock
 
@@ -35,13 +36,13 @@ class PromptContextPacker:
 
         for hit in wiki_hits[:self._max_wiki_hits]:
             packed_hit = {**hit, "summary": _compress_text(str(hit.get("summary", "")), self._max_wiki_summary_chars)}
-            cost = len(packed_hit.get("title", "")) + len(packed_hit.get("relative_path", "")) + len(packed_hit["summary"]) + 24
+            cost = estimate_tokens(packed_hit.get("title", "") + packed_hit.get("relative_path", "") + packed_hit["summary"]) + 24
             if selected_wiki and cost > remaining:
                 wiki_truncated = True
                 break
             if not selected_wiki and cost > remaining:
                 packed_hit["summary"] = _compress_text(packed_hit["summary"], max(80, remaining // 2))
-                cost = len(packed_hit.get("title", "")) + len(packed_hit.get("relative_path", "")) + len(packed_hit["summary"]) + 24
+                cost = estimate_tokens(packed_hit.get("title", "") + packed_hit.get("relative_path", "") + packed_hit["summary"]) + 24
             if cost > remaining:
                 wiki_truncated = True
                 continue
@@ -52,14 +53,14 @@ class PromptContextPacker:
             packed_block = AnswerBlock(title=block.title, summary=_compress_text(block.summary, self._max_block_summary_chars),
                                        citation=block.citation, score=block.score)
             section = " > ".join(packed_block.citation.section_path) if packed_block.citation.section_path else packed_block.title
-            cost = len(packed_block.title) + len(section) + len(packed_block.summary) + len(packed_block.citation.relative_path) + 32
+            cost = estimate_tokens(packed_block.title + section + packed_block.summary + packed_block.citation.relative_path) + 32
             if selected_blocks and cost > remaining:
                 block_truncated = True
                 break
             if not selected_blocks and cost > remaining:
                 packed_block = AnswerBlock(title=packed_block.title, summary=_compress_text(packed_block.summary, max(120, remaining // 2)),
                                            citation=packed_block.citation, score=packed_block.score)
-                cost = len(packed_block.title) + len(section) + len(packed_block.summary) + len(packed_block.citation.relative_path) + 32
+                cost = estimate_tokens(packed_block.title + section + packed_block.summary + packed_block.citation.relative_path) + 32
             if cost > remaining:
                 block_truncated = True
                 continue

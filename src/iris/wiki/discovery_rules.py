@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from ._constants import PAGE_TYPE_PRIORITY
+
 # 标题前缀 → 页面类型映射（用于 infer_page_type）
 HEADING_PREFIXES: list[tuple[str, str]] = [
     ("项目", "project"),
@@ -77,9 +79,6 @@ PROJECT_SUFFIX_PATTERNS: list[re.Pattern] = [
 
 LEADING_ENUM_RE = re.compile(r"^\d+[\.\、\s]+")
 ONLY_SECTION_RE = re.compile(r"^[\d\.\s\一-鿿h]{1,8}$")
-
-# 页面类型优先级（高→低用于合并冲突）
-PAGE_TYPE_PRIORITY: dict[str, int] = {"project": 3, "domain": 2, "concept": 2, "person": 1}
 
 # 通用术语抑制
 GENERIC_TERM_SUPPRESS: list[str] = ["AI", "AB", "VS", "OKR", "TODO"]

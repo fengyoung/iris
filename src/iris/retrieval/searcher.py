@@ -123,13 +123,17 @@ class LocalRetriever:
         self._compute_corpus_stats()
 
     def _compute_corpus_stats(self) -> None:
-        """计算全局 BM25 统计量：文档总数、平均长度、词项文档频率。"""
+        """计算全局 BM25 统计量：文档总数、平均长度、词项文档频率。
+
+        使用 chunk.content（全文）而非 content_preview（截断预览），
+        确保 TF/IDF/doc_len 统计基于完整内容而非 ~180 字符截断。
+        """
         if self._corpus_stats_computed or not self._chunks:
             return
         total_len = 0
         df: Dict[str, set] = defaultdict(set)
         for i, chunk in enumerate(self._chunks):
-            tokens = _tokenize(chunk.content_preview)
+            tokens = _tokenize(chunk.content)
             total_len += len(tokens)
             for t in set(tokens):
                 df[t].add(i)
@@ -165,7 +169,6 @@ def _score_chunk(query: str, query_tokens: List[str], chunk: ChunkRecord,
                  df: Dict[str, int] | None = None,
                  query_plan: QueryPlan | None = None) -> Tuple[float, List[str]]:
     title_lower = chunk.title.lower()
-    content_lower = chunk.content_preview.lower()
     section_lower = " ".join(chunk.section_path).lower()
     query_lower = query.lower().strip()
 
@@ -207,7 +210,7 @@ def _score_chunk(query: str, query_tokens: List[str], chunk: ChunkRecord,
             if token not in matched:
                 matched.append(token)
 
-    content_tokens = _tokenize(chunk.content_preview)
+    content_tokens = _tokenize(chunk.content)
     freq: Dict[str, int] = defaultdict(int)
     for token in content_tokens:
         freq[token] += 1
