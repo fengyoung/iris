@@ -1,4 +1,4 @@
-# Iris 3.8 — 项目执行说明
+# Iris 3.8.1 — 项目执行说明
 
 > 工作知识助手，从 Iris v2.7.1 重构升级而来。
 > 个人知识库（Obsidian Wiki）重新设计 + 新增飞书团队知识库操作能力。
@@ -19,9 +19,9 @@
 
 | 维度 | 数据 |
 |------|------|
-| 源代码 | 16,183 行，92 个文件，19 个模块 |
+| 源代码 | 16,694 行，93 个文件，19 个模块 |
 | CLI 命令 | 44 个 |
-| 单元测试 | 161 个（13 个测试文件） |
+| 单元测试 | 169 个（12 个测试文件） |
 | 数据源 | 594 个文档，3,402 个 Chunk |
 | 向量索引 | 5,810 条，25 MB |
 | Wiki 页面 | 30 页（领域 6 / 概念 7 / 项目 8 / 人物 9） |
@@ -245,7 +245,7 @@ JSON 配置中使用 `${VAR_NAME}` 引用环境变量或 .env 中的值。
 
 | 层 | 位置 | 格式 | 含义 | 当前值 |
 |----|------|------|------|--------|
-| **产品版本** | `pyproject.toml` | SemVer X.Y.Z | 软件发布版本 | 3.8.0 |
+| **产品版本** | `pyproject.toml` | SemVer X.Y.Z | 软件发布版本 | 3.8.1 |
 | **协议版本** | `src/iris/__init__.py` | MAJOR.MINOR | CLI 命令集 / agent-spec 格式 | 3.7 |
 | **数据版本** | `config/*.json` | 各自独立 | 配置文件 Schema | 3.4 |
 
@@ -264,7 +264,7 @@ JSON 配置中使用 `${VAR_NAME}` 引用环境变量或 .env 中的值。
 
 ```
 iris3/
-├── pyproject.toml          # 3.8.0，依赖：PyMuPDF / python-docx / numpy / pydantic>=2.0
+├── pyproject.toml          # 3.8.1，依赖：PyMuPDF / python-docx / numpy / pydantic>=2.0
 ├── README.md
 ├── CLAUDE.md               # 本文件
 ├── .env.example            # 环境变量模板
@@ -295,9 +295,57 @@ iris3/
 │       └── chat_digest.py  #   聊天记录 AI 提炼 + 结构化输出
 ├── scripts/                # CLI 入口 + 委托脚本
 ├── templates/              # Prompt / Wiki 模板（🆕 v3.6: wiki/generate_*.txt Prompt 外部化）
-├── tests/                  # 单元测试（161 用例，13 个测试文件）
+├── tests/                  # 单元测试（169 用例，12 个测试文件）
 └── memory/                 # Claude 工作记忆
 ```
+
+---
+
+## 🆕 v3.8.1 变更（2026-06-30）
+
+### 多模型路由自动触发改进
+
+**问题**：用户通过 query 文本或 Claude Code 传入图片路径时，系统不会自动触发多模型路由。
+
+**根因 3 个断点**：
+1. Agent 层：`ask` 的 agent-spec 未声明 `image` 参数
+2. CLI 层：`handle_ask` 只检查 `--image` 标志，不解析 query 文本
+3. 检测层：`InputDetector.detect()` 的 `query` 参数未使用
+
+### 改动清单
+
+| 文件 | 改动 |
+|------|------|
+| `complex_input/detector.py` | 新增 `extract_file_paths_from_text()` 公开函数；`detect()` 在 `file_paths` 为空时自动从 query 提取路径；提取 `_resolve_files()` 静态方法消除代码重复；新增 `_merge_detected_types()` 辅助函数 |
+| `app/cli/handlers.py` | `handle_ask()` 在 `--image` 为空时自动调用 `extract_file_paths_from_text(args.query)` 提取路径并路由到 ComplexInputPipeline |
+| `core/agent_adapter.py` | `ask` 的 input_schema 新增 `"image": {"type": "string"}`，Claude Code 作为 Agent 时知道可以传 `--image` |
+| `complex_input/__init__.py` | 导出 `extract_file_paths_from_text` |
+
+### 三层自动触发
+
+| 层 | 触发条件 | 效果 |
+|:--:|----------|------|
+| Agent | Claude Code 通过 agent-spec 知道 `ask` 支持 `--image` | 自动传 `--image` 标志 |
+| CLI | `ask` 命令自动从 query 文本提取文件路径 | 路由到三阶段流水线 |
+| Detector | 任何调用 `detect(query)` 时自动检查 query 中的路径 | 兜底触发多模态 |
+
+### 测试
+
+```
+161 → 169 测试 (+8)
+新增: test_utils.py::TestExtractFilePaths (8 个)
+```
+
+### 关键指标
+
+| 维度 | 改进前 (v3.8.0) | 改进后 (v3.8.1) |
+|------|:---:|:---:|
+| 源代码行数 | 16,620 | **16,694** |
+| 源文件数 | 93 | 93 |
+| 单元测试 | 161 | **169** |
+| query 自动路径提取 | ❌ 无 | ✅ `extract_file_paths_from_text()` |
+| ask 命令图片支持 | ❌ agent-spec 缺 `image` | ✅ agent-spec 完整声明 |
+| detector query 使用 | ❌ 标注"未使用" | ✅ 自动提取路径 |
 
 ---
 

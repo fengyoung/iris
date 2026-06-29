@@ -98,6 +98,10 @@ def handle_search(args, bundle, logger) -> int:
 
 def handle_ask(args, bundle, logger) -> int:
     image_paths = _parse_image_list(args.image)
+    if not image_paths and args.query:
+        # 尝试从 query 文本中自动提取文件路径
+        from iris.complex_input.detector import extract_file_paths_from_text
+        image_paths = extract_file_paths_from_text(args.query)
     if image_paths:
         pipeline = ComplexInputPipeline(bundle)
         result = pipeline.process(args.query, file_paths=image_paths)

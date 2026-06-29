@@ -1,10 +1,10 @@
-# Iris 3.8
+# Iris 3.8.1
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
 
-**v3.8.0** — 复杂输入三阶段重构 + LLMService 统一入口，161 测试。
+**v3.8.1** — 多模型路由自动触发 + query 文本路径提取，169 测试。
 
 ## 开发路线
 
@@ -42,7 +42,7 @@ python scripts/run_cli.py daily-start
 | 类别 | 命令 | 说明 |
 |------|------|------|
 | 数据管道 | `scan-source`, `build-chunks`, `build-vector-index` | 文档扫描 / 切块 / 向量索引 |
-| 检索问答 | `search`, `ask` | 混合检索（BM25 全文 + 向量）+ LLM 问答 |
+| 检索问答 | `search`, `ask` | 混合检索（BM25 全文 + 向量）+ LLM 问答（支持图文输入 🖼️） |
 | Wiki | `discover-wiki`, `build-wiki`, `wiki-update` | 发现 / 生成 / 增量更新 |
 | 质量保障 | `wiki-lint`, `wiki-lint --fix`, `deep-eval` | 结构检查 + 内容准确性/全面性校验 |
 | 报告 | `build-report`, `build-mindmap`, `build-biweekly-report` | 专题报告 / 思维导图 / 双周报 |
@@ -82,12 +82,13 @@ SOURCE/                     LLM-WIKI/
 - Pydantic v2（配置类型安全校验）
 - lark-cli（飞书接口，步骤 3）
 - macOS Keychain（可选密钥存储）
-- 161 个单元测试（13 个测试文件）
+- 169 个单元测试（12 个测试文件）
 
 ## 版本历史
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.8.1** | 2026-06-30 | 多模型路由自动触发：query 文本路径提取 + agent-spec 补全 + detector 兜底，169 测试 |
 | **v3.8.0** | 2026-06-29 | 复杂输入三阶段重构 + LLMService 统一入口 + 8 路由规则，161 测试 |
 | **v3.7.0** | 2026-06-29 | iris2 迁移：Pydantic v2 配置校验 + Wiki 深度评估，161 测试 |
 | **v3.6.0** | 2026-06-29 | 全面审查：6 Critical + 14 High 修复，5 项架构重构，138 测试 |

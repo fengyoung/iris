@@ -31,9 +31,10 @@ IRIS_CAPABILITIES: List[AgentCapability] = [
     AgentCapability(name="search", description="混合检索（BM25+向量）", command="search",
                     input_schema={"query": {"type": "string"}, "top_k": {"type": "int", "default": 5}},
                     output_schema={}, tags=["retrieval", "read-only"]),
-    AgentCapability(name="ask", description="LLM 增强问答", command="ask",
-                    input_schema={"query": {"type": "string"}, "mode": {"type": "string", "default": "llm"}},
-                    output_schema={}, tags=["qa", "llm"]),
+    AgentCapability(name="ask", description="LLM 增强问答（支持图文混合输入）", command="ask",
+                    input_schema={"query": {"type": "string"}, "mode": {"type": "string", "default": "llm"},
+                                  "image": {"type": "string"}},
+                    output_schema={}, tags=["qa", "llm", "multimodal"]),
     # ── Wiki ──
     AgentCapability(name="discover-wiki", description="发现 Wiki 候选", command="discover-wiki",
                     input_schema={"limit": {"type": "int", "default": 20}}, output_schema={}, tags=["wiki"]),

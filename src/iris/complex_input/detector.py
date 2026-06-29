@@ -53,6 +53,32 @@ class ComplexityResult:
     reason: str = ""
 
 
+def extract_file_paths_from_text(text: str) -> List[str]:
+    """从文本中提取可能的文件路径。
+
+    按空白分割 token，查找包含路径分隔符且扩展名在已知类型中的 token，
+    验证文件存在后返回。用于让 query 中包含文件路径时自动触发多模态路由。
+
+    Args:
+        text: 用户查询文本
+
+    Returns:
+        存在的文件路径列表（绝对路径）
+    """
+    found: List[str] = []
+    for token in text.split():
+        token = token.strip('.,;:!?，。；：！？""''（）()[]【】「」')
+        if not token:
+            continue
+        # 必须包含路径分隔符
+        if "/" not in token and "\\" not in token:
+            continue
+        p = Path(token).expanduser().resolve()
+        if p.exists() and p.suffix.lower() in COMPLEX_EXTENSIONS:
+            found.append(str(p))
+    return found
+
+
 def _classify_file(ext: str) -> str:
     """根据扩展名返回文件类型。"""
     if ext in IMAGE_EXTENSIONS:
@@ -78,7 +104,7 @@ class InputDetector:
         """检测输入复杂度。
 
         Args:
-            query: 用户查询文本（暂仅用于接口一致性，未直接使用）
+            query: 用户查询文本（query 中包含的文件路径会被自动提取）
             file_paths: 文件路径列表
             force_type: 强制指定所有文件类型，跳过逐文件扩展名检测。
                         用于调用方已知文件类型时。
@@ -87,11 +113,56 @@ class InputDetector:
             ComplexityResult
         """
         if not file_paths:
+            # ── 尝试从 query 文本中提取文件路径 ──
+            extracted = extract_file_paths_from_text(query)
+            if extracted:
+                logger.info("从 query 文本中提取到 %d 个文件路径", len(extracted))
+                resolved, encoded, detected_types = self._resolve_files(extracted, force_type)
+                if resolved:
+                    final_type = _merge_detected_types(detected_types, encoded)
+                    return ComplexityResult(
+                        is_complex=True,
+                        file_type=final_type,
+                        file_paths=resolved,
+                        file_count=len(resolved),
+                        encoded_images=encoded,
+                        reason=f"从 query 中检测到 {len(resolved)} 个文件（类型: {final_type}）",
+                    )
             return ComplexityResult(
                 is_complex=False,
                 reason="纯文本输入，无附件",
             )
 
+        resolved, encoded, detected_types = self._resolve_files(file_paths, force_type)
+
+        if not resolved:
+            return ComplexityResult(
+                is_complex=False,
+                reason="未识别到有效复杂输入文件",
+            )
+
+        final_type = _merge_detected_types(detected_types, encoded)
+        type_msg = f"图片" if encoded else final_type
+        return ComplexityResult(
+            is_complex=True,
+            file_type=final_type,
+            file_paths=resolved,
+            file_count=len(resolved),
+            encoded_images=encoded,
+            reason=f"检测到 {len(resolved)} 个文件（类型: {type_msg}）",
+        )
+
+    @staticmethod
+    def _resolve_files(
+        file_paths: List[str],
+        force_type: Optional[str] = None,
+    ) -> tuple:
+        """解析文件路径列表，返回 (resolved, encoded, detected_types)。
+
+        resolved: 通过检查的有效文件路径
+        encoded: 已编码的图片数据
+        detected_types: 检测到的文件类型集合
+        """
         resolved: List[str] = []
         encoded: List[EncodedImage] = []
         detected_types: Set[str] = set()
@@ -131,23 +202,17 @@ class InputDetector:
             resolved.append(str(p))
             detected_types.add(ftype)
 
-        if not resolved:
-            return ComplexityResult(
-                is_complex=False,
-                reason="未识别到有效复杂输入文件",
-            )
+        return resolved, encoded, detected_types
 
-        # 合并文件类型（存在多种类型时取第一个）
-        final_type = next(iter(detected_types)) if len(detected_types) == 1 else "mixed"
-        type_msg = f"图片" if encoded else final_type
-        return ComplexityResult(
-            is_complex=True,
-            file_type=final_type,
-            file_paths=resolved,
-            file_count=len(resolved),
-            encoded_images=encoded,
-            reason=f"检测到 {len(resolved)} 个文件（类型: {type_msg}）",
-        )
+
+def _merge_detected_types(
+    detected_types: Set[str], encoded: list
+) -> str:
+    """合并检测到的文件类型为单一类型标识。"""
+    if not detected_types:
+        return FILE_TYPE_UNKNOWN
+    final_type = next(iter(detected_types)) if len(detected_types) == 1 else "mixed"
+    return final_type
 
 
 def _encode_image(path: Path, mime_type: str) -> str:

@@ -211,3 +211,86 @@ class TestPromptTemplateFallback:
         )
         assert "知识库编辑助手" in prompt
         assert "测试项目" in prompt
+
+
+# ── v3.8.1: query 文本路径提取 ──────────────────────────────
+
+class TestExtractFilePaths:
+    """验证 extract_file_paths_from_text 路径提取逻辑。"""
+
+    def test_absolute_path(self, tmp_path):
+        """绝对路径能正确提取。"""
+        from iris.complex_input.detector import extract_file_paths_from_text
+        png = tmp_path / "test.png"
+        png.write_text("fake png")
+        query = f"分析这张图片 {png}"
+        result = extract_file_paths_from_text(query)
+        assert result == [str(png.resolve())]
+
+    def test_nonexistent_path(self):
+        """不存在的路径不返回。"""
+        from iris.complex_input.detector import extract_file_paths_from_text
+        query = "分析 /nonexistent/file.png"
+        result = extract_file_paths_from_text(query)
+        assert result == []
+
+    def test_no_path_in_text(self):
+        """纯文本不含路径时返回空列表。"""
+        from iris.complex_input.detector import extract_file_paths_from_text
+        result = extract_file_paths_from_text("今天有什么新闻")
+        assert result == []
+
+    def test_unsupported_extension(self, tmp_path):
+        """不支持扩展名的文件不被提取。"""
+        from iris.complex_input.detector import extract_file_paths_from_text
+        f = tmp_path / "notes.txt"
+        f.write_text("hello")
+        query = f"打开 {f}"
+        result = extract_file_paths_from_text(query)
+        assert result == []
+
+    def test_chinese_text_surrounding_path(self, tmp_path):
+        """中文文本与路径之间有空格时能提取（路径前后紧挨中文无空格时不支持）。"""
+        from iris.complex_input.detector import extract_file_paths_from_text
+        png = tmp_path / "截图.png"
+        png.write_text("fake")
+        # 路径前后有空格 → 可提取
+        query = f"帮我分析 {png} 这个截图的内容"
+        result = extract_file_paths_from_text(query)
+        assert result == [str(png.resolve())]
+        # 路径前后无空格 → 不分词，不可提取（设计约束）
+        query2 = f"帮我分析{png}这个截图的内容"
+        result2 = extract_file_paths_from_text(query2)
+        assert result2 == []
+
+    def test_multiple_paths(self, tmp_path):
+        """多个文件路径都能提取。"""
+        from iris.complex_input.detector import extract_file_paths_from_text
+        p1 = tmp_path / "a.png"
+        p2 = tmp_path / "b.jpg"
+        p1.write_text("fake")
+        p2.write_text("fake")
+        query = f"对比 {p1} 和 {p2}"
+        result = extract_file_paths_from_text(query)
+        assert len(result) == 2
+        assert str(p1.resolve()) in result
+        assert str(p2.resolve()) in result
+
+    def test_pdf_path(self, tmp_path):
+        """PDF 路径也能被提取（非图片类型走 Stage 2 跳过）。"""
+        from iris.complex_input.detector import extract_file_paths_from_text
+        pdf = tmp_path / "report.pdf"
+        pdf.write_text("fake pdf")
+        query = f"分析报告 {pdf}"
+        result = extract_file_paths_from_text(query)
+        assert result == [str(pdf.resolve())]
+
+    def test_detector_uses_query_paths(self, tmp_path):
+        """detector.detect() 从 query 提取路径后正确设置 is_complex=True。"""
+        from iris.complex_input.detector import InputDetector
+        png = tmp_path / "photo.png"
+        png.write_text("fake")
+        query = f"看图 {png}"
+        result = InputDetector().detect(query)
+        assert result.is_complex is True
+        assert str(png.resolve()) in result.file_paths
