@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any, Dict
@@ -533,6 +534,37 @@ def _load_review_items(path: Path):
     return items
 
 
+def handle_deep_eval(args, bundle, logger) -> int:
+    """深度评估：校验 Wiki 页面内容准确性 + 全面性。"""
+    from iris.evaluation import DeepEvaluator, deep_eval_result_to_json, print_deep_eval_pretty
+
+    if not bundle.wiki or not bundle.wiki.get("wiki_root"):
+        print("Wiki 配置缺失", file=sys.stderr)
+        return 1
+
+    page_filter = getattr(args, "page_filter", None) or None
+    sample_rate = getattr(args, "sample_rate", None) or None
+
+    evaluator = DeepEvaluator(bundle)
+    print("开始深度评估...", file=sys.stderr)
+    result = evaluator.evaluate(page_filter=page_filter, sample_rate=sample_rate)
+
+    if getattr(args, "pretty", False):
+        print_deep_eval_pretty(result)
+    else:
+        print(json.dumps(deep_eval_result_to_json(result), ensure_ascii=False, indent=2))
+
+    # 摘要
+    if result.overall_accuracy_rate is not None:
+        print(f"\n准确率: {result.overall_accuracy_rate:.1%}", file=sys.stderr)
+    print(f"引用: {result.total_references} 条 | 一致 {result.consistent_count} / "
+          f"不一致 {result.inconsistent_count} / 无法验证 {result.unverifiable_count} / "
+          f"源缺失 {result.source_missing_count}", file=sys.stderr)
+    print(f"全面性: {result.total_gaps} 处可能遗漏（{result.pages_with_gaps} 页）",
+          file=sys.stderr)
+    return 0
+
+
 def handle_build_vector_index(args, bundle, logger) -> int:
     from iris.retrieval.embedder import EmbedderError, build_embedder_from_config
     from iris.retrieval.vector_index import VectorIndex, build_vector_index
@@ -1031,6 +1063,7 @@ COMMAND_HANDLERS = {
     "wiki-lint": handle_wiki_lint,
     "wiki-update": handle_wiki_update,
     "build-asr-prompt": handle_build_asr_prompt,
+    "deep-eval": handle_deep_eval,
     "diagnose": handle_diagnose,
     "status": handle_status,
     "agent-spec": handle_agent_spec,
