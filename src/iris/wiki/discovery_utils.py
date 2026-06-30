@@ -15,6 +15,7 @@ from .discovery_rules import (
     LEADING_ENUM_RE, ONLY_SECTION_RE, PAGE_TYPE_PRIORITY,
     GENERIC_TERM_SUPPRESS, HIGH_VALUE_TOPIC_HINTS, LOW_VALUE_PATH_HINTS,
     LOW_VALUE_TERM_PATTERNS, PERSON_PATTERNS, CANDIDATE_EVIDENCE_THRESHOLDS,
+    PERSON_EXCLUSIONS,
 )
 from .discovery_types import CandidateItem
 
@@ -80,8 +81,21 @@ def extract_persons(text: str) -> List[str]:
             # 参会人列表：按 、，, 拆分
             parts = _re.split(r"[、，,]", raw)
             for part in parts:
-                name = part.strip()
-                if name and len(name) >= 2 and len(name) <= 6 and name not in found:
+                name = part.strip().rstrip(".")
+                if not name or len(name) < 2 or len(name) > 6:
+                    continue
+                # 过滤 markdown 语法残留（如 **）
+                if _re.match(r"^[!@#$%^&*_\-=+\[\]{}|:;<>,.?/~`]+$", name):
+                    continue
+                # 过滤非人名（Iris、角色标记、数字等）
+                if name.lower() in PERSON_EXCLUSIONS or name in PERSON_EXCLUSIONS:
+                    continue
+                if _re.match(r"^(?:[a-zA-Z]\d+|[一-龥]+\d+)$", name):  # 如 "发言人3"
+                    continue
+                # 排除组织/角色类名称（以团队/组/部结尾且非单纯人名）
+                if _re.search(r"(?:团队|小组|部门|系统|平台|项目)$", name):
+                    continue
+                if name not in found:
                     found.append(name)
     return found
 

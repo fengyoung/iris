@@ -327,6 +327,31 @@ def handle_wiki_update(args, bundle, logger) -> int:
     return 0
 
 
+def handle_enrich_persons(args, bundle, logger) -> int:
+    """从飞书通讯录补充人物 Wiki 页面的部门和邮箱信息。"""
+    from iris.wiki.person_enricher import PersonEnricher
+
+    enricher = PersonEnricher(bundle)
+    if args.dry_run:
+        logger.log("enrich_persons", {"status": "dry_run"})
+    result = enricher.enrich(dry_run=args.dry_run)
+    payload = {
+        "total": result.total,
+        "updated": result.updated,
+        "not_found": result.not_found,
+        "ambiguous": result.ambiguous,
+        "no_change": result.no_change,
+        "errors": result.errors,
+        "details": [
+            {"name": d.name, "status": d.status, "department": d.department,
+             "email": d.email, "message": d.message}
+            for d in result.details
+        ],
+    }
+    _emit_output(args.command, payload, pretty=args.pretty)
+    return 0
+
+
 def handle_build_asr_prompt(args, bundle, logger) -> int:
     """从 Wiki 知识库构建语音转写优化资源。
 
@@ -837,12 +862,30 @@ def handle_daily_start(args, bundle, logger) -> int:
     total_rebuilt = sum(cs.build_stats.get("rebuilt_documents", 0) for cs in chunk_summaries)
     from iris.app.cli.helpers import _auto_discover_wiki
     wiki_discover_result = _auto_discover_wiki(bundle, changed_count=total_rebuilt)
+    person_enrich_result = {"status": "skipped", "reason": "无 wiki_root 配置"}
     if bundle.wiki:
         from iris.wiki.generator import WikiGenerator
         wiki_update_result = WikiGenerator(bundle).update_all_pages(top_k=4)
         builder = WikiNavigationBuilder(bundle)
         builder.build(write=True)
         append_changelog(Path(bundle.wiki["wiki_root"]), "daily-start 自动维护")
+
+        # 5. 飞书通讯录人物信息丰富（静默失败，不影响主流程）
+        try:
+            from iris.wiki.person_enricher import PersonEnricher
+            enrich_result = PersonEnricher(bundle).enrich(dry_run=False)
+            person_enrich_result = {
+                "status": "ok",
+                "updated": enrich_result.updated,
+                "not_found": enrich_result.not_found,
+                "ambiguous": enrich_result.ambiguous,
+                "no_change": enrich_result.no_change,
+            }
+            if enrich_result.updated:
+                # 有更新时重建导航
+                builder.build(write=True)
+        except Exception as _pe_exc:
+            person_enrich_result = {"status": "error", "reason": str(_pe_exc)}
 
     payload = {"memory_sync": {"scanned": sync_result.get("scanned", 0), "skipped": sync_result.get("skipped", 0),
                                 "corrections_added": sync_result.get("corrections_added", 0)},
@@ -852,7 +895,8 @@ def handle_daily_start(args, bundle, logger) -> int:
                             "rebuilt_documents": cs.build_stats.get("rebuilt_documents", 0)} for cs in chunk_summaries],
                "vector_index": vector_index_result,
                "wiki_discover": wiki_discover_result,
-               "wiki_update": wiki_update_result}
+               "wiki_update": wiki_update_result,
+               "person_enrich": person_enrich_result}
     _emit_output(args.command, payload, pretty=args.pretty)
     return 0
 
@@ -1065,6 +1109,7 @@ COMMAND_HANDLERS = {
     "wiki-pipeline": handle_wiki_pipeline,
     "wiki-lint": handle_wiki_lint,
     "wiki-update": handle_wiki_update,
+    "enrich-persons": handle_enrich_persons,
     "build-asr-prompt": handle_build_asr_prompt,
     "deep-eval": handle_deep_eval,
     "diagnose": handle_diagnose,

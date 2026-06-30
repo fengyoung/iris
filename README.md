@@ -1,10 +1,10 @@
-# Iris 3.8.1
+# Iris 3.9.0
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
 
-**v3.8.1** — 多模型路由自动触发 + query 文本路径提取，169 测试。
+**v3.9.0** — 人物 Wiki 页面飞书通讯录自动丰富 + 人物发现规则增强，169 测试。
 
 ## 开发路线
 
@@ -49,6 +49,7 @@ python scripts/run_cli.py daily-start
 | 会议 | `transcribe-meeting`, `batch-transcribe`, `build-asr-prompt` | 转录纪要 / 批量处理 / ASR 三段校正 |
 | 飞书 | `feishu-doc-convert`, `chat-digest` | 文档转换 / 聊天记录提炼 |
 | 记忆 | `memory-*`, `working-set`, `sync-memory` | 记忆管理 / 工作上下文 |
+| 人物 | `enrich-persons` | 飞书通讯录自动补充人物 Wiki 的部门/邮箱信息 |
 | 工具 | `process`, `trello`, `extract-weekly-reports` | 图文处理 / 看板 / 周报提取 |
 | 系统 | `daily-start`, `check-config`, `status`, `diagnose` | 日常维护 / 配置检查 |
 
@@ -88,6 +89,7 @@ SOURCE/                     LLM-WIKI/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.9.0** | 2026-06-30 | 人物 Wiki 飞书通讯录丰富 + 人物发现规则增强（8 条新模式 + 排除名单），169 测试 |
 | **v3.8.1** | 2026-06-30 | 多模型路由自动触发：query 文本路径提取 + agent-spec 补全 + detector 兜底，169 测试 |
 | **v3.8.0** | 2026-06-29 | 复杂输入三阶段重构 + LLMService 统一入口 + 8 路由规则，161 测试 |
 | **v3.7.0** | 2026-06-29 | iris2 迁移：Pydantic v2 配置校验 + Wiki 深度评估，161 测试 |

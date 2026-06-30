@@ -311,7 +311,7 @@ def lint_wiki(wiki_root: Path, data_root: Optional[Path] = None) -> Dict[str, An
 
         page_info_dict[title] = {
             "path": str(md_file.relative_to(wiki_root)),
-                "type": ptype,
+                "type": page_info.page_type,
                 "status": status,
                 "outbound_count": len(actual_links),
             }

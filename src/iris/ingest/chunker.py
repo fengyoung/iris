@@ -58,16 +58,19 @@ class ChunkSlim:
     title: str
     section_path: List[str]
     content_preview: str
+    content: str = ""
 
     @classmethod
     def from_chunk_record(cls, chunk: ChunkRecord) -> "ChunkSlim":
         return cls(relative_path=chunk.relative_path, title=chunk.title,
-                   section_path=chunk.section_path, content_preview=chunk.content_preview)
+                   section_path=chunk.section_path, content_preview=chunk.content_preview,
+                   content=chunk.content)
 
     @classmethod
     def from_dict(cls, data: dict) -> "ChunkSlim":
         return cls(relative_path=data.get("relative_path", ""), title=data.get("title", ""),
-                   section_path=data.get("section_path", []), content_preview=data.get("content_preview", ""))
+                   section_path=data.get("section_path", []), content_preview=data.get("content_preview", ""),
+                   content=data.get("content", ""))
 
 
 @dataclass(frozen=True)

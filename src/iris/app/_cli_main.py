@@ -20,7 +20,7 @@ COMMANDS = [
     "search", "ask", "build-report", "build-mindmap", "build-biweekly-report",
     "discover-wiki", "discover-wiki-auto", "build-wiki",
     "build-wiki-nav", "wiki-pipeline", "wiki-lint", "wiki-update",
-    "build-asr-prompt", "deep-eval",
+    "build-asr-prompt", "enrich-persons", "deep-eval",
     "memory-status", "memory-list", "memory-delete", "memory-maintenance",
     "memory-export", "memory-import", "working-set", "working-show",
     "working-clear", "process", "transcribe-meeting", "batch-transcribe", "daily-start",

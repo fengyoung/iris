@@ -61,8 +61,8 @@ class CandidateDiscovery:
                 evidence_counter[canonical] += 1
                 append_sample(sample_paths.setdefault(canonical, []), chunk.relative_path)
 
-            # 概念提取：从正文内容中提取大写术语
-            content = chunk.content_preview
+            # 概念/人物提取：使用全文（若有），回退到预览
+            content = chunk.content or chunk.content_preview
             for term in extract_terms(content):
                 term_clean = term.strip().strip("()[]（）【】")
                 if not term_clean or not is_high_value_term(term_clean):
