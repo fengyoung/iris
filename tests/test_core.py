@@ -1,36 +1,11 @@
-"""核心协议和工具模块测试。"""
+"""核心类型和工具模块测试。"""
 
 from __future__ import annotations
 
-from iris.core.protocols import LLMProvider, MemoryStore
 from iris.core.fake_provider import FakeLLMProvider
+from iris.core.llm_types import LLMRequest
 from iris.core.locks import FileLock
-from iris.llm import LLMRequest
 from iris.utils.tokenization import estimate_tokens, truncate_by_tokens
-
-
-class TestProtocols:
-    def test_llm_provider_protocol(self):
-        """验证 FakeLLMProvider 符合 LLMProvider protocol。"""
-        provider = FakeLLMProvider()
-        assert isinstance(provider, LLMProvider)
-
-    def test_memory_store_protocol(self):
-        """验证 dict-based store 符合 MemoryStore protocol。"""
-        store = SimpleMemoryStore()
-        assert isinstance(store, MemoryStore)
-
-
-class SimpleMemoryStore:
-    """MemoryStore protocol 的最小实现（用于测试）。"""
-    def __init__(self):
-        self._data = {}
-
-    def load(self):
-        return self._data
-
-    def save(self, payload):
-        self._data = payload
 
 
 class TestFakeLLMProvider:

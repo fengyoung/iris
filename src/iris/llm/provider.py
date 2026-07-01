@@ -7,7 +7,6 @@ import logging
 import random
 import socket
 import time
-from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 from urllib import error, request
 
@@ -18,6 +17,7 @@ _DEFAULT_TEMPERATURE = 0.2
 _MAX_BACKOFF_SECONDS = 60  # 指数退避上限
 
 from iris.config.loader import ConfigBundle
+from iris.core.llm_types import LLMRequest, LLMResponse  # 从 core/ 迁移（消除循环依赖）
 from iris.llm.model_manager import ModelManager, ModelManagerError
 from iris.llm.router import ModelRouter, RoutingDecision
 
@@ -26,31 +26,11 @@ class LLMProviderError(RuntimeError):
     """LLM provider 相关错误。"""
 
 
-@dataclass(frozen=True)
-class LLMRequest:
-    """LLM 请求上下文。"""
-
-    prompt: str
-    route_context: Dict[str, Any]
-
-
-@dataclass(frozen=True)
-class LLMResponse:
-    """LLM 返回结果。"""
-
-    text: str
-    selected_role: str
-    provider: str
-    model: str
-    api_base_url: str
-    matched_rule: str
-
-
 class BaseLLMProvider:
     """LLM provider 抽象基类 — 所有 LLM 提供者必须实现此接口。
 
-    与 core.protocols.LLMProvider Protocol 保持签名一致，
-    使用 NotImplementedError 而非 abc.ABC 以保持与 Protocol 的兼容性。
+    使用 NotImplementedError 而非 abc.ABC，保持简洁。
+    FakeLLMProvider、NullLLMProvider 均继承自此基类。
     """
 
     def generate(

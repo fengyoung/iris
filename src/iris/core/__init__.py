@@ -1,6 +1,6 @@
-"""核心抽象层——协议、锁、写入守卫、存储层。"""
+"""核心抽象层——数据类型、锁、写入守卫、存储层。"""
 
-from .protocols import LLMProvider, MemoryStore, PromptLoader
+from .llm_types import LLMRequest, LLMResponse  # 从 protocols 迁移，消除 Any 类型标注
 from .locks import FileLock, FileLockError
 from .write_guard import (
     WriteGuardError,
@@ -17,9 +17,8 @@ except ImportError:
     StorageError = RuntimeError  # type: ignore
 
 __all__ = [
-    "LLMProvider",
-    "MemoryStore",
-    "PromptLoader",
+    "LLMRequest",
+    "LLMResponse",
     "FileLock",
     "FileLockError",
     "WriteGuardError",

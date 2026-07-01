@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
-from iris.llm import LLMProviderError, LLMRequest
-from iris.llm.provider import BaseLLMProvider, LLMResponse
+from iris.core.llm_types import LLMRequest, LLMResponse
+from iris.llm import LLMProviderError
+from iris.llm.provider import BaseLLMProvider
 
 
 class FakeLLMProvider(BaseLLMProvider):
