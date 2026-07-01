@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from datetime import datetime, timezone
+from typing import Any, Dict, List
 
 from iris.complex_input import ComplexInputPipeline
 from iris.config import load_config_bundle
@@ -120,7 +121,6 @@ def handle_build_report(args, bundle, logger) -> int:
     result = service.build_report(args.query, top_k=max(args.top_k, 4), mode=args.mode, two_stage=getattr(args, "two_stage", False))
     payload = result.to_dict()
     if args.output_file:
-        from pathlib import Path
         output_path = Path(args.output_file)
         report_format = getattr(args, "output_format", "md") or "md"
         from iris.output.converters import convert_report
@@ -167,8 +167,6 @@ def handle_build_mindmap(args, bundle, logger) -> int:
 
 def handle_build_biweekly_report(args, bundle, logger) -> int:
     from iris.analysis import AnalysisReportService
-    from datetime import datetime
-
     service = AnalysisReportService(bundle)
     query = getattr(args, "query", "") or ""
     result = service.build_biweekly_report(query=query, mode=getattr(args, "mode", "llm"))
@@ -290,7 +288,6 @@ def handle_wiki_pipeline(args, bundle, logger) -> int:
 
 def handle_wiki_lint(args, bundle, logger) -> int:
     from iris.wiki import lint_wiki, fix_wiki
-    from pathlib import Path
 
     wiki_root = Path(bundle.wiki["wiki_root"]).resolve() if bundle.wiki else Path()
     data_root = bundle.root / "data"
@@ -305,8 +302,7 @@ def handle_wiki_lint(args, bundle, logger) -> int:
                 if items:
                     print(f"  {key}: {len(items)} 处 ({', '.join(items[:5])})")
         else:
-            import json as _json
-            print(_json.dumps(fix_result, ensure_ascii=False, indent=2))
+            print(json.dumps(fix_result, ensure_ascii=False, indent=2))
         return 0
 
     result = lint_wiki(wiki_root, data_root=data_root)
@@ -365,10 +361,6 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
     Phase 2: LLM 误识别映射生成（分 8 批 LLM 调用）
     Phase 3: LLM Prompt 优化压缩（1 次 LLM 调用）
     """
-    import sys
-    from pathlib import Path as _Pt
-    from datetime import datetime, timezone
-    from typing import List
     from iris.wiki.context_loader import WikiContextLoader
     from iris.wiki.term_extractor import (
         TermExtractor, render_asr_prompt, determine_new_version,
@@ -381,7 +373,7 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
     if not bundle.wiki or not bundle.wiki.get("wiki_root"):
         _emit_output(args.command, {"error": "Wiki 配置缺失"}, pretty=args.pretty)
         return 1
-    wiki_root = _Pt(bundle.wiki["wiki_root"]).resolve()
+    wiki_root = Path(bundle.wiki["wiki_root"]).resolve()
     if not wiki_root.exists():
         _emit_output(args.command, {"error": "Wiki 根目录不存在"}, pretty=args.pretty)
         return 1
@@ -475,7 +467,7 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
 
         # 写入文件
         if args.output_file:
-            out = _Pt(args.output_file)
+            out = Path(args.output_file)
             clean_stem = _strip_version_suffix(out.stem)
             version_tag = f"v{new_version.version}"
             out = out.with_name(f"{clean_stem}_{version_tag}{out.suffix}")
@@ -517,8 +509,6 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
 
 
 def _load_batch_items(path: Path):
-    import json
-    import sys
     items = []
     for idx, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         line = raw_line.strip()
@@ -539,8 +529,6 @@ def _load_batch_items(path: Path):
 
 
 def _load_review_items(path: Path):
-    import json
-    import sys
     items = []
     for idx, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         line = raw_line.strip()
@@ -615,8 +603,7 @@ def handle_build_vector_index(args, bundle, logger) -> int:
         if not summary_path.exists():
             results.append({"source": source_name, "status": "skipped", "reason": "chunk_summary 不存在"})
             continue
-        import json as _json
-        payload = _json.loads(summary_path.read_text(encoding="utf-8"))
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
         from iris.ingest.chunker import ChunkRecord
         chunks = [ChunkRecord(**item) for item in payload["chunks"]]
         index_path = metadata_root / f"{source_name}_vector_index"
@@ -865,12 +852,11 @@ def _daily_vector_index(bundle) -> dict:
         if not embedder:
             return {"status": "skipped", "reason": "embedder_not_configured"}
         from iris.retrieval.vector_index import VectorIndex, build_vector_index
-        import json as _vi_json
         ds_name = (bundle.data_source or {}).get("default_source", "work_docs_main")
         summary_path = bundle.root / "data" / "metadata" / f"{ds_name}_chunk_summary.json"
         if not summary_path.exists():
             return {"status": "skipped", "reason": "no_chunk_summary"}
-        vi_payload = _vi_json.loads(summary_path.read_text(encoding="utf-8"))
+        vi_payload = json.loads(summary_path.read_text(encoding="utf-8"))
         from iris.ingest.chunker import ChunkRecord
         vi_chunks = [ChunkRecord(**item) for item in vi_payload["chunks"]]
         index_path = bundle.root / "data" / "metadata" / f"{ds_name}_vector_index"
@@ -892,7 +878,7 @@ def _auto_discover_wiki_for_daily(bundle, chunk_summaries) -> dict:
 def _daily_wiki_maintenance(bundle, chunk_summaries) -> tuple:
     """Wiki 增量更新 + 人物信息丰富。"""
     from iris.wiki import WikiNavigationBuilder, append_changelog
-    from pathlib import Path as _Pt
+    # Path 已在模块顶部导入
 
     wiki_update_result = {"status": "skipped", "reason": "无 chunk 数据"}
     person_enrich_result = {"status": "skipped", "reason": "无 wiki_root 配置"}
@@ -904,7 +890,7 @@ def _daily_wiki_maintenance(bundle, chunk_summaries) -> tuple:
     wiki_update_result = WikiGenerator(bundle).update_all_pages(top_k=4)
     builder = WikiNavigationBuilder(bundle)
     builder.build(write=True)
-    append_changelog(_Pt(bundle.wiki["wiki_root"]), "daily-start 自动维护")
+    append_changelog(Path(bundle.wiki["wiki_root"]), "daily-start 自动维护")
 
     # 飞书通讯录人物信息丰富（静默失败，不影响主流程）
     try:

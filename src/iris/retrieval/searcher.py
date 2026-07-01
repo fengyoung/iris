@@ -215,12 +215,17 @@ def _score_chunk(query: str, query_tokens: List[str], chunk: ChunkRecord,
             if token not in matched:
                 matched.append(token)
 
-    content_tokens = tokenize(chunk.content)
-    freq: Dict[str, int] = defaultdict(int)
-    for token in content_tokens:
-        freq[token] += 1
-
-    doc_len = len(content_tokens)
+    # 优先使用预计算的 token_freq（chunking 阶段已构建），避免每次搜索重新分词
+    if chunk.token_freq:
+        freq = chunk.token_freq
+        doc_len = sum(freq.values())
+    else:
+        # 回退：兼容旧 chunk 数据（token_freq 为 None 或空 dict）
+        content_tokens = tokenize(chunk.content)
+        freq = defaultdict(int)
+        for token in content_tokens:
+            freq[token] += 1
+        doc_len = len(content_tokens)
     N = max(total_docs, 1)
     avgdl = avg_doc_len if avg_doc_len > 0 else max(doc_len, 50)
     df_map = df if df is not None else {}

@@ -132,5 +132,5 @@ def extract_date(time_str: str) -> str:
 
 
 def now_iso() -> str:
-    """返回当前时间的 ISO 8601 带时区字符串。"""
-    return datetime.now().astimezone().isoformat()
+    """返回当前 UTC 时间的 ISO 8601 字符串（统一使用 UTC，避免本地/UTC 混用）。"""
+    return datetime.now(timezone.utc).isoformat()
