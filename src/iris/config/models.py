@@ -3,8 +3,9 @@
 从 iris2 迁移，适配 iris3 的 4 种 Wiki 页面类型 (domain/concept/project/person)
 和 llm.json v3.3 结构（策略开关 + 4 adv_model）。
 
-与 config/loader.py 的 ConfigBundle（Dict 访问）并存，
-通过 ConfigBundleV2.from_config_bundle() 渐进迁移。
+v3.11: BaseConfigModel 基类提供 __getitem__ / get() 向后兼容，
+      使旧代码的 config.llm["models"] 风格访问在 Pydantic 模型上仍可工作。
+      渐进迁移完成后再移除这些方法。
 """
 
 from __future__ import annotations
@@ -12,13 +13,30 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, SecretStr, field_validator
+from pydantic import BaseModel, Field, field_validator
+
+
+class BaseConfigModel(BaseModel):
+    """配置模型的基类 — 向后兼容 dict 风格访问。
+
+    允许旧代码以 config["key"] 和 config.get("key", default)
+    访问 Pydantic 模型字段，作为属性访问的过渡桥接。
+    """
+
+    def __getitem__(self, key: str) -> Any:
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
 
 
 # ── App 配置 ──────────────────────────────────────────────────────
 
 
-class QAConfig(BaseModel):
+class QAConfig(BaseConfigModel):
     """问答上下文预算配置。"""
     max_prompt_context_chars: int = Field(default=6000, gt=0, description="LLM prompt 最大上下文字符数")
     max_evidence_blocks: int = Field(default=6, gt=0, description="最大证据块数")
@@ -27,21 +45,22 @@ class QAConfig(BaseModel):
     max_wiki_summary_chars: int = Field(default=200, gt=0, description="每条 Wiki 摘要最大字符数")
 
 
-class OutputConfig(BaseModel):
+class OutputConfig(BaseConfigModel):
     """输出配置。"""
     default_output_mode: Literal["chat"] = "chat"
     pretty_by_default: bool = Field(default=False, description="默认人类可读输出")
 
 
-class SessionConfig(BaseModel):
+class SessionConfig(BaseConfigModel):
     """会话配置。"""
     enable_session_memory: bool = Field(default=True, description="启用会话记忆")
     session_timeout_minutes: int = Field(default=30, gt=0, description="会话超时（分钟）")
+    session_summary_dir: str = Field(default="./data/memory/sessions", description="会话摘要存储目录")
     max_recent_questions: int = Field(default=8, ge=1, description="最多记录最近问题数")
     max_recent_topics: int = Field(default=12, ge=1, description="最多记录最近主题数")
 
 
-class PathsConfig(BaseModel):
+class PathsConfig(BaseConfigModel):
     """路径配置。"""
     output_dir: str = Field(default="./output")
     temp_dir: str = Field(default="./temp")
@@ -50,19 +69,19 @@ class PathsConfig(BaseModel):
     log_dir: str = Field(default="./logs")
 
 
-class LoggingConfig(BaseModel):
+class LoggingConfig(BaseConfigModel):
     """日志配置。"""
     log_to_file: bool = Field(default=False)
     level: str = Field(default="INFO")
 
 
-class SafetyConfig(BaseModel):
+class SafetyConfig(BaseConfigModel):
     """安全配置。"""
     allowed_write_paths: List[str] = Field(default_factory=list, description="允许写入的路径白名单")
     enforce_write_guard: bool = Field(default=True, description="启用写入守卫")
 
 
-class AppConfig(BaseModel):
+class AppConfig(BaseConfigModel):
     """应用层配置。"""
     version: str
     app: Dict[str, Any] = Field(default_factory=dict)
@@ -77,7 +96,7 @@ class AppConfig(BaseModel):
 # ── 数据源配置 ────────────────────────────────────────────────────
 
 
-class DataSourceItem(BaseModel):
+class DataSourceItem(BaseConfigModel):
     """单个数据源配置。"""
     enabled: bool = True
     name: str = ""
@@ -92,7 +111,7 @@ class DataSourceItem(BaseModel):
     notes: str = ""
 
 
-class IngestionConfig(BaseModel):
+class IngestionConfig(BaseConfigModel):
     """摄入配置。"""
     scan_on_startup: bool = True
     incremental_scan: bool = True
@@ -105,7 +124,7 @@ class IngestionConfig(BaseModel):
     max_preview_chars: int = Field(default=180, gt=0)
 
 
-class DataSourceConfig(BaseModel):
+class DataSourceConfig(BaseConfigModel):
     """数据源配置。"""
     version: str
     default_source: str
@@ -124,7 +143,7 @@ class DataSourceConfig(BaseModel):
 # ── LLM 配置 ──────────────────────────────────────────────────────
 
 
-class ModelItem(BaseModel):
+class ModelItem(BaseConfigModel):
     """单个模型配置。"""
     provider: str
     model: str
@@ -142,7 +161,7 @@ class ModelItem(BaseModel):
     use_cases: List[str]
     notes: str = ""
     api_base_url: str
-    api_key: SecretStr
+    api_key: str
 
     @field_validator("api_base_url")
     @classmethod
@@ -152,14 +171,14 @@ class ModelItem(BaseModel):
         return v
 
 
-class RoleModels(BaseModel):
+class RoleModels(BaseConfigModel):
     """一个角色下的模型注册表。"""
     enabled: bool = True
     default_model_id: str
     models: Dict[str, ModelItem]
 
 
-class DefaultStrategy(BaseModel):
+class DefaultStrategy(BaseConfigModel):
     """默认路由策略。"""
     default_model_role: str
     fallback_model_role: str
@@ -168,7 +187,7 @@ class DefaultStrategy(BaseModel):
     allow_auto_downgrade: bool = True
 
 
-class RoutingRule(BaseModel):
+class RoutingRule(BaseConfigModel):
     """单条路由规则。"""
     name: str
     enabled: bool = True
@@ -179,22 +198,22 @@ class RoutingRule(BaseModel):
     description: str = ""
 
 
-class RoutingConfig(BaseModel):
+class RoutingConfig(BaseConfigModel):
     """路由配置。"""
     rules: List[RoutingRule]
 
 
-class EmbeddingConfig(BaseModel):
+class EmbeddingConfig(BaseConfigModel):
     """Embedding 配置。"""
     enabled: bool = False
     model: str = "text-embedding-v3"
     api_base_url: str = ""
-    api_key: SecretStr = SecretStr("")
+    api_key: str = ""
     timeout_seconds: int = Field(default=30, gt=0)
     max_retries: int = Field(default=2, ge=0)
 
 
-class LLMConfig(BaseModel):
+class LLMConfig(BaseConfigModel):
     """LLM 层配置。"""
     version: str
     default_strategy: DefaultStrategy
@@ -206,7 +225,7 @@ class LLMConfig(BaseModel):
 # ── Wiki 配置 ─────────────────────────────────────────────────────
 
 
-class PageTypeConfig(BaseModel):
+class PageTypeConfig(BaseConfigModel):
     """单种 Wiki 页面类型配置。"""
     enabled: bool = True
     subdir: str
@@ -214,19 +233,19 @@ class PageTypeConfig(BaseModel):
     template_name: str
 
 
-class IndexConfig(BaseModel):
+class IndexConfig(BaseConfigModel):
     """Wiki 索引配置。"""
     auto_update: bool = True
     filename: str = "index.md"
 
 
-class ChangelogConfig(BaseModel):
+class ChangelogConfig(BaseConfigModel):
     """Wiki 变更日志配置。"""
     auto_update: bool = True
     filename: str = "changelog.md"
 
 
-class WikiConfig(BaseModel):
+class WikiConfig(BaseConfigModel):
     """Wiki 配置。"""
     version: str
     wiki_root: str
@@ -238,7 +257,7 @@ class WikiConfig(BaseModel):
 # ── 飞书配置 ──────────────────────────────────────────────────────
 
 
-class FeishuIngestConfig(BaseModel):
+class FeishuIngestConfig(BaseConfigModel):
     """飞书摄入配置（可选）。"""
     version: str = "3.2"
     doc_convert: Dict[str, Any] = Field(default_factory=dict)
@@ -248,7 +267,7 @@ class FeishuIngestConfig(BaseModel):
 # ── 配置聚合根 ────────────────────────────────────────────────────
 
 
-class ConfigBundleV2(BaseModel):
+class ConfigBundleV2(BaseConfigModel):
     """类型安全的配置聚合根（Pydantic v2）。
 
     对应 config/loader.py 的 ConfigBundle（Dict 访问），
@@ -279,7 +298,7 @@ class ConfigBundleV2(BaseModel):
     app: AppConfig
     data_source: DataSourceConfig
     llm: LLMConfig
-    wiki: WikiConfig
+    wiki: Optional[WikiConfig] = None
     feishu_ingest: Optional[FeishuIngestConfig] = None
     meeting_routes: Optional[Dict[str, Any]] = None
 
@@ -301,35 +320,71 @@ class ConfigBundleV2(BaseModel):
     def metadata_dir(self) -> Path:
         return self.root / "data" / "metadata"
 
-    # ── 从 ConfigBundle 转换 ──────────────────────────────────
+    # ── 工厂方法 ──────────────────────────────────────────────
 
     @classmethod
-    def from_config_bundle(cls, bundle: Any) -> "ConfigBundleV2":
-        """从现有 ConfigBundle（dataclass, Dict 访问）转换为类型安全版本。
+    def from_dicts(
+        cls,
+        *,
+        root: Path,
+        app_dict: Dict[str, Any],
+        data_source_dict: Dict[str, Any],
+        llm_dict: Dict[str, Any],
+        wiki_dict: Optional[Dict[str, Any]] = None,
+        meeting_routes: Optional[Dict[str, Any]] = None,
+        feishu_ingest_dict: Optional[Dict[str, Any]] = None,
+    ) -> "ConfigBundleV2":
+        """从配置字典构建类型安全的 ConfigBundleV2。
 
-        Args:
-            bundle: config/loader.py 的 ConfigBundle 实例
-
-        Returns:
-            ConfigBundleV2 实例
+        由 loader.load_config_bundle() 调用，传入已解析 ${VAR} 占位符的字典。
+        Pydantic 在此自动校验所有字段和约束。
         """
-        wiki_dict = bundle.wiki or {}
-        feishu_dict = bundle.feishu_ingest or {}
+        wd = wiki_dict or {}
+        fd = feishu_ingest_dict or {}
         return cls(
-            root=bundle.root,
-            app=AppConfig(**bundle.app),
-            data_source=DataSourceConfig(**bundle.data_source),
-            llm=LLMConfig(**bundle.llm),
-            wiki=WikiConfig(**wiki_dict) if wiki_dict else WikiConfig(
-                version="3.2",
-                wiki_root="",
-                page_types={
-                    "domain": PageTypeConfig(subdir="01-领域", filename_prefix="领域-", template_name="domain.md"),
-                    "concept": PageTypeConfig(subdir="02-概念", filename_prefix="概念-", template_name="concept.md"),
-                    "project": PageTypeConfig(subdir="03-项目", filename_prefix="项目-", template_name="project.md"),
-                    "person": PageTypeConfig(subdir="04-人物", filename_prefix="人物-", template_name="person.md"),
-                },
-            ),
-            feishu_ingest=FeishuIngestConfig(**feishu_dict) if feishu_dict else None,
-            meeting_routes=bundle.meeting_routes,
+            root=root,
+            app=AppConfig(**app_dict),
+            data_source=DataSourceConfig(**data_source_dict),
+            llm=LLMConfig(**llm_dict),
+            wiki=WikiConfig(**wd) if wd else None,
+            feishu_ingest=FeishuIngestConfig(**fd) if fd else None,
+            meeting_routes=meeting_routes,
+        )
+
+    @classmethod
+    def from_config_bundle(
+        cls,
+        bundle: Any = None,
+        *,
+        root: Optional[Path] = None,
+        app_dict: Optional[Dict[str, Any]] = None,
+        data_source_dict: Optional[Dict[str, Any]] = None,
+        llm_dict: Optional[Dict[str, Any]] = None,
+        wiki_dict: Optional[Dict[str, Any]] = None,
+        meeting_routes: Optional[Dict[str, Any]] = None,
+        feishu_ingest_dict: Optional[Dict[str, Any]] = None,
+    ) -> "ConfigBundleV2":
+        """向后兼容：接受旧 ConfigBundle 对象或字典参数。"""
+        # 已经是 ConfigBundleV2，直接返回
+        if isinstance(bundle, ConfigBundleV2):
+            return bundle
+        # 是旧 dataclass ConfigBundle
+        if bundle is not None and hasattr(bundle, "root"):
+            return cls.from_dicts(
+                root=bundle.root,
+                app_dict=bundle.app if isinstance(bundle.app, dict) else {},
+                data_source_dict=bundle.data_source if isinstance(bundle.data_source, dict) else {},
+                llm_dict=bundle.llm if isinstance(bundle.llm, dict) else {},
+                wiki_dict=bundle.wiki or {},
+                meeting_routes=getattr(bundle, "meeting_routes", None),
+                feishu_ingest_dict=bundle.feishu_ingest or {},
+            )
+        return cls.from_dicts(
+            root=root or Path("."),
+            app_dict=app_dict or {},
+            data_source_dict=data_source_dict or {},
+            llm_dict=llm_dict or {},
+            wiki_dict=wiki_dict,
+            meeting_routes=meeting_routes,
+            feishu_ingest_dict=feishu_ingest_dict,
         )

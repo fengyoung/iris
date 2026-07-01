@@ -1,4 +1,9 @@
-"""加载和校验 Iris JSON 配置，支持 .env 变量注入与路径占位符。"""
+"""加载和校验 Iris JSON 配置，支持 .env 变量注入与路径占位符。
+
+v3.11: load_config_bundle() 返回 ConfigBundleV2（Pydantic v2 类型安全），
+       删除手工校验函数（_validate_* → Pydantic 自动校验）。
+       ConfigBundle dataclass 保留为类型别名（兼容旧代码的类型标注）。
+"""
 
 from __future__ import annotations
 
@@ -6,9 +11,11 @@ import json
 import logging
 import os
 import re
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
+
+from iris.config.models import ConfigBundleV2
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +26,12 @@ class ConfigError(ValueError):
 
 @dataclass(frozen=True)
 class ConfigBundle:
-    """聚合后的配置对象。"""
+    """过渡性配置容器（dataclass, Dict 访问）。
+
+    v3.11: load_config_bundle() 返回 ConfigBundleV2（Pydantic v2），
+    但保留此 dataclass 供测试和旧代码的类型标注使用。
+    渐进迁移完成后可删除。
+    """
 
     root: Path
     app: Dict[str, Any]
@@ -28,6 +40,18 @@ class ConfigBundle:
     wiki: Dict[str, Any] | None = None
     meeting_routes: Dict[str, Any] | None = None
     feishu_ingest: Dict[str, Any] | None = None
+
+    def to_v2(self) -> ConfigBundleV2:
+        """转换为类型安全版本。"""
+        return ConfigBundleV2.from_dicts(
+            root=self.root,
+            app_dict=self.app,
+            data_source_dict=self.data_source,
+            llm_dict=self.llm,
+            wiki_dict=self.wiki or {},
+            meeting_routes=self.meeting_routes,
+            feishu_ingest_dict=self.feishu_ingest or {},
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -195,18 +219,24 @@ def load_config_bundle(
     for name in loaded:
         loaded[name] = resolve_path_vars(loaded[name], root)
 
-    _validate_app_config(loaded["app"])
-    _validate_data_source_config(loaded["data_source"])
-    _validate_llm_config(loaded["llm"])
-
-    # 可选加载配置文件（实际文件优先，其次 .example 占位符）
+    # ── 可选配置 ──────────────────────────────────────────────
     wiki_config = _load_optional_config(config_root, "wiki.json", env, root)
     meeting_routes_config = _load_optional_config(config_root, "meeting_routes.json", env, root)
     feishu_ingest_config = _load_optional_config(config_root, "feishu_ingest.json", env, root)
 
-    return ConfigBundle(root=root, **loaded, wiki=wiki_config,
-                        meeting_routes=meeting_routes_config,
-                        feishu_ingest=feishu_ingest_config)
+    # ── 通过 Pydantic v2 构建类型安全配置（自动校验） ─────────
+    try:
+        return ConfigBundleV2.from_dicts(
+            root=root,
+            app_dict=loaded["app"],
+            data_source_dict=loaded["data_source"],
+            llm_dict=loaded["llm"],
+            wiki_dict=wiki_config,
+            meeting_routes=meeting_routes_config,
+            feishu_ingest_dict=feishu_ingest_config,
+        )
+    except Exception as exc:
+        raise ConfigError(f"配置校验失败: {exc}") from exc
 
 
 def _load_json(path: Path) -> Dict[str, Any]:
@@ -245,136 +275,6 @@ def _load_optional_config(
     return None
 
 
-def _require_keys(data: Dict[str, Any], keys: Iterable[str], prefix: str) -> None:
-    for key in keys:
-        if key not in data:
-            raise ConfigError(f"缺少必填字段: {prefix}{key}")
-
-
-def _validate_app_config(config: Dict[str, Any]) -> None:
-    _require_keys(config, ["version", "app", "paths", "session", "output", "qa", "logging", "safety"], "app.")
-    if config["output"].get("default_output_mode") != "chat":
-        raise ConfigError("app.output.default_output_mode 当前必须为 chat")
-    qa = config["qa"]
-    _require_keys(
-        qa,
-        [
-            "max_prompt_context_chars",
-            "max_evidence_blocks",
-            "max_wiki_hits",
-            "max_block_summary_chars",
-            "max_wiki_summary_chars",
-        ],
-        "app.qa.",
-    )
-    for key in (
-        "max_prompt_context_chars",
-        "max_evidence_blocks",
-        "max_wiki_hits",
-        "max_block_summary_chars",
-        "max_wiki_summary_chars",
-    ):
-        value = qa[key]
-        if not isinstance(value, int) or value <= 0:
-            raise ConfigError(f"app.qa.{key} 必须是正整数")
-
-
-def _validate_data_source_config(config: Dict[str, Any]) -> None:
-    _require_keys(config, ["version", "default_source", "sources", "ingestion"], "data_source.")
-    sources = config["sources"]
-    if not isinstance(sources, dict) or not sources:
-        raise ConfigError("data_source.sources 至少需要一个数据源")
-
-    default_source = config["default_source"]
-    if default_source not in sources:
-        raise ConfigError("data_source.default_source 必须存在于 sources 中")
-
-    enabled_sources = 0
-    for source_name, source in sources.items():
-        _require_keys(
-            source,
-            ["enabled", "path", "format", "read_only", "include_patterns", "exclude_patterns"],
-            f"data_source.sources.{source_name}.",
-        )
-        if source["enabled"]:
-            enabled_sources += 1
-        if source["format"] not in ("markdown", "pdf"):
-            raise ConfigError(f"不支持的数据源格式: {source_name}.format={source['format']}，当前支持 markdown / pdf")
-
-    if enabled_sources == 0:
-        raise ConfigError("data_source.sources 至少需要启用一个数据源")
-
-    default_config = sources[default_source]
-    if not default_config.get("read_only", False):
-        raise ConfigError("主数据源必须显式配置 read_only=true")
-
-
-def _validate_llm_config(config: Dict[str, Any]) -> None:
-    _require_keys(config, ["version", "default_strategy", "models", "routing"], "llm.")
-
-    models = config["models"]
-    for role in ("base_model", "adv_model"):
-        if role not in models:
-            raise ConfigError(f"llm.models 缺少角色: {role}")
-
-        role_container = models[role]
-        _require_keys(
-            role_container,
-            ["enabled", "default_model_id", "models"],
-            f"llm.models.{role}.",
-        )
-
-        inner_models = role_container["models"]
-        if not isinstance(inner_models, dict) or not inner_models:
-            raise ConfigError(f"llm.models.{role}.models 必须是非空对象")
-
-        default_id = role_container["default_model_id"]
-        if default_id not in inner_models:
-            raise ConfigError(
-                f"llm.models.{role}.default_model_id '{default_id}' 未在 models 中定义"
-            )
-
-        advanced_role_has_text = False
-        for mid, model_cfg in inner_models.items():
-            _require_keys(
-                model_cfg,
-                ["provider", "model", "api_base_url", "api_key", "multimodal", "supported_inputs", "use_cases"],
-                f"llm.models.{role}.models.{mid}.",
-            )
-
-            supported_inputs = model_cfg["supported_inputs"]
-            if not isinstance(supported_inputs, list) or not supported_inputs:
-                raise ConfigError(f"llm.models.{role}.models.{mid}.supported_inputs 必须是非空数组")
-            if model_cfg["multimodal"] is False and "image" in supported_inputs:
-                raise ConfigError(f"llm.models.{role}.models.{mid} 不支持多模态却声明了 image 输入")
-            if role == "adv_model" and "text" in supported_inputs:
-                advanced_role_has_text = True
-            if not isinstance(model_cfg["api_base_url"], str) or not model_cfg["api_base_url"].strip():
-                raise ConfigError(f"llm.models.{role}.models.{mid}.api_base_url 必须是非空字符串")
-            if not isinstance(model_cfg["api_key"], str):
-                raise ConfigError(f"llm.models.{role}.models.{mid}.api_key 必须是字符串")
-
-        if role == "adv_model" and not advanced_role_has_text:
-            raise ConfigError("llm.models.adv_model 至少要有一个模型支持 text 输入")
-
-    strategy = config["default_strategy"]
-    _require_keys(strategy, ["default_model_role", "fallback_model_role"], "llm.default_strategy.")
-    for field in ("default_model_role", "fallback_model_role"):
-        if strategy[field] not in models:
-            raise ConfigError(f"llm.default_strategy.{field} 必须指向已定义模型")
-
-    routing = config["routing"]
-    rules = routing.get("rules")
-    if not isinstance(rules, list) or not rules:
-        raise ConfigError("llm.routing.rules 必须是非空数组")
-
-    seen_names = set()
-    for rule in rules:
-        _require_keys(rule, ["name", "enabled", "priority", "match", "route_to"], "llm.routing.rules[].")
-        if rule["name"] in seen_names:
-            raise ConfigError(f"llm.routing.rules 存在重复名称: {rule['name']}")
-        seen_names.add(rule["name"])
-        if rule["route_to"] not in models:
-            raise ConfigError(f"llm.routing.rules.{rule['name']}.route_to 未定义")
-        if "fallback_to" in rule and rule["fallback_to"] not in models:
-            raise ConfigError(f"llm.routing.rules.{rule['name']}.fallback_to 未定义")
+# ── 以下手工校验已由 ConfigBundleV2 的 Pydantic v2 校验替代 ──
+# 包括：字段存在性、数据类型、数值范围、启用数据源数、role/model 一致性等
+# 相关 Pydantic 模型：AppConfig / DataSourceConfig / LLMConfig / WikiConfig

@@ -15,6 +15,7 @@ from iris.config.loader import (
     resolve_env_vars,
     resolve_path_vars,
 )
+from iris.config.models import ConfigBundleV2
 
 
 class TestLoadEnvFile:
@@ -80,7 +81,7 @@ class TestResolveEnvVars:
 
 class TestConfigBundle:
     def test_load_minimal(self, config_bundle):
-        assert isinstance(config_bundle, ConfigBundle)
+        assert isinstance(config_bundle, ConfigBundleV2)
         assert config_bundle.root.exists()
         assert config_bundle.app["app"]["name"] == "Iris"
 
