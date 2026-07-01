@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from iris.config.loader import ConfigBundle
-from iris.llm.provider import LLMRequest, LLMResponse, EnvironmentConfiguredLLMProvider
+from iris.llm import LLMService
 from iris.trello.models import TrelloCard
 
 _TRELLO_DATETIME_FMT = "%Y-%m-%dT%H:%M:%S.%fZ"
@@ -16,7 +16,7 @@ _TRELLO_DATETIME_FMT = "%Y-%m-%dT%H:%M:%S.%fZ"
 class TrelloLLM:
     def __init__(self, config_bundle: ConfigBundle, model: Optional[str] = None):
         self._config = config_bundle
-        self._provider = EnvironmentConfiguredLLMProvider(config_bundle)
+        self._llm = LLMService(config_bundle)
         self._model = model
 
     def summarize(self, cards: List[TrelloCard]) -> str:
@@ -25,7 +25,7 @@ class TrelloLLM:
         context = self._build_cards_context(cards)
         prompt = _SUMMARIZE_PROMPT.format(context=context, now=datetime.now().strftime("%Y-%m-%d %H:%M"))
         response = self._call_llm(prompt, input_type="text")
-        return response.text
+        return response
 
     def prioritize(self, cards: List[TrelloCard]) -> List[Dict[str, Any]]:
         if not cards:
@@ -34,7 +34,7 @@ class TrelloLLM:
         prompt = _PRIORITIZE_PROMPT.format(context=context, now=datetime.now().strftime("%Y-%m-%d %H:%M"))
         response = self._call_llm(prompt, input_type="text")
         try:
-            result = json.loads(_extract_json_block(response.text))
+            result = json.loads(_extract_json_block(response))
             return result if isinstance(result, list) else []
         except (json.JSONDecodeError, ValueError):
             return [{"id": c.id, "name": c.name, "priority_reason": "(解析失败)"} for c in cards]
@@ -43,7 +43,7 @@ class TrelloLLM:
         prompt = _NL_PARSE_PROMPT.format(user_input=text)
         response = self._call_llm(prompt, input_type="text")
         try:
-            result = json.loads(_extract_json_block(response.text))
+            result = json.loads(_extract_json_block(response))
             return result if isinstance(result, dict) else {"action": "unknown", "reason": "LLM 返回格式异常"}
         except (json.JSONDecodeError, ValueError):
             return {"action": "unknown", "reason": "解析失败"}
@@ -52,7 +52,7 @@ class TrelloLLM:
         prompt = _BREAKDOWN_PROMPT.format(title=title, desc=desc or "(无详细描述)")
         response = self._call_llm(prompt, input_type="text")
         try:
-            result = json.loads(_extract_json_block(response.text))
+            result = json.loads(_extract_json_block(response))
             return result if isinstance(result, list) else []
         except (json.JSONDecodeError, ValueError):
             return []
@@ -71,19 +71,19 @@ class TrelloLLM:
             prompt += f"\n\n以下为 Trello 看板中已有的待办事项，请勿重复输出语义相同的项：\n" + "\n".join(f"- {t}" for t in existing_titles)
         response = self._call_llm(prompt, input_type="text")
         try:
-            result = json.loads(_extract_json_block(response.text))
+            result = json.loads(_extract_json_block(response))
             return result if isinstance(result, list) else []
         except (json.JSONDecodeError, ValueError):
             return []
 
-    def _call_llm(self, prompt: str, input_type: str = "text") -> LLMResponse:
+    def _call_llm(self, prompt: str, input_type: str = "text") -> str:
         route_context: Dict[str, Any] = {"input_type": input_type}
         if self._model:
             route_context["user_selected_role"] = f"{self._model}_model"
         if input_type == "multimodal":
             route_context["task_type"] = "analysis"
             route_context["complexity"] = "complex"
-        return self._provider.generate(LLMRequest(prompt=prompt, route_context=route_context))
+        return self._llm.generate(prompt, route_context=route_context)
 
     def _build_cards_context(self, cards: List[TrelloCard]) -> str:
         lines = []

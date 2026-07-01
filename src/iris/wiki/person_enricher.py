@@ -16,11 +16,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from iris.config.loader import ConfigBundle
 from iris.feishu.client import FeishuClient, FeishuClientError
+from .searcher import parse_frontmatter, FRONTMATTER_RE
 
 logger = logging.getLogger(__name__)
-
-# YAML frontmatter 正则
-_FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
 # 批量查询每批最多 names 数（lark-cli --queries 无硬性限制，保守分批）
 _BATCH_SIZE = 20
@@ -201,14 +199,9 @@ class PersonEnricher:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             return ""
-        # 尝试 frontmatter
-        m = _FRONTMATTER_RE.match(text)
-        if m:
-            for line in m.group(1).splitlines():
-                if line.startswith("title:"):
-                    raw = line.split(":", 1)[1].strip().strip("\"'")
-                    if raw:
-                        return raw
+        fm, _ = parse_frontmatter(text)
+        if "title" in fm:
+            return fm["title"]
         # fallback: 文件名
         stem = path.stem
         if stem.startswith("人物-"):
@@ -247,18 +240,8 @@ class PersonEnricher:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             return False
-        m = _FRONTMATTER_RE.match(text)
-        if not m:
-            return False
-        fm_text = m.group(1)
-        existing_dept = ""
-        existing_email = ""
-        for line in fm_text.splitlines():
-            if line.startswith("department:"):
-                existing_dept = line.split(":", 1)[1].strip().strip("\"'")
-            if line.startswith("email:"):
-                existing_email = line.split(":", 1)[1].strip().strip("\"'")
-        return existing_dept == department and existing_email == email
+        fm, _ = parse_frontmatter(text)
+        return fm.get("department", "").strip("\"'") == department and fm.get("email", "").strip("\"'") == email
 
     def _update_page(self, path: Path, name: str, department: str, email: str) -> None:
         """更新页面 frontmatter 中的 department 和 email 字段。
@@ -268,7 +251,7 @@ class PersonEnricher:
         3. 原子写入
         """
         text = path.read_text(encoding="utf-8")
-        m = _FRONTMATTER_RE.match(text)
+        m = FRONTMATTER_RE.match(text)
         if not m:
             logger.warning("跳过 %s: 无有效 frontmatter", name)
             return

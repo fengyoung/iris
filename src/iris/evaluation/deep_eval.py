@@ -15,11 +15,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from iris.config.loader import ConfigBundle, load_config_bundle
-from iris.llm.provider import (
-    EnvironmentConfiguredLLMProvider,
-    LLMProviderError,
-    LLMRequest,
-)
+from iris.llm import LLMService
+from iris.llm.provider import LLMProviderError
 
 # ──────────────────────────────────────────────
 # 数据结构
@@ -408,9 +405,9 @@ PAGE_ACCURACY_PROMPT_TEMPLATE = """你正在审核 Wiki 页面内容是否与原
 class AccuracyVerifier:
     """准确性校验器：逐条审核 Wiki 引用是否与源文档一致。"""
 
-    def __init__(self, llm_provider: EnvironmentConfiguredLLMProvider,
+    def __init__(self, llm_service: LLMService,
                  source_locator: SourceLocator):
-        self._llm = llm_provider
+        self._llm = llm_service
         self._locator = source_locator
 
     def verify(self, entries: List[ReferenceEntry],
@@ -472,19 +469,16 @@ class AccuracyVerifier:
         )
 
         try:
-            resp = self._llm.generate(
-                LLMRequest(
-                    prompt=prompt,
-                    route_context={
-                        "input_type": "text",
-                        "task_type": "analysis",
-                        "complexity": "simple",
-                    },
-                ),
+            result_line = self._llm.generate(
+                prompt,
+                route_context={
+                    "input_type": "text",
+                    "task_type": "analysis",
+                    "complexity": "simple",
+                },
                 temperature=0.1,
                 max_tokens=100,
-            )
-            result_line = resp.text.strip().split("\n")[0]
+            ).strip().split("\n")[0]
         except LLMProviderError as e:
             return AccuracyVerdict(
                 reference=entry,
@@ -539,19 +533,16 @@ class AccuracyVerifier:
         )
 
         try:
-            resp = self._llm.generate(
-                LLMRequest(
-                    prompt=prompt,
-                    route_context={
-                        "input_type": "text",
-                        "task_type": "analysis",
-                        "complexity": "simple",
-                    },
-                ),
+            result_line = self._llm.generate(
+                prompt,
+                route_context={
+                    "input_type": "text",
+                    "task_type": "analysis",
+                    "complexity": "simple",
+                },
                 temperature=0.1,
                 max_tokens=120,
-            )
-            result_line = resp.text.strip().split("\n")[0]
+            ).strip().split("\n")[0]
         except LLMProviderError as e:
             return AccuracyVerdict(
                 reference=entry,
@@ -609,9 +600,9 @@ COMPREHENSIVENESS_PROMPT_TEMPLATE = """你正在审核 Wiki 页面是否遗漏�
 class ComprehensivenessVerifier:
     """全面性校验器：发现同主题源文件中可能遗漏的关键信息。"""
 
-    def __init__(self, llm_provider: EnvironmentConfiguredLLMProvider,
+    def __init__(self, llm_service: LLMService,
                  source_locator: SourceLocator):
-        self._llm = llm_provider
+        self._llm = llm_service
         self._locator = source_locator
 
     def find_gaps(self, wiki_title: str, wiki_content: str,
@@ -643,19 +634,16 @@ class ComprehensivenessVerifier:
             )
 
             try:
-                resp = self._llm.generate(
-                    LLMRequest(
-                        prompt=prompt,
-                        route_context={
-                            "input_type": "text",
-                            "task_type": "analysis",
-                            "complexity": "simple",
-                        },
-                    ),
+                result_line = self._llm.generate(
+                    prompt,
+                    route_context={
+                        "input_type": "text",
+                        "task_type": "analysis",
+                        "complexity": "simple",
+                    },
                     temperature=0.1,
                     max_tokens=120,
-                )
-                result_line = resp.text.strip().split("\n")[0]
+                ).strip().split("\n")[0]
             except LLMProviderError:
                 continue
 
@@ -708,8 +696,8 @@ class DeepEvaluator:
         self._config = config
         self._wiki_root = Path(config.wiki["wiki_root"])
 
-        # 初始化 LLM provider（走 base_model，纯文本低 cost）
-        self._llm = EnvironmentConfiguredLLMProvider(config)
+        # 初始化 LLM 服务（走 base_model，纯文本低 cost）
+        self._llm = LLMService(config)
 
         # 初始化源定位器（iris3: 主数据源 chunk 摘要）
         data_root = Path(config.root) / "data" / "metadata"

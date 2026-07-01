@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 
@@ -124,16 +127,23 @@ class VectorIndex:
         self._matrix_ids = list(self._data.keys())
         dim = len(next(iter(self._data.values())).get("vector", []))
         if dim == 0:
+            logger.warning("向量索引首个向量为空，搜索功能暂时不可用。请重建索引。")
             self._matrix_cache = None
             return
         self._matrix_cache = np.zeros((len(self._matrix_ids), dim), dtype=np.float32)
         valid_mask = np.ones(len(self._matrix_ids), dtype=bool)
+        dim_mismatch_count = 0
         for idx, cid in enumerate(self._matrix_ids):
             vec = self._data[cid].get("vector", [])
             if len(vec) == dim:
                 self._matrix_cache[idx] = np.array(vec, dtype=np.float32)
             else:
                 valid_mask[idx] = False
+                dim_mismatch_count += 1
+        if dim_mismatch_count > 0:
+            logger.warning("向量索引中 %d/%d 条记录维度不匹配（期望 %d），已跳过。"
+                           "可能原因：embedding 模型更换。建议重建索引。",
+                           dim_mismatch_count, len(self._matrix_ids), dim)
         self._valid_mask = valid_mask
 
     def search(self, query_vector: List[float], top_k: int = 10) -> List[Tuple[str, float]]:

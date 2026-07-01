@@ -180,37 +180,28 @@ class MarkdownChunker:
             return {}
         payload = json.loads(summary_path.read_text(encoding="utf-8"))
         grouped: Dict[str, List[ChunkRecord]] = {}
+        import logging
+        _logger = logging.getLogger(__name__)
         for item in payload.get("chunks", []):
             try:
                 chunk = ChunkRecord(**item)
             except TypeError:
-                return {}
+                _logger.warning("跳过损坏的 chunk 记录: %s", str(item)[:120])
+                continue
             grouped.setdefault(chunk.relative_path, []).append(chunk)
         return grouped
 
 
 def _chunk_pdf_document(document: DocumentRecord, *, max_chunk_chars: int, max_preview_chars: int) -> Iterable[ChunkRecord]:
+    """提取 PDF 文本并直接切块（无需临时文件）。"""
     try:
         from iris.ingest.pdf_extractor import PDFExtractor
         extractor = PDFExtractor()
         markdown_text = extractor.extract_as_markdown(Path(document.path))
     except Exception:
         return []
-    import tempfile
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", encoding="utf-8", delete=False) as tmpf:
-        tmpf.write(markdown_text)
-        tmp_path = Path(tmpf.name)
-    pdf_doc_tmp = DocumentRecord(source_name=document.source_name, path=str(tmp_path),
-                                  relative_path=document.relative_path, size_bytes=len(markdown_text),
-                                  modified_at=document.modified_at, file_hash=document.file_hash, title=document.title)
-    try:
-        yield from _chunk_document(pdf_doc_tmp, max_chunk_chars=max_chunk_chars, max_preview_chars=max_preview_chars)
-    finally:
-        import os
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
+    yield from _chunk_lines(markdown_text.splitlines(), document,
+                            max_chunk_chars=max_chunk_chars, max_preview_chars=max_preview_chars)
 
 
 def _chunk_document(document: DocumentRecord, *, max_chunk_chars: int, max_preview_chars: int) -> Iterable[ChunkRecord]:
@@ -221,7 +212,15 @@ def _chunk_document(document: DocumentRecord, *, max_chunk_chars: int, max_previ
         lines = path.read_text(encoding="utf-8").splitlines()
     except UnicodeDecodeError:
         return []
+    yield from _chunk_lines(lines, document, max_chunk_chars=max_chunk_chars, max_preview_chars=max_preview_chars)
 
+
+def _chunk_lines(lines: List[str], document: DocumentRecord, *,
+                 max_chunk_chars: int, max_preview_chars: int) -> Iterable[ChunkRecord]:
+    """核心切块逻辑：接收行列表 + 文档元数据，产出 ChunkRecord。
+
+    供 _chunk_document（文件路径）和 _chunk_pdf_document（内存文本）共享。
+    """
     sections: List[dict[str, Any]] = []
     current_content: List[str] = []
     current_section_path: List[str] = []

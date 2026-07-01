@@ -190,7 +190,7 @@ class InputDetector:
                         _MAX_IMAGE_BYTES / (1024 * 1024),
                     )
                     continue
-                mime = MIME_MAP[ext]
+                mime = MIME_MAP.get(ext, "application/octet-stream")
                 data_url = _encode_image(p, mime)
                 encoded.append(
                     EncodedImage(path=str(p), mime_type=mime, data_url=data_url)

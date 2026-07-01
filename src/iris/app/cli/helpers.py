@@ -1,4 +1,4 @@
-"""CLI 辅助函数：步骤 1 版本，去掉所有知识库相关依赖。"""
+"""CLI 辅助函数 — 输出格式化、配置展示、Wiki 自动发现等共享工具。"""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any, Dict, List
 
 from iris.app.banner import BANNER
 from iris.config import load_config_bundle
-from iris.llm import EnvironmentConfiguredLLMProvider
+from iris.llm import LLMService
 from iris.output.formatter import format_payload
 from iris.utils.logging import IrisLogger
 
@@ -86,8 +86,8 @@ def _print_config_summary(bundle) -> None:
     print(f"- 默认模型角色: {default_model_role}")
 
     try:
-        prov = EnvironmentConfiguredLLMProvider(bundle)
-        mm = prov.get_model_manager()
+        llm_service = LLMService(bundle)
+        mm = llm_service.get_provider().get_model_manager()
         base_info = mm.get_active_model_info("base_model")
         adv_info = mm.get_active_model_info("adv_model")
         print(f"- 基础模型: [{base_info['model_id']}] {base_info['provider']} {base_info['model']}")
@@ -103,7 +103,8 @@ def _build_diagnose_payload(bundle, logger: IrisLogger) -> Dict[str, Any]:
     data_source = bundle.data_source
     default_source_name = data_source["default_source"]
     default_source = data_source["sources"].get(default_source_name, {})
-    provider = EnvironmentConfiguredLLMProvider(bundle)
+    llm_service = LLMService(bundle)
+    provider = llm_service.get_provider()
     route = provider.resolve({"input_type": "text", "task_type": "qa", "complexity": "standard", "use_case": "qa"})
 
     base_model_info = provider.get_model_manager().get_active_model_info("base_model")

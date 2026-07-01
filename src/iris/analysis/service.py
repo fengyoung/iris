@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from iris.config.loader import ConfigBundle
-from iris.llm import EnvironmentConfiguredLLMProvider, LLMProviderError, LLMRequest
+from iris.llm import LLMProviderError
+from iris.llm.service import LLMService
 from iris.qa import QAService
 from iris.utils.logging import IrisLogger
 from iris.utils.prompting import PromptTemplateLoader
@@ -37,7 +38,7 @@ class AnalysisReportService:
     def __init__(self, config: ConfigBundle):
         self._config = config
         self._qa = QAService(config)
-        self._llm_provider = EnvironmentConfiguredLLMProvider(config)
+        self._llm = LLMService(config)
         self._prompt_loader = PromptTemplateLoader(config)
         self._logger = IrisLogger(config)
 
@@ -54,11 +55,10 @@ class AnalysisReportService:
                 prompt = self._prompt_loader.render("analysis_report.md",
                     {"query": query, "answer": qa_response.answer, "blocks": render_evidence_blocks(blocks),
                      "structured_context": render_structured_evidence(structured)})
-                llm_response = self._llm_provider.generate(LLMRequest(prompt=prompt,
-                    route_context={"input_type": "text", "task_type": "analysis", "complexity": "complex", "use_case": "analysis_basic"}))
-                markdown = llm_response.text.strip()
-                llm_payload = {"provider": llm_response.provider, "model": llm_response.model,
-                               "selected_role": llm_response.selected_role, "matched_rule": llm_response.matched_rule, "fallback_used": False}
+                markdown = self._llm.generate(prompt=prompt,
+                    route_context={"input_type": "text", "task_type": "analysis", "complexity": "complex", "use_case": "analysis_basic"})
+                markdown = markdown.strip()
+                llm_payload = {"fallback_used": False}
                 review_result = None
                 revised = False
                 if two_stage:
@@ -117,13 +117,14 @@ class AnalysisReportService:
                 "evidence": evidence_blocks,
             })
             # 使用 base_model（避免 reasoning 模型输出 CoT）
-            response = self._llm_provider.generate(
-                LLMRequest(prompt=prompt, route_context={
+            markdown = self._llm.generate(
+                prompt=prompt,
+                route_context={
                     "input_type": "text", "task_type": "analysis",
                     "complexity": "standard", "use_case": "biweekly_report",
-                })
+                }
             )
-            markdown = response.text.strip()
+            markdown = markdown.strip()
             # 清理代码块包裹
             from iris.wiki.generator import WikiGenerator
             markdown = WikiGenerator._extract_wiki_content(markdown)
@@ -132,11 +133,7 @@ class AnalysisReportService:
             if not markdown.startswith("*时间周期"):
                 markdown = f"*时间周期：{period}*\n\n{markdown}"
 
-            llm_payload = {
-                "provider": response.provider, "model": response.model,
-                "selected_role": response.selected_role,
-                "matched_rule": response.matched_rule, "fallback_used": False,
-            }
+            llm_payload = {"fallback_used": False}
             result = ReportResponse(query=query, mode="llm", markdown=markdown,
                                      blocks=[], structured={}, llm=llm_payload)
             self._logger.log("biweekly_report", result.to_dict())
@@ -299,15 +296,15 @@ class AnalysisReportService:
         structured_ctx = render_structured_evidence(structured)
         try:
             review_prompt = self._prompt_loader.render("report_review.md", {"query": query, "draft": draft, "structured_context": structured_ctx})
-            review_resp = self._llm_provider.generate(LLMRequest(prompt=review_prompt, route_context={"input_type": "text", "task_type": "analysis", "complexity": "complex", "user_selected_role": "adv_model"}))
-            review_data = _parse_review_json(review_resp.text)
+            review_resp = self._llm.generate(prompt=review_prompt, route_context={"input_type": "text", "task_type": "analysis", "complexity": "complex", "user_selected_role": "adv_model"})
+            review_data = _parse_review_json(review_resp)
             if not review_data or review_data.get("quality_score", 5) >= 4:
                 return draft, review_data, False
             issues_text = "\n".join(f"- {i}" for i in review_data.get("issues", []))
             suggestions_text = "\n".join(f"- {s}" for s in review_data.get("suggestions", []))
             revise_prompt = self._prompt_loader.render("report_revise.md", {"query": query, "issues": issues_text or "无", "suggestions": suggestions_text or "无", "draft": draft, "structured_context": structured_ctx})
-            revise_resp = self._llm_provider.generate(LLMRequest(prompt=revise_prompt, route_context={"input_type": "text", "task_type": "analysis", "complexity": "complex", "use_case": "analysis_basic"}))
-            return revise_resp.text.strip(), review_data, True
+            revise_resp = self._llm.generate(prompt=revise_prompt, route_context={"input_type": "text", "task_type": "analysis", "complexity": "complex", "use_case": "analysis_basic"})
+            return revise_resp.strip(), review_data, True
         except LLMProviderError:
             return draft, None, False
 

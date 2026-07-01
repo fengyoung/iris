@@ -146,8 +146,8 @@ def build_candidates(counter: Counter[str], evidence_counter: Counter[str],
         evidence_count = evidence_counter[title]
         if evidence_count < min_evidence:
             continue
-        if page_type == "term" and not re.search(r"[A-Z]", title):
-            continue
+        if page_type == "concept" and not re.search(r"[A-Z]", title):
+            continue  # 概念标题需含英文缩写或术语
         items.append(CandidateItem(title=title, page_type=page_type, query=title,
                                    score=score, evidence_count=evidence_count,
                                    sample_paths=sample_paths.get(title, [])))
@@ -235,11 +235,13 @@ def normalized_key(title: str) -> str:
 
 
 def is_wiki_stale(wiki_path: Path) -> bool:
+    """检查 Wiki 页面是否超过陈腐阈值（默认 30 天），需要重新生成。"""
+    from ._constants import STALE_DAYS_THRESHOLD
     generated_at = parse_wiki_generated_at(str(wiki_path))
     if generated_at is None:
         return True
     now = datetime.now(generated_at.tzinfo) if generated_at.tzinfo else datetime.now()
-    return (now - generated_at).days >= 30
+    return (now - generated_at).days >= STALE_DAYS_THRESHOLD
 
 
 def parse_wiki_generated_at(wiki_path: str) -> Optional[datetime]:

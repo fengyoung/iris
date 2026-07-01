@@ -11,10 +11,13 @@ from typing import Any, Dict, List, Optional
 from iris.config.loader import ConfigBundle
 
 from .searcher import WikiSearcher, _read_wiki_page, _infer_title_from_filename, FRONTMATTER_RE
-from ._constants import PAGE_TYPE_CONFIG as _PTC, get_wiki_dir, get_display_name, get_all_types
+from ._constants import (
+    get_wiki_dir, get_display_name, get_all_types, get_type_config_map,
+    LINT_STALE_DAYS,
+)
 
-# 向下兼容别名
-PAGE_TYPE_CONFIG = {k: {"dir": v[0], "name": v[2]} for k, v in _PTC.items()}
+# 向下兼容别名（推荐直接使用 get_type_config_map()）
+PAGE_TYPE_CONFIG = get_type_config_map()
 
 
 @dataclass(frozen=True)
@@ -151,11 +154,9 @@ EXTERNAL_CONCEPT_PATTERNS = [
 
 
 def _atomic_write(path: Path, text: str) -> None:
-    """原子写入：先写临时文件，再 os.rename（Unix 原子操作），避免崩溃损坏原文件。"""
-    import os
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(str(tmp), str(path))  # atomic on Unix
+    """原子写入：委托给 core.write_guard.safe_write_text，统一全项目写入策略。"""
+    from iris.core.write_guard import safe_write_text
+    safe_write_text(path, text, allow_existing_outside=True)
 
 
 def _is_wiki_broken_link(target: str, page_titles: dict) -> str | None:
@@ -298,7 +299,7 @@ def lint_wiki(wiki_root: Path, data_root: Optional[Path] = None) -> Dict[str, An
                 if updated.tzinfo is None:
                     updated = updated.replace(tzinfo=timezone.utc)
                 days = (datetime.now(timezone.utc) - updated).days
-                if days > 90:
+                if days > LINT_STALE_DAYS:
                     old_pages.append(f"{title} ({days}天)")
             except (ValueError, TypeError):
                 pass

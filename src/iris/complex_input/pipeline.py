@@ -28,11 +28,12 @@ logger = logging.getLogger(__name__)
 def _safe_format(template: str, **kwargs: str) -> str:
     """安全的模板替换 — 用逐字段 replace 代替 str.format()，
 
-    避免用户输入或 LLM 输出中的花括号（{、}）触发 KeyError。
+    使用 {{key}} 语法，与 prompting.py 和 wiki 模板保持一致。
+    避免用户输入或 LLM 输出中的花括号触发 KeyError。
     """
     result = template
     for key, value in kwargs.items():
-        result = result.replace("{" + key + "}", value)
+        result = result.replace("{{" + key + "}}", value)
     return result
 
 
@@ -58,9 +59,9 @@ class PipelineResult:
 
 # ── Stage 1 prompt 模板 ────────────────────────────────────────────
 
-_STAGE1_TEMPLATE = """用户问题：{query}
+_STAGE1_TEMPLATE = """用户问题：{{query}}
 
-输入文件类型：{file_type}
+输入文件类型：{{file_type}}
 
 你的任务是生成一段给多模态模型的分析指令，指导它如何处理用户上传的附件。
 
@@ -72,13 +73,13 @@ _STAGE1_TEMPLATE = """用户问题：{query}
 
 # ── Stage 3 prompt 模板 ────────────────────────────────────────────
 
-_STAGE3_TEMPLATE = """用户问题：{query}
+_STAGE3_TEMPLATE = """用户问题：{{query}}
 
-输入文件类型：{file_type}
+输入文件类型：{{file_type}}
 
 以下是对附件的分析结果：
 ---
-{stage2_output}
+{{stage2_output}}
 ---
 
 请基于以上分析结果回答用户的问题。要求：
@@ -268,8 +269,8 @@ class ComplexInputPipeline:
         """
         if stage2_output.startswith("[Stage2 失败]"):
             prompt = (
-                f"用户问题：{query}\n\n"
-                f"输入类型：{file_type}\n\n"
+                f"用户问题：{{query}}\n\n"
+                f"输入类型：{{file_type}}\n\n"
                 f"多模态分析不可用。请根据已有信息尽可能回答用户。"
             )
         else:

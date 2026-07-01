@@ -3,8 +3,8 @@
 import pytest
 from unittest.mock import MagicMock, patch
 
-from iris.retrieval.searcher import _tokenize, _score_chunk
-from iris.utils.tokenization import estimate_tokens
+from iris.retrieval.searcher import _score_chunk
+from iris.utils.tokenization import tokenize, estimate_tokens
 
 
 # ── C5: BM25 基于全文而非截断预览 ──────────────────────────
@@ -12,7 +12,7 @@ from iris.utils.tokenization import estimate_tokens
 class TestBm25FullContent:
     """验证 BM25 统计量和评分基于 chunk.content 而非 content_preview。"""
 
-    def test_tokenize_on_content_vs_preview(self):
+    def testtokenize_on_content_vs_preview(self):
         """_compute_corpus_stats 使用 content 字段。"""
         # 模拟 LocalRetriever._compute_corpus_stats
         from collections import defaultdict
@@ -31,9 +31,9 @@ class TestBm25FullContent:
         chunk = FakeChunk(content=long_text, content_preview=short_preview)
 
         # 使用 content（全文）计算
-        full_tokens = _tokenize(chunk.content)
+        full_tokens = tokenize(chunk.content)
         # 使用 content_preview（截断）计算
-        preview_tokens = _tokenize(chunk.content_preview)
+        preview_tokens = tokenize(chunk.content_preview)
 
         # 全文 token 应显著多于预览
         assert len(full_tokens) > len(preview_tokens) * 5, \
@@ -42,7 +42,7 @@ class TestBm25FullContent:
     def test_score_chunk_uses_full_content(self):
         """_score_chunk 内部使用 chunk.content。"""
         query = "拍照 标准化 iPhone"
-        query_tokens = _tokenize(query)
+        query_tokens = tokenize(query)
 
         class FakeChunk:
             content = "图像采集3.0 项目涉及 iPhone 全量标准化拍摄流程 " * 10
@@ -65,8 +65,8 @@ class TestBm25FullContent:
         text = "iPhone iPhone iPhone 拍照"  # "iPhone" 出现 3 次
         preview = "iPhone 拍照"  # "iPhone" 出现 1 次
 
-        full_tokens = _tokenize(text)
-        preview_tokens = _tokenize(preview)
+        full_tokens = tokenize(text)
+        preview_tokens = tokenize(preview)
 
         from collections import Counter
         full_tf = Counter(full_tokens).get("iphone", 0)

@@ -11,30 +11,30 @@ from iris.wiki.searcher import (
     WikiSearcher,
     _read_wiki_page,
     _score_page,
-    _tokenize,
     _infer_title_from_filename,
     load_index_summaries,
 )
+from iris.utils.tokenization import tokenize
 
 
 class TestTokenize:
     def test_english_text(self):
-        tokens = _tokenize("Hello World Test")
+        tokens = tokenize("Hello World Test")
         assert "hello" in tokens
         assert "world" in tokens
         assert "test" in tokens
 
     def test_chinese_text(self):
-        tokens = _tokenize("质检自动化进展")
+        tokens = tokenize("质检自动化进展")
         assert "质检自动化进展" in tokens
 
     def test_mixed_text(self):
-        tokens = _tokenize("某检测项目项目进展")
+        tokens = tokenize("某检测项目项目进展")
         # 中文和英文被合并为一个token，这是分词器的行为
         assert len(tokens) > 0
 
     def test_empty(self):
-        assert _tokenize("") == []
+        assert tokenize("") == []
 
 
 class TestInferTitleFromFilename:

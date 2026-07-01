@@ -6,7 +6,7 @@ from collections import defaultdict
 from typing import Any, Dict, List
 
 from iris.config.loader import ConfigBundle
-from iris.llm import EnvironmentConfiguredLLMProvider, LLMProviderError, LLMRequest
+from iris.llm import LLMProviderError, LLMRequest, LLMService
 from iris.memory import CorrectionMemoryStore, SessionMemoryStore, UserProfileMemoryStore, WorkingContextStore
 from iris.retrieval import EnhancedRetriever, RetrievalHit
 from iris.utils.logging import IrisLogger
@@ -22,7 +22,7 @@ class QAService:
     def __init__(self, config: ConfigBundle):
         self._config = config
         self._retriever = EnhancedRetriever(config)
-        self._llm_provider = EnvironmentConfiguredLLMProvider(config)
+        self._llm = LLMService(config)
         self._context_packer = PromptContextPacker(config)
         self._prompt_loader = PromptTemplateLoader(config)
         self._memory = SessionMemoryStore(config)
@@ -81,7 +81,7 @@ class QAService:
         prompt = self._build_llm_prompt(question, question_type, packed_context.blocks, packed_context.wiki_hits,
                                          packed_context.metadata, structured)
         try:
-            llm_response = self._llm_provider.generate(LLMRequest(prompt=prompt, route_context=route_context))
+            llm_response = self._llm.get_provider().generate(LLMRequest(prompt=prompt, route_context=route_context))
             answer = llm_response.text.strip()
             llm_payload = {"retrieval": retrieval_llm, "wiki_hits": wiki_hits, "selected_role": llm_response.selected_role,
                            "provider": llm_response.provider, "model": llm_response.model,

@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from datetime import datetime, timezone
+from typing import Any, Dict, List
 
 from iris.complex_input import ComplexInputPipeline
 from iris.config import load_config_bundle
 from iris.ingest import MarkdownChunker, MarkdownScanner
-from iris.llm import EnvironmentConfiguredLLMProvider
+from iris.llm import LLMService
 from iris.llm.router import ModelRouter
 from iris.memory import (
     CorrectionMemoryStore,
@@ -120,7 +121,6 @@ def handle_build_report(args, bundle, logger) -> int:
     result = service.build_report(args.query, top_k=max(args.top_k, 4), mode=args.mode, two_stage=getattr(args, "two_stage", False))
     payload = result.to_dict()
     if args.output_file:
-        from pathlib import Path
         output_path = Path(args.output_file)
         report_format = getattr(args, "output_format", "md") or "md"
         from iris.output.converters import convert_report
@@ -167,8 +167,6 @@ def handle_build_mindmap(args, bundle, logger) -> int:
 
 def handle_build_biweekly_report(args, bundle, logger) -> int:
     from iris.analysis import AnalysisReportService
-    from datetime import datetime
-
     service = AnalysisReportService(bundle)
     query = getattr(args, "query", "") or ""
     result = service.build_biweekly_report(query=query, mode=getattr(args, "mode", "llm"))
@@ -290,7 +288,6 @@ def handle_wiki_pipeline(args, bundle, logger) -> int:
 
 def handle_wiki_lint(args, bundle, logger) -> int:
     from iris.wiki import lint_wiki, fix_wiki
-    from pathlib import Path
 
     wiki_root = Path(bundle.wiki["wiki_root"]).resolve() if bundle.wiki else Path()
     data_root = bundle.root / "data"
@@ -305,8 +302,7 @@ def handle_wiki_lint(args, bundle, logger) -> int:
                 if items:
                     print(f"  {key}: {len(items)} 处 ({', '.join(items[:5])})")
         else:
-            import json as _json
-            print(_json.dumps(fix_result, ensure_ascii=False, indent=2))
+            print(json.dumps(fix_result, ensure_ascii=False, indent=2))
         return 0
 
     result = lint_wiki(wiki_root, data_root=data_root)
@@ -365,10 +361,6 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
     Phase 2: LLM 误识别映射生成（分 8 批 LLM 调用）
     Phase 3: LLM Prompt 优化压缩（1 次 LLM 调用）
     """
-    import sys
-    from pathlib import Path as _Pt
-    from datetime import datetime, timezone
-    from typing import List
     from iris.wiki.context_loader import WikiContextLoader
     from iris.wiki.term_extractor import (
         TermExtractor, render_asr_prompt, determine_new_version,
@@ -376,13 +368,12 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
         format_replace_dict, LLMHotwordExtractor, LLMPromptOptimizer,
         hotwords_to_terms,
     )
-    from iris.llm import EnvironmentConfiguredLLMProvider
 
     # ── 0. 校验 Wiki ────────────────────────────────────
     if not bundle.wiki or not bundle.wiki.get("wiki_root"):
         _emit_output(args.command, {"error": "Wiki 配置缺失"}, pretty=args.pretty)
         return 1
-    wiki_root = _Pt(bundle.wiki["wiki_root"]).resolve()
+    wiki_root = Path(bundle.wiki["wiki_root"]).resolve()
     if not wiki_root.exists():
         _emit_output(args.command, {"error": "Wiki 根目录不存在"}, pretty=args.pretty)
         return 1
@@ -398,7 +389,8 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
     mode = getattr(args, "asr_mode", "all") or "all"
     today = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     data_dir = bundle.root / "data"
-    provider = EnvironmentConfiguredLLMProvider(bundle)
+    llm_service = LLMService(bundle)
+    provider = llm_service.get_provider()
 
     # ── Phase 1：LLM 热词提取 ────────────────────────────
     hotwords: List[str] = []
@@ -475,7 +467,7 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
 
         # 写入文件
         if args.output_file:
-            out = _Pt(args.output_file)
+            out = Path(args.output_file)
             clean_stem = _strip_version_suffix(out.stem)
             version_tag = f"v{new_version.version}"
             out = out.with_name(f"{clean_stem}_{version_tag}{out.suffix}")
@@ -517,8 +509,6 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
 
 
 def _load_batch_items(path: Path):
-    import json
-    import sys
     items = []
     for idx, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         line = raw_line.strip()
@@ -539,8 +529,6 @@ def _load_batch_items(path: Path):
 
 
 def _load_review_items(path: Path):
-    import json
-    import sys
     items = []
     for idx, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         line = raw_line.strip()
@@ -615,8 +603,7 @@ def handle_build_vector_index(args, bundle, logger) -> int:
         if not summary_path.exists():
             results.append({"source": source_name, "status": "skipped", "reason": "chunk_summary 不存在"})
             continue
-        import json as _json
-        payload = _json.loads(summary_path.read_text(encoding="utf-8"))
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
         from iris.ingest.chunker import ChunkRecord
         chunks = [ChunkRecord(**item) for item in payload["chunks"]]
         index_path = metadata_root / f"{source_name}_vector_index"
@@ -803,20 +790,41 @@ def _expand_file_list(files_expr: str):
 
 def handle_daily_start(args, bundle, logger) -> int:
     from iris.memory import MemoryLifecycle
-    from iris.ingest import MarkdownScanner, MarkdownChunker
-    from iris.wiki import CandidateDiscovery, WikiNavigationBuilder, append_changelog
+    from iris.app.cli.helpers import _run_sync_memory
 
     # 1. 记忆同步
-    from iris.app.cli.helpers import _run_sync_memory
     sync_result = _run_sync_memory(bundle)
     if sync_result.get("synced"):
         logger.log("sync_memory", {"corrections_added": sync_result.get("corrections_added", 0)})
 
     # 2. 记忆自治维护
-    lifecycle = MemoryLifecycle(bundle)
-    maintenance_report = lifecycle.maintenance()
+    maintenance_report = MemoryLifecycle(bundle).maintenance()
 
-    # 3. 扫描 + 切块
+    # 3. 扫描 + 切块 + 向量索引
+    scan_info, chunk_summaries, vector_index_result = _daily_scan_and_chunk(bundle)
+
+    # 4. Wiki 自动发现 + 索引维护 + 增量更新
+    wiki_update_result, person_enrich_result = _daily_wiki_maintenance(
+        bundle, chunk_summaries,
+    )
+
+    payload = {"memory_sync": {"scanned": sync_result.get("scanned", 0), "skipped": sync_result.get("skipped", 0),
+                                "corrections_added": sync_result.get("corrections_added", 0)},
+               "memory_maintenance": maintenance_report, "scan": scan_info,
+               "chunks": [{"source_name": cs.source_name, "chunk_count": cs.chunk_count,
+                            "reused_documents": cs.build_stats.get("reused_documents", 0),
+                            "rebuilt_documents": cs.build_stats.get("rebuilt_documents", 0)} for cs in chunk_summaries],
+               "vector_index": vector_index_result,
+               "wiki_discover": _auto_discover_wiki_for_daily(bundle, chunk_summaries),
+               "wiki_update": wiki_update_result,
+               "person_enrich": person_enrich_result}
+    _emit_output(args.command, payload, pretty=args.pretty)
+    return 0
+
+
+def _daily_scan_and_chunk(bundle) -> tuple:
+    """日常扫描、切块、向量索引更新。"""
+    from iris.ingest import MarkdownScanner, MarkdownChunker
     scanner = MarkdownScanner(bundle)
     chunker = MarkdownChunker(bundle)
     scan_summaries = scanner.scan_all_enabled_sources()
@@ -827,78 +835,80 @@ def handle_daily_start(args, bundle, logger) -> int:
         cs = chunker.build_source_chunks(scan_summary.source_name)
         chunker.write_summary(cs)
         chunk_summaries.append(cs)
-        scan_info.append({"source_name": scan_summary.source_name, "document_count": scan_summary.document_count})
+        scan_info.append({"source_name": scan_summary.source_name,
+                          "document_count": scan_summary.document_count})
+    vector_index_result = _daily_vector_index(bundle)
+    return scan_info, chunk_summaries, vector_index_result
 
-    # 3.5 向量索引增量更新（若 embedding 已启用）
+
+def _daily_vector_index(bundle) -> dict:
+    """向量索引增量更新（静默失败）。"""
     try:
-        from iris.retrieval.embedder import EmbedderError, build_embedder_from_config
+        from iris.retrieval.embedder import build_embedder_from_config
         emb_cfg = bundle.llm.get("embedding", {})
-        if emb_cfg.get("enabled", False):
-            from iris.retrieval.vector_index import VectorIndex, build_vector_index
-            embedder = build_embedder_from_config(bundle.llm)
-            if embedder:
-                import json as _vi_json
-                ds_name = (bundle.data_source or {}).get("default_source", "work_docs_main")
-                summary_path = bundle.root / "data" / "metadata" / f"{ds_name}_chunk_summary.json"
-                if summary_path.exists():
-                    vi_payload = _vi_json.loads(summary_path.read_text(encoding="utf-8"))
-                    from iris.ingest.chunker import ChunkRecord as _ChunkRecord
-                    vi_chunks = [_ChunkRecord(**item) for item in vi_payload["chunks"]]
-                    index_path = bundle.root / "data" / "metadata" / f"{ds_name}_vector_index"
-                    existing = VectorIndex(index_path)
-                    existing.load()
-                    idx = build_vector_index(ds_name, vi_chunks, embedder, index_path, existing_index=existing)
-                    vector_index_result = {"status": "ok", "indexed": idx.size()}
-                else:
-                    vector_index_result = {"status": "skipped", "reason": "no_chunk_summary"}
-            else:
-                vector_index_result = {"status": "skipped", "reason": "embedder_not_configured"}
-        else:
-            vector_index_result = {"status": "skipped", "reason": "embedding_disabled"}
-    except Exception as _vi_exc:
-        vector_index_result = {"status": "error", "reason": str(_vi_exc)}
+        if not emb_cfg.get("enabled", False):
+            return {"status": "skipped", "reason": "embedding_disabled"}
+        embedder = build_embedder_from_config(bundle.llm)
+        if not embedder:
+            return {"status": "skipped", "reason": "embedder_not_configured"}
+        from iris.retrieval.vector_index import VectorIndex, build_vector_index
+        ds_name = (bundle.data_source or {}).get("default_source", "work_docs_main")
+        summary_path = bundle.root / "data" / "metadata" / f"{ds_name}_chunk_summary.json"
+        if not summary_path.exists():
+            return {"status": "skipped", "reason": "no_chunk_summary"}
+        vi_payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        from iris.ingest.chunker import ChunkRecord
+        vi_chunks = [ChunkRecord(**item) for item in vi_payload["chunks"]]
+        index_path = bundle.root / "data" / "metadata" / f"{ds_name}_vector_index"
+        existing = VectorIndex(index_path)
+        existing.load()
+        idx = build_vector_index(ds_name, vi_chunks, embedder, index_path, existing_index=existing)
+        return {"status": "ok", "indexed": idx.size()}
+    except Exception as exc:
+        return {"status": "error", "reason": str(exc)}
 
-    # 4. Wiki 自动发现 + 索引维护 + 增量更新
-    total_rebuilt = sum(cs.build_stats.get("rebuilt_documents", 0) for cs in chunk_summaries)
+
+def _auto_discover_wiki_for_daily(bundle, chunk_summaries) -> dict:
+    """Wiki 自动发现（封装 helpers 调用）。"""
     from iris.app.cli.helpers import _auto_discover_wiki
-    wiki_discover_result = _auto_discover_wiki(bundle, changed_count=total_rebuilt)
+    total_rebuilt = sum(cs.build_stats.get("rebuilt_documents", 0) for cs in chunk_summaries)
+    return _auto_discover_wiki(bundle, changed_count=total_rebuilt)
+
+
+def _daily_wiki_maintenance(bundle, chunk_summaries) -> tuple:
+    """Wiki 增量更新 + 人物信息丰富。"""
+    from iris.wiki import WikiNavigationBuilder, append_changelog
+    # Path 已在模块顶部导入
+
+    wiki_update_result = {"status": "skipped", "reason": "无 chunk 数据"}
     person_enrich_result = {"status": "skipped", "reason": "无 wiki_root 配置"}
-    if bundle.wiki:
-        from iris.wiki.generator import WikiGenerator
-        wiki_update_result = WikiGenerator(bundle).update_all_pages(top_k=4)
-        builder = WikiNavigationBuilder(bundle)
-        builder.build(write=True)
-        append_changelog(Path(bundle.wiki["wiki_root"]), "daily-start 自动维护")
 
-        # 5. 飞书通讯录人物信息丰富（静默失败，不影响主流程）
-        try:
-            from iris.wiki.person_enricher import PersonEnricher
-            enrich_result = PersonEnricher(bundle).enrich(dry_run=False)
-            person_enrich_result = {
-                "status": "ok",
-                "updated": enrich_result.updated,
-                "not_found": enrich_result.not_found,
-                "ambiguous": enrich_result.ambiguous,
-                "no_change": enrich_result.no_change,
-            }
-            if enrich_result.updated:
-                # 有更新时重建导航
-                builder.build(write=True)
-        except Exception as _pe_exc:
-            person_enrich_result = {"status": "error", "reason": str(_pe_exc)}
+    if not bundle.wiki:
+        return wiki_update_result, person_enrich_result
 
-    payload = {"memory_sync": {"scanned": sync_result.get("scanned", 0), "skipped": sync_result.get("skipped", 0),
-                                "corrections_added": sync_result.get("corrections_added", 0)},
-               "memory_maintenance": maintenance_report, "scan": scan_info,
-               "chunks": [{"source_name": cs.source_name, "chunk_count": cs.chunk_count,
-                            "reused_documents": cs.build_stats.get("reused_documents", 0),
-                            "rebuilt_documents": cs.build_stats.get("rebuilt_documents", 0)} for cs in chunk_summaries],
-               "vector_index": vector_index_result,
-               "wiki_discover": wiki_discover_result,
-               "wiki_update": wiki_update_result,
-               "person_enrich": person_enrich_result}
-    _emit_output(args.command, payload, pretty=args.pretty)
-    return 0
+    from iris.wiki.generator import WikiGenerator
+    wiki_update_result = WikiGenerator(bundle).update_all_pages(top_k=4)
+    builder = WikiNavigationBuilder(bundle)
+    builder.build(write=True)
+    append_changelog(Path(bundle.wiki["wiki_root"]), "daily-start 自动维护")
+
+    # 飞书通讯录人物信息丰富（静默失败，不影响主流程）
+    try:
+        from iris.wiki.person_enricher import PersonEnricher
+        enrich_result = PersonEnricher(bundle).enrich(dry_run=False)
+        person_enrich_result = {
+            "status": "ok",
+            "updated": enrich_result.updated,
+            "not_found": enrich_result.not_found,
+            "ambiguous": enrich_result.ambiguous,
+            "no_change": enrich_result.no_change,
+        }
+        if enrich_result.updated:
+            builder.build(write=True)
+    except Exception as exc:
+        person_enrich_result = {"status": "error", "reason": str(exc)}
+
+    return wiki_update_result, person_enrich_result
 
 
 # ── 系统 ──────────────────────────────────────────────────

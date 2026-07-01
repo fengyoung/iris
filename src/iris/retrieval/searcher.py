@@ -11,11 +11,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Sequence, Tuple
 
 from iris.config.loader import ConfigBundle
-from iris.ingest import ChunkSummary, MarkdownChunker
 from iris.ingest.chunker import ChunkRecord
-from iris.retrieval.planner import QueryPlan, QueryPlanner
+from iris.retrieval.planner import QueryPlan
 
 from iris.utils.tokenization import TOKEN_RE, tokenize  # noqa: F811 — 统一分词
+
+# BM25 参数
+_BM25_K1 = 1.5
+_BM25_B = 0.75
+_BM25_OOV_DF = 0  # 未登录词文档频率（0 = 不假设任何文档含该词）
 
 
 @dataclass(frozen=True)
@@ -156,7 +160,6 @@ class LocalRetriever:
             chunks = store.load_all()
             for chunk in chunks:
                 self._chunks.append(chunk)
-            for chunk in chunks:
                 self._by_source.setdefault(chunk.source_name, []).append(chunk)
             return len(chunks) > 0
         except Exception:
@@ -181,6 +184,8 @@ def _score_chunk(query: str, query_tokens: List[str], chunk: ChunkRecord,
     section_token_bonus = 2.0
     if query_plan is not None:
         # 高优先级 focus_areas 提升标题权重
+        # 注意：当前 LLMQueryPlanner.enhance() 为占位实现，answer_focus 始终为空，
+        # 此分支待 LLM 增强启用后生效。
         focus_mult = 1.0 + 0.5 * len([a for a in query_plan.answer_focus if a == "high"])
         title_bonus *= focus_mult
         title_token_bonus *= focus_mult
@@ -210,25 +215,29 @@ def _score_chunk(query: str, query_tokens: List[str], chunk: ChunkRecord,
             if token not in matched:
                 matched.append(token)
 
-    content_tokens = tokenize(chunk.content)
-    freq: Dict[str, int] = defaultdict(int)
-    for token in content_tokens:
-        freq[token] += 1
-
-    doc_len = len(content_tokens)
+    # 优先使用预计算的 token_freq（chunking 阶段已构建），避免每次搜索重新分词
+    if chunk.token_freq:
+        freq = chunk.token_freq
+        doc_len = sum(freq.values())
+    else:
+        # 回退：兼容旧 chunk 数据（token_freq 为 None 或空 dict）
+        content_tokens = tokenize(chunk.content)
+        freq = defaultdict(int)
+        for token in content_tokens:
+            freq[token] += 1
+        doc_len = len(content_tokens)
     N = max(total_docs, 1)
     avgdl = avg_doc_len if avg_doc_len > 0 else max(doc_len, 50)
-    k1 = 1.5
-    b = 0.75
     df_map = df if df is not None else {}
 
     for qt in query_tokens:
         tf = freq.get(qt, 0)
         if tf > 0:
-            dft = df_map.get(qt, 1)
-            idf = math.log((N - dft + 0.5) / (dft + 0.5) + 1.0)
-            norm = 1 - b + b * doc_len / avgdl
-            bm25 = idf * (tf * (k1 + 1)) / (tf + k1 * norm)
+            dft = df_map.get(qt, _BM25_OOV_DF)
+            # 对未登录词使用平缓 IDF（等价于出现在 0 个文档中）
+            idf = math.log((N - dft + 0.5) / (max(dft, 1) + 0.5) + 1.0)
+            norm = 1 - _BM25_B + _BM25_B * doc_len / avgdl
+            bm25 = idf * (tf * (_BM25_K1 + 1)) / (tf + _BM25_K1 * norm)
             score += bm25
             if qt not in matched:
                 matched.append(qt)

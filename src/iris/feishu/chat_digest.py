@@ -14,7 +14,7 @@ from iris.feishu._shared import (
     load_dedup_index, save_dedup_index, upsert_dedup_item,
     sanitize_title, extract_date, now_iso,
 )
-from iris.llm import EnvironmentConfiguredLLMProvider, LLMRequest
+from iris.llm import LLMService
 from iris.core.write_guard import safe_write_text
 
 # ── 常量 ────────────────────────────────────────────────────
@@ -47,7 +47,7 @@ class ChatDigester:
     def __init__(self, bundle: ConfigBundle) -> None:
         self._bundle = bundle
         self._client = FeishuClient(as_user=True)
-        self._provider = EnvironmentConfiguredLLMProvider(bundle)
+        self._llm = LLMService(bundle)
         self._wiki_root = self._resolve_wiki_root()
         self._dedup_path = resolve_dedup_path(
             bundle, "chat_digest.dedup_index", "data/dedup/chat_digest_index.json")
@@ -317,10 +317,10 @@ RISKS:
 SUMMARY:
 <100-200字的讨论总结>"""
 
-        response = self._provider.generate(
-            LLMRequest(prompt=prompt, route_context={"input_type": "text"}),
+        text = self._llm.generate(
+            prompt, route_context={"input_type": "text"},
             temperature=0.1, max_tokens=4096)
-        return self._parse_extraction(response.text)
+        return self._parse_extraction(text)
 
     @staticmethod
     def _parse_extraction(text: str) -> Dict[str, Any]:

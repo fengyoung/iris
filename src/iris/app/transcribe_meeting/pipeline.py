@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from iris.config.loader import ConfigBundle
-from iris.llm import EnvironmentConfiguredLLMProvider, LLMRequest
+from iris.llm import LLMRequest, LLMService
 
 SYSTEM_PROMPT = "你是一个专业的会议纪要提取专家，擅长从语音转写文本中提取结构化会议纪要。你会仔细校正 ASR 误识别，准确提取信息。注意：直接输出会议纪要正文，不要输出任何前缀说明、开场白或打招呼内容。"
 
@@ -16,7 +16,7 @@ SYSTEM_PROMPT = "你是一个专业的会议纪要提取专家，擅长从语音
 class TranscribeMeetingPipeline:
     def __init__(self, bundle: ConfigBundle) -> None:
         self._bundle = bundle
-        self._provider = EnvironmentConfiguredLLMProvider(bundle)
+        self._llm = LLMService(bundle)
         self._wiki_root = Path(bundle.wiki["wiki_root"]).resolve() if bundle.wiki else Path()
         self._temp_dir = bundle.root / bundle.app["paths"]["temp_dir"]
 
@@ -105,7 +105,7 @@ class TranscribeMeetingPipeline:
 
         result = {"audio_file": str(source) if has_audio else "", "transcript_file": str(source) if has_text else "",
                   "source_type": source_type, "word_count": word_count, "wiki_pages_loaded": page_count,
-                  "output_file": str(out), "model": self._provider.get_active_model_config("base_model")["model"]}
+                  "output_file": str(out), "model": self._llm.get_provider().get_active_model_config("base_model")["model"]}
         if route_result:
             result["route"] = route_result.get("route", "")
             result["route_reason"] = route_result.get("reason", "")
@@ -192,10 +192,8 @@ ROUTE: <目录名>
 REASON: <一句话理由>
 FILENAME: <文件名>"""
 
-        response = self._provider.generate(
-            LLMRequest(prompt=prompt, route_context={"input_type": "text"}),
-            temperature=0, max_tokens=300)
-        return self._parse_route_response(response.text)
+        text = self._llm.generate(prompt, route_context={"input_type": "text"}, temperature=0, max_tokens=300)
+        return self._parse_route_response(text)
 
     @staticmethod
     def _parse_route_response(text: str) -> Dict[str, str]:
@@ -340,5 +338,4 @@ FILENAME: <文件名>"""
 ## 原始转写文本
 
 {raw_transcript}"""
-        response = self._provider.generate(LLMRequest(prompt=prompt, route_context={"input_type": "text"}), temperature=0.1, max_tokens=16384)
-        return response.text
+        return self._llm.generate(prompt, route_context={"input_type": "text"}, temperature=0.1, max_tokens=16384)

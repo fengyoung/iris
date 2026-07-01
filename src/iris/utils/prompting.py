@@ -46,5 +46,6 @@ class PromptTemplateLoader:
         rendered = template
         # 按 key 长度降序替换，避免前缀冲突
         for key in sorted(variables.keys(), key=len, reverse=True):
-            rendered = rendered.replace("{{" + key + "}}", str(variables[key]))
+            value = variables[key]
+            rendered = rendered.replace("{{" + key + "}}", str(value) if value is not None else "")
         return rendered
