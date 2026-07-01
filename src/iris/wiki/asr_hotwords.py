@@ -5,13 +5,25 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from typing import Dict, List, Optional, Set
 
 from ._constants import get_wiki_prefix
 from .context_loader import WikiPageInfo
-from .term_extractor import AsrTerm, _clean_markup, _is_noise_term
+from .term_extractor import (
+    AsrTerm,
+    _BOLD_RE,
+    _clean_markup,
+    _HEADING_RE,
+    _is_noise_term,
+    _SKIP_HEADINGS,
+    _WIKI_LINK_RE,
+)
+
+# 每批最多处理的 Wiki 页面数
+_HOTWORD_BATCH_SIZE = 20
 
 def _build_page_batches(pages: List[WikiPageInfo]) -> List[List[WikiPageInfo]]:
     """按类型分组，每批不超过 _HOTWORD_BATCH_SIZE 个页面。

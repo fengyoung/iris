@@ -12,6 +12,24 @@ from typing import Dict, List, Optional, Set
 
 from .term_extractor import AsrTerm, AsrPromptVersion
 
+
+def _count_chinese(text: str) -> int:
+    """统计文本中的中文字符数。"""
+    return sum(1 for c in text if '一' <= c <= '鿿')
+
+
+def _exceeds_char_limit(text: str, max_total: int = 20, max_chinese: int = 10) -> bool:
+    """检查文本是否超过字符限制（总长度或中文字数）。"""
+    if not text:
+        return False
+    if len(text) > max_total:
+        return True
+    if _count_chinese(text) > max_chinese:
+        return True
+    return False
+
+
+
 def format_hotwords_file(hotwords: List[str], output_path: str) -> str:
     """将热词列表写入 txt 文件（每行一个，自动去重）。
 
