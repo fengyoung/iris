@@ -9,17 +9,20 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from iris.config.loader import ConfigBundle
-from iris.llm import EnvironmentConfiguredLLMProvider, LLMProviderError, LLMRequest
+from iris.llm import LLMProviderError, LLMService
 from iris.retrieval.searcher import LocalRetriever
 from iris.utils.logging import IrisLogger
 
 from .searcher import WikiSearcher, FRONTMATTER_RE
-from ._constants import PAGE_TYPE_CONFIG, get_display_name, get_wiki_dir, get_wiki_prefix
+from ._constants import (
+    get_display_name, get_wiki_dir, get_wiki_prefix,
+    get_dir_map, get_prefix_map, get_display_name_map,
+)
 
-# 向下兼容别名
-TYPE_NAMES = {k: v[2] for k, v in PAGE_TYPE_CONFIG.items()}
-PAGE_DIRS = {k: v[0] for k, v in PAGE_TYPE_CONFIG.items()}
-PAGE_PREFIXES = {k: v[1] for k, v in PAGE_TYPE_CONFIG.items()}
+# 向下兼容别名（推荐直接使用 get_* 访问器）
+TYPE_NAMES = get_display_name_map()
+PAGE_DIRS = get_dir_map()
+PAGE_PREFIXES = get_prefix_map()
 
 
 @dataclass(frozen=True)
@@ -56,7 +59,7 @@ class WikiGenerator:
     def __init__(self, config: ConfigBundle):
         self._config = config
         self._retriever = LocalRetriever(config)
-        self._llm_provider = EnvironmentConfiguredLLMProvider(config)
+        self._llm = LLMService(config)
         self._template_root = config.root / "templates" / "wiki"
         if not config.wiki or not config.wiki.get("wiki_root"):
             raise ValueError("Wiki 配置缺失：请在 config/wiki.json 中设置 wiki_root")
@@ -162,11 +165,11 @@ class WikiGenerator:
             prompt = self._build_generic_prompt(type_name, page_type, title, query, evidence, related, now)
 
         try:
-            response = self._llm_provider.generate(
-                LLMRequest(prompt=prompt, route_context={"input_type": "text", "task_type": "qa",
-                                                          "complexity": "standard", "use_case": "wiki_generate"})
+            text = self._llm.generate(
+                prompt, route_context={"input_type": "text", "task_type": "qa",
+                                       "complexity": "standard", "use_case": "wiki_generate"}
             )
-            return self._extract_wiki_content(response.text)
+            return self._extract_wiki_content(text)
         except LLMProviderError as exc:
             return self._fallback_markdown(page_type=page_type, title=title, query=query,
                                            evidence=evidence, related=related)
@@ -337,13 +340,11 @@ sources:
             prompt = self._build_generic_update_prompt(existing_content, type_name, last_updated, evidence, related, today)
 
         try:
-            response = self._llm_provider.generate(
-                LLMRequest(prompt=prompt, route_context={
-                    "input_type": "text", "task_type": "qa",
-                    "complexity": "standard", "use_case": "wiki_update",
-                })
+            text = self._llm.generate(
+                prompt, route_context={"input_type": "text", "task_type": "qa",
+                                       "complexity": "standard", "use_case": "wiki_update"}
             )
-            return self._extract_wiki_content(response.text)
+            return self._extract_wiki_content(text)
         except LLMProviderError as exc:
             self._logger.log("wiki_update_llm_failed", {"title": title, "error": str(exc)})
             return None

@@ -11,7 +11,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
 from iris.config.loader import ConfigBundle
-from iris.llm import EnvironmentConfiguredLLMProvider, LLMProviderError, LLMRequest
+from iris.llm import LLMProviderError
+from iris.llm.service import LLMService
 from iris.qa import QAService
 from iris.utils.logging import IrisLogger
 
@@ -86,7 +87,7 @@ class MindmapService:
     def __init__(self, config: ConfigBundle):
         self._config = config
         self._qa = QAService(config)
-        self._llm_provider = EnvironmentConfiguredLLMProvider(config)
+        self._llm = LLMService(config)
         self._prompt_loader = PromptTemplateLoader(config)
         self._logger = IrisLogger(config)
 
@@ -105,13 +106,13 @@ class MindmapService:
             prompt = self._prompt_loader.render("mindmap_generate.md",
                 {"query": query, "blocks": render_evidence_blocks(blocks),
                  "structured_context": render_structured_evidence(structured)})
-            response = self._llm_provider.generate(LLMRequest(prompt=prompt,
-                route_context={"input_type": "text", "task_type": "analysis", "complexity": "complex", "use_case": "analysis_basic"}))
-            llm_payload = {"provider": response.provider, "model": response.model, "selected_role": response.selected_role}
+            markdown = self._llm.generate(prompt=prompt,
+                route_context={"input_type": "text", "task_type": "analysis", "complexity": "complex", "use_case": "analysis_basic"})
+            llm_payload = {"fallback_used": False}
             tree = None
-            markdown = response.text.strip()
+            markdown = markdown.strip()
             if format in ("xmind", "both"):
-                json_tree = _parse_json_tree(response.text)
+                json_tree = _parse_json_tree(markdown)
                 tree = _dict_to_tree(json_tree) if "error" not in json_tree else None
             return MindmapResponse(query=query, format=format, markdown=markdown, tree=tree, blocks=blocks, structured=structured, llm=llm_payload)
         except LLMProviderError as exc:

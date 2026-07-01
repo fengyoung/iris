@@ -235,11 +235,13 @@ def normalized_key(title: str) -> str:
 
 
 def is_wiki_stale(wiki_path: Path) -> bool:
+    """检查 Wiki 页面是否超过陈腐阈值（默认 30 天），需要重新生成。"""
+    from ._constants import STALE_DAYS_THRESHOLD
     generated_at = parse_wiki_generated_at(str(wiki_path))
     if generated_at is None:
         return True
     now = datetime.now(generated_at.tzinfo) if generated_at.tzinfo else datetime.now()
-    return (now - generated_at).days >= 30
+    return (now - generated_at).days >= STALE_DAYS_THRESHOLD
 
 
 def parse_wiki_generated_at(wiki_path: str) -> Optional[datetime]:

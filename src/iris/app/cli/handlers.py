@@ -10,7 +10,7 @@ from typing import Any, Dict
 from iris.complex_input import ComplexInputPipeline
 from iris.config import load_config_bundle
 from iris.ingest import MarkdownChunker, MarkdownScanner
-from iris.llm import EnvironmentConfiguredLLMProvider
+from iris.llm import LLMService
 from iris.llm.router import ModelRouter
 from iris.memory import (
     CorrectionMemoryStore,
@@ -376,7 +376,6 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
         format_replace_dict, LLMHotwordExtractor, LLMPromptOptimizer,
         hotwords_to_terms,
     )
-    from iris.llm import EnvironmentConfiguredLLMProvider
 
     # ── 0. 校验 Wiki ────────────────────────────────────
     if not bundle.wiki or not bundle.wiki.get("wiki_root"):
@@ -398,7 +397,8 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
     mode = getattr(args, "asr_mode", "all") or "all"
     today = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     data_dir = bundle.root / "data"
-    provider = EnvironmentConfiguredLLMProvider(bundle)
+    llm_service = LLMService(bundle)
+    provider = llm_service.get_provider()
 
     # ── Phase 1：LLM 热词提取 ────────────────────────────
     hotwords: List[str] = []

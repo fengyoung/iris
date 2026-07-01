@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional, Sequence
 
 from iris.config.loader import ConfigBundle
-from iris.llm import EnvironmentConfiguredLLMProvider, LLMProviderError, LLMRequest
+from iris.llm import LLMProviderError, LLMRequest, LLMService
 from iris.retrieval.embedder import EmbedderError, TextEmbedder, build_embedder_from_config
 from iris.retrieval.planner import LLMQueryPlanner, QueryPlan, QueryPlanner
 from iris.retrieval.searcher import LocalRetriever, RetrievalHit
@@ -88,14 +88,14 @@ class EnhancedRetriever:
         self._local = LocalRetriever(config)
         self._planner = QueryPlanner()
         self._rewriter = QueryRewriter()
-        self._llm_provider = EnvironmentConfiguredLLMProvider(config)
+        self._llm = LLMService(config)
         self._wiki_searcher = WikiSearcher(config) if config.wiki else None
         self._prompt_loader = PromptTemplateLoader(config)
         self._embedder: Optional[TextEmbedder] = _init_embedder(config)
         self._vector_indexes: Dict[str, VectorIndex] = {}
         if self._embedder:
             self._vector_indexes = _load_vector_indexes(config)
-        self._llm_planner = LLMQueryPlanner(self._llm_provider, self._prompt_loader)
+        self._llm_planner = LLMQueryPlanner(self._llm.get_provider(), self._prompt_loader)
         self._cache: OrderedDict = OrderedDict()
 
     def _cache_key(self, query: str, top_k: int, mode: str) -> str:
@@ -193,7 +193,7 @@ class EnhancedRetriever:
         prompt = self._build_rerank_prompt(query, hits[:min(len(hits), 12)])
         route_context = {"input_type": "text", "task_type": "analysis", "complexity": "complex", "use_case": "retrieval_rerank"}
         try:
-            response = self._llm_provider.generate(LLMRequest(prompt=prompt, route_context=route_context))
+            response = self._llm.get_provider().generate(LLMRequest(prompt=prompt, route_context=route_context))
             ranked_ids = _parse_ranked_ids(response.text)
             reranked = _apply_rank_order(hits, ranked_ids, top_k=top_k)
             return reranked, {"selected_role": response.selected_role, "provider": response.provider,
@@ -241,6 +241,12 @@ def _apply_rank_order(hits, ranked_ids, *, top_k: int) -> List[RetrievalHit]:
 
 def _rrf_fuse(lexical_hits, vector_scores, *, top_k: int, k: int = 60,
               lexical_weight: float = 0.5, vector_weight: float = 0.5) -> List[RetrievalHit]:
+    """RRF + 向量语义融合。
+
+    RRF 得分量级 ~[0, 0.02]，归一化 BM25 得分量级 ~[0, 1]。
+    各占一半权重，避免 BM25 原始分（5-20+）完全支配排序。
+    同时包含纯向量命中（超出 lexical_hits 范围的新发现）。
+    """
     lexical_rrf = {}
     for rank, hit in enumerate(lexical_hits, start=1):
         lexical_rrf[hit.chunk_id] = lexical_weight * (1.0 / (k + rank))
@@ -250,12 +256,27 @@ def _rrf_fuse(lexical_hits, vector_scores, *, top_k: int, k: int = 60,
     combined = {cid: lexical_rrf.get(cid, 0.0) + vector_rrf.get(cid, 0.0) for cid in all_ids}
     hit_by_id = {h.chunk_id: h for h in lexical_hits}
     ranked_ids = sorted(combined, key=lambda cid: -combined[cid])
+
+    # 归一化 BM25 得分，量级对齐 RRF 得分
+    max_lexical = max((h.score for h in lexical_hits if h.score > 0), default=1.0)
+    bm25_bonus = 0.02  # BM25 归一化后对融合得分的贡献系数
+
     result = []
     for cid in ranked_ids:
         if cid in hit_by_id:
             orig = hit_by_id[cid]
-            blended = combined[cid] + orig.score * 0.3
-            result.append(orig.with_score(blended)._with_explanation(orig.explanation + " [vector-fused]"))
+            normalized_bm25 = (orig.score / max(max_lexical, 1e-9)) * bm25_bonus
+            blended = combined[cid] + normalized_bm25
+            result.append(orig.with_score(blended)._with_explanation(
+                orig.explanation + " [vector-fused]"))
+        # 包含纯向量命中
+        elif len(hit_by_id) < top_k:
+            result.append(RetrievalHit(
+                chunk_id=cid, score=combined[cid], title="",
+                relative_path="", section_path=[], content_preview="",
+                line_start=0, line_end=0, chunk_type="vector",
+                explanation=f"向量相似度={combined[cid]:.4f}",
+            ))
         if len(result) >= top_k:
             break
     return result

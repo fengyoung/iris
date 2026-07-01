@@ -10,13 +10,16 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from iris.config.loader import ConfigBundle
 from iris.utils.tokenization import TOKEN_RE, tokenize  # noqa: F811
-from ._constants import PAGE_TYPE_CONFIG, get_wiki_dir, get_wiki_prefix
+from ._constants import (
+    get_wiki_dir, get_wiki_prefix,
+    get_dir_map, get_prefix_to_type_map,
+)
 
 logger = logging.getLogger(__name__)
 
-# 向下兼容别名
-PAGE_TYPE_DIRS = {k: v[0] for k, v in PAGE_TYPE_CONFIG.items()}
-PREFIX_TO_TYPE = {v[1]: k for k, v in PAGE_TYPE_CONFIG.items()}
+# 向下兼容别名（推荐直接使用 get_* 访问器）
+PAGE_TYPE_DIRS = get_dir_map()
+PREFIX_TO_TYPE = get_prefix_to_type_map()
 
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
