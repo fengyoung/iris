@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from iris.config.loader import ConfigBundle
@@ -17,6 +18,18 @@ from iris.llm import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class GenerationResult:
+    """LLM 生成结果：包含文本和调用元数据。"""
+
+    text: str
+    selected_role: str = ""
+    provider: str = ""
+    model: str = ""
+    api_base_url: str = ""
+    matched_rule: str = ""
 
 
 class LLMService:
@@ -46,7 +59,7 @@ class LLMService:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         max_retries: Optional[int] = None,
-    ) -> str:
+    ) -> GenerationResult:
         """调用 LLM 生成文本。
 
         Args:
@@ -57,7 +70,7 @@ class LLMService:
             max_retries: 重试次数
 
         Returns:
-            生成文本
+            GenerationResult：包含生成文本和调用元数据
         """
         ctx = route_context or {"input_type": "text", "task_type": "qa", "complexity": "standard"}
         request = LLMRequest(prompt=prompt, route_context=ctx)
@@ -68,7 +81,14 @@ class LLMService:
                 max_tokens=max_tokens,
                 max_retries=max_retries,
             )
-            return response.text
+            return GenerationResult(
+                text=response.text,
+                selected_role=response.selected_role or "",
+                provider=response.provider or "",
+                model=response.model or "",
+                api_base_url=response.api_base_url or "",
+                matched_rule=response.matched_rule or "",
+            )
         except LLMProviderError as exc:
             logger.error("LLM 文本生成失败: %s", exc)
             raise

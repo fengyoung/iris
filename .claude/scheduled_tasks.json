@@ -1,13 +1,3 @@
 {
-  "tasks": [
-    {
-      "id": "0d6ad959",
-      "cron": "0 20 1 7 *",
-      "prompt": "晚上架构迁移时间——Iris 3 三项待处理的架构优化：\n\n1. **ConfigBundle → ConfigBundleV2 全面迁移**（38 文件联动，Pydantic v2）\n   - 删除 config/loader.py 中手工验证 (~80行)，loader 默认返回 ConfigBundleV2\n   - 逐模块迁移 dict 访问 `bundle.llm[\"models\"]` → Pydantic 属性 `bundle.llm.models`\n\n2. **LLMRequest/LLMResponse 移至 core/ 消除 Protocol 中的 Any**\n   - 先讨论决策：修复 Protocol 使其真正有用，还是直接删除 YAGNI\n\n3. **LLMService 全面注入**（10+ 模块）\n   - 先扩展 LLMService.generate() 使其返回 model metadata\n   - 然后逐个迁移：wiki/generator, qa/service, analysis/service, retrieval/enhanced...\n\n每个项独立 PR，从风险最低的 #3 开始。",
-      "createdAt": 1782884787949,
-      "createdBySessionId": "3bc520b7-ccee-47e9-a702-3555d3c8bb21",
-      "createdByPid": 37798,
-      "createdByProcStart": "Tue Jun 30 12:31:26 2026"
-    }
-  ]
+  "tasks": []
 }

@@ -478,7 +478,7 @@ class AccuracyVerifier:
                 },
                 temperature=0.1,
                 max_tokens=100,
-            ).strip().split("\n")[0]
+            ).text.strip().split("\n")[0]
         except LLMProviderError as e:
             return AccuracyVerdict(
                 reference=entry,
@@ -542,7 +542,7 @@ class AccuracyVerifier:
                 },
                 temperature=0.1,
                 max_tokens=120,
-            ).strip().split("\n")[0]
+            ).text.strip().split("\n")[0]
         except LLMProviderError as e:
             return AccuracyVerdict(
                 reference=entry,
@@ -643,7 +643,7 @@ class ComprehensivenessVerifier:
                     },
                     temperature=0.1,
                     max_tokens=120,
-                ).strip().split("\n")[0]
+                ).text.strip().split("\n")[0]
             except LLMProviderError:
                 continue
 

@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional, Sequence
 
 from iris.config.loader import ConfigBundle
-from iris.llm import LLMProviderError, LLMRequest, LLMService
+from iris.llm import LLMProviderError, LLMService
 from iris.retrieval.embedder import EmbedderError, TextEmbedder, build_embedder_from_config
 from iris.retrieval.planner import LLMQueryPlanner, QueryPlan, QueryPlanner
 from iris.retrieval.searcher import LocalRetriever, RetrievalHit
@@ -193,12 +193,12 @@ class EnhancedRetriever:
         prompt = self._build_rerank_prompt(query, hits[:min(len(hits), 12)])
         route_context = {"input_type": "text", "task_type": "analysis", "complexity": "complex", "use_case": "retrieval_rerank"}
         try:
-            response = self._llm.get_provider().generate(LLMRequest(prompt=prompt, route_context=route_context))
-            ranked_ids = _parse_ranked_ids(response.text)
+            result = self._llm.generate(prompt, route_context=route_context)
+            ranked_ids = _parse_ranked_ids(result.text)
             reranked = _apply_rank_order(hits, ranked_ids, top_k=top_k)
-            return reranked, {"selected_role": response.selected_role, "provider": response.provider,
-                              "model": response.model, "api_base_url": response.api_base_url,
-                              "matched_rule": response.matched_rule, "fallback_used": False}, "llm"
+            return reranked, {"selected_role": result.selected_role, "provider": result.provider,
+                              "model": result.model, "api_base_url": result.api_base_url,
+                              "matched_rule": result.matched_rule, "fallback_used": False}, "llm"
         except LLMProviderError as exc:
             logger.warning("LLM 重排降级：%s，回退到本地排序", exc)
             return list(hits[:top_k]), {"fallback_used": True, "reason": str(exc)}, "local_fallback"

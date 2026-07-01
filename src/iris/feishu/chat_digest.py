@@ -319,7 +319,7 @@ SUMMARY:
 
         text = self._llm.generate(
             prompt, route_context={"input_type": "text"},
-            temperature=0.1, max_tokens=4096)
+            temperature=0.1, max_tokens=4096).text
         return self._parse_extraction(text)
 
     @staticmethod

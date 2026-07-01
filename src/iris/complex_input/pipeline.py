@@ -192,7 +192,7 @@ class ComplexInputPipeline:
         """调用 base_model 生成 adv_model 的分析指令。"""
         prompt = _safe_format(_STAGE1_TEMPLATE, query=query, file_type=file_type)
         try:
-            text = self._llm.generate(
+            result = self._llm.generate(
                 prompt,
                 route_context={
                     "input_type": "text",
@@ -200,8 +200,7 @@ class ComplexInputPipeline:
                     "complexity": "standard",
                 },
             )
-            model_info = self._llm.get_provider().get_active_model_config("base_model")
-            return text.strip(), model_info.get("model", "base_model")
+            return result.text.strip(), result.model
         except LLMProviderError as exc:
             return f"[Stage1 失败] base_model 调用出错: {exc}", None
 
@@ -279,7 +278,7 @@ class ComplexInputPipeline:
             )
 
         try:
-            text = self._llm.generate(
+            result = self._llm.generate(
                 prompt,
                 route_context={
                     "input_type": "text",
@@ -287,8 +286,7 @@ class ComplexInputPipeline:
                     "complexity": "standard",
                 },
             )
-            model_info = self._llm.get_provider().get_active_model_config("base_model")
-            return text.strip(), model_info.get("model", "base_model")
+            return result.text.strip(), result.model
         except LLMProviderError as exc:
             fallback = (
                 f"[Stage3 失败] base_model 调用出错: {exc}\n\n"

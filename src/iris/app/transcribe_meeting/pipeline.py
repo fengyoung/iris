@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from iris.config.loader import ConfigBundle
-from iris.llm import LLMRequest, LLMService
+from iris.llm import LLMService
 
 SYSTEM_PROMPT = "你是一个专业的会议纪要提取专家，擅长从语音转写文本中提取结构化会议纪要。你会仔细校正 ASR 误识别，准确提取信息。注意：直接输出会议纪要正文，不要输出任何前缀说明、开场白或打招呼内容。"
 
@@ -192,7 +192,7 @@ ROUTE: <目录名>
 REASON: <一句话理由>
 FILENAME: <文件名>"""
 
-        text = self._llm.generate(prompt, route_context={"input_type": "text"}, temperature=0, max_tokens=300)
+        text = self._llm.generate(prompt, route_context={"input_type": "text"}, temperature=0, max_tokens=300).text
         return self._parse_route_response(text)
 
     @staticmethod
@@ -338,4 +338,4 @@ FILENAME: <文件名>"""
 ## 原始转写文本
 
 {raw_transcript}"""
-        return self._llm.generate(prompt, route_context={"input_type": "text"}, temperature=0.1, max_tokens=16384)
+        return self._llm.generate(prompt, route_context={"input_type": "text"}, temperature=0.1, max_tokens=16384).text

@@ -168,7 +168,7 @@ class WikiGenerator:
             text = self._llm.generate(
                 prompt, route_context={"input_type": "text", "task_type": "qa",
                                        "complexity": "standard", "use_case": "wiki_generate"}
-            )
+            ).text
             return self._extract_wiki_content(text)
         except LLMProviderError as exc:
             return self._fallback_markdown(page_type=page_type, title=title, query=query,
@@ -343,7 +343,7 @@ sources:
             text = self._llm.generate(
                 prompt, route_context={"input_type": "text", "task_type": "qa",
                                        "complexity": "standard", "use_case": "wiki_update"}
-            )
+            ).text
             return self._extract_wiki_content(text)
         except LLMProviderError as exc:
             self._logger.log("wiki_update_llm_failed", {"title": title, "error": str(exc)})

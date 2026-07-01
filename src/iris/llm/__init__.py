@@ -10,11 +10,12 @@ from .provider import (
     NullLLMProvider,
 )
 from .router import ModelRouter, RoutingDecision
-from .service import LLMService
+from .service import GenerationResult, LLMService
 
 __all__ = [
     "BaseLLMProvider",
     "EnvironmentConfiguredLLMProvider",
+    "GenerationResult",
     "LLMProviderError",
     "LLMRequest",
     "LLMResponse",

@@ -6,7 +6,7 @@ from collections import defaultdict
 from typing import Any, Dict, List
 
 from iris.config.loader import ConfigBundle
-from iris.llm import LLMProviderError, LLMRequest, LLMService
+from iris.llm import LLMProviderError, LLMService
 from iris.memory import CorrectionMemoryStore, SessionMemoryStore, UserProfileMemoryStore, WorkingContextStore
 from iris.retrieval import EnhancedRetriever, RetrievalHit
 from iris.utils.logging import IrisLogger
@@ -81,11 +81,11 @@ class QAService:
         prompt = self._build_llm_prompt(question, question_type, packed_context.blocks, packed_context.wiki_hits,
                                          packed_context.metadata, structured)
         try:
-            llm_response = self._llm.get_provider().generate(LLMRequest(prompt=prompt, route_context=route_context))
-            answer = llm_response.text.strip()
-            llm_payload = {"retrieval": retrieval_llm, "wiki_hits": wiki_hits, "selected_role": llm_response.selected_role,
-                           "provider": llm_response.provider, "model": llm_response.model,
-                           "api_base_url": llm_response.api_base_url, "matched_rule": llm_response.matched_rule,
+            result = self._llm.generate(prompt, route_context=route_context)
+            answer = result.text.strip()
+            llm_payload = {"retrieval": retrieval_llm, "wiki_hits": wiki_hits, "selected_role": result.selected_role,
+                           "provider": result.provider, "model": result.model,
+                           "api_base_url": result.api_base_url, "matched_rule": result.matched_rule,
                            "prompt_context": packed_context.metadata, "question_type": question_type,
                            "query_intent": query_plan.get("query_intent", "general"), "query_plan": query_plan, "fallback_used": False}
             mode = "llm"

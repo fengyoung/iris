@@ -106,11 +106,13 @@ class MindmapService:
             prompt = self._prompt_loader.render("mindmap_generate.md",
                 {"query": query, "blocks": render_evidence_blocks(blocks),
                  "structured_context": render_structured_evidence(structured)})
-            markdown = self._llm.generate(prompt=prompt,
+            result = self._llm.generate(prompt=prompt,
                 route_context={"input_type": "text", "task_type": "analysis", "complexity": "complex", "use_case": "analysis_basic"})
-            llm_payload = {"fallback_used": False}
+            llm_payload = {"selected_role": result.selected_role, "provider": result.provider,
+                           "model": result.model, "api_base_url": result.api_base_url,
+                           "matched_rule": result.matched_rule, "fallback_used": False}
             tree = None
-            markdown = markdown.strip()
+            markdown = result.text.strip()
             if format in ("xmind", "both"):
                 json_tree = _parse_json_tree(markdown)
                 tree = _dict_to_tree(json_tree) if "error" not in json_tree else None

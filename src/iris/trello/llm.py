@@ -83,7 +83,7 @@ class TrelloLLM:
         if input_type == "multimodal":
             route_context["task_type"] = "analysis"
             route_context["complexity"] = "complex"
-        return self._llm.generate(prompt, route_context=route_context)
+        return self._llm.generate(prompt, route_context=route_context).text
 
     def _build_cards_context(self, cards: List[TrelloCard]) -> str:
         lines = []

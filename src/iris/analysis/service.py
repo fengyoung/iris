@@ -56,7 +56,7 @@ class AnalysisReportService:
                     {"query": query, "answer": qa_response.answer, "blocks": render_evidence_blocks(blocks),
                      "structured_context": render_structured_evidence(structured)})
                 markdown = self._llm.generate(prompt=prompt,
-                    route_context={"input_type": "text", "task_type": "analysis", "complexity": "complex", "use_case": "analysis_basic"})
+                    route_context={"input_type": "text", "task_type": "analysis", "complexity": "complex", "use_case": "analysis_basic"}).text
                 markdown = markdown.strip()
                 llm_payload = {"fallback_used": False}
                 review_result = None
@@ -123,7 +123,7 @@ class AnalysisReportService:
                     "input_type": "text", "task_type": "analysis",
                     "complexity": "standard", "use_case": "biweekly_report",
                 }
-            )
+            ).text
             markdown = markdown.strip()
             # 清理代码块包裹
             from iris.wiki.generator import WikiGenerator
@@ -296,14 +296,14 @@ class AnalysisReportService:
         structured_ctx = render_structured_evidence(structured)
         try:
             review_prompt = self._prompt_loader.render("report_review.md", {"query": query, "draft": draft, "structured_context": structured_ctx})
-            review_resp = self._llm.generate(prompt=review_prompt, route_context={"input_type": "text", "task_type": "analysis", "complexity": "complex", "user_selected_role": "adv_model"})
+            review_resp = self._llm.generate(prompt=review_prompt, route_context={"input_type": "text", "task_type": "analysis", "complexity": "complex", "user_selected_role": "adv_model"}).text
             review_data = _parse_review_json(review_resp)
             if not review_data or review_data.get("quality_score", 5) >= 4:
                 return draft, review_data, False
             issues_text = "\n".join(f"- {i}" for i in review_data.get("issues", []))
             suggestions_text = "\n".join(f"- {s}" for s in review_data.get("suggestions", []))
             revise_prompt = self._prompt_loader.render("report_revise.md", {"query": query, "issues": issues_text or "无", "suggestions": suggestions_text or "无", "draft": draft, "structured_context": structured_ctx})
-            revise_resp = self._llm.generate(prompt=revise_prompt, route_context={"input_type": "text", "task_type": "analysis", "complexity": "complex", "use_case": "analysis_basic"})
+            revise_resp = self._llm.generate(prompt=revise_prompt, route_context={"input_type": "text", "task_type": "analysis", "complexity": "complex", "use_case": "analysis_basic"}).text
             return revise_resp.strip(), review_data, True
         except LLMProviderError:
             return draft, None, False
