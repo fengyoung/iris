@@ -143,10 +143,13 @@ class TrelloClient:
         return self.get(f"/cards/{card_id}")
 
     def create_card(self, list_id: str, name: str, desc: str = "",
-                    due: Optional[str] = None) -> Dict[str, Any]:
+                    due: Optional[str] = None,
+                    id_labels: Optional[List[str]] = None) -> Dict[str, Any]:
         params: Dict[str, Any] = {"idList": list_id, "name": name, "desc": desc}
         if due:
             params["due"] = due
+        if id_labels:
+            params["idLabels"] = ",".join(id_labels)
         return self.post("/cards", **params)
 
     def update_card(self, card_id: str, **fields: Any) -> Dict[str, Any]:
@@ -160,6 +163,18 @@ class TrelloClient:
 
     def create_label(self, board_id: str, name: str, color: str) -> Dict[str, Any]:
         return self.post("/labels", name=name, color=color, idBoard=board_id)
+
+    def find_label_by_color(self, board_id: str, color: str) -> Optional[Dict[str, Any]]:
+        """在指定看板中按颜色查找标签。"""
+        labels = self.list_labels(board_id)
+        for label in labels:
+            if label.get("color") == color:
+                return label
+        return None
+
+    def move_card(self, card_id: str, target_list_id: str) -> Dict[str, Any]:
+        """将卡片移动到指定列表。"""
+        return self.put(f"/cards/{card_id}", idList=target_list_id)
 
     def add_label_to_card(self, card_id: str, label_id: str) -> Dict[str, Any]:
         return self.post(f"/cards/{card_id}/idLabels", value=label_id)

@@ -15,19 +15,19 @@ venv/
 config/*.json
 
 # Runtime data
-data/
+/data/
 
 # Working data (raw transcripts, intermediate files)
-work-data/
+/work-data/
 
 # Output
-output/
+/output/
 
 # Temp
-temp/
+/temp/
 
 # Logs
-logs/
+/logs/
 *.log
 
 # OS
@@ -41,7 +41,7 @@ Thumbs.db
 *.swo
 
 # Memory (Claude working memory - user-specific)
-memory/
+/memory/
 
 # Benchmarks
 .benchmarks/

@@ -1,0 +1,101 @@
+"""轻量会话记忆。"""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List
+
+from iris.config.loader import ConfigBundle
+
+
+class SessionMemoryStore:
+    """保存最近问题、主题与命中来源，供后续问答参考。"""
+
+    def __init__(self, config: ConfigBundle):
+        session_cfg = config.app["session"]
+        self._enabled = bool(session_cfg.get("enable_session_memory", True))
+        summary_dir = config.root / session_cfg["session_summary_dir"].replace("./", "")
+        self._path = summary_dir / "latest_session.json"
+
+    def load(self) -> Dict[str, Any]:
+        if not self._enabled or not self._path.exists():
+            return {
+                "recent_questions": [],
+                "recent_topics": [],
+                "topic_threads": {},
+                "recent_summary": "",
+                "updated_at": None,
+            }
+        return json.loads(self._path.read_text(encoding="utf-8"))
+
+    def save_interaction(self, *, question: str, mode: str, blocks: List[Any], wiki_hits: List[Dict[str, Any]]) -> Dict[str, Any]:
+        if not self._enabled:
+            return self.load()
+
+        state = self.load()
+        questions = [question] + [item for item in state.get("recent_questions", []) if item != question]
+        topics = _build_topics(blocks, wiki_hits) + state.get("recent_topics", [])
+        deduped_topics: List[str] = []
+        for topic in topics:
+            if topic and topic not in deduped_topics:
+                deduped_topics.append(topic)
+
+        topic_threads = _update_topic_threads(state.get("topic_threads", {}), question=question, topics=deduped_topics, mode=mode)
+        payload = {
+            "recent_questions": questions[:8],
+            "recent_topics": deduped_topics[:12],
+            "topic_threads": topic_threads,
+            "recent_summary": _build_recent_summary(questions[:5], deduped_topics[:6], topic_threads),
+            "last_mode": mode,
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return payload
+
+
+def _build_topics(blocks: List[Any], wiki_hits: List[Dict[str, Any]]) -> List[str]:
+    topics: List[str] = []
+    for hit in wiki_hits[:3]:
+        title = str(hit.get("title", "")).strip()
+        if title:
+            topics.append(title)
+    for block in blocks[:4]:
+        title = getattr(block, "title", "").strip()
+        if title:
+            topics.append(title)
+    return topics
+
+
+def _update_topic_threads(state: Dict[str, Any], *, question: str, topics: List[str], mode: str) -> Dict[str, Any]:
+    threads: Dict[str, Dict[str, Any]] = {}
+    for key, value in state.items():
+        if not isinstance(value, dict):
+            continue
+        threads[key] = {
+            "count": int(value.get("count", 0)),
+            "last_question": str(value.get("last_question", "")),
+            "last_mode": str(value.get("last_mode", "")),
+        }
+
+    for topic in topics[:3]:
+        thread = threads.get(topic, {"count": 0, "last_question": "", "last_mode": ""})
+        thread["count"] = int(thread["count"]) + 1
+        thread["last_question"] = question
+        thread["last_mode"] = mode
+        threads[topic] = thread
+
+    sorted_items = sorted(threads.items(), key=lambda item: (-item[1]["count"], item[0]))
+    return {key: value for key, value in sorted_items[:10]}
+
+
+def _build_recent_summary(questions: List[str], topics: List[str], threads: Dict[str, Any]) -> str:
+    if not questions and not topics:
+        return "暂无会话摘要"
+    top_threads = list(threads.keys())[:3]
+    return (
+        f"最近问题：{' | '.join(questions[:3]) if questions else '无'}；"
+        f"高频主题：{' | '.join(top_threads) if top_threads else (' | '.join(topics[:3]) if topics else '无')}"
+    )
