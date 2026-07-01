@@ -279,12 +279,11 @@ iris3/
 │   ├── app/cli/            # 步骤 1 — CLI 框架（45 命令）
 │   ├── app/transcribe_meeting/ # 步骤 2 — 会议转录
 │   ├── trello/             # 步骤 1 — Trello 集成
-│   ├── complex_input/      # 步骤 1 — 图文处理
 │   ├── utils/              # 步骤 1 — 工具（🆕 v3.6: constants, llm_parsing）
 │   ├── ingest/             # 步骤 2 — 数据源扫描/切块
 │   ├── retrieval/          # 步骤 2 — 混合检索
 │   ├── qa/                 # 步骤 2 — 问答
-│   ├── wiki/               # 步骤 2 — Wiki 体系（🆕 v3.6: asr_hotwords, asr_prompt_optimizer, asr_formatter, asr_version 拆分自 term_extractor）
+│   ├── wiki/               # 步骤 2 — Wiki 体系（🆕 v3.6: asr_hotwords, asr_prompt_optimizer, asr_formatter, asr_version 拆分自 term_extractor; 🆕 v3.9: person_enricher 飞书通讯录丰富）
 │   ├── analysis/           # 步骤 2 — 报告/思维导图/双周报
 │   ├── evaluation/         # 🆕 v3.7 — Wiki 深度评估（准确性 + 全面性，从 iris2 迁移）
 │   ├── output/             # 步骤 1 — 输出格式化

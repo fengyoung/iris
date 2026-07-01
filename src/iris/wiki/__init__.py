@@ -3,6 +3,7 @@
 from .discovery import CandidateDiscovery
 from .generator import BatchWikiItem, WikiGenerator, WikiPageDraft, WikiWriteResult
 from .navigation import WikiNavigationBuilder, append_changelog, fix_wiki, lint_wiki
+from .person_enricher import EnrichResult, EnrichSummary, PersonEnricher
 from .searcher import WikiHit, WikiSearcher
 from .term_extractor import (
     AsrPromptVersion,
@@ -21,6 +22,9 @@ __all__ = [
     "WikiNavigationBuilder",
     "WikiPageDraft",
     "WikiWriteResult",
+    "EnrichResult",
+    "EnrichSummary",
+    "PersonEnricher",
     "WikiHit",
     "WikiSearcher",
     "append_changelog",
