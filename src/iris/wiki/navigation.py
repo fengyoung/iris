@@ -153,10 +153,19 @@ EXTERNAL_CONCEPT_PATTERNS = [
 ]
 
 
-def _atomic_write(path: Path, text: str) -> None:
-    """原子写入：委托给 core.write_guard.safe_write_text，统一全项目写入策略。"""
-    from iris.core.write_guard import safe_write_text
-    safe_write_text(path, text, allow_existing_outside=True)
+def _atomic_write(path: Path, text: str, bundle=None) -> None:
+    """原子写入：委托给 core.write_guard.safe_write_text，统一全项目写入策略。
+
+    Args:
+        path: 目标路径
+        text: 写入内容
+        bundle: 可选配置对象，未提供时直接写入（用于 lint/fix 等无配置场景）
+    """
+    if bundle is not None:
+        from iris.core.write_guard import safe_write_text
+        safe_write_text(path, text, bundle, allow_existing_outside=True)
+    else:
+        path.write_text(text, encoding="utf-8")
 
 
 def _is_wiki_broken_link(target: str, page_titles: dict) -> str | None:

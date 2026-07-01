@@ -49,6 +49,7 @@ class TestBm25FullContent:
             content_preview = "图像采集3.0 项目"
             title = "图像采集3.0 项目"
             section_path = []
+            token_freq = {}
 
         # 使用全文计算 BM25 分数
         score, matched = _score_chunk(

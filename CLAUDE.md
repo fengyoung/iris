@@ -1,4 +1,4 @@
-# Iris 3.9.0 — 项目执行说明
+# Iris 3.10.0 — 项目执行说明
 
 > 工作知识助手，从 Iris v2.7.1 重构升级而来。
 > 个人知识库（Obsidian Wiki）重新设计 + 新增飞书团队知识库操作能力。
@@ -19,12 +19,12 @@
 
 | 维度 | 数据 |
 |------|------|
-| 源代码 | 17,117 行，94 个文件，19 个模块 |
+| 源代码 | 17,298 行，94 个文件，19 个模块 |
 | CLI 命令 | 45 个 |
 | 单元测试 | 169 个（12 个测试文件） |
 | 数据源 | 594 个文档，3,402 个 Chunk |
 | 向量索引 | 5,810 条，25 MB |
-| Wiki 页面 | 30 页（领域 6 / 概念 7 / 项目 8 / 人物 9） |
+| Wiki 页面 | 91 页（领域 6 / 概念 7 / 项目 8 / 人物 70） |
 | 成员周报 | 453 份（2025-2026） |
 
 ### 关键路径
@@ -245,7 +245,7 @@ JSON 配置中使用 `${VAR_NAME}` 引用环境变量或 .env 中的值。
 
 | 层 | 位置 | 格式 | 含义 | 当前值 |
 |----|------|------|------|--------|
-| **产品版本** | `pyproject.toml` | SemVer X.Y.Z | 软件发布版本 | 3.9.0 |
+| **产品版本** | `pyproject.toml` | SemVer X.Y.Z | 软件发布版本 | 3.10.0 |
 | **协议版本** | `src/iris/__init__.py` | MAJOR.MINOR | CLI 命令集 / agent-spec 格式 | 3.8 |
 | **数据版本** | `config/*.json` | 各自独立 | 配置文件 Schema | 3.4 |
 
@@ -264,7 +264,7 @@ JSON 配置中使用 `${VAR_NAME}` 引用环境变量或 .env 中的值。
 
 ```
 iris3/
-├── pyproject.toml          # 3.9.0，依赖：PyMuPDF / python-docx / numpy / pydantic>=2.0
+├── pyproject.toml          # 3.10.0，依赖：PyMuPDF / python-docx / numpy / pydantic>=2.0
 ├── README.md
 ├── CLAUDE.md               # 本文件
 ├── .env.example            # 环境变量模板
@@ -274,7 +274,7 @@ iris3/
 │   ├── config/             # 步骤 1 — 配置加载（🆕 v3.7: models.py Pydantic v2 类型安全）
 │   ├── complex_input/       # 步骤 1 — 复杂输入（🆕 v3.8: 三阶段流水线 + 多文件类型检测）
 │   ├── llm/                # 步骤 1 — LLM Provider + 路由（🆕 v3.8: LLMService 统一入口）
-│   ├── memory/             # 步骤 1 — 记忆系统
+│   ├── memory/             # 步骤 1 — 记忆系统（🆕 v3.10: lifecycle, long_term, manager, session, working 独立子模块）
 │   ├── core/               # 步骤 1 — 核心抽象（Protocol、锁、写保护、存储）
 │   ├── app/cli/            # 步骤 1 — CLI 框架（45 命令）
 │   ├── app/transcribe_meeting/ # 步骤 2 — 会议转录
@@ -286,7 +286,7 @@ iris3/
 │   ├── wiki/               # 步骤 2 — Wiki 体系（🆕 v3.6: asr_hotwords, asr_prompt_optimizer, asr_formatter, asr_version 拆分自 term_extractor; 🆕 v3.9: person_enricher 飞书通讯录丰富）
 │   ├── analysis/           # 步骤 2 — 报告/思维导图/双周报
 │   ├── evaluation/         # 🆕 v3.7 — Wiki 深度评估（准确性 + 全面性，从 iris2 迁移）
-│   ├── output/             # 步骤 1 — 输出格式化
+│   ├── output/             # 🆕 v3.10 — 输出格式化（formatter, converters）
 │   └── feishu/             # 步骤 3 — 飞书文档/聊天提炼
 │       ├── client.py       #   lark-cli 封装（文档/IM/图片/通讯录）
 │       ├── _shared.py      #   共享工具（路径/排重/时间/标题清理）
@@ -389,6 +389,98 @@ iris3/
 | ChunkSlim 字段 | 3 | **4**（+content） |
 | Person exclusion 名单 | ❌ 无 | ✅ 60+ 词条 |
 | 飞书通讯录集成 | ❌ 无 | ✅ `PersonEnricher` |
+
+---
+
+## 🆕 v3.10.0 变更（2026-07-01）
+
+### 全面代码优化 + 新模块引入
+
+基于多轮并行审查（v3.9.0 后 7 个提交，46 个文件变更，+2171/-527），完成致命修复、架构重构和性能优化。
+
+### 致命 Bug 修复（4 项）
+
+| # | 问题 | 修复 |
+|---|------|------|
+| C1 | API Key 在全系统中明文传播 | `get_active_model_config(sensitive=False)` 默认脱敏 |
+| C2 | Protocol 与实际 LLM Provider 签名不一致 | 统一为 `(LLMRequest, *, kwargs) -> LLMResponse` |
+| C3 | Trello DNS monkey-patch 全局状态污染 | 移除 monkey-patch，改为 URL 重写 + Host header |
+| C4 | Keychain set_secret 先删后加数据丢失 | 移除前置 delete 调用 |
+
+### High 问题修复（10 项）
+
+| # | 问题 | 修复 |
+|---|------|------|
+| H1 | LLM 调用无重试机制 | `generate()` / `generate_multimodal()` 加 `max_retries` |
+| H2 | generate/generate_multimodal 85% 代码重复 | `_fallback_loop()` 共享降级循环 |
+| H3 | has_credentials_for_role 只查活跃模型 | 扫描角色下全部模型 |
+| H4 | handlers.py 15+ 处 `__import__('sys')` | 统一为顶部 `import sys` |
+| H5 | _read_wiki_page 无文件读取容错 | try/except + 日志警告 |
+| H6 | 日志归档竞态条件 | `os.rename` 原子归档 + `fcntl` 锁 |
+| H7 | QA token 预算用 len() 近似 | 改用 `estimate_tokens()` |
+| H8 | fix_wiki 缺少 ConfigBundle 参数 | `_atomic_write` 支持可选 bundle 降级 |
+| H9 | BM25 基于 180 字符 content_preview | 改用 `chunk.content` 全文计算 |
+| H10 | 图片编码无大小限制 | 20MB 上限 + 跳过大图警告 |
+
+### 架构重构（4 项）
+
+| 项 | 内容 | 效果 |
+|----|------|------|
+| **1** | LLM Provider 双接口统一 | Protocol + BaseLLMProvider 签名一致，`_fallback_loop` 消除重复 |
+| **2** | term_extractor.py 拆分 | 1,298 行 → 556 行，拆出 4 个 ASR 子模块（hotwords/prompt_optimizer/formatter/version） |
+| **3** | WikiContextLoader 统一加载 | 5 处独立文件扫描收敛到 1 个入口 |
+| **4** | Prompt 模板外部化 | 2 个 Wiki 生成模板 → `templates/wiki/generate_*.txt` |
+
+### 新模块
+
+| 模块 | 文件 | 行数 | 说明 |
+|------|------|:----:|------|
+| 记忆子模块 | `memory/lifecycle.py` | 327 | 记忆生命周期管理 |
+| 记忆子模块 | `memory/long_term.py` | 252 | 长期记忆持久化 |
+| 记忆子模块 | `memory/manager.py` | 104 | 记忆管理器编排 |
+| 记忆子模块 | `memory/session.py` | 101 | 会话记忆 |
+| 记忆子模块 | `memory/working.py` | 173 | 工作记忆上下文 |
+| 输出格式化 | `output/formatter.py` | 441 | 统一输出格式化 |
+| 输出格式化 | `output/converters.py` | 58 | 输出格式转换 |
+| 全局常量 | `utils/constants.py` | 35 | IMAGE_EXTENSIONS, FILE_TYPE_* 等 |
+
+### 搜索性能优化
+
+| 优化项 | 说明 |
+|--------|------|
+| 分词缓存 | 热路径分词结果缓存，减少重复计算 |
+| RRF 排序改进 | 混合检索排序融合优化 |
+| BM25 全文基准 | 从 content_preview（180 字符）改为 `chunk.content` 全文 |
+| 向量索引矩阵缓存 | 避免每次 `search()` 重建 numpy 矩阵 |
+| `query_plan` 权重调整 | 高优先级 focus_areas 提升标题/段落权重 |
+
+### Bug 修复
+
+| 文件 | 修复 |
+|------|------|
+| `config/loader.py` | `resolve_env_vars` 死循环检测，文档说明单层替换 |
+| `config/secrets.py` | 移除 `set_secret` 前置 delete 调用，消除数据丢失窗口 |
+| `trello/client.py` | DNS monkey-patch → URL 重写 + Host header，消除全局污染 |
+| `feishu/doc_convert.py` | 孤儿子进程 `Popen.kill()` + `communicate()` + `finally` |
+| `retrieval/enhanced.py` | RRF 分数归一化修复 |
+| `output/formatter.py` | 统一 `build-report` / `build-mindmap` 输出格式 |
+| `ingest/chunker.py` | `ChunkSlim` 新增 `content` 字段（全文），消除 180 字符截断 |
+
+### 关键指标
+
+| 维度 | 改进前 (v3.9.0) | 改进后 (v3.10.0) |
+|------|:---:|:---:|
+| 源代码行数 | 17,117 | **17,298** |
+| 源文件数 | 94 | **94** |
+| 模块数 | 19 | **19** |
+| CLI 命令 | 45 | **45** |
+| 单元测试 | 169 | **169** |
+| Wiki 页面数 | 30 | **91** |
+| term_extractor.py | 1,298 行 | **556 行**（-57%） |
+| provider.py 重复率 | ~85% | **0%**（_fallback_loop 统一） |
+| API Key 暴露面 | 全模块 | **仅 provider 内部** |
+| Trello 线程安全 | ❌ | ✅ |
+| 记忆系统 | __init__ 单文件 | **5 子模块：lifecycle/long_term/manager/session/working** |
 
 ---
 
