@@ -1,12 +1,25 @@
-"""Tokenization 工具：估算 token 数、文本分块等。"""
+"""Tokenization 工具：分词、估算 token 数、文本分块等。"""
 
 from __future__ import annotations
 
 import re
+from typing import List
+
+# ── 共享分词定义 ────────────────────────────────────────────
+# searcher / wiki/searcher / chunker / planner 统一引用，
+# 避免跨模块重复定义。
+
+# 中英混合分词正则（字母数字 + CJK 统一表意文字）
+TOKEN_RE = re.compile(r"[A-Za-z0-9_\-一-鿿]+")
 
 # 中英文混合场景的粗略 token 估算系数
 # 英文约 1 token / 4 chars，中文约 1 token / 1.5 chars
 _CHINESE_RE = re.compile(r"[一-鿿]")
+
+
+def tokenize(text: str) -> List[str]:
+    """对文本分词，返回 token 列表（小写化）。"""
+    return TOKEN_RE.findall(text.lower())
 
 
 def estimate_tokens(text: str) -> int:

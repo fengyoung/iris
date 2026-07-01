@@ -27,17 +27,12 @@ class MindmapNode:
 
 
 def _parse_json_tree(text: str) -> Dict[str, Any]:
-    text = text.strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(1))
-        except json.JSONDecodeError:
-            pass
+    """解析 LLM 返回的 JSON 树结构（委托到中心化 tools）。"""
+    from iris.utils.llm_parsing import try_parse_json
+    result = try_parse_json(text)
+    if result is not None:
+        return result
+    # 简单花括号匹配作为最后回退
     match = re.search(r"\{[^{}]+\}", text, re.DOTALL)
     if match:
         try:

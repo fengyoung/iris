@@ -257,6 +257,8 @@ class LLMHotwordExtractor:
                 print(f"  [asr] 第 {idx+1} 批 → {len(batch_terms)} 个候选（过滤后 {len(clean_batch)}）（累计 {len(all_hotwords)}）",
                       file=sys.stderr)
             except Exception as exc:
+                if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                    raise
                 print(f"  [warn] 第 {idx+1} 批热词提取失败: {exc}",
                       file=sys.stderr)
 

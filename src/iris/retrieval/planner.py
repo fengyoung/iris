@@ -19,8 +19,9 @@ TIME_SCOPE_PATTERNS = [
     (re.compile(r"最近|近期|当前|现在|本周|本月|最新"), "recent"),
     (re.compile(rf"去年|今年|(?:{_YEAR_RANGE})|Q[1-4]|季度|时间线|演进"), "historical"),
 ]
+from iris.utils.tokenization import TOKEN_RE
+
 TERM_RE = re.compile(r"[A-Z]{2,}[A-Za-z0-9\-]*")
-TOKEN_RE = re.compile(r"[A-Za-z0-9_\-一-鿿]+")
 STOPWORDS = {"什么", "多少", "一个", "我们", "你们", "当前", "最近", "一下", "帮我", "一下子"}
 
 

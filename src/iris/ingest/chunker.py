@@ -10,10 +10,10 @@ from typing import Any, Dict, Iterable, List
 
 from iris.config.loader import ConfigBundle
 from iris.ingest.scanner import DocumentRecord, MarkdownScanner, ScanSummary
+from iris.utils.tokenization import TOKEN_RE
 from iris.utils.validation import safe_int
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
-TOKEN_RE = re.compile(r"[A-Za-z0-9_\-一-鿿]+")
 FIELD_KEYWORDS = {
     "goal": ("目标", "希望", "计划", "实现", "达成", "覆盖"),
     "progress": ("进展", "阶段", "上线", "试点", "推进", "完成", "当前"),

@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Set, TYPE_CHECKING
 
+from .asr_formatter import _render_standard
 from .term_extractor import AsrTerm, AsrPromptVersion
 from .asr_version import load_version, save_version
 
@@ -136,6 +137,8 @@ class LLMPromptOptimizer:
             )
             return LLMPromptOptimizer._clean_text(response.text)
         except Exception as exc:
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
             print(f"[warn] Prompt 优化生成失败: {exc}", file=sys.stderr)
             return _render_standard(terms, AsrPromptVersion(
                 version="0.0.0", generated_at="",

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from iris.config.loader import ConfigBundle
+from iris.utils.tokenization import TOKEN_RE, tokenize  # noqa: F811
 from ._constants import PAGE_TYPE_CONFIG, get_wiki_dir, get_wiki_prefix
 
 logger = logging.getLogger(__name__)
@@ -17,7 +18,6 @@ logger = logging.getLogger(__name__)
 PAGE_TYPE_DIRS = {k: v[0] for k, v in PAGE_TYPE_CONFIG.items()}
 PREFIX_TO_TYPE = {v[1]: k for k, v in PAGE_TYPE_CONFIG.items()}
 
-TOKEN_RE = re.compile(r"[A-Za-z0-9_\-\一-鿿]+")
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
 
@@ -49,7 +49,7 @@ class WikiSearcher:
     def search(self, query: str, *, top_k: int = 3, page_type: Optional[str] = None) -> List[WikiHit]:
         if not self._wiki_root.exists():
             return []
-        query_tokens = _tokenize(query)
+        query_tokens = tokenize(query)
         hits: List[WikiHit] = []
         for path, title, ptype, status, summary, body in self._load_pages():
             if page_type and ptype != page_type:
@@ -163,8 +163,6 @@ def _infer_title_from_filename(path: Path) -> str:
     return name
 
 
-def _tokenize(text: str) -> List[str]:
-    return [match.group(0).lower() for match in TOKEN_RE.finditer(text)]
 
 
 def _score_page(query: str, query_tokens: List[str], title: str, summary: str, body: str) -> Tuple[float, List[str]]:

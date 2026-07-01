@@ -125,7 +125,7 @@ KNOWN_TECH_TERMS = frozenset({
 # 源文档引用模式（含路径前缀如 "会议纪要/20260518-..."）
 SOURCE_REF_PATTERN = re.compile(r"^(?:.*/)?\d{8}-")
 # 超短噪音
-NOISE_LINK_PATTERN = re.compile(r"^[.\-#]{1,3}$|^_{2,}$|^\.{2,}$")
+NOISE_LINK_PATTERN = re.compile(r"^[.\-#]{1,3}$|^_{2,}$|^\.{2,}$", re.MULTILINE)
 
 # LLM 引用不存在页面的常见模式（业务概念，非 Wiki 页面）
 EXTERNAL_CONCEPT_PATTERNS = [

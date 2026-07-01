@@ -126,7 +126,7 @@ class AnalysisReportService:
             markdown = response.text.strip()
             # 清理代码块包裹
             from iris.wiki.generator import WikiGenerator
-            markdown = WikiGenerator._strip_code_fence(markdown)
+            markdown = WikiGenerator._extract_wiki_content(markdown)
 
             # 添加时间周期头
             if not markdown.startswith("*时间周期"):
@@ -313,25 +313,17 @@ class AnalysisReportService:
 
 
 def _parse_review_json(text: str) -> Optional[Dict[str, Any]]:
-    try:
-        data = json.loads(text.strip())
-        if isinstance(data, dict) and "quality_score" in data:
-            return data
-    except json.JSONDecodeError:
-        pass
-    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(1))
-        except json.JSONDecodeError:
-            pass
-    match = re.search(r'\{[^{}]*"quality_score"[^{}]*\}', text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(0))
-        except json.JSONDecodeError:
-            pass
-    return None
+    """解析 LLM 审查 JSON（委托到中心化工具）。"""
+    from iris.utils.llm_parsing import try_parse_json, extract_json_from_text
+    result = try_parse_json(text)
+    if result is not None and "quality_score" in result:
+        return result
+    # 按 key 提取
+    extracted = extract_json_from_text(text, "quality_score")
+    if extracted is not None:
+        return extracted
+    # raw JSON 作为回退
+    return try_parse_json(text)
 
 
 DEFAULT_REPORT_SECTIONS = [

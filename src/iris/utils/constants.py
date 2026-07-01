@@ -40,3 +40,38 @@ VIDEO_EXTENSIONS: frozenset[str] = frozenset(
 COMPLEX_EXTENSIONS: frozenset[str] = (
     IMAGE_EXTENSIONS | PDF_EXTENSIONS | DOCUMENT_EXTENSIONS | VIDEO_EXTENSIONS
 )
+
+# ── LLM 路由上下文标识 ─────────────────────────────────────────────────
+# 统一路由上下文字符串常量，避免各模块硬编码 magic strings
+
+
+class InputType:
+    """输入类型标识。"""
+    TEXT: str = "text"
+    MULTIMODAL: str = "multimodal"
+
+
+class TaskType:
+    """任务类型标识。"""
+    QA: str = "qa"
+    PROMPT_GEN: str = "prompt_gen"
+    IMAGE_UNDERSTANDING: str = "image_understanding"
+    WIKI_GENERATE: str = "wiki_generate"
+    WIKI_UPDATE: str = "wiki_update"
+    ASR_PROMPT_OPTIMIZE: str = "asr_prompt_optimize"
+    ANALYSIS: str = "analysis"
+
+
+class Complexity:
+    """任务复杂度标识。"""
+    STANDARD: str = "standard"
+    COMPLEX: str = "complex"
+
+
+class UseCase:
+    """用例标识。"""
+    QA: str = "qa"
+    RETRIEVAL_RERANK: str = "retrieval_rerank"
+    ANALYSIS_BASIC: str = "analysis_basic"
+    WIKI_GENERATE: str = "wiki_generate"
+    BIWEEKLY_REPORT: str = "biweekly_report"

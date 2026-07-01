@@ -166,7 +166,7 @@ class WikiGenerator:
                 LLMRequest(prompt=prompt, route_context={"input_type": "text", "task_type": "qa",
                                                           "complexity": "standard", "use_case": "wiki_generate"})
             )
-            return self._strip_code_fence(response.text)
+            return self._extract_wiki_content(response.text)
         except LLMProviderError as exc:
             return self._fallback_markdown(page_type=page_type, title=title, query=query,
                                            evidence=evidence, related=related)
@@ -235,8 +235,8 @@ class WikiGenerator:
         return None
 
     @staticmethod
-    def _strip_code_fence(text: str) -> str:
-        """去除 LLM 返回内容中的 ```markdown 代码块包裹和对话前缀，提取纯 Markdown。"""
+    def _extract_wiki_content(text: str) -> str:
+        """从 LLM 响应中提取 Wiki Markdown（剥离代码块包裹、定位 YAML frontmatter 起点）。"""
         text = text.strip()
         # 尝试提取 ```markdown ... ``` 中的内容
         m = re.search(r"```(?:markdown)?\s*\n(.*?)```", text, re.DOTALL)
@@ -349,7 +349,7 @@ sources:
                     "complexity": "standard", "use_case": "wiki_update",
                 })
             )
-            return self._strip_code_fence(response.text)
+            return self._extract_wiki_content(response.text)
         except LLMProviderError as exc:
             self._logger.log("wiki_update_llm_failed", {"title": title, "error": str(exc)})
             return None

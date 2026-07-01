@@ -15,7 +15,7 @@ from iris.ingest import ChunkSummary, MarkdownChunker
 from iris.ingest.chunker import ChunkRecord
 from iris.retrieval.planner import QueryPlan, QueryPlanner
 
-TOKEN_RE = re.compile(r"[A-Za-z0-9_\-一-鿿]+")
+from iris.utils.tokenization import TOKEN_RE, tokenize  # noqa: F811 — 统一分词
 
 
 @dataclass(frozen=True)
@@ -75,7 +75,7 @@ class LocalRetriever:
     def search(self, query: str, *, top_k: int = 10, query_plan: QueryPlan | None = None) -> RetrievalResult:
         self._ensure_loaded()
 
-        query_tokens = _tokenize(query)
+        query_tokens = tokenize(query)
         scored: List[Tuple[RetrievalHit, float, str]] = []
 
         for chunk in self._chunks:
@@ -133,7 +133,10 @@ class LocalRetriever:
         total_len = 0
         df: Dict[str, set] = defaultdict(set)
         for i, chunk in enumerate(self._chunks):
-            tokens = _tokenize(chunk.content)
+            content = chunk.content or chunk.content_preview
+            if not content:
+                continue
+            tokens = tokenize(content)
             total_len += len(tokens)
             for t in set(tokens):
                 df[t].add(i)
@@ -160,10 +163,6 @@ class LocalRetriever:
             return False
 
 
-def _tokenize(text: str) -> List[str]:
-    return [match.group(0).lower() for match in TOKEN_RE.finditer(text)]
-
-
 def _score_chunk(query: str, query_tokens: List[str], chunk: ChunkRecord,
                  *, total_docs: int = 0, avg_doc_len: float = 0.0,
                  df: Dict[str, int] | None = None,
@@ -182,12 +181,13 @@ def _score_chunk(query: str, query_tokens: List[str], chunk: ChunkRecord,
     section_token_bonus = 2.0
     if query_plan is not None:
         # 高优先级 focus_areas 提升标题权重
-        focus_mult = 1.0 + 0.5 * len([a for a in query_plan.focus_areas if a == "high"])
+        focus_mult = 1.0 + 0.5 * len([a for a in query_plan.answer_focus if a == "high"])
         title_bonus *= focus_mult
         title_token_bonus *= focus_mult
         # entity_weights 如果指定了特定实体权重，额外加分
-        if query_plan.entity_weights:
-            entity_mult = 1.0 + 0.2 * len(query_plan.entity_weights)
+        entity_mult = 1.0
+        if query_plan.entities:
+            entity_mult = 1.0 + 0.2 * len(query_plan.entities)
             section_bonus *= entity_mult
             section_token_bonus *= entity_mult
 
@@ -210,7 +210,7 @@ def _score_chunk(query: str, query_tokens: List[str], chunk: ChunkRecord,
             if token not in matched:
                 matched.append(token)
 
-    content_tokens = _tokenize(chunk.content)
+    content_tokens = tokenize(chunk.content)
     freq: Dict[str, int] = defaultdict(int)
     for token in content_tokens:
         freq[token] += 1

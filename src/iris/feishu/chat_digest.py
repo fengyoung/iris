@@ -122,6 +122,8 @@ class ChatDigester:
             extracted = self._call_llm(conversation, wiki_context, target_name,
                                         message_count=len(raw_messages))
         except Exception as e:
+            if isinstance(e, (KeyboardInterrupt, SystemExit)):
+                raise
             return {"status": "error", "error": f"AI 提炼失败: {e}"}
 
         # 8. 生成输出
