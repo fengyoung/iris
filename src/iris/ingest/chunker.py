@@ -180,11 +180,14 @@ class MarkdownChunker:
             return {}
         payload = json.loads(summary_path.read_text(encoding="utf-8"))
         grouped: Dict[str, List[ChunkRecord]] = {}
+        import logging
+        _logger = logging.getLogger(__name__)
         for item in payload.get("chunks", []):
             try:
                 chunk = ChunkRecord(**item)
             except TypeError:
-                return {}
+                _logger.warning("跳过损坏的 chunk 记录: %s", str(item)[:120])
+                continue
             grouped.setdefault(chunk.relative_path, []).append(chunk)
         return grouped
 

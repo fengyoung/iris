@@ -21,6 +21,29 @@ PREFIX_TO_TYPE = {v[1]: k for k, v in PAGE_TYPE_CONFIG.items()}
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
 
+def parse_frontmatter(text: str) -> Tuple[Dict[str, str], str]:
+    """解析 Wiki 页面的 YAML frontmatter。
+
+    返回 (frontmatter字段字典, 正文部分)。无 frontmatter 时返回 ({}, text)。
+    自动处理 \\r\\n 换行符。
+    """
+    normalized = text.replace("\r\n", "\n")
+    fm_match = FRONTMATTER_RE.match(normalized)
+    if not fm_match:
+        return {}, normalized
+    fields: Dict[str, str] = {}
+    for line in fm_match.group(1).splitlines():
+        if ":" in line:
+            key, _, val = line.partition(":")
+            fields[key.strip()] = val.strip().strip("\"'")
+    return fields, normalized[fm_match.end():]
+
+
+def get_frontmatter_field(text: str, field: str) -> str:
+    """从 Wiki 页面文本的 frontmatter 中获取指定字段值。"""
+    return parse_frontmatter(text)[0].get(field, "")
+
+
 @dataclass(frozen=True)
 class WikiHit:
     title: str
@@ -118,27 +141,12 @@ def _read_wiki_page(path: Path) -> Tuple[str, str, str, str, str]:
         logger.warning("无法读取 Wiki 页面 %s: %s", path, exc)
         title = _infer_title_from_filename(path)
         return title, "domain", "draft", "", ""
-    # 统一换行符（防止 Windows \r\n 破坏 frontmatter 正则）
-    text = text.replace("\r\n", "\n")
-    title = _infer_title_from_filename(path)
-    page_type = "domain"  # default
-    status = "draft"
+    # 统一换行符 + 解析 frontmatter
+    fm, body = parse_frontmatter(text)
+    title = fm.get("title", _infer_title_from_filename(path))
+    page_type = fm.get("type", "domain")
+    status = fm.get("status", "draft")
     summary = ""
-
-    # 解析 YAML frontmatter
-    fm_match = FRONTMATTER_RE.match(text)
-    if fm_match:
-        fm_text = fm_match.group(1)
-        for line in fm_text.splitlines():
-            if line.startswith("title:"):
-                title = line.split(":", 1)[1].strip().strip("\"'")
-            elif line.startswith("type:"):
-                page_type = line.split(":", 1)[1].strip().strip("\"'")
-            elif line.startswith("status:"):
-                status = line.split(":", 1)[1].strip().strip("\"'")
-        body = text[fm_match.end():]
-    else:
-        body = text
 
     # 提取摘要：找第一个 ## 摘要 后的内容或第一段非空文字
     body_lines = [line.strip() for line in body.splitlines() if line.strip()]

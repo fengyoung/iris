@@ -199,36 +199,10 @@ def load_config_bundle(
     _validate_data_source_config(loaded["data_source"])
     _validate_llm_config(loaded["llm"])
 
-    # 可选加载 wiki.json（步骤 2 启用）
-    wiki_config_path = config_root / "wiki.json"
-    wiki_config = None
-    if wiki_config_path.exists():
-        wiki_config = resolve_env_vars(_load_json(wiki_config_path), env)
-        wiki_config = resolve_path_vars(wiki_config, root)
-    elif (config_root / "wiki.json.example").exists():
-        logger.warning("wiki.json 不存在，回退加载 wiki.json.example（占位符可能未解析）")
-        wiki_config = resolve_env_vars(_load_json(config_root / "wiki.json.example"), env)
-        wiki_config = resolve_path_vars(wiki_config, root)
-
-    # 可选加载 meeting_routes.json（纪要提取路由配置）
-    meeting_routes_config_path = config_root / "meeting_routes.json"
-    meeting_routes_config = None
-    if meeting_routes_config_path.exists():
-        meeting_routes_config = resolve_env_vars(_load_json(meeting_routes_config_path), env)
-        meeting_routes_config = resolve_path_vars(meeting_routes_config, root)
-    elif (config_root / "meeting_routes.json.example").exists():
-        meeting_routes_config = resolve_env_vars(_load_json(config_root / "meeting_routes.json.example"), env)
-        meeting_routes_config = resolve_path_vars(meeting_routes_config, root)
-
-    # 可选加载 feishu_ingest.json（飞书文档/聊天提取配置）
-    feishu_ingest_config_path = config_root / "feishu_ingest.json"
-    feishu_ingest_config = None
-    if feishu_ingest_config_path.exists():
-        feishu_ingest_config = resolve_env_vars(_load_json(feishu_ingest_config_path), env)
-        feishu_ingest_config = resolve_path_vars(feishu_ingest_config, root)
-    elif (config_root / "feishu_ingest.json.example").exists():
-        feishu_ingest_config = resolve_env_vars(_load_json(config_root / "feishu_ingest.json.example"), env)
-        feishu_ingest_config = resolve_path_vars(feishu_ingest_config, root)
+    # 可选加载配置文件（实际文件优先，其次 .example 占位符）
+    wiki_config = _load_optional_config(config_root, "wiki.json", env, root)
+    meeting_routes_config = _load_optional_config(config_root, "meeting_routes.json", env, root)
+    feishu_ingest_config = _load_optional_config(config_root, "feishu_ingest.json", env, root)
 
     return ConfigBundle(root=root, **loaded, wiki=wiki_config,
                         meeting_routes=meeting_routes_config,
@@ -248,6 +222,27 @@ def _load_json(path: Path) -> Dict[str, Any]:
     if not isinstance(data, dict):
         raise ConfigError(f"配置文件顶层必须是对象: {path}")
     return data
+
+
+def _load_optional_config(
+    config_root: Path, filename: str, env: Dict[str, str], root: Path
+) -> Optional[Dict[str, Any]]:
+    """加载可选配置文件，优先实际文件，其次 .example 占位符。
+
+    不存在任何文件时返回 None。
+    """
+    actual = config_root / filename
+    if actual.exists():
+        config = resolve_env_vars(_load_json(actual), env)
+        return resolve_path_vars(config, root)
+
+    example = config_root / f"{filename}.example"
+    if example.exists():
+        logger.warning("%s 不存在，回退加载 %s.example（占位符可能未解析）", filename, filename)
+        config = resolve_env_vars(_load_json(example), env)
+        return resolve_path_vars(config, root)
+
+    return None
 
 
 def _require_keys(data: Dict[str, Any], keys: Iterable[str], prefix: str) -> None:

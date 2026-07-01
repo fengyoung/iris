@@ -13,9 +13,7 @@ from typing import Dict, List, Optional, Set
 from .term_extractor import AsrTerm, AsrPromptVersion
 
 
-def _count_chinese(text: str) -> int:
-    """统计文本中的中文字符数。"""
-    return sum(1 for c in text if '一' <= c <= '鿿')
+from iris.utils.tokenization import count_chinese as _count_chinese  # noqa: E402 — 向后兼容别名
 
 
 def _exceeds_char_limit(text: str, max_total: int = 20, max_chinese: int = 10) -> bool:
@@ -242,9 +240,6 @@ def _render_compact(terms: List[AsrTerm], version: AsrPromptVersion) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 版本管理
-# ═══════════════════════════════════════════════════════════════════
-
-_VERSION_FILE = "asr_prompt_version.json"
+# 版本管理由 asr_version.py 统一提供
 
 

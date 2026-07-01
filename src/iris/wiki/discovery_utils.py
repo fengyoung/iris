@@ -146,8 +146,8 @@ def build_candidates(counter: Counter[str], evidence_counter: Counter[str],
         evidence_count = evidence_counter[title]
         if evidence_count < min_evidence:
             continue
-        if page_type == "term" and not re.search(r"[A-Z]", title):
-            continue
+        if page_type == "concept" and not re.search(r"[A-Z]", title):
+            continue  # 概念标题需含英文缩写或术语
         items.append(CandidateItem(title=title, page_type=page_type, query=title,
                                    score=score, evidence_count=evidence_count,
                                    sample_paths=sample_paths.get(title, [])))

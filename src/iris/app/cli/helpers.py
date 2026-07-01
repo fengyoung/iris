@@ -1,4 +1,4 @@
-"""CLI 辅助函数：步骤 1 版本，去掉所有知识库相关依赖。"""
+"""CLI 辅助函数 — 输出格式化、配置展示、Wiki 自动发现等共享工具。"""
 
 from __future__ import annotations
 

@@ -13,6 +13,10 @@ from urllib import error, request
 
 logger = logging.getLogger(__name__)
 
+# 默认参数
+_DEFAULT_TEMPERATURE = 0.2
+_MAX_BACKOFF_SECONDS = 60  # 指数退避上限
+
 from iris.config.loader import ConfigBundle
 from iris.llm.model_manager import ModelManager, ModelManagerError
 from iris.llm.router import ModelRouter, RoutingDecision
@@ -125,6 +129,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
                 return self._call_anthropic(
                     api_base, api_key, model_name,
                     request_data.prompt, max_tokens=max_tokens,
+                    max_retries=effective_retries,
                 )
             raise LLMProviderError(f"暂不支持的 provider: {provider_name}")
 
@@ -276,6 +281,36 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         except (KeyError, ModelManagerError):
             return False
 
+    def _call_openai_chat(
+        self, api_base_url: str, api_key: str, model: str, content,
+        *,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        timeout: int = 60,
+        max_retries: int = 0,
+    ) -> str:
+        """统一的 OpenAI 兼容 Chat Completions 调用。
+
+        content 可以是 str（纯文本）或 list[dict]（多模态 content_parts）。
+        """
+        endpoint = _join_url(api_base_url, "/chat/completions")
+        payload: Dict[str, Any] = {
+            "model": model,
+            "messages": [{"role": "user", "content": content}],
+            "temperature": temperature if temperature is not None else _DEFAULT_TEMPERATURE,
+        }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        data = self._post_json(
+            endpoint,
+            payload,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=timeout,
+            max_retries=max_retries,
+        )
+        return _extract_chat_completions_text(data)
+
+    # 向后兼容：保留旧方法名，内部委托给统一方法
     def _call_openai_compatible(
         self, api_base_url: str, api_key: str, model: str, prompt: str,
         *,
@@ -284,29 +319,11 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         timeout: int = 60,
         max_retries: int = 0,
     ) -> str:
-        endpoint = _join_url(api_base_url, "/chat/completions")
-        payload = {
-            "model": model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt,
-                }
-            ],
-            "temperature": temperature if temperature is not None else 0.2,
-        }
-        if max_tokens is not None:
-            payload["max_tokens"] = max_tokens
-        data = self._post_json(
-            endpoint,
-            payload,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-            },
-            timeout=timeout,
-            max_retries=max_retries,
+        return self._call_openai_chat(
+            api_base_url, api_key, model, prompt,
+            temperature=temperature, max_tokens=max_tokens,
+            timeout=timeout, max_retries=max_retries,
         )
-        return _extract_chat_completions_text(data)
 
     def _call_openai_compatible_multimodal(
         self, api_base_url: str, api_key: str, model: str, content_parts: list[dict],
@@ -315,30 +332,14 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         timeout: int = 60,
         max_retries: int = 0,
     ) -> str:
-        endpoint = _join_url(api_base_url, "/chat/completions")
-        payload = {
-            "model": model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": content_parts,
-                }
-            ],
-            "temperature": temperature if temperature is not None else 0.2,
-        }
-        data = self._post_json(
-            endpoint,
-            payload,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-            },
-            timeout=timeout,
-            max_retries=max_retries,
+        return self._call_openai_chat(
+            api_base_url, api_key, model, content_parts,
+            temperature=temperature, timeout=timeout, max_retries=max_retries,
         )
-        return _extract_chat_completions_text(data)
 
     def _call_anthropic(self, api_base_url: str, api_key: str, model: str, prompt: str,
-                        max_tokens: Optional[int] = None) -> str:
+                        max_tokens: Optional[int] = None,
+                        max_retries: int = 0) -> str:
         endpoint = _join_url(api_base_url, "/messages")
         payload = {
             "model": model,
@@ -357,6 +358,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
                 "x-api-key": api_key,
                 "anthropic-version": "2023-06-01",
             },
+            max_retries=max_retries,
         )
         return _extract_anthropic_text(data)
 
@@ -371,7 +373,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         last_exc: Optional[Exception] = None
         for attempt in range(max_retries + 1):
             if attempt > 0:
-                backoff = 2 ** attempt + random.uniform(0, 1)
+                backoff = min(2 ** attempt + random.uniform(0, 1), _MAX_BACKOFF_SECONDS)
                 time.sleep(backoff)
 
             try:

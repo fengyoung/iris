@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator
 
 
 # ── App 配置 ──────────────────────────────────────────────────────
@@ -142,7 +142,7 @@ class ModelItem(BaseModel):
     use_cases: List[str]
     notes: str = ""
     api_base_url: str
-    api_key: str
+    api_key: SecretStr
 
     @field_validator("api_base_url")
     @classmethod
@@ -157,11 +157,6 @@ class RoleModels(BaseModel):
     enabled: bool = True
     default_model_id: str
     models: Dict[str, ModelItem]
-
-    @field_validator("models")
-    @classmethod
-    def default_in_models(cls, v: Dict[str, ModelItem], info: Any) -> Dict[str, ModelItem]:
-        return v
 
 
 class DefaultStrategy(BaseModel):
@@ -194,7 +189,7 @@ class EmbeddingConfig(BaseModel):
     enabled: bool = False
     model: str = "text-embedding-v3"
     api_base_url: str = ""
-    api_key: str = ""
+    api_key: SecretStr = SecretStr("")
     timeout_seconds: int = Field(default=30, gt=0)
     max_retries: int = Field(default=2, ge=0)
 

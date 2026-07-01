@@ -302,14 +302,8 @@ sources:
 
     def _parse_frontmatter_field(self, content: str, field: str) -> str:
         """从 YAML frontmatter 中提取指定字段的值。"""
-        # 统一换行符
-        normalized = content.replace("\r\n", "\n")
-        fm_match = FRONTMATTER_RE.match(normalized)
-        if not fm_match:
-            return ""
-        for line in fm_match.group(1).splitlines():
-            if line.startswith(field + ":"):
-                return line.split(":", 1)[1].strip().strip("\"'")
+        from .searcher import get_frontmatter_field
+        return get_frontmatter_field(content, field)
         return ""
 
     def _find_page_by_title(self, title: str, page_type: Optional[str] = None) -> Optional[Tuple[Path, str, str]]:

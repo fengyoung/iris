@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import traceback
 from pathlib import Path
 
 from iris.config import load_config_bundle
@@ -141,7 +142,16 @@ def main() -> int:
         parser.error("未知命令")
         return 2
 
-    return handler(args, bundle, logger)
+    try:
+        return handler(args, bundle, logger)
+    except Exception as exc:
+        _emit_output(args.command, {
+            "error": str(exc),
+            "type": type(exc).__name__,
+        }, pretty=args.pretty)
+        if args.pretty:
+            traceback.print_exc(file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
