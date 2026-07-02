@@ -14,13 +14,13 @@
       "type_values": ["internal-discussion", "about", "independent-communication", "internal-communication"]
     },
     "XX-reports": {
-      "keywords": ["proposal", "report", "summary", "tech-article", "review", "evaluation"],
-      "description": "Formal proposals, milestone summaries, tech articles, review reports and other polished outputs",
+      "keywords": ["proposal", "report", "summary", "tech-article", "review", "evaluation", "planning", "product-planning"],
+      "description": "Formal proposals, product planning, milestone summaries, tech articles, review reports and other polished outputs",
       "naming": "YYYYMMDD-{topic}",
       "type_values": []
     },
     "XX-reference": {
-      "keywords": ["training", "workshop", "conference", "external", "learning", "lecture"],
+      "keywords": ["training", "workshop", "conference", "learning", "lecture"],
       "description": "External training notes, conference sessions, learning materials",
       "naming": "YYYYMMDD-{source}-{topic}",
       "type_values": []
