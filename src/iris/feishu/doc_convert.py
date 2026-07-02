@@ -70,17 +70,21 @@ class FeishuDocConverter:
         # 3. 提取元信息
         title = doc.get("title", "") or self._extract_title_from_content(doc.get("content", "")) or "未命名文档"
         author = doc.get("owner_name", "").strip() or ""
-        if not author:
-            try:
-                author = self._client.resolve_owner_name(url)
-            except FeishuClientError:
-                pass
+        create_time = doc.get("create_time", "") or ""
+
+        # 3b. fallback：docs +fetch 可能不含 create_time / owner_name，通过 wiki +node-get 补充
+        if not author or not create_time:
+            meta = self._resolve_doc_meta_fallback(url, author, create_time)
+            if not author and meta.get("owner_name"):
+                author = meta["owner_name"]
+            if not create_time and meta.get("create_time"):
+                create_time = meta["create_time"]
 
         # 4. 计算文件名 stem
-        date_str = extract_date(doc.get("create_time", "")) or datetime.now().strftime("%Y%m%d")
+        date_str = extract_date(create_time) or datetime.now().strftime("%Y%m%d")
         clean_title = sanitize_title(title, max_len=60)
         clean_author = sanitize_title(author) if author else ""
-        stem = f"{date_str}-{clean_title}" + (f"-from{clean_author}" if clean_author else "")
+        stem = f"{date_str}-{clean_title}" + (f"-{clean_author}" if clean_author else "")
 
         # 5. 处理内容（图片下载 + 元信息）
         try:
@@ -125,6 +129,39 @@ class FeishuDocConverter:
     def convert_batch(self, urls: List[str], **kwargs) -> List[Dict[str, Any]]:
         """批量转换多个文档。"""
         return [self.convert(url, **kwargs) for url in urls]
+
+    # ── 元信息 fallback ───────────────────────────────────
+
+    def _resolve_doc_meta_fallback(self, url: str,
+                                   author_hint: str = "",
+                                   create_time_hint: str = "") -> Dict[str, str]:
+        """通过 wiki +node-get 补充 docs +fetch 可能缺失的作者和创建时间。
+
+        仅在主流程中 author 或 create_time 为空时调用。
+        """
+        meta: Dict[str, str] = {}
+        try:
+            token = self._client.parse_doc_url(url)
+        except FeishuClientError:
+            return meta
+
+        if not author_hint:
+            try:
+                owner = self._client.resolve_owner_name(url)
+                if owner:
+                    meta["owner_name"] = owner
+            except FeishuClientError:
+                pass
+
+        if not create_time_hint:
+            try:
+                ct = self._client.resolve_doc_create_time(token)
+                if ct:
+                    meta["create_time"] = ct
+            except FeishuClientError:
+                pass
+
+        return meta
 
     def convert_from_config(self, **kwargs) -> List[Dict[str, Any]]:
         """从配置文件读取文档列表并转换。"""

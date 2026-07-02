@@ -123,11 +123,20 @@ def sanitize_title(title: str, max_len: int = 60) -> str:
 
 
 def extract_date(time_str: str) -> str:
-    """从 ISO 时间字符串中提取 YYYYmmdd 格式日期。"""
+    """从 ISO 时间字符串或 Unix 时间戳中提取 YYYYmmdd 格式日期。"""
+    if not time_str:
+        return ""
     try:
+        # Try ISO format first
         dt = datetime.fromisoformat(time_str)
         return dt.strftime("%Y%m%d")
     except (ValueError, TypeError):
+        pass
+    try:
+        # Try Unix timestamp (seconds since epoch)
+        dt = datetime.fromtimestamp(int(time_str))
+        return dt.strftime("%Y%m%d")
+    except (ValueError, TypeError, OSError):
         return ""
 
 

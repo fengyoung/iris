@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -268,6 +269,29 @@ class FeishuClient:
             if user:
                 return user.get("name", "") or user.get("localized_name", "")
             return ""
+        except (FeishuClientError, json.JSONDecodeError):
+            return ""
+
+    def resolve_doc_create_time(self, token: str) -> str:
+        """通过 wiki +node-get 获取文档创建时间（作为 docs +fetch 的 fallback）。
+
+        返回 ISO 格式时间字符串，失败时返回空字符串。
+        """
+        try:
+            data = self._run([
+                "wiki", "+node-get",
+                "--node-token", token,
+            ], timeout=30)
+            node = data.get("data", {})
+            created_ts = node.get("create_time", "") or node.get("created_at", "")
+            if not created_ts:
+                return ""
+            try:
+                # node-get 返回 Unix 时间戳（秒）
+                dt = datetime.fromtimestamp(int(created_ts))
+                return dt.isoformat()
+            except (ValueError, TypeError, OSError):
+                return ""
         except (FeishuClientError, json.JSONDecodeError):
             return ""
 
