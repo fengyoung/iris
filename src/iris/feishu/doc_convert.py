@@ -72,9 +72,9 @@ class FeishuDocConverter:
         author = doc.get("owner_name", "").strip() or ""
         create_time = doc.get("create_time", "") or ""
 
-        # 3b. fallback：docs +fetch 可能不含 create_time / owner_name，通过 wiki +node-get 补充
+        # 3b. fallback：docs +fetch 可能不含 create_time / owner_name，通过 search 补充
         if not author or not create_time:
-            meta = self._resolve_doc_meta_fallback(url, author, create_time)
+            meta = self._resolve_doc_meta_fallback(url, author, create_time, title)
             if not author and meta.get("owner_name"):
                 author = meta["owner_name"]
             if not create_time and meta.get("create_time"):
@@ -134,8 +134,9 @@ class FeishuDocConverter:
 
     def _resolve_doc_meta_fallback(self, url: str,
                                    author_hint: str = "",
-                                   create_time_hint: str = "") -> Dict[str, str]:
-        """通过 wiki +node-get 补充 docs +fetch 可能缺失的作者和创建时间。
+                                   create_time_hint: str = "",
+                                   title: str = "") -> Dict[str, str]:
+        """通过 docs +search 补充 docs +fetch 可能缺失的作者和创建时间。
 
         仅在主流程中 author 或 create_time 为空时调用。
         """
@@ -145,21 +146,12 @@ class FeishuDocConverter:
         except FeishuClientError:
             return meta
 
-        if not author_hint:
-            try:
-                owner = self._client.resolve_owner_name(url)
-                if owner:
-                    meta["owner_name"] = owner
-            except FeishuClientError:
-                pass
-
-        if not create_time_hint:
-            try:
-                ct = self._client.resolve_doc_create_time(token)
-                if ct:
-                    meta["create_time"] = ct
-            except FeishuClientError:
-                pass
+        if not author_hint or not create_time_hint:
+            search_meta = self._client.search_doc_meta(token, title)
+            if not author_hint and search_meta.get("owner_name"):
+                meta["owner_name"] = search_meta["owner_name"]
+            if not create_time_hint and search_meta.get("create_time"):
+                meta["create_time"] = search_meta["create_time"]
 
         return meta
 

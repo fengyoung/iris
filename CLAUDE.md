@@ -1,4 +1,4 @@
-# Iris 3.10.1 — 项目执行说明
+# Iris 3.10.2 — 项目执行说明
 
 > 工作知识助手，从 Iris v2.7.1 重构升级而来。
 > 个人知识库（Obsidian Wiki）重新设计 + 新增飞书团队知识库操作能力。
@@ -245,7 +245,7 @@ JSON 配置中使用 `${VAR_NAME}` 引用环境变量或 .env 中的值。
 
 | 层 | 位置 | 格式 | 含义 | 当前值 |
 |----|------|------|------|--------|
-| **产品版本** | `pyproject.toml` | SemVer X.Y.Z | 软件发布版本 | 3.10.1 |
+| **产品版本** | `pyproject.toml` | SemVer X.Y.Z | 软件发布版本 | 3.10.2 |
 | **协议版本** | `src/iris/__init__.py` | MAJOR.MINOR | CLI 命令集 / agent-spec 格式 | 3.8 |
 | **数据版本** | `config/*.json` | 各自独立 | 配置文件 Schema | 3.4 |
 
@@ -264,7 +264,7 @@ JSON 配置中使用 `${VAR_NAME}` 引用环境变量或 .env 中的值。
 
 ```
 iris3/
-├── pyproject.toml          # 3.10.1，依赖：PyMuPDF / python-docx / numpy / pydantic>=2.0
+├── pyproject.toml          # 3.10.2，依赖：PyMuPDF / python-docx / numpy / pydantic>=2.0
 ├── README.md
 ├── CLAUDE.md               # 本文件
 ├── .env.example            # 环境变量模板
@@ -481,6 +481,29 @@ iris3/
 | API Key 暴露面 | 全模块 | **仅 provider 内部** |
 | Trello 线程安全 | ❌ | ✅ |
 | 记忆系统 | __init__ 单文件 | **5 子模块：lifecycle/long_term/manager/session/working** |
+
+---
+
+## v3.10.2 变更（2026-07-02）
+
+### feishu-doc-convert 改进
+
+| 改动 | 文件 | 说明 |
+|------|------|------|
+| 文件名使用飞书创建时间 | `doc_convert.py`, `client.py`, `_shared.py` | `{date}-{title}-from{author}`，日期取自飞书文档 `create_time` |
+| 新增 `search_doc_meta` | `client.py` | 通过 `docs +search` 获取文档创建时间和作者（`docs +fetch` 不返回这些字段） |
+| 元信息 fallback 重写 | `doc_convert.py` | `wiki +node-get` → `docs +search`，解决非 Wiki 文档元信息缺失问题 |
+| `extract_date` 增强 | `_shared.py` | 新增 Unix 时间戳支持（飞书 node API 返回格式） |
+| 路由关键词调整 | `meeting_routes.json` | `03-方案报告` 增加「规划/产品规划/需求规划」，`08-参考资料` 移除「外部」（太泛） |
+| `_shared.py` 补导入 | `_shared.py` | 补充 `timezone` import（`name 'timezone' is not defined` 修复） |
+
+### 关键指标
+
+| 维度 | v3.10.1 | v3.10.2 |
+|------|:-------:|:-------:|
+| 产品版本 | 3.10.1 | **3.10.2** |
+| 协议版本 | 3.8 | 3.8 |
+| 数据版本 | 3.2/3.4 | 3.2/3.4 |
 
 ---
 

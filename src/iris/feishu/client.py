@@ -233,7 +233,6 @@ class FeishuClient:
             "--doc-format", "markdown",
         ], timeout=120)
         doc = data.get("data", {}).get("document", {})
-        # 若无 document 字段则尝试顶层 data
         if not doc:
             doc = data.get("data", {})
         return {
@@ -243,6 +242,31 @@ class FeishuClient:
             "modify_time": doc.get("modify_time", ""),
             "owner_name": doc.get("owner_name", ""),
         }
+
+    def search_doc_meta(self, token: str, title: str) -> Dict[str, str]:
+        """通过 docs +search 搜索文档元信息（创建时间、作者）。
+
+        docs +fetch 不返回 create_time 和 owner_name 时的 fallback。
+        搜索文档标题，按 token 精确匹配，返回 {create_time, owner_name}。
+        """
+        if not title:
+            return {}
+        try:
+            data = self._run([
+                "docs", "+search",
+                "--query", title,
+            ], timeout=30)
+            results = data.get("data", {}).get("results", [])
+            for r in results:
+                meta = r.get("result_meta", {})
+                if meta.get("token") == token:
+                    return {
+                        "create_time": meta.get("create_time_iso", ""),
+                        "owner_name": meta.get("owner_name", ""),
+                    }
+            return {}
+        except (FeishuClientError, json.JSONDecodeError):
+            return {}
 
     def resolve_owner_name(self, doc_url: str) -> str:
         """通过 wiki +node-get 获取文档作者姓名。
