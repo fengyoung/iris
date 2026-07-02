@@ -1,4 +1,4 @@
-# Iris 3.10.0 — 项目执行说明
+# Iris 3.10.1 — 项目执行说明
 
 > 工作知识助手，从 Iris v2.7.1 重构升级而来。
 > 个人知识库（Obsidian Wiki）重新设计 + 新增飞书团队知识库操作能力。
@@ -245,7 +245,7 @@ JSON 配置中使用 `${VAR_NAME}` 引用环境变量或 .env 中的值。
 
 | 层 | 位置 | 格式 | 含义 | 当前值 |
 |----|------|------|------|--------|
-| **产品版本** | `pyproject.toml` | SemVer X.Y.Z | 软件发布版本 | 3.10.0 |
+| **产品版本** | `pyproject.toml` | SemVer X.Y.Z | 软件发布版本 | 3.10.1 |
 | **协议版本** | `src/iris/__init__.py` | MAJOR.MINOR | CLI 命令集 / agent-spec 格式 | 3.8 |
 | **数据版本** | `config/*.json` | 各自独立 | 配置文件 Schema | 3.4 |
 
@@ -264,7 +264,7 @@ JSON 配置中使用 `${VAR_NAME}` 引用环境变量或 .env 中的值。
 
 ```
 iris3/
-├── pyproject.toml          # 3.10.0，依赖：PyMuPDF / python-docx / numpy / pydantic>=2.0
+├── pyproject.toml          # 3.10.1，依赖：PyMuPDF / python-docx / numpy / pydantic>=2.0
 ├── README.md
 ├── CLAUDE.md               # 本文件
 ├── .env.example            # 环境变量模板
@@ -481,6 +481,30 @@ iris3/
 | API Key 暴露面 | 全模块 | **仅 provider 内部** |
 | Trello 线程安全 | ❌ | ✅ |
 | 记忆系统 | __init__ 单文件 | **5 子模块：lifecycle/long_term/manager/session/working** |
+
+---
+
+## v3.10.1 变更（2026-07-02）
+
+### 版本号更新
+
+产品版本从 `3.10.0` 更新为 `3.10.1`。协议版本（3.8）和数据版本（3.2/3.4）不变。
+
+### 文件变更
+
+| 文件 | 变更 |
+|------|------|
+| `pyproject.toml` | 产品版本 `3.10.0` → `3.10.1` |
+| `CLAUDE.md` | 版本引用更新 + v3.10.1 变更记录 |
+| `README.md` | 标题版本更新 + v3.10.0/v3.10.1 版本历史补充 |
+
+### 关键指标
+
+| 维度 | v3.10.0 | v3.10.1 |
+|------|:-------:|:-------:|
+| 产品版本 | 3.10.0 | **3.10.1** |
+| 协议版本 | 3.8 | 3.8 |
+| 数据版本 | 3.2/3.4 | 3.2/3.4 |
 
 ---
 
