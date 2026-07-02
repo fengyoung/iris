@@ -84,7 +84,7 @@ class FeishuDocConverter:
         date_str = extract_date(create_time) or datetime.now().strftime("%Y%m%d")
         clean_title = sanitize_title(title, max_len=60)
         clean_author = sanitize_title(author) if author else ""
-        stem = f"{date_str}-{clean_title}" + (f"-{clean_author}" if clean_author else "")
+        stem = f"{date_str}-{clean_title}" + (f"-from{clean_author}" if clean_author else "")
 
         # 5. 处理内容（图片下载 + 元信息）
         try:
