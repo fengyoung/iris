@@ -1,4 +1,4 @@
-# Iris 3.10.2 — 项目执行说明
+# Iris 3.11.0 — 项目执行说明
 
 > 工作知识助手，从 Iris v2.7.1 重构升级而来。
 > 个人知识库（Obsidian Wiki）重新设计 + 新增飞书团队知识库操作能力。
@@ -245,7 +245,7 @@ JSON 配置中使用 `${VAR_NAME}` 引用环境变量或 .env 中的值。
 
 | 层 | 位置 | 格式 | 含义 | 当前值 |
 |----|------|------|------|--------|
-| **产品版本** | `pyproject.toml` | SemVer X.Y.Z | 软件发布版本 | 3.10.2 |
+| **产品版本** | `pyproject.toml` | SemVer X.Y.Z | 软件发布版本 | 3.11.0 |
 | **协议版本** | `src/iris/__init__.py` | MAJOR.MINOR | CLI 命令集 / agent-spec 格式 | 3.8 |
 | **数据版本** | `config/*.json` | 各自独立 | 配置文件 Schema | 3.4 |
 
@@ -481,6 +481,43 @@ iris3/
 | API Key 暴露面 | 全模块 | **仅 provider 内部** |
 | Trello 线程安全 | ❌ | ✅ |
 | 记忆系统 | __init__ 单文件 | **5 子模块：lifecycle/long_term/manager/session/working** |
+
+---
+
+## 🆕 v3.11.0 变更（2026-07-03）
+
+### Claude Code 项目级 Skill 体系
+
+为 Iris 引入 6 个 Claude Code 项目级 Skill，将知识库操作从纯 CLI 扩展到对话式交互。
+
+### 新增 Skill
+
+| Skill | 封装命令 | 核心价值 |
+|------|---------|------|
+| `iris-wiki` | `wiki-pipeline` + `build-wiki` + `wiki-lint` | 对话式 Wiki 发现→审核→生成，消除 JSONL 手工编辑 |
+| `iris-feishu-import` | `feishu-doc-convert` + `chat-digest` | 飞书文档/聊天交互式导入，dry-run 预览 + 排重透明 + 错误恢复 |
+| `iris-meeting` | `transcribe-meeting` + `batch-transcribe` | 音频转写→LLM 纪要→智能路由归档，全流程引导 |
+| `iris-ask` | `ask` + `process` | 知识库问答 + 多模态理解，自动判断输入类型 |
+| `iris-report` | `build-report` + `build-mindmap` + `build-biweekly-report` | Query 精炼 + 格式引导，从模糊想法到精准报告 |
+| `iris-health` | `wiki-lint` + `deep-eval` + `enrich-persons` | 健康检查结果解读 + 可操作修复建议 |
+
+### 设计原则
+
+- **Skill 化标准**：决策密度高、多轮交互、错误脆弱性强、领域知识门槛高的命令优先
+- **公式**：Skill = CLI 命令 + Claude 对话引导（参数选择/结果解读/错误恢复）
+- **范围**：6 个 Skill 覆盖 5 个 Tier 1 命令 + 4 个 Tier 2 命令，其余 36 个命令保留 CLI
+
+### 关键指标
+
+| 维度 | v3.10.2 | v3.11.0 |
+|------|:-------:|:-------:|
+| 产品版本 | 3.10.2 | **3.11.0** |
+| 协议版本 | 3.8 | 3.8 |
+| 数据版本 | 3.2/3.4 | 3.2/3.4 |
+| CLI 命令 | 45 | 45 |
+| 单元测试 | 169 | 169 |
+| 项目级 Skill | 0 | **6** |
+| 源代码行数 | 17,298 | 17,298 |
 
 ---
 
