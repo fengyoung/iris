@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 import time
 from pathlib import Path
@@ -81,11 +82,16 @@ class TranscribeMeetingPipeline:
         wiki_context, page_count = self._load_wiki_context()
         print(f"     完成：加载 {page_count} 个 Wiki 页面", file=sys.stderr)
 
+        # 计算会议日期和时长
+        meeting_date = self._format_meeting_date(date_part)
+        duration = self._calc_duration(raw_transcript)
+
         # Step 3: LLM 生成会议纪要
         print(f"[3/3] base_model 生成会议纪要...", file=sys.stderr)
         source_filename = source.name  # 来源文件，供输出标识和未来排重
         minutes = self._call_llm(raw_transcript, wiki_context, meeting_type, meeting_topic,
-                                 source_filename=source_filename)
+                                 source_filename=source_filename,
+                                 meeting_date=meeting_date, duration=duration)
 
         # Step 3b: 路由判定（--to-source 模式）
         route_result = None
@@ -110,6 +116,55 @@ class TranscribeMeetingPipeline:
             result["route"] = route_result.get("route", "")
             result["route_reason"] = route_result.get("reason", "")
         return result
+
+    # ── 日期与时长计算 ──────────────────────────────────────────
+
+    @staticmethod
+    def _format_meeting_date(date_part: str) -> str:
+        """将 8 位日期 YYYYMMDD 格式化为 YYYY-MM-DD，失败返回空字符串。"""
+        if len(date_part) == 8 and date_part.isdigit():
+            return f"{date_part[:4]}-{date_part[4:6]}-{date_part[6:8]}"
+        return ""
+
+    @staticmethod
+    def _calc_duration(raw_transcript: str) -> str:
+        """从转写文本中提取时间戳计算时长。
+
+        支持格式：`说话人  HH:MM:SS` 或 `说话人  MM:SS`。
+        返回 "X小时X分" 或空字符串。
+        """
+        pattern = re.compile(r'\b(\d{1,2}):(\d{2})(?::(\d{2}))?\b')
+        timestamps = []
+        for m in pattern.finditer(raw_transcript):
+            h = int(m.group(1))
+            mi = int(m.group(2))
+            s = int(m.group(3)) if m.group(3) else 0
+            timestamps.append(h * 3600 + mi * 60 + s)
+
+        if len(timestamps) < 2:
+            return ""
+
+        # 取有效时间范围（过滤掉可能的噪音时间戳）
+        first_ts = timestamps[0]
+        last_ts = timestamps[-1]
+
+        # 如果最后的时间戳异常大（> 24小时），回退到合理范围内
+        if last_ts > 86400:
+            for ts in reversed(timestamps):
+                if ts < 86400:
+                    last_ts = ts
+                    break
+
+        if first_ts >= last_ts:
+            return ""
+
+        total_seconds = last_ts - first_ts
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+
+        if hours > 0:
+            return f"{hours}小时{minutes}分"
+        return f"{minutes}分"
 
     def _resolve_source_dir(self) -> Path:
         """解析 SOURCE/05-会议纪要/ 输出目录。"""
@@ -289,12 +344,18 @@ FILENAME: <文件名>"""
 
     def _call_llm(self, raw_transcript: str, wiki_context: str,
                   meeting_type: str = "", meeting_topic: str = "",
-                  source_filename: str = "") -> str:
-        date_str = time.strftime("%Y-%m-%d")
+                  source_filename: str = "", meeting_date: str = "",
+                  duration: str = "") -> str:
+        gen_date = time.strftime("%Y-%m-%d")
+        meeting_date_display = meeting_date or gen_date  # fallback：无文件名日期时用当天
         type_label = meeting_type or "会议"
         topic_label = meeting_topic or ""
         title = f"会议纪要 - {topic_label}" if topic_label else f"会议纪要 - {type_label}"
-        header_lines = [f"# {title}", f"日期：{date_str}", f"类型：{type_label}"]
+        header_lines = [f"# {title}",
+                        f"日期：{meeting_date_display}",
+                        f"类型：{type_label}"]
+        if duration:
+            header_lines.append(f"时长：{duration}")
         if source_filename:
             header_lines.append(f"来源：{source_filename}")
         header = "\n".join(header_lines)
@@ -315,7 +376,7 @@ FILENAME: <文件名>"""
 3. **结构化输出**：按议题分组，保留关键数据指标、决策、风险/问题
 4. **待办事项**：输出清晰的责任人+截止时间
 
-## 输出格式
+## 输出格式（必须严格遵守）
 
 {header}
 
@@ -332,10 +393,24 @@ FILENAME: <文件名>"""
 | 序号 | 事项 | 负责人 | 截止时间 |
 
 ---
-*生成说明：基于 {date_str} 录音转写生成*
-*记录人：Iris，纪要日期：{date_str}*
+*生成说明：基于 {meeting_date_display} 录音转写生成*
+*记录人：Iris，纪要日期：{gen_date}*
 
 ## 原始转写文本
 
 {raw_transcript}"""
-        return self._llm.generate(prompt, route_context={"input_type": "text"}, temperature=0.1, max_tokens=16384).text
+        minutes = self._llm.generate(prompt, route_context={"input_type": "text"},
+                                     temperature=0.1, max_tokens=16384).text
+        # 后处理：确保尾注存在
+        minutes = self._ensure_footer(minutes, meeting_date_display, gen_date)
+        return minutes
+
+    @staticmethod
+    def _ensure_footer(text: str, meeting_date: str, gen_date: str) -> str:
+        """确保纪要末尾包含生成说明尾注，缺少则自动追加。"""
+        if "生成说明" in text:
+            return text
+        footer = (f"\n\n---\n"
+                   f"*生成说明：基于 {meeting_date} 录音转写生成*\n"
+                   f"*记录人：Iris，纪要日期：{gen_date}*")
+        return text.rstrip() + footer
