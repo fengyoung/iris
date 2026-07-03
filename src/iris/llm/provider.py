@@ -84,6 +84,27 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         """返回内部的 ModelManager 实例，供外部查询/切换模型。"""
         return self._model_manager
 
+    def _find_model_by_name(self, model_name: str) -> Optional[Dict[str, Any]]:
+        """在所有角色中按 model 字段或 model_id 查找模型配置（含 api_key）。"""
+        for role, role_cfg in self._model_manager._models.items():
+            # 兼容 dict 和 Pydantic RoleModels
+            models = role_cfg.get("models", {}) if isinstance(role_cfg, dict) else getattr(role_cfg, "models", {})
+            for model_id, cfg in models.items():
+                # cfg 可能是 dict 或 Pydantic ModelItem
+                cfg_model = cfg.get("model") if isinstance(cfg, dict) else getattr(cfg, "model", None)
+                if cfg_model == model_name or model_id == model_name:
+                    if isinstance(cfg, dict):
+                        return dict(cfg, _model_id=model_id)
+                    # Pydantic ModelItem → dict
+                    result = {"model": cfg_model, "_model_id": model_id,
+                              "api_key": getattr(cfg, "api_key", ""),
+                              "api_base_url": getattr(cfg, "api_base_url", ""),
+                              "provider": getattr(cfg, "provider", ""),
+                              "timeout_seconds": getattr(cfg, "timeout_seconds", 60),
+                              "max_retries": getattr(cfg, "max_retries", 0)}
+                    return result
+        return None
+
     def generate(
         self,
         request_data: LLMRequest,
@@ -91,7 +112,39 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         max_retries: Optional[int] = None,
+        force_model: Optional[str] = None,
     ) -> LLMResponse:
+        # force_model：跳过路由，直接使用指定模型
+        if force_model:
+            model_cfg = self._find_model_by_name(force_model)
+            if model_cfg is None:
+                raise LLMProviderError(f"未找到模型: {force_model}")
+            api_base = model_cfg["api_base_url"]
+            api_key = model_cfg.get("api_key", "")
+            model_name = model_cfg["model"]
+            provider_name = str(model_cfg["provider"]).lower()
+            timeout = model_cfg.get("timeout_seconds", 60)
+            effective_retries = max_retries if max_retries is not None else model_cfg.get("max_retries", 0)
+            if provider_name in self.OPENAI_COMPATIBLE_PROVIDERS:
+                text = self._call_openai_compatible(
+                    api_base, api_key, model_name, request_data.prompt,
+                    temperature=temperature, max_tokens=max_tokens,
+                    timeout=timeout, max_retries=effective_retries,
+                )
+            elif provider_name == "anthropic":
+                text = self._call_anthropic(
+                    api_base, api_key, model_name,
+                    request_data.prompt, max_tokens=max_tokens,
+                    max_retries=effective_retries,
+                )
+            else:
+                raise LLMProviderError(f"暂不支持的 provider: {provider_name}")
+            return LLMResponse(
+                text=text, selected_role="forced", provider=provider_name,
+                model=model_name, api_base_url=api_base,
+                matched_rule="force_model",
+            )
+
         decision = self._router.route(request_data.route_context)
 
         def _try_call(api_base: str, api_key: str, model_name: str, cfg: Dict[str, Any]) -> str:

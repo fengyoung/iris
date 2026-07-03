@@ -23,7 +23,8 @@ class TranscribeMeetingPipeline:
 
     def run(self, audio_path: str = "", *, transcript_path: Optional[str] = None,
             output_path: Optional[str] = None, whisper_model: str = "base",
-            force_retranscribe: bool = False, to_source: bool = False) -> Dict[str, Any]:
+            force_retranscribe: bool = False, to_source: bool = False,
+            model: Optional[str] = None) -> Dict[str, Any]:
         has_audio = bool(audio_path)
         has_text = transcript_path is not None
         if not has_audio and not has_text:
@@ -91,7 +92,8 @@ class TranscribeMeetingPipeline:
         source_filename = source.name  # 来源文件，供输出标识和未来排重
         minutes = self._call_llm(raw_transcript, wiki_context, meeting_type, meeting_topic,
                                  source_filename=source_filename,
-                                 meeting_date=meeting_date, duration=duration)
+                                 meeting_date=meeting_date, duration=duration,
+                                 model=model)
 
         # Step 3b: 路由判定（--to-source 模式）
         route_result = None
@@ -109,9 +111,10 @@ class TranscribeMeetingPipeline:
         safe_write_text(out, minutes, self._bundle, allow_existing_outside=True)
         print(f"     完成 → {out.name}", file=sys.stderr)
 
+        reported_model = model if model else self._llm.get_provider().get_active_model_config("base_model")["model"]
         result = {"audio_file": str(source) if has_audio else "", "transcript_file": str(source) if has_text else "",
                   "source_type": source_type, "word_count": word_count, "wiki_pages_loaded": page_count,
-                  "output_file": str(out), "model": self._llm.get_provider().get_active_model_config("base_model")["model"]}
+                  "output_file": str(out), "model": reported_model}
         if route_result:
             result["route"] = route_result.get("route", "")
             result["route_reason"] = route_result.get("reason", "")
@@ -345,7 +348,7 @@ FILENAME: <文件名>"""
     def _call_llm(self, raw_transcript: str, wiki_context: str,
                   meeting_type: str = "", meeting_topic: str = "",
                   source_filename: str = "", meeting_date: str = "",
-                  duration: str = "") -> str:
+                  duration: str = "", model: Optional[str] = None) -> str:
         gen_date = time.strftime("%Y-%m-%d")
         meeting_date_display = meeting_date or gen_date  # fallback：无文件名日期时用当天
         type_label = meeting_type or "会议"
@@ -400,7 +403,8 @@ FILENAME: <文件名>"""
 
 {raw_transcript}"""
         minutes = self._llm.generate(prompt, route_context={"input_type": "text"},
-                                     temperature=0.1, max_tokens=16384).text
+                                     temperature=0.1, max_tokens=16384,
+                                     force_model=model).text
         # 后处理：确保尾注存在
         minutes = self._ensure_footer(minutes, meeting_date_display, gen_date)
         return minutes

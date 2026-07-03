@@ -59,6 +59,7 @@ class LLMService:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         max_retries: Optional[int] = None,
+        force_model: Optional[str] = None,
     ) -> GenerationResult:
         """调用 LLM 生成文本。
 
@@ -68,6 +69,7 @@ class LLMService:
             temperature: 温度参数
             max_tokens: 最大输出 token
             max_retries: 重试次数
+            force_model: 强制使用指定模型名称，跳过路由规则
 
         Returns:
             GenerationResult：包含生成文本和调用元数据
@@ -80,6 +82,7 @@ class LLMService:
                 temperature=temperature,
                 max_tokens=max_tokens,
                 max_retries=max_retries,
+                force_model=force_model,
             )
             return GenerationResult(
                 text=response.text,
