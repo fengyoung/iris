@@ -1,4 +1,4 @@
-# Iris 3.12.0 — 项目执行说明
+# Iris 3.11.2 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -136,7 +136,7 @@ Stage 3 (base model)  → 整合润色输出
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.12.0 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.11.2 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.8 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.2/3.4 | 配置文件 Schema |
 
@@ -159,7 +159,7 @@ Stage 3 (base model)  → 整合润色输出
 
 ```
 iris3/
-├── pyproject.toml              # 产品版本 3.12.0
+├── pyproject.toml              # 产品版本 3.11.2
 ├── README.md
 ├── CLAUDE.md                   # 本文件
 ├── CHANGELOG.md                # 完整版本历史
@@ -206,6 +206,9 @@ iris3/
 ---
 
 ## 近期变更
+
+### v3.11.2 (2026-07-03)
+force_model 参数 + 111 份历史纪要翻新 + 人物歧义处理。
 
 ### v3.11.1 (2026-07-03)
 transcribe-meeting 三项修复：日期从文件名提取、时长从时间戳计算、尾注自动追加。
