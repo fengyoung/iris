@@ -4,6 +4,18 @@
 
 ---
 
+## v3.12.0 (2026-07-03)
+
+### force_model 参数 + 历史纪要翻新
+
+- LLM Provider 新增 `force_model` 参数，支持跳过路由规则直接指定模型
+- `TranscribeMeetingPipeline` 新增 `model` 参数，可指定纪要生成模型
+- `scripts/refresh_meeting_minutes.py` — 独立翻新脚本，支持 dry-run/resume/verify
+- 使用 deepseek-v4-pro 重新提取全部 111 份历史转录文件纪要
+- 人物歧义处理：6 人手动排歧 + 杜鹏→杜朋飞书信息统一
+
+---
+
 ## v3.11.1 (2026-07-03)
 
 ### transcribe-meeting 三项修复
