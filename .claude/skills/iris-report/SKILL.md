@@ -104,7 +104,13 @@ Mermaid 格式的导图可以在对话中直接展示。
 **步骤 2：执行**
 
 ```bash
-python3 scripts/run_cli.py build-biweekly-report --to-source
+python3 scripts/run_cli.py build-biweekly-report --mode llm --to-source
+```
+
+**可选输出路径：**
+
+```bash
+python3 scripts/run_cli.py build-biweekly-report --mode llm --output-file output/双周报.md
 ```
 
 **步骤 3：展示摘要**

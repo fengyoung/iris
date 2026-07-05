@@ -169,7 +169,8 @@ def handle_build_biweekly_report(args, bundle, logger) -> int:
     from iris.analysis import AnalysisReportService
     service = AnalysisReportService(bundle)
     query = getattr(args, "query", "") or ""
-    result = service.build_biweekly_report(query=query, mode=getattr(args, "mode", "llm"))
+    # 默认走 llm 模式，LLM 不可用时 service 内部自动降级为 local
+    result = service.build_biweekly_report(query=query, mode="llm")
     payload = result.to_dict()
 
     # 确定输出路径
@@ -183,11 +184,10 @@ def handle_build_biweekly_report(args, bundle, logger) -> int:
         date_str = today.strftime("%Y%m%d")
         filename = f"双周报-w{week:02d}-{author}-{date_str}.md" if author else f"双周报-w{week:02d}-{date_str}.md"
 
-        # 输出到 SOURCE/06-我的周报/
-        from iris.app.transcribe_meeting.pipeline import TranscribeMeetingPipeline
-        pipeline = TranscribeMeetingPipeline(bundle)
-        source_dir = pipeline._resolve_source_dir().parent / "06-我的周报"
-        output = str(source_dir / filename)
+        # 输出到 SOURCE/06-我的周报/（直接读取数据源配置，不耦合会议转写模块）
+        source_root = _resolve_data_source_root(bundle)
+        if source_root:
+            output = str(source_root / "06-我的周报" / filename)
 
     if output:
         path = Path(output)
@@ -1098,6 +1098,17 @@ def _strip_version_suffix(stem: str) -> str:
     如 "asr_prompt_v1.0.0" → "asr_prompt"
     """
     return _VERSION_SUFFIX_PATTERN.sub("", stem)
+
+
+def _resolve_data_source_root(bundle) -> Optional[Path]:
+    """解析数据源根目录（第一个启用的数据源的 path）。"""
+    sources = bundle.data_source.get("sources", {})
+    for cfg in sources.values():
+        if cfg.get("enabled") and cfg.get("path"):
+            p = Path(cfg["path"]).resolve()
+            if p.exists():
+                return p
+    return None
 
 
 # ── 命令分发表 ─────────────────────────────────────────────

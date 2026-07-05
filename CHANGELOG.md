@@ -4,6 +4,21 @@
 
 ---
 
+## v3.11.3 (2026-07-05)
+
+### build-biweekly-report 全面重构
+
+- **管道重构**：从「OP 关键词 → chunk 检索 → 时效性加权」改为「时间窗口文件扫描 → LLM 直接理解」，不再遗漏关键词不匹配的文档
+- **证据源**：直接扫描 SOURCE 中 03-方案报告/04-讨论思考/05-会议纪要/07-成员周报 近两周文件，43 个完整文件直接喂给 LLM
+- **混合检索**：纯 BM25 → EnhancedRetriever（BM25 + 向量 RRF 融合）+ 时效性加权
+- **格式参考**：新增上期双周报加载，作为 LLM 输出格式与战略分析深度的标杆
+- **引用格式**：简化可读，支持类型前缀 + 完整描述 + MMDD（如 `项目讨论-某检测项目拆修检测...-0702`）
+- **反幻觉**：引用标签严格来自文件清单，禁止编造
+- **架构清理**：删除废弃方法 `_retrieve_recent_evidence`, `_extract_op_keywords`, `_load_wiki_for_report`；OP 文档缓存；handler 解耦
+- **默认模式**：`build-biweekly-report` 默认走 `llm` 模式，不再 fallthrough 到 `local`
+
+---
+
 ## v3.11.2 (2026-07-03)
 
 ### force_model 参数 + 历史纪要翻新

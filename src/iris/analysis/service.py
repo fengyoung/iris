@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from iris.config.loader import ConfigBundle
@@ -41,6 +43,7 @@ class AnalysisReportService:
         self._llm = LLMService(config)
         self._prompt_loader = PromptTemplateLoader(config)
         self._logger = IrisLogger(config)
+        self._op_text_cache: Optional[str] = None  # OP 文档缓存，避免重复加载
 
     def build_report(self, query: str, *, top_k: int = 6, mode: str = "llm", two_stage: bool = False) -> ReportResponse:
         qa_response = self._qa.ask(query, top_k=top_k, mode=mode)
@@ -81,12 +84,13 @@ class AnalysisReportService:
         return result
 
     def build_biweekly_report(self, *, query: str = "", top_k: int = 12, mode: str = "llm") -> ReportResponse:
-        """生成双周报——汇总近两周进展，按项目方向编写。
+        """生成双周报——文件级时间窗口扫描 + LLM 直接理解。
 
-        与 build_report 不同：此方法独立实现完整 pipeline，
-        加载 Wiki 上下文 + 检索最近证据 → LLM 按方向编写结构化周报。
+        新管道：扫描 SOURCE 中 4 类目录的近两周文件 → 构建文件清单
+        → LLM 按 OP 方向理解、整合、排重、输出结构化周报。
+        不再依赖 chunk 检索，不再遗漏关键词匹配不到的文档。
         """
-        from datetime import datetime, timedelta, timezone
+        from datetime import timezone
 
         now = datetime.now(timezone.utc)
         two_weeks_ago = now - timedelta(days=14)
@@ -95,45 +99,49 @@ class AnalysisReportService:
         if not query:
             query = f"近两周({period})工作进展"
 
-        # 1. 加载 Wiki 上下文作为背景知识
-        wiki_context = self._load_wiki_for_report()
+        # 1. 加载 OP 规划文档作为框架
+        op_doc = self._load_op_document()
 
-        # 2. 检索近两周的证据
-        evidence_blocks = self._retrieve_recent_evidence(query, top_k=top_k)
+        # 2. 加载上期双周报作为格式范例
+        previous_report = self._load_previous_biweekly()
+
+        # 3. 收集近两周的数据源文件
+        files = self._collect_recent_files(two_weeks_ago.replace(tzinfo=None))
+
+        # 4. 构建文件清单文本
+        file_manifest = _build_file_manifest(files)
 
         if mode == "local":
-            markdown = self._build_local_biweekly(period, evidence_blocks, wiki_context)
+            markdown = _build_local_fallback(period, op_doc, file_manifest)
             return ReportResponse(query=query, mode="local", markdown=markdown, blocks=[],
                                   structured={}, llm={"fallback_used": False})
 
-        # 3. LLM 模式：用模板生成
+        # 5. LLM 模式：模板 + LLM 生成
         try:
             cfg = self._config.app.get("biweekly_report", {})
             author_info = cfg.get("author_info", "你是一个技术团队的写作助手。")
             prompt = self._prompt_loader.render("biweekly_report.md", {
                 "period": period,
                 "author_info": author_info,
-                "wiki_context": wiki_context,
-                "evidence": evidence_blocks,
+                "op_doc": op_doc or "（未找到 OP 规划文档）",
+                "previous_report": previous_report or "（无上期双周报）",
+                "file_manifest": file_manifest,
             })
-            # 使用 base_model（避免 reasoning 模型输出 CoT）
             markdown = self._llm.generate(
                 prompt=prompt,
                 route_context={
                     "input_type": "text", "task_type": "analysis",
-                    "complexity": "standard", "use_case": "biweekly_report",
+                    "complexity": "complex", "use_case": "biweekly_report",
                 }
             ).text
             markdown = markdown.strip()
-            # 清理代码块包裹
             from iris.wiki.generator import WikiGenerator
             markdown = WikiGenerator._extract_wiki_content(markdown)
 
-            # 添加时间周期头
             if not markdown.startswith("*时间周期"):
                 markdown = f"*时间周期：{period}*\n\n{markdown}"
 
-            llm_payload = {"fallback_used": False}
+            llm_payload = {"fallback_used": False, "file_count": len(files)}
             result = ReportResponse(query=query, mode="llm", markdown=markdown,
                                      blocks=[], structured={}, llm=llm_payload)
             self._logger.log("biweekly_report", result.to_dict())
@@ -141,156 +149,222 @@ class AnalysisReportService:
 
         except LLMProviderError as exc:
             self._logger.log("biweekly_llm_fallback", {"query": query, "reason": str(exc)})
-            markdown = self._build_local_biweekly(period, evidence_blocks, wiki_context)
+            markdown = _build_local_fallback(period, op_doc, file_manifest)
             return ReportResponse(query=query, mode="local_fallback", markdown=markdown,
                                   blocks=[], structured={},
                                   llm={"fallback_used": True, "reason": str(exc)})
 
-    def _load_wiki_for_report(self) -> str:
-        """加载 Wiki 页面上下文 + OP 规划文档，用于双周报背景知识。"""
-        from iris.wiki.context_loader import WikiContextLoader
-        fragments = []
-
-        # 0. 优先加载 OP 规划作为主框架
-        op_text = self._load_op_document()
-        if op_text:
-            fragments.append(f"## OP规划（双周报必须对齐此框架）\n{op_text}")
-
-        # 1. Wiki 页面（跳过概念，仅领域/项目/人物）
-        if self._config.wiki and self._config.wiki.get("wiki_root"):
-            wiki_root = Path(self._config.wiki["wiki_root"]).resolve()
-            if wiki_root.exists():
-                loader = WikiContextLoader(wiki_root)
-                ctx = loader.load_context(
-                    page_types=["domain", "project", "person"],
-                    max_chars_per_page=1500,
-                )
-                if ctx:
-                    fragments.append(ctx)
-
-        return "\n\n".join(fragments) if fragments else "（无背景知识）"
+    # ── OP 文档加载 ──────────────────────────────────────────
 
     def _load_op_document(self) -> str:
-        """加载 SOURCE 中的 OP 规划文档。"""
+        """加载 SOURCE 中的 OP 规划文档（缓存，避免重复加载）。"""
+        if self._op_text_cache is not None:
+            return self._op_text_cache
         from pathlib import Path as _Pt
-        # 从数据源配置中获取 SOURCE 路径
         sources = self._config.data_source.get("sources", {})
         for cfg in sources.values():
             src_path = _Pt(cfg.get("path", "")).resolve()
             if not src_path.exists():
                 continue
-            # 查找 OP 规划文件
             op_dir = src_path / "01-目标管理"
             if op_dir.exists():
-                for f in sorted(op_dir.glob("*.md"), reverse=True):  # 最新OP优先
+                for f in sorted(op_dir.glob("*.md"), reverse=True):
                     try:
                         text = f.read_text(encoding="utf-8")
                     except (OSError, UnicodeDecodeError):
                         continue
-                    # 去掉 frontmatter（如果有）
                     if text.startswith("---"):
                         parts = text.split("---", 2)
                         text = parts[2].strip() if len(parts) >= 3 else text
-                    # 截断过长的 OP（保留核心：方向+目标+举措+责任人）
-                    return text[:8000]
+                    self._op_text_cache = text[:8000]
+                    return self._op_text_cache
+        self._op_text_cache = ""
         return ""
 
+    # ── 上期双周报 ──────────────────────────────────────────
+
+    def _load_previous_biweekly(self) -> str:
+        """加载上期双周报作为格式范例（最新一份 06-我的周报/ 下的文件）。"""
+        source_root = _resolve_source_root(self._config)
+        if not source_root:
+            return ""
+        report_dir = source_root / "06-我的周报"
+        if not report_dir.exists():
+            return ""
+        files = sorted(report_dir.glob("双周报-*.md"), reverse=True)
+        if not files:
+            return ""
+        try:
+            content = files[0].read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return ""
+        # 去掉尾部生成标记行，保留正文
+        content = re.sub(r'\n*> This report was.*$', '', content, flags=re.MULTILINE)
+        return content[:5000]
+
+    # ── 文件收集 ────────────────────────────────────────────
+
     @staticmethod
-    def _extract_op_keywords(op_text: str) -> list[str]:
-        """从 OP 文档中提取搜索关键词（方向名、项目名、责任人）。
+    def _extract_date_from_path(relative_path: str) -> Optional[datetime]:
+        """从文件路径中提取日期（YYYYMMDD 格式）。"""
+        m = re.search(r"(\d{8})", relative_path)
+        if not m:
+            return None
+        try:
+            return datetime.strptime(m.group(1), "%Y%m%d")
+        except ValueError:
+            return None
 
-        关键词驱动近两周证据检索，OP 更新后自动适配。
+    @staticmethod
+    def _build_citation_label(filename: str, dir_label: str) -> str:
+        """构建简化引用标签。
+
+        规则：
+        - 成员周报: 提取人名 → "团队成员B周报-0703"
+        - 会议纪要: 保留类型前缀 + 完整描述 → "项目讨论/某检测项目拆修检测-0626"
+        - 讨论思考: 保留类型前缀 + 完整描述 → "内部讨论/质检执行智能化-0701"
+        - 其他（方案报告等）: 显式标注目录类型 → "方案报告/图验技术进展-0625"
         """
-        keywords = []
-        # 提取 OP 各层级的核心词（适配多种格式）
-        # 方向标题：## 1、视觉检测 或 ## 方向一：质量...
-        for m in re.finditer(r"##\s*(?:\d+[、.])?\s*(.+?)(?:\n|$)", op_text):
-            title = m.group(1).strip()
-            # 跳过非方向行（如空行、纯数字）
-            if not title or len(title) < 3:
-                continue
-            clean = re.sub(r'[“”‘’\"\'＞>]', '', title)
-            words = re.findall(r"[\w一-鿿]{2,}", clean)
-            keywords.extend(words[:5])
-        # 子项标题：### 1.1、Alpha项目
-        for m in re.finditer(r"###\s+\d+\.\d+[、.]?\s*(.+?)(?:\n|$)", op_text):
-            desc = m.group(1).strip()
-            nouns = re.findall(r"[\w一-鿿A-Za-z]{2,}", desc)
-            keywords.extend(nouns[:3])
-        # 责任人、目标中的关键名词
-        for m in re.finditer(r"责任人[：:]\s*(.+?)$", op_text, re.MULTILINE):
-            names = m.group(1).strip()
-            for name in re.split(r"[//、,，\s]+", names):
-                if name and len(name) >= 2:
-                    keywords.append(name)
-        # 去重、去通用词、排序
-        stop = {"方向", "检测", "覆盖", "实现", "推动", "提升", "建立", "持续", "支撑", "完成", "目标", "举措", "扩展", "能力"}
-        seen = set()
-        result = []
-        for kw in keywords:
-            if kw not in stop and kw not in seen and len(kw) >= 2:
-                seen.add(kw)
-                result.append(kw)
-        return result[:20]
+        m = re.match(r'(\d{4})(\d{2})(\d{2})', filename)
+        mmdd = f"{m.group(2)}{m.group(3)}" if m else ""
 
-    def _retrieve_recent_evidence(self, query: str, top_k: int) -> str:
-        """检索近两周的工作证据——多关键词并发搜索、按相关度合并去重。"""
-        from iris.retrieval.searcher import LocalRetriever
-        retriever = LocalRetriever(self._config)
+        # 去掉日期前缀和扩展名
+        name = re.sub(r'^\d{8}-?', '', filename).replace('.md', '')
 
-        # 从 OP 文档中动态提取搜索关键词（不硬编码）
-        op_text = self._load_op_document()
-        keywords = self._extract_op_keywords(op_text) if op_text else ["进展", "项目"]
-        seen_ids = set()
-        all_hits = []
-        for kw in keywords:
-            result = retriever.search(kw, top_k=max(top_k // 3, 3))
-            for hit in result.hits:
-                if hit.chunk_id not in seen_ids:
-                    seen_ids.add(hit.chunk_id)
-                    all_hits.append(hit)
+        if dir_label == "成员周报":
+            person_m = re.search(r'[-—]([一-鿿]{2,3})(?:\.|$)', name)
+            if person_m:
+                return f"{person_m.group(1)}周报-{mmdd}"
+            return f"{name[:10]}-{mmdd}"
 
-        # 按 score 降序、去重，取 top 15
-        all_hits.sort(key=lambda h: -h.score)
-        top_hits = all_hits[:15]
+        # 会议纪要 / 讨论思考 / 方案报告：完整描述名 + MMDD
+        # 例：项目讨论-某检测项目拆修检测-H2检出率目标测算及少人工机会点讨论-0702
+        if dir_label in ("会议纪要", "讨论思考", "方案报告"):
+            return f"{name}-{mmdd}"
 
-        if not top_hits:
-            # 回退：直接用原 query 搜索
-            result = retriever.search(query, top_k=top_k)
-            top_hits = list(result.hits[:15])
+    def _collect_recent_files(self, since_date: datetime) -> list[dict]:
+        """收集近两周的数据源文件。
 
-        lines = []
-        for i, hit in enumerate(top_hits, 1):
-            source_info = f"{hit.relative_path}:{hit.line_start}"
-            date_hint = ""
-            m = re.search(r"(\d{8})", hit.relative_path)
-            if m:
-                date_hint = f" [{m.group(1)[:4]}.{m.group(1)[4:6]}.{m.group(1)[6:8]}]"
-            lines.append(f"### 证据 {i}{date_hint}")
-            lines.append(f"来源：{source_info}")
-            lines.append(f"标题：{hit.title}")
-            lines.append(f"内容：{hit.content_preview[:400]}")
-            lines.append("")
-
-        return "\n".join(lines) if lines else "（未检索到工作相关数据）"
-
-    def _build_local_biweekly(self, period: str, evidence: str, wiki: str) -> str:
-        """降级模式：生成简版双周报。"""
-        lines = [
-            f"*时间周期：{period}*",
-            "",
-            "## 本周进展汇总",
-            "",
-            "*以下为基于近两周数据的自动汇总，建议使用 LLM 模式获得更高质量报告。*",
-            "",
-            wiki[:3000] if wiki else "",
-            "",
-            evidence[:5000] if evidence else "",
-            "",
-            "---",
-            "> This report was generated by Iris.",
+        扫描 03-方案报告、04-讨论思考、05-会议纪要、07-成员周报，
+        按文件名 YYYYMMDD 过滤。成员周报每人只保留最新一份。
+        每文件截断到 2000 字。
+        """
+        target_dirs = [
+            ("03-方案报告", "方案报告"),
+            ("04-讨论思考", "讨论思考"),
+            ("05-会议纪要", "会议纪要"),
+            ("07-成员周报", "成员周报"),
         ]
-        return "\n".join(lines)
+        source_root = _resolve_source_root(self._config)
+        if not source_root:
+            return []
+
+        all_files = []
+        for dir_name, dir_label in target_dirs:
+            dir_path = source_root / dir_name
+            if not dir_path.exists():
+                continue
+            for f in sorted(dir_path.glob("*.md")):
+                d = self._extract_date_from_path(f.name)
+                if d is None or d < since_date:
+                    continue
+                try:
+                    content = f.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    continue
+                # 去掉 frontmatter
+                if content.startswith("---"):
+                    parts = content.split("---", 2)
+                    content = parts[2].strip() if len(parts) >= 3 else content
+                label = self._build_citation_label(f.name, dir_label)
+                all_files.append({
+                    "date": d,
+                    "dir": dir_label,
+                    "filename": f.name,
+                    "label": label,
+                    "content": content,
+                    "char_count": len(content),
+                })
+
+        # 成员周报去重：同一人只保留最新一份
+        all_files.sort(key=lambda x: (-x["date"].timestamp(), x["dir"]))
+        seen_persons = set()
+        deduped = []
+        for f in all_files:
+            if f["dir"] == "成员周报":
+                person_key = f["label"].replace("周报", "").rsplit("-", 1)[0]
+                if person_key in seen_persons:
+                    continue
+                seen_persons.add(person_key)
+            deduped.append(f)
+
+        return deduped
+
+
+# ── 模块级辅助函数 ──────────────────────────────────────────
+
+
+def _resolve_source_root(bundle) -> Optional[Path]:
+    """解析数据源根目录（第一个启用的数据源的 path）。"""
+    sources = bundle.data_source.get("sources", {})
+    for cfg in sources.values():
+        if cfg.get("enabled") and cfg.get("path"):
+            p = Path(cfg["path"]).resolve()
+            if p.exists():
+                return p
+    return None
+
+
+def _build_file_manifest(files: list[dict]) -> str:
+    """构建 LLM 输入的文件清单文本。
+
+    按目录分组，每文件输出：引用标签 + 内容（截断到 2000 字）。
+    """
+    if not files:
+        return "（近两周无数据源文件）"
+
+    MAX_CHARS = 2000
+    lines = []
+    # 按目录分组
+    from collections import OrderedDict
+    groups = OrderedDict()
+    for f in files:
+        groups.setdefault(f["dir"], []).append(f)
+
+    for dir_label, group_files in groups.items():
+        lines.append(f"### {dir_label}（{len(group_files)} 份）")
+        lines.append("")
+        for f in group_files:
+            content = f["content"]
+            truncated = content if len(content) <= MAX_CHARS else content[:MAX_CHARS] + "\n…[截断]"
+            lines.append(f"#### 引用标签: {f['label']}")
+            lines.append(f"文件: {f['filename']}")
+            lines.append(f"日期：{f['date'].strftime('%Y-%m-%d')} | 字数：{f['char_count']}")
+            lines.append("")
+            lines.append(truncated)
+            lines.append("")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _build_local_fallback(period: str, op_doc: str, file_manifest: str) -> str:
+    """降级模式：简版双周报（LLM 不可用时的回退）。"""
+    lines = [
+        f"*时间周期：{period}*",
+        "",
+        "## 本周进展汇总",
+        "",
+        "*以下为基于近两周文件的自动汇总，建议使用 LLM 模式获得更高质量报告。*",
+        "",
+        op_doc[:3000] if op_doc else "",
+        "",
+        file_manifest[:5000] if file_manifest else "",
+        "",
+        "---",
+        "> This report was generated by Iris.",
+    ]
+    return "\n".join(lines)
 
     def _review_and_revise(self, query, draft, structured, llm_payload) -> Tuple[str, Optional[Dict], bool]:
         structured_ctx = render_structured_evidence(structured)
