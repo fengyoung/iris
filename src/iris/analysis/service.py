@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import re
@@ -21,6 +20,8 @@ from iris.utils.prompting import PromptTemplateLoader
 from iris.utils.paths import resolve_source_root as _resolve_source_root
 
 from ._helpers import render_evidence_blocks, render_structured_evidence
+from ._biweekly_collector import BiweeklyCollector
+from ._biweekly_cache import BiweeklyCache
 
 logger = logging.getLogger(__name__)
 
@@ -49,20 +50,18 @@ class AnalysisReportService:
         self._llm = LLMService(config)
         self._prompt_loader = PromptTemplateLoader(config)
         self._logger = IrisLogger(config)
-        self._op_text_cache: Optional[str] = None  # OP 文档缓存，避免重复加载
+        self._collector = BiweeklyCollector(config)
+        self._cache = BiweeklyCache(config.root / "data" / "build-biweekly-report")
 
-    # ── 缓存路径 ──────────────────────────────────────────────
+    # ── 缓存路径（向后兼容属性） ─────────────────────────────────
 
     @property
-    def _biweekly_cache_dir(self) -> Path:
-        """双周报缓存目录：data/build-biweekly-report/"""
-        d = self._config.root / "data" / "build-biweekly-report"
-        d.mkdir(parents=True, exist_ok=True)
-        return d
+    def _biweekly_cache_dir(self):
+        return self._cache.cache_dir
 
     @staticmethod
     def _content_hash(text: str, prefix_len: int = 2000) -> str:
-        return hashlib.md5(text[:prefix_len].encode("utf-8")).hexdigest()
+        return BiweeklyCache.content_hash(text, prefix_len)
 
     # ── _review_and_revise（供 build_report 使用）────────────────
 
@@ -127,8 +126,8 @@ class AnalysisReportService:
         if not query:
             query = f"近两周({period})工作进展"
 
-        op_doc = self._load_op_document()
-        files = self._collect_recent_files(two_weeks_ago)
+        op_doc = self._collector.load_op_document()
+        files = self._collector.collect_recent_files(two_weeks_ago)
 
         if not files:
             return ReportResponse(query=query, mode="llm",
@@ -222,24 +221,14 @@ class AnalysisReportService:
 
     def _stage0a_parse_op(self, op_doc: str) -> dict:
         """解析 OP 文档为结构化方向定义（content_hash 缓存）。"""
-        cache_path = self._biweekly_cache_dir / "op_directions.json"
-
         if not op_doc:
             return {"directions": []}
 
-        content_hash = self._content_hash(op_doc, len(op_doc))
+        content_hash = self._cache.content_hash(op_doc, len(op_doc))
 
-        # 检查缓存
-        if cache_path.exists():
-            try:
-                cached = json.loads(cache_path.read_text("utf-8"))
-                if cached.get("content_hash") == content_hash:
-                    directions = cached.get("directions", [])
-                    if directions:
-                        logger.info("  OP 方向定义命中缓存 (%d 个方向)", len(directions))
-                        return {"directions": directions}
-            except (json.JSONDecodeError, KeyError):
-                pass
+        cached_directions = self._cache.load_op_directions(content_hash)
+        if cached_directions is not None:
+            return {"directions": cached_directions}
 
         prompt = self._prompt_loader.render("biweekly_stage0a_op.md", {"op_doc": op_doc})
         result = self._llm.generate(prompt=prompt, route_context={
@@ -251,11 +240,7 @@ class AnalysisReportService:
         directions = parsed.get("directions", []) if parsed else []
 
         if directions:
-            cache_path.write_text(json.dumps({
-                "content_hash": content_hash,
-                "directions": directions,
-            }, ensure_ascii=False, indent=2), encoding="utf-8")
-            logger.info("  OP 解析完成: %d 个方向 → 已缓存", len(directions))
+            self._cache.save_op_directions(content_hash, directions)
         else:
             logger.warning("  Stage 0a 未能解析出方向，返回空")
 
@@ -282,8 +267,6 @@ class AnalysisReportService:
 
     def _stage0b_load_style(self, style_from: Optional[str] = None) -> dict:
         """加载风格指南：--style-from 时分析并缓存，否则读缓存/默认。"""
-        cache_path = self._biweekly_cache_dir / "style_guide.json"
-
         if style_from:
             style_source = Path(style_from)
             if not style_source.is_absolute():
@@ -292,9 +275,8 @@ class AnalysisReportService:
                     style_source = source_root / "06-我的周报" / style_from
             if not style_source.exists():
                 logger.warning("  风格源文件不存在: %s，回退", style_from)
-                if cache_path.exists():
-                    return self._read_style_cache(cache_path)
-                return dict(self._DEFAULT_STYLE_GUIDE)
+                cached = self._cache.load_style_guide()
+                return cached if cached else dict(self._DEFAULT_STYLE_GUIDE)
 
             content = style_source.read_text(encoding="utf-8")
             content = re.sub(r'\n*---\n> This report was.*$', '',
@@ -311,14 +293,14 @@ class AnalysisReportService:
             if guide:
                 guide.setdefault("version", 1)
                 guide["source_file"] = str(style_source)
-                cache_path.write_text(json.dumps(guide, ensure_ascii=False, indent=2),
-                                      encoding="utf-8")
+                self._cache.save_style_guide(guide)
                 logger.info("  风格指南已更新并缓存: %s", style_source.name)
                 return guide
             logger.warning("  Stage 0b 风格解析失败，回退")
 
-        if cache_path.exists():
-            return self._read_style_cache(cache_path)
+        cached = self._cache.load_style_guide()
+        if cached:
+            return cached
 
         logger.info("  使用内置默认风格指南")
         return dict(self._DEFAULT_STYLE_GUIDE)
@@ -332,13 +314,7 @@ class AnalysisReportService:
     # ── Stage 1: 方向-文件匹配 ────────────────────────────────
 
     def _stage1_filter_files(self, directions: list, files: list) -> dict:
-        """按方向并行过滤文件（LLM 语义判定，结果缓存）。
-
-        Returns:
-            {direction_name: {"high": [...], "medium": [...], "low": [...], "none": [...]}}
-        """
-        # ── 缓存检查 ──
-        cache_path = self._biweekly_cache_dir / "stage1_filter.json"
+        """按方向并行过滤文件（LLM 语义判定，结果缓存）。"""
         inventory_lines = []
         for f in files:
             preview = f["content"][:300].replace("\n", " ")
@@ -348,20 +324,15 @@ class AnalysisReportService:
             )
         file_inventory = "\n".join(inventory_lines)
         all_labels = {f["label"] for f in files}
-        # 缓存键 = 文件清单 hash + 方向 hash
-        inv_hash = self._content_hash(file_inventory, 2000)
-        dir_hash = self._content_hash(
+
+        inv_hash = self._cache.content_hash(file_inventory, 2000)
+        dir_hash = self._cache.content_hash(
             json.dumps([{"id": d.get("id"), "name": d.get("name")} for d in directions],
                        ensure_ascii=False, sort_keys=True), 2000)
 
-        if cache_path.exists():
-            try:
-                cached = json.loads(cache_path.read_text("utf-8"))
-                if cached.get("inv_hash") == inv_hash and cached.get("dir_hash") == dir_hash:
-                    logger.info("  Stage 1 命中缓存 (%d 个方向)", len(cached.get("dir_file_map", {})))
-                    return cached["dir_file_map"]
-            except (json.JSONDecodeError, KeyError):
-                pass
+        cached = self._cache.load_stage1_filter(inv_hash, dir_hash)
+        if cached is not None:
+            return cached
 
         def _filter_one(direction: dict) -> dict:
             d_id = direction.get("id", 0)
@@ -414,28 +385,14 @@ class AnalysisReportService:
                         "low": [{"label": l} for l in all_labels], "none": [],
                     }
 
-        # 缓存结果
-        cache_path.write_text(json.dumps({
-            "inv_hash": inv_hash,
-            "dir_hash": dir_hash,
-            "dir_file_map": dir_file_map,
-        }, ensure_ascii=False, indent=2), encoding="utf-8")
-        logger.info("  Stage 1 完成，结果已缓存")
-
+        self._cache.save_stage1_filter(inv_hash, dir_hash, dir_file_map)
         return dir_file_map
 
     # ── Stage 2: 文件深度摘要 ─────────────────────────────────
 
     def _stage2_summarize_files(self, directions: list, dir_file_map: dict,
                                 files: list) -> dict:
-        """对 high+medium+low 文件并集进行深度摘要（缓存感知）。
-
-        low 文件也纳入摘要以防止 LLM 非确定性过滤导致遗漏，
-        但 low 文件的正文截断长度更短（8000 vs 50000 字）。
-
-        Returns:
-            {label: brief_dict}
-        """
+        """对 high+medium+low 文件并集进行深度摘要（缓存感知）。"""
         needed_labels: dict = {}
         for d_name, mapping in dir_file_map.items():
             for level in ("high", "medium", "low"):
@@ -449,11 +406,7 @@ class AnalysisReportService:
             return {}
 
         file_by_label = {f["label"]: f for f in files}
-
-        briefs_dir = self._biweekly_cache_dir / "file_briefs"
-        briefs_dir.mkdir(parents=True, exist_ok=True)
-        index_path = briefs_dir / "index.json"
-        brief_index = self._load_brief_index(index_path)
+        brief_index = self._cache.load_brief_index()
 
         to_summarize: list = []
         briefs: dict = {}
@@ -463,16 +416,11 @@ class AnalysisReportService:
             if not f_data:
                 continue
 
-            hash_key = self._content_hash(f_data["content"], 2000)
-            cached_hash = brief_index.get(label)
-            if cached_hash and cached_hash == hash_key:
-                cached_brief = briefs_dir / f"{hash_key}.json"
-                if cached_brief.exists():
-                    try:
-                        briefs[label] = json.loads(cached_brief.read_text("utf-8"))
-                        continue
-                    except (json.JSONDecodeError, OSError):
-                        pass
+            hash_key = self._cache.content_hash(f_data["content"], 2000)
+            cached_brief = self._cache.load_brief(label, hash_key, brief_index)
+            if cached_brief is not None:
+                briefs[label] = cached_brief
+                continue
 
             f_copy = dict(f_data)
             f_copy["_dir_names"] = dir_names
@@ -498,15 +446,12 @@ class AnalysisReportService:
                         briefs[label] = brief
                         f_data = file_by_label.get(label)
                         if f_data:
-                            hk = self._content_hash(f_data["content"], 2000)
-                            (briefs_dir / f"{hk}.json").write_text(
-                                json.dumps(brief, ensure_ascii=False, indent=2),
-                                encoding="utf-8")
-                            brief_index[label] = hk
+                            hk = self._cache.content_hash(f_data["content"], 2000)
+                            self._cache.save_brief(label, hk, brief, brief_index)
                 except Exception as e:
                     logger.warning("  Stage 2 摘要失败 [%s]: %s", label, e)
 
-        self._save_brief_index(index_path, brief_index, briefs_dir)
+        self._cache.flush_brief_index(brief_index)
         logger.info("  Stage 2 完成: %d 份 Brief", len(briefs))
         return briefs
 
@@ -544,7 +489,7 @@ class AnalysisReportService:
 
         return _try_parse_json(result.text)
 
-    # ── Brief 缓存管理 ──────────────────────────────────────
+    # ── Brief 缓存管理（向后兼容，委托给 BiweeklyCache）──────────
 
     @staticmethod
     def _load_brief_index(index_path: Path) -> dict:
@@ -630,7 +575,7 @@ class AnalysisReportService:
             boundary_by_dir[d_name] = {"own": own_concepts, "others": other_concepts}
 
         # ── 多期历史双周报逐方向提取（去重衔接） ──
-        recent_reports = self._load_recent_biweeklies(since_days=35)
+        recent_reports = self._collector.load_recent_biweeklies(since_days=35)
         # 排除最新一份（如果存在），因为我们不希望与自己对比
         # 实际上 _load_recent_biweeklies 返回的列表可能包含今天刚生成的报告，
         # 但我们只关心历史报告（至少是 1 天前的），所以排除当天的。
@@ -792,255 +737,43 @@ class AnalysisReportService:
         logger.info("  Stage 4 完成 (%d 字)", len(markdown))
         return markdown
 
-    # ── OP 文档加载 ──────────────────────────────────────────
+    # ── 向后兼容委托方法（供外部代码或子类访问） ──────────────────
 
     def _load_op_document(self) -> str:
-        """加载 SOURCE 中的 OP 规划文档（内存缓存，避免重复加载）。"""
-        if self._op_text_cache is not None:
-            return self._op_text_cache
-        from pathlib import Path as _Pt
-        sources = self._config.data_source.get("sources", {})
-        for cfg in sources.values():
-            src_path = _Pt(cfg.get("path", "")).resolve()
-            if not src_path.exists():
-                continue
-            op_dir = src_path / "01-目标管理"
-            if op_dir.exists():
-                for f in sorted(op_dir.glob("*.md"), reverse=True):
-                    try:
-                        text = f.read_text(encoding="utf-8")
-                    except (OSError, UnicodeDecodeError):
-                        continue
-                    if text.startswith("---"):
-                        parts = text.split("---", 2)
-                        text = parts[2].strip() if len(parts) >= 3 else text
-                    self._op_text_cache = text  # 全文保留，LLM 自行判断重点
-                    return self._op_text_cache
-        self._op_text_cache = ""
-        logger.warning("未找到 OP 规划文档（01-目标管理/*.md），Stage 0a 将返回空方向")
-        return ""
-
-    # ── 历史双周报（去重衔接） ──────────────────────────────
+        """向后兼容：委托给 BiweeklyCollector。"""
+        return self._collector.load_op_document()
 
     def _load_recent_biweeklies(self, since_days: int = 35) -> list[dict]:
-        """加载近 N 天内所有双周报，用于多期去重。
-
-        Returns:
-            [{week, date, date_str, content, path}, ...] 按日期降序排列。
-            35 天覆盖「本月 + 上月最后一期」，确保去重充分。
-        """
-        source_root = _resolve_source_root(self._config)
-        if not source_root:
-            return []
-        report_dir = source_root / "06-我的周报"
-        if not report_dir.exists():
-            return []
-
-        # 使用本地时间计算截止日期（文件名中的日期是本地日期，非 UTC）
-        cutoff = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - \
-                 timedelta(days=since_days)
-        results: list[dict] = []
-        for f in sorted(report_dir.glob("双周报-*.md"), reverse=True):
-            # 从文件名提取日期（格式：双周报-w{week}-{name}-{yyyymmdd}.md）
-            date_match = re.search(r'(\d{8})', f.name)
-            if not date_match:
-                continue
-            try:
-                file_date = datetime.strptime(date_match.group(1), "%Y%m%d")
-            except ValueError:
-                continue
-            if file_date < cutoff:
-                continue
-            try:
-                content = f.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                continue
-            # 去掉尾部生成标记行
-            content = re.sub(r'\n*> This report was.*$', '', content, flags=re.MULTILINE)
-            # 提取周数
-            week_match = re.search(r'w(\d{2})', f.name)
-            week = int(week_match.group(1)) if week_match else 0
-            results.append({
-                "week": week,
-                "date": file_date,
-                "date_str": file_date.strftime("%Y.%m.%d"),
-                "content": content,
-                "path": str(f),
-            })
-
-        logger.info("  加载近 %d 天历史双周报: %d 份", since_days, len(results))
-        return results
+        """向后兼容：委托给 BiweeklyCollector。"""
+        return self._collector.load_recent_biweeklies(since_days=since_days)
 
     def _load_previous_biweekly(self) -> str:
-        """加载上期双周报（兼容旧接口，委托到 _load_recent_biweeklies）。"""
-        reports = self._load_recent_biweeklies(since_days=35)
-        if not reports:
-            return ""
-        return reports[0]["content"][:5000]
+        """向后兼容：委托给 BiweeklyCollector。"""
+        return self._collector.load_previous_biweekly()
 
-    # ── 文件收集 ────────────────────────────────────────────
+    def _collect_recent_files(self, since_date: datetime) -> list[dict]:
+        """向后兼容：委托给 BiweeklyCollector。"""
+        return self._collector.collect_recent_files(since_date)
 
     @staticmethod
     def _extract_date_from_path(relative_path: str) -> Optional[datetime]:
-        """从文件路径中提取日期（优先 YYYYMMDD 格式）。"""
-        m = re.search(r"(\d{8})", relative_path)
-        if not m:
-            return None
-        try:
-            return datetime.strptime(m.group(1), "%Y%m%d")
-        except ValueError:
-            return None
+        """向后兼容：委托给 BiweeklyCollector。"""
+        return BiweeklyCollector._extract_date_from_path(relative_path)
 
     @staticmethod
     def _extract_date_from_frontmatter(content: str) -> Optional[datetime]:
-        """从 Markdown frontmatter 中提取日期（fallback）。
-
-        支持格式：date: YYYY-MM-DD / 日期：YYYY年MM月DD日
-        """
-        if not content.startswith("---"):
-            return None
-        parts = content.split("---", 2)
-        if len(parts) < 3:
-            return None
-        fm = parts[1]
-        # 尝试 date: YYYY-MM-DD
-        m = re.search(r'date:\s*(\d{4}-\d{2}-\d{2})', fm)
-        if m:
-            try:
-                return datetime.strptime(m.group(1), "%Y-%m-%d")
-            except ValueError:
-                pass
-        # 尝试 日期：YYYY年MM月DD日
-        m = re.search(r'日期[：:]\s*(\d{4})年(\d{1,2})月(\d{1,2})日', fm)
-        if m:
-            try:
-                return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)))
-            except ValueError:
-                pass
-        return None
+        """向后兼容：委托给 BiweeklyCollector。"""
+        return BiweeklyCollector._extract_date_from_frontmatter(content)
 
     @staticmethod
     def _extract_person_from_filename(filename: str) -> Optional[str]:
-        """从成员周报文件名提取人名。格式: YYYYMMDD-周报-w{week}-{name}.md"""
-        m = re.match(r'\d{8}-周报-w\d{1,2}-(.+)\.md$', filename)
-        if m:
-            return m.group(1)
-        # fallback: 尝试其他常见格式
-        m = re.search(r'[-—]([一-鿿]{2,4})(?:\.|$)', filename)
-        return m.group(1) if m else None
+        """向后兼容：委托给 BiweeklyCollector。"""
+        return BiweeklyCollector._extract_person_from_filename(filename)
 
     @staticmethod
     def _build_citation_label(filename: str, dir_label: str) -> str:
-        """构建简化引用标签。
-
-        规则：
-        - 成员周报: 提取人名 → "团队成员B周报-0703"
-        - 会议纪要: 保留类型前缀 + 完整描述 → "项目讨论/某检测项目拆修检测-0626"
-        - 讨论思考: 保留类型前缀 + 完整描述 → "内部讨论/质检执行智能化-0701"
-        - 其他（方案报告等）: 显式标注目录类型 → "方案报告/图验技术进展-0625"
-        """
-        m = re.match(r'(\d{4})(\d{2})(\d{2})', filename)
-        mmdd = f"{m.group(2)}{m.group(3)}" if m else ""
-
-        # 去掉日期前缀和扩展名
-        name = re.sub(r'^\d{8}-?', '', filename).replace('.md', '')
-
-        if dir_label == "成员周报":
-            person_m = re.search(r'[-—]([一-鿿]{2,3})(?:\.|$)', name)
-            if person_m:
-                return f"{person_m.group(1)}周报-{mmdd}"
-            return f"{name[:10]}-{mmdd}"
-
-        # 会议纪要 / 讨论思考 / 方案报告：完整描述名 + MMDD
-        # 例：项目讨论-某检测项目拆修检测-H2检出率目标测算及少人工机会点讨论-0702
-        if dir_label in ("会议纪要", "讨论思考", "方案报告"):
-            return f"{name}-{mmdd}"
-
-        # fallback：未知目录类型，返回目录名+文件名
-        return f"{dir_label}/{name}-{mmdd}" if mmdd else f"{dir_label}/{name}"
-
-    def _collect_recent_files(self, since_date: datetime) -> list[dict]:
-        """收集近两周的数据源文件。
-
-        扫描目录由 config.app.biweekly_report.data_sources 控制，
-        默认：成员周报、会议纪要、讨论思考、方案报告。
-        按文件名 YYYYMMDD 过滤（fallback 到 frontmatter 日期）。
-        成员周报每人只保留最新一份。
-        """
-        # 目录名 → 标签映射（默认值，可通过 app.json biweekly_report.dir_map 覆盖）
-        _DEFAULT_DIR_MAP = {
-            "方案报告": ("03-方案报告", "方案报告"),
-            "讨论思考": ("04-讨论思考", "讨论思考"),
-            "会议纪要": ("05-会议纪要", "会议纪要"),
-            "成员周报": ("07-成员周报", "成员周报"),
-        }
-
-        biweekly_cfg = self._config.app.get("biweekly_report", {})
-        cfg_dir_map = biweekly_cfg.get("dir_map", {})
-        _DIR_MAP = {**_DEFAULT_DIR_MAP, **{k: tuple(v) for k, v in cfg_dir_map.items()}}
-        enabled_sources = biweekly_cfg.get("data_sources",
-            ["成员周报", "会议纪要", "讨论思考", "方案报告"])
-
-        target_dirs = []
-        for src_name in enabled_sources:
-            if src_name in _DIR_MAP:
-                target_dirs.append(_DIR_MAP[src_name])
-            else:
-                logger.warning("  未知数据源: %s，已跳过", src_name)
-
-        source_root = _resolve_source_root(self._config)
-        if not source_root:
-            return []
-
-        all_files = []
-        for dir_name, dir_label in target_dirs:
-            dir_path = source_root / dir_name
-            if not dir_path.exists():
-                logger.warning("  双周报数据目录不存在: %s", dir_path)
-                continue
-            for f in sorted(dir_path.glob("*.md")):
-                # 先读取文件内容（只读一次）
-                try:
-                    raw_content = f.read_text(encoding="utf-8")
-                except (OSError, UnicodeDecodeError):
-                    continue
-
-                d = self._extract_date_from_path(f.name)
-                # frontmatter fallback：文件名无日期时从内容提取
-                if d is None:
-                    d = self._extract_date_from_frontmatter(raw_content)
-                if d is None or d < since_date:
-                    continue
-
-                # 去掉 frontmatter
-                content = raw_content
-                if content.startswith("---"):
-                    parts = content.split("---", 2)
-                    content = parts[2].strip() if len(parts) >= 3 else content
-                label = self._build_citation_label(f.name, dir_label)
-                all_files.append({
-                    "date": d,
-                    "dir": dir_label,
-                    "filename": f.name,
-                    "label": label,
-                    "content": content,
-                    "char_count": len(content),
-                })
-
-        # 成员周报去重：同一人只保留最新一份
-        all_files.sort(key=lambda x: (-x["date"].timestamp(), x["dir"]))
-        seen_persons = set()
-        deduped = []
-        for f in all_files:
-            if f["dir"] == "成员周报":
-                person = self._extract_person_from_filename(f["filename"])
-                person_key = person or f["label"].replace("周报", "").rsplit("-", 1)[0]
-                if person_key in seen_persons:
-                    continue
-                seen_persons.add(person_key)
-            deduped.append(f)
-
-        return deduped
+        """向后兼容：委托给 BiweeklyCollector。"""
+        return BiweeklyCollector._build_citation_label(filename, dir_label)
 
     # ── 质量审查（供 build_report 两阶段模式使用）──────────────
 
