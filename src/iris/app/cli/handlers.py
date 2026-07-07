@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
 from iris.complex_input import ComplexInputPipeline
@@ -165,34 +166,61 @@ def handle_build_mindmap(args, bundle, logger) -> int:
 # ── 双周报 ────────────────────────────────────────────
 
 
+def _build_biweekly_filename(bundle, today: datetime) -> str:
+    """生成双周报文件名：双周报-w{week}-{author}-{date}.md。
+
+    周一生成时，周数归属上周（如 W27 而非 W28）。
+    """
+    cfg = bundle.app.get("biweekly_report", {})
+    author = cfg.get("author_name", "")
+    if today.weekday() == 0:  # 周一
+        report_week_date = today - timedelta(days=1)
+    else:
+        report_week_date = today
+    _, week, _ = report_week_date.isocalendar()
+    date_str = today.strftime("%Y%m%d")
+    return f"双周报-w{week:02d}-{author}-{date_str}.md" if author else f"双周报-w{week:02d}-{date_str}.md"
+
+
 def handle_build_biweekly_report(args, bundle, logger) -> int:
     from iris.analysis import AnalysisReportService
     service = AnalysisReportService(bundle)
     query = getattr(args, "query", "") or ""
+    style_from = getattr(args, "style_from", "") or None
+    dry_run = getattr(args, "dry_run", False)
     # 默认走 llm 模式，LLM 不可用时 service 内部自动降级为 local
-    result = service.build_biweekly_report(query=query, mode="llm")
+    result = service.build_biweekly_report(query=query, mode="llm",
+                                           style_from=style_from, dry_run=dry_run)
     payload = result.to_dict()
+
+    # dry-run 模式不写文件，直接输出预览
+    if dry_run:
+        _emit_output(args.command, payload, pretty=args.pretty)
+        return 0
 
     # 确定输出路径
     output = args.output_file
-    if not output and getattr(args, "to_source", False):
-        # 自动生成文件名：双周报-w{week}-{name}-{date}.md
-        cfg = bundle.app.get("biweekly_report", {})
-        author = cfg.get("author_name", "")
-        today = datetime.now()
-        _, week, _ = today.isocalendar()
-        date_str = today.strftime("%Y%m%d")
-        filename = f"双周报-w{week:02d}-{author}-{date_str}.md" if author else f"双周报-w{week:02d}-{date_str}.md"
-
-        # 输出到 SOURCE/06-我的周报/（直接读取数据源配置，不耦合会议转写模块）
+    # 提取自动生成的文件名（to_source 或 output 指向目录时使用）
+    auto_filename = _build_biweekly_filename(bundle, datetime.now())
+    if output:
+        out_path = Path(output)
+        # 用户指定了目录路径 → 自动拼接文件名
+        if output.endswith("/") or output.endswith(os.sep) or (out_path.exists() and out_path.is_dir()):
+            output = str(out_path / auto_filename)
+    elif getattr(args, "to_source", False):
         source_root = _resolve_data_source_root(bundle)
         if source_root:
-            output = str(source_root / "06-我的周报" / filename)
+            output = str(source_root / "06-我的周报" / auto_filename)
 
     if output:
         path = Path(output)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(result.markdown, encoding="utf-8")
+        markdown = result.markdown.strip()
+        # 追加尾注
+        footer = "\n\n---\n> This report was written by Iris and revised by maintainer."
+        if not markdown.endswith(footer.strip()):
+            markdown += footer
+        path.write_text(markdown, encoding="utf-8")
         payload["output_file"] = str(path)
 
     _emit_output(args.command, payload, pretty=args.pretty)

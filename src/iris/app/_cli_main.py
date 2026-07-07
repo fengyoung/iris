@@ -80,6 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--transcript-file", default="", help="transcribe-meeting 已有转写文本路径")
     parser.add_argument("--output", default="", help="transcribe-meeting 输出路径")
     parser.add_argument("--to-source", action="store_true", help="输出归档到 SOURCE（会议纪要→05/，双周报→06/）")
+    parser.add_argument("--style-from", default="", help="build-biweekly-report 风格参考文件路径")
     parser.add_argument("--whisper-model", default="base", help="Whisper 模型规格")
     parser.add_argument("--force", action="store_true", help="强制重新转写")
     parser.add_argument("--files", default="", help="batch-transcribe 文件列表（逗号分隔）")
@@ -116,7 +117,7 @@ def build_parser() -> argparse.ArgumentParser:
     # 飞书文档转换
     parser.add_argument("--url", default="", help="feishu-doc-convert 飞书文档 URL（逗号分隔多文档）")
     parser.add_argument("--from-config", action="store_true", help="feishu-doc-convert / chat-digest 从配置文件读取目标列表")
-    parser.add_argument("--dry-run", action="store_true", help="feishu-doc-convert / chat-digest 预览模式不写入")
+    parser.add_argument("--dry-run", action="store_true", help="预览模式不写入文件（feishu-doc-convert/chat-digest/build-biweekly-report）")
     # 聊天提炼
     parser.add_argument("--group", default="", help="chat-digest 群聊名称")
     parser.add_argument("--user", default="", help="chat-digest 用户名称（单聊）")

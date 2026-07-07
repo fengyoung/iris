@@ -37,7 +37,10 @@
   "biweekly_report": {
     "author_name": "",
     "author_info": "你是一个技术团队负责人的写作助手。",
-    "_note": "author_name 用于生成文件名（如 双周报-w25-张三-20260621.md）；author_info 用于 prompt 角色定义。搜索关键词从 OP 文档动态提取，无需配置。"
+    "data_sources": ["成员周报", "会议纪要", "讨论思考", "方案报告"],
+    "lookback_days": 14,
+    "dedup_window_days": 35,
+    "_note": "author_name 用于生成文件名（如 双周报-w25-张三-20260621.md）；author_info 用于 prompt 角色定义。data_sources 控制扫描的目录（成员周报/会议纪要/讨论思考/方案报告），可增减。lookback_days 控制数据源时间窗口（默认14天）。dedup_window_days 控制历史报告去重窗口（默认35天，覆盖当月+上月最后一期）。"
   },
   "logging": {
     "level": "info",

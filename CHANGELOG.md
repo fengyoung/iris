@@ -4,6 +4,35 @@
 
 ---
 
+## v3.11.4 (2026-07-07)
+
+### build-biweekly-report 流水线修复
+
+**问题修复（7 项）：**
+- **跨方向 brief 路由**：修复 `primary_direction` 独占路由导致跨方向内容遗漏（如团队成员A周报的 某检测项目/某品牌项目 进展仅路由到方向二）
+- **Stage 1 LLM 非确定性**：新增 `stage1_filter.json` 缓存（按文件清单 hash + 方向 hash），消除 LLM 随机性导致的文件过滤不一致
+- **low 文件静默丢弃**：Stage 2 摘要范围从 high+medium 扩展到 high+medium+low，防止 LLM 保守判定导致内容缺失
+- **历史去重文本泄露**：修复 Stage 3 LLM 将历史去重参考文本当作本期素材的问题，增加隔离警告
+- **方向二/三"无显著进展"**：放宽全子领域覆盖规则，允许按内容主题自行聚类
+- **base_model 统一**：Stage 3/4 的 `complexity` 从 `"complex"` 改为 `"standard"`，全链路使用 base_model
+- **双重文件读取**：`_collect_recent_files` frontmatter fallback 时合并为单次读取
+
+**Prompt 优化：**
+- Stage 3 新增规则 12：禁止「某某决策/明确/认为」等过程性表述，转为客观事实
+- Stage 3 新增规则 13：同项目进展聚合为加粗标题 + 子 bullet 展开
+- Stage 1 增加包容性规则：疑惑时归 medium 而非 low/none
+- Stage 3 增加战略分析段撰写指南（四层次：态势→突破→风险→指向）
+
+**测试覆盖：**
+- 新增 52 个单元测试（`test_biweekly_files.py` 18 + `test_biweekly_dedup.py` 13 + `test_biweekly_pipeline.py` 21）
+- 全量测试 219 passed
+
+**配置增强：**
+- `biweekly_report.data_sources`：可配置扫描目录
+- `biweekly_report.lookback_days`：可配置时间窗口（默认 14）
+- `biweekly_report.dedup_window_days`：可配置去重窗口（默认 35）
+- `--dry-run`：预览模式（文件清单 + OP 方向，不调用 LLM）
+
 ## v3.11.3 (2026-07-05)
 
 ### build-biweekly-report 全面重构

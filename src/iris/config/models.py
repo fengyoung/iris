@@ -91,6 +91,7 @@ class AppConfig(BaseConfigModel):
     output: OutputConfig = Field(default_factory=OutputConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     safety: SafetyConfig = Field(default_factory=SafetyConfig)
+    biweekly_report: Dict[str, Any] = Field(default_factory=dict)
 
 
 # ── 数据源配置 ────────────────────────────────────────────────────

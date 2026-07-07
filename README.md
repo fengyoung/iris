@@ -1,10 +1,10 @@
-# Iris 3.11.3
+# Iris 3.11.4
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
 
-**v3.11.3** — build-biweekly-report 全面重构：文件级时间窗口扫描 + 时效性加权 + 引用格式简化。
+**v3.11.4** — build-biweekly-report 流水线修复：多期去重、跨方向路由、Stage 1 缓存、base_model 统一。
 
 ## 开发路线
 
@@ -89,6 +89,7 @@ SOURCE/                     LLM-WIKI/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.11.4** | 2026-07-07 | build-biweekly-report 流水线修复：多期去重 + 跨方向路由 + Stage 1 缓存 + base_model |
 | **v3.11.3** | 2026-07-05 | build-biweekly-report 全面重构：文件级时间窗口 + 引用简化 |
 | **v3.11.2** | 2026-07-03 | force_model 参数 + 纪要翻新 + 人物歧义处理，169 测试 |
 | **v3.11.1** | 2026-07-03 | transcribe-meeting 修复：会议日期/时长/尾注，169 测试 |

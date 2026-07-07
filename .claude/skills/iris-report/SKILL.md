@@ -97,25 +97,61 @@ Mermaid 格式的导图可以在对话中直接展示。
 
 ### 双周报
 
-**步骤 1：确认时间范围**
+双周报自动整合近两周的成员周报、会议纪要、讨论思考，与最新 OP 方向对齐，生成结构化战略周报。
 
-双周报覆盖最近两周。Claude 自动计算日期范围。
+**步骤 1：检查数据源**
 
-**步骤 2：执行**
-
-```bash
-python3 scripts/run_cli.py build-biweekly-report --mode llm --to-source
-```
-
-**可选输出路径：**
+在生成前，先用 `--dry-run` 模式预览数据源覆盖情况：
 
 ```bash
-python3 scripts/run_cli.py build-biweekly-report --mode llm --output-file output/双周报.md
+python3 scripts/run_cli.py build-biweekly-report --dry-run
 ```
 
-**步骤 3：展示摘要**
+确认：
+- 文件数量是否充足（通常应 ≥10 份）
+- OP 方向是否正确解析（方向名和 scope_summary 是否合理）
+- 时间窗口是否覆盖了最近两周
 
-在对话中展示报告关键内容，提醒用户文件已归档到 SOURCE。
+如果文件偏少（<5 份），提醒用户可能原因（假期、成员未发周报等）。
+
+**步骤 2：执行生成**
+
+```bash
+python3 scripts/run_cli.py build-biweekly-report --to-source
+```
+
+**选项：**
+- `--to-source`：归档到 `SOURCE/06-我的周报/`（默认推荐）
+- `--output-file <路径>`：手动指定输出路径
+- `--query "<补充说明>"`：额外的重点关注内容
+- `--style-from <文件名>`：从指定历史双周报学习写作风格
+- `--dry-run`：预览模式，仅展示文件清单和方向匹配，不调用 LLM
+
+**步骤 3：展示摘要并提醒修订**
+
+在对话中展示：
+1. 报告标题和时间周期
+2. 每个方向的关键进展摘要（1-2 条）
+3. 数据源文件统计（共 N 份文件）
+4. 提醒用户报告已保存到 `SOURCE/06-我的周报/`，建议人工审阅修订
+
+**流水线说明：**
+
+双周报生成采用五阶段流水线：
+1. **OP 解析**：从 `01-目标管理/` 提取战略方向定义（缓存）
+2. **文件过滤**：LLM 按方向语义判定文件相关性
+3. **深度摘要**：高相关文件全文摘要（缓存）
+4. **方向合成**：每方向独立合成章节，含战略分析 + 多期去重
+5. **终稿审查**：组装 + 质量审查修订
+
+**常见场景：**
+
+| 场景 | 命令 |
+|------|------|
+| 标准生成 | `python3 scripts/run_cli.py build-biweekly-report --to-source` |
+| 预览检查 | `python3 scripts/run_cli.py build-biweekly-report --dry-run` |
+| 指定风格 | `python3 scripts/run_cli.py build-biweekly-report --to-source --style-from 双周报-w25-团队成员J-20260621.md` |
+| 手动输出 | `python3 scripts/run_cli.py build-biweekly-report --output-file output/双周报.md` |
 
 ## 常见场景
 
@@ -123,7 +159,8 @@ python3 scripts/run_cli.py build-biweekly-report --mode llm --output-file output
 |--------|-------------|
 | 「帮我写一份关于微服务的分析报告」 | `iris build-report --query "微服务架构 最佳实践 经验总结" --output-format standard` |
 | 「画个产品架构的思维导图」 | `iris build-mindmap --query "产品架构 模块设计" --format mermaid` |
-| 「这周的双周报」 | `iris build-biweekly-report --to-source` |
+| 「这周的双周报」 | 先 `iris build-biweekly-report --dry-run` 预览，确认后 `iris build-biweekly-report --to-source` |
+| 「看看这周有多少文件要处理」 | `iris build-biweekly-report --dry-run` |
 | 「导出 Word 版本」 | 先生成 md，再用 `--output-format docx` 转换 |
 
 ## 常见错误处理
