@@ -110,10 +110,13 @@ class FeishuDocConverter:
                 "content_preview": processed.get("content", "")[:200],
             }
 
+        content = processed.get("content")
+        if content is None:
+            return {"status": "error", "url": url, "token": token, "error": "内容处理结果缺少 content 字段"}
         try:
-            safe_write_text(output_path, processed["content"], self._bundle,
+            safe_write_text(output_path, content, self._bundle,
                             allow_existing_outside=True)
-        except Exception as e:
+        except OSError as e:
             return {"status": "error", "url": url, "token": token, "error": f"写入失败: {e}"}
 
         # 8. 更新排重
@@ -203,6 +206,13 @@ class FeishuDocConverter:
             ext = _guess_image_ext(ref)
             local_name = f"feishu_{seq:03d}{ext}"
             pic_path = img_dir / local_name
+
+            # 安全检查：防止路径逃逸出 img_dir（深度防御）
+            try:
+                if not pic_path.resolve().is_relative_to(img_dir.resolve()):
+                    return m.group(0)
+            except Exception:
+                return m.group(0)
 
             try:
                 self._download_image_to(ref, str(pic_path))

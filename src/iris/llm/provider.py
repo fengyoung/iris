@@ -105,6 +105,35 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
                     return result
         return None
 
+    def _dispatch_provider_call(
+        self,
+        api_base: str,
+        api_key: str,
+        model_name: str,
+        prompt: str,
+        provider_name: str,
+        cfg: Dict[str, Any],
+        *,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        max_retries: Optional[int] = None,
+    ) -> str:
+        """按 provider 类型分发 API 调用（消除 force_model 与 _try_call 的重复）。"""
+        timeout = cfg.get("timeout_seconds", 60)
+        effective_retries = max_retries if max_retries is not None else cfg.get("max_retries", 0)
+        if provider_name in self.OPENAI_COMPATIBLE_PROVIDERS:
+            return self._call_openai_compatible(
+                api_base, api_key, model_name, prompt,
+                temperature=temperature, max_tokens=max_tokens,
+                timeout=timeout, max_retries=effective_retries,
+            )
+        if provider_name == "anthropic":
+            return self._call_anthropic(
+                api_base, api_key, model_name, prompt,
+                max_tokens=max_tokens, max_retries=effective_retries,
+            )
+        raise LLMProviderError(f"暂不支持的 provider: {provider_name}")
+
     def generate(
         self,
         request_data: LLMRequest,
@@ -123,22 +152,10 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
             api_key = model_cfg.get("api_key", "")
             model_name = model_cfg["model"]
             provider_name = str(model_cfg["provider"]).lower()
-            timeout = model_cfg.get("timeout_seconds", 60)
-            effective_retries = max_retries if max_retries is not None else model_cfg.get("max_retries", 0)
-            if provider_name in self.OPENAI_COMPATIBLE_PROVIDERS:
-                text = self._call_openai_compatible(
-                    api_base, api_key, model_name, request_data.prompt,
-                    temperature=temperature, max_tokens=max_tokens,
-                    timeout=timeout, max_retries=effective_retries,
-                )
-            elif provider_name == "anthropic":
-                text = self._call_anthropic(
-                    api_base, api_key, model_name,
-                    request_data.prompt, max_tokens=max_tokens,
-                    max_retries=effective_retries,
-                )
-            else:
-                raise LLMProviderError(f"暂不支持的 provider: {provider_name}")
+            text = self._dispatch_provider_call(
+                api_base, api_key, model_name, request_data.prompt, provider_name, model_cfg,
+                temperature=temperature, max_tokens=max_tokens, max_retries=max_retries,
+            )
             return LLMResponse(
                 text=text, selected_role="forced", provider=provider_name,
                 model=model_name, api_base_url=api_base,
@@ -149,22 +166,11 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
 
         def _try_call(api_base: str, api_key: str, model_name: str, cfg: Dict[str, Any]) -> str:
             """文本 API 调用闭包，捕获 prompt / temperature / max_tokens。"""
-            provider_name = str(cfg["provider"]).lower()
-            timeout = cfg.get("timeout_seconds", 60)
-            effective_retries = max_retries if max_retries is not None else cfg.get("max_retries", 0)
-            if provider_name in self.OPENAI_COMPATIBLE_PROVIDERS:
-                return self._call_openai_compatible(
-                    api_base, api_key, model_name, request_data.prompt,
-                    temperature=temperature, max_tokens=max_tokens,
-                    timeout=timeout, max_retries=effective_retries,
-                )
-            elif provider_name == "anthropic":
-                return self._call_anthropic(
-                    api_base, api_key, model_name,
-                    request_data.prompt, max_tokens=max_tokens,
-                    max_retries=effective_retries,
-                )
-            raise LLMProviderError(f"暂不支持的 provider: {provider_name}")
+            return self._dispatch_provider_call(
+                api_base, api_key, model_name, request_data.prompt,
+                str(cfg["provider"]).lower(), cfg,
+                temperature=temperature, max_tokens=max_tokens, max_retries=max_retries,
+            )
 
         text, role, provider_name, model_name, api_base = self._fallback_loop(
             decision, _try_call,
@@ -193,9 +199,12 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
                 chain.append((primary_role, model_id, cfg))
         else:
             # 仅使用当前活跃模型，不尝试同角色其他模型
-            active_cfg = self._model_manager.get_active_model_config(primary_role, sensitive=True)
-            active_id = self._model_manager.get_active_model_id(primary_role)
-            chain.append((primary_role, active_id, active_cfg))
+            try:
+                active_cfg = self._model_manager.get_active_model_config(primary_role, sensitive=True)
+                active_id = self._model_manager.get_active_model_id(primary_role)
+                chain.append((primary_role, active_id, active_cfg))
+            except ModelManagerError as exc:
+                raise LLMProviderError(f"角色 {primary_role} 配置错误: {exc}") from exc
         seen_roles.add(primary_role)
 
         if fallback_role and fallback_role not in seen_roles and decision.allow_auto_downgrade:
@@ -475,7 +484,7 @@ def _extract_chat_completions_text(payload: Dict[str, Any]) -> str:
         if text:
             return text
     reasoning = message.get("reasoning_content", "")
-    if isinstance(reasoning, str) and reasoning.strip() and not content:
+    if isinstance(reasoning, str) and reasoning.strip():
         return reasoning.strip()
     finish_reason = choices[0].get("finish_reason", "")
     raise LLMProviderError(

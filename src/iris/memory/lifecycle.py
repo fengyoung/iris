@@ -47,6 +47,20 @@ class MemoryLifecycle:
 
     # ── 老化 ──────────────────────────────────────────────────────
 
+    @staticmethod
+    def _is_item_stale(item: dict, cutoff: datetime) -> bool:
+        """判断记录是否已超期（updated_at < cutoff）。"""
+        updated_str = item.get("updated_at", "")
+        if not updated_str:
+            return False
+        try:
+            updated = datetime.fromisoformat(updated_str)
+            if updated.tzinfo is None:
+                updated = updated.replace(tzinfo=timezone.utc)
+            return updated < cutoff
+        except (ValueError, TypeError):
+            return False
+
     def age(self, *, days: int = DEFAULT_CORRECTION_AGE_DAYS) -> Dict[str, Any]:
         """将超过 N 天未更新的纠正记录移至归档文件。"""
         state = self._corrections.load()
@@ -58,18 +72,7 @@ class MemoryLifecycle:
         kept: Dict[str, Any] = {}
 
         for concept, item in items.items():
-            updated_str = item.get("updated_at", "")
-            is_stale = False
-            if updated_str:
-                try:
-                    updated = datetime.fromisoformat(updated_str)
-                    if updated.tzinfo is None:
-                        updated = updated.replace(tzinfo=timezone.utc)
-                    is_stale = updated < cutoff
-                except (ValueError, TypeError):
-                    pass
-
-            if is_stale:
+            if self._is_item_stale(item, cutoff):
                 archive.setdefault("items", {})[concept] = item
                 archived.append(concept)
             else:
@@ -100,17 +103,18 @@ class MemoryLifecycle:
             updated_str = item.get("updated_at", "")
             if not updated_str:
                 continue
+            if not self._is_item_stale(item, cutoff):
+                continue
             try:
                 updated = datetime.fromisoformat(updated_str)
                 if updated.tzinfo is None:
                     updated = updated.replace(tzinfo=timezone.utc)
-                if updated < cutoff:
-                    stale.append({
-                        "concept": concept,
-                        "preferred": str(item.get("preferred", "")),
-                        "days_since_update": (datetime.now(timezone.utc) - updated).days,
-                        "updated_at": updated_str,
-                    })
+                stale.append({
+                    "concept": concept,
+                    "preferred": str(item.get("preferred", "")),
+                    "days_since_update": (datetime.now(timezone.utc) - updated).days,
+                    "updated_at": updated_str,
+                })
             except (ValueError, TypeError):
                 pass
 
@@ -209,9 +213,13 @@ class MemoryLifecycle:
                     if existing_value != incoming_value:
                         if strategy in ("auto", "latest"):
                             # auto 当前等价于 latest（时间戳优先）；后续可扩展为 LLM 辅助合并
+                            # 时间相等时新值优先，允许重新导入来纠正错误记录
                             inc_time = _parse_iso(item.get("updated_at", ""))
                             ext_time = _parse_iso(existing.get("updated_at", ""))
-                            if inc_time and ext_time and inc_time > ext_time:
+                            if inc_time and ext_time and inc_time >= ext_time:
+                                base_items[concept_clean] = item
+                            elif inc_time and not ext_time:
+                                # 旧记录无时间戳时，新记录优先
                                 base_items[concept_clean] = item
                         elif strategy == "keep_both":
                             result.setdefault("conflicts", []).append({

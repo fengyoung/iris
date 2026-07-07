@@ -226,6 +226,11 @@ def load_config_bundle(
 
     # ── 通过 Pydantic v2 构建类型安全配置（自动校验） ─────────
     try:
+        from pydantic import ValidationError
+    except ImportError:
+        ValidationError = None
+
+    try:
         return ConfigBundleV2.from_dicts(
             root=root,
             app_dict=loaded["app"],
@@ -236,7 +241,14 @@ def load_config_bundle(
             feishu_ingest_dict=feishu_ingest_config,
         )
     except Exception as exc:
-        raise ConfigError(f"配置校验失败: {exc}") from exc
+        if ValidationError and isinstance(exc, ValidationError):
+            # 格式化 Pydantic 字段级错误为可读形式
+            errors = "; ".join(
+                f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}"
+                for e in exc.errors()
+            )
+            raise ConfigError(f"配置校验失败: {errors}") from exc
+        raise ConfigError(f"配置加载异常: {exc}") from exc
 
 
 def _load_json(path: Path) -> Dict[str, Any]:

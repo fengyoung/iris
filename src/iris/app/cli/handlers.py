@@ -30,6 +30,7 @@ from iris.app.cli.helpers import (
     _scan_payload, _chunk_payload,
     _emit_output, _print_config_summary,
 )
+from iris.utils.paths import resolve_source_root as _resolve_data_source_root
 
 
 # ── 命令处理器 ──────────────────────────────────────────────
@@ -536,7 +537,9 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
 # ── 辅助函数（wiki 相关） ─────────────────────────────
 
 
-def _load_batch_items(path: Path):
+def _load_wiki_items_from_jsonl(path: Path, *, only_selected: bool = False):
+    """从 JSONL 文件加载 BatchWikiItem 列表。only_selected=True 时只加载 selected=True 的行。"""
+    from iris.wiki import BatchWikiItem
     items = []
     for idx, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         line = raw_line.strip()
@@ -547,35 +550,25 @@ def _load_batch_items(path: Path):
         except json.JSONDecodeError as exc:
             print(f"[警告] 第 {idx} 行 JSON 解析失败: {exc}", file=sys.stderr)
             continue
+        if only_selected and not payload.get("selected", False):
+            continue
         if "query" not in payload:
             print(f"[警告] 第 {idx} 行缺少必填字段 query，已跳过", file=sys.stderr)
             continue
-        from iris.wiki import BatchWikiItem
-        items.append(BatchWikiItem(query=payload["query"], title=payload.get("title", payload["query"]),
-                                    page_type=payload.get("page_type", "domain")))
+        items.append(BatchWikiItem(
+            query=payload["query"],
+            title=payload.get("title", payload["query"]),
+            page_type=payload.get("page_type", "domain"),
+        ))
     return items
+
+
+def _load_batch_items(path: Path):
+    return _load_wiki_items_from_jsonl(path)
 
 
 def _load_review_items(path: Path):
-    items = []
-    for idx, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        line = raw_line.strip()
-        if not line:
-            continue
-        try:
-            payload = json.loads(line)
-        except json.JSONDecodeError as exc:
-            print(f"[警告] 第 {idx} 行 JSON 解析失败: {exc}", file=sys.stderr)
-            continue
-        if not payload.get("selected", False):
-            continue
-        if "query" not in payload:
-            print(f"[警告] 第 {idx} 行缺少必填字段 query，已跳过", file=sys.stderr)
-            continue
-        from iris.wiki import BatchWikiItem
-        items.append(BatchWikiItem(query=payload["query"], title=payload.get("title", payload["query"]),
-                                    page_type=payload.get("page_type", "domain")))
-    return items
+    return _load_wiki_items_from_jsonl(path, only_selected=True)
 
 
 def handle_deep_eval(args, bundle, logger) -> int:
@@ -1126,17 +1119,6 @@ def _strip_version_suffix(stem: str) -> str:
     如 "asr_prompt_v1.0.0" → "asr_prompt"
     """
     return _VERSION_SUFFIX_PATTERN.sub("", stem)
-
-
-def _resolve_data_source_root(bundle) -> Optional[Path]:
-    """解析数据源根目录（第一个启用的数据源的 path）。"""
-    sources = bundle.data_source.get("sources", {})
-    for cfg in sources.values():
-        if cfg.get("enabled") and cfg.get("path"):
-            p = Path(cfg["path"]).resolve()
-            if p.exists():
-                return p
-    return None
 
 
 # ── 命令分发表 ─────────────────────────────────────────────

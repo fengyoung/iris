@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from iris.config.loader import ConfigBundle
-from iris.llm import LLMService
+from iris.llm import LLMService, LLMProviderError
 
 SYSTEM_PROMPT = "你是一个专业的会议纪要提取专家，擅长从语音转写文本中提取结构化会议纪要。你会仔细校正 ASR 误识别，准确提取信息。注意：直接输出会议纪要正文，不要输出任何前缀说明、开场白或打招呼内容。"
 
@@ -402,9 +402,19 @@ FILENAME: <文件名>"""
 ## 原始转写文本
 
 {raw_transcript}"""
-        minutes = self._llm.generate(prompt, route_context={"input_type": "text"},
-                                     temperature=0.1, max_tokens=16384,
-                                     force_model=model).text
+        try:
+            minutes = self._llm.generate(prompt, route_context={"input_type": "text"},
+                                         temperature=0.1, max_tokens=16384,
+                                         force_model=model).text
+        except LLMProviderError as exc:
+            import logging as _logging
+            _logging.getLogger(__name__).error("纪要生成 LLM 调用失败: %s", exc)
+            return (
+                f"<!-- LLM 生成失败: {exc} -->\n\n"
+                f"{header}\n\n"
+                "（LLM 不可用，原始转写见下）\n\n"
+                f"## 原始转写文本\n\n{raw_transcript}"
+            )
         # 后处理：确保尾注存在
         minutes = self._ensure_footer(minutes, meeting_date_display, gen_date)
         return minutes

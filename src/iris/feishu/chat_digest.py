@@ -51,6 +51,7 @@ class ChatDigester:
         self._wiki_root = self._resolve_wiki_root()
         self._dedup_path = resolve_dedup_path(
             bundle, "chat_digest.dedup_index", "data/dedup/chat_digest_index.json")
+        self._dedup_index_cache: Optional[Dict[str, Any]] = None
 
     # ── 对外接口 ────────────────────────────────────────────
 
@@ -395,7 +396,13 @@ SUMMARY:
             for todo in todos:
                 parts = [p.strip() for p in todo.split("|")]
                 if len(parts) >= 3:
-                    lines.append(f"| {parts[0]} | {parts[1]} | {parts[2]} |")
+                    # 字段数超过3时，多余部分合并到事项列（防止LLM输出含|的任务名）
+                    if len(parts) > 3:
+                        task = "|".join(parts[:-2])
+                        owner, deadline = parts[-2], parts[-1]
+                    else:
+                        task, owner, deadline = parts[0], parts[1], parts[2]
+                    lines.append(f"| {task} | {owner} | {deadline} |")
                 else:
                     lines.append(f"| {todo} | | |")
             lines.append("")
@@ -438,15 +445,15 @@ SUMMARY:
     # ── 排重 ────────────────────────────────────────────────
 
     def _check_dedup(self, dedup_key: str) -> Optional[Dict[str, Any]]:
-        index = load_dedup_index(self._dedup_path)
-        # 构建查找字典避免 O(n) 线性扫描
-        lookup = {it.get("dedup_key"): it for it in index.get("items", []) if it.get("dedup_key")}
+        if self._dedup_index_cache is None:
+            self._dedup_index_cache = load_dedup_index(self._dedup_path)
+        lookup = {it.get("dedup_key"): it for it in self._dedup_index_cache.get("items", []) if it.get("dedup_key")}
         return lookup.get(dedup_key)
 
     def _update_dedup(self, dedup_key: str, identifier: str, target_name: str,
                        time_start: str, time_end: str,
                        fingerprint: str, topic: str, output_path: str) -> None:
-        index = load_dedup_index(self._dedup_path)
+        index = load_dedup_index(self._dedup_path)  # 写操作总是读最新状态
         upsert_dedup_item(index, dedup_key, {
             "dedup_key": dedup_key,
             "chat_id": identifier,
@@ -459,3 +466,4 @@ SUMMARY:
             "extracted_at": now_iso(),
         })
         save_dedup_index(self._dedup_path, index)
+        self._dedup_index_cache = None  # 写后清除缓存，下次重新加载

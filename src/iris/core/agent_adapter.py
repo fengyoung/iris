@@ -199,7 +199,9 @@ class ConsoleAdapter(AgentAdapter):
     def _invoke_wiki_lint(self, params):
         from iris.wiki.navigation import lint_wiki
         from pathlib import Path as _Pt
-        wiki_root = _Pt(self._config.wiki["wiki_root"]) if self._config.wiki else _Pt()
+        if not self._config.wiki or not self._config.wiki.get("wiki_root"):
+            return {"error": "Wiki 配置缺失，无法执行 lint"}
+        wiki_root = _Pt(self._config.wiki["wiki_root"])
         result = lint_wiki(wiki_root)
         return {"page_count": result["page_count"], "broken_links": result["broken_count"]}
 

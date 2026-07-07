@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -307,7 +308,6 @@ sources:
         """从 YAML frontmatter 中提取指定字段的值。"""
         from .searcher import get_frontmatter_field
         return get_frontmatter_field(content, field)
-        return ""
 
     def _find_page_by_title(self, title: str, page_type: Optional[str] = None) -> Optional[Tuple[Path, str, str]]:
         """按标题查找已有 Wiki 页面，返回 (path, page_type, content)。"""
@@ -480,12 +480,25 @@ sources:
             page_index[page_info.title] = (page_info.path, page_info.page_type, content)
 
         results: List[Dict[str, Any]] = []
-        for title, (path, page_type, content) in page_index.items():
-            r = self._update_page_with_content(
+        items = [(t, p, pt, c) for t, (p, pt, c) in page_index.items()]
+        if not items:
+            return {"total": 0, "updated": 0, "unchanged": 0, "not_found": 0, "errors": 0, "details": []}
+
+        def _update_one(args: Tuple) -> Dict[str, Any]:
+            title, path, page_type, content = args
+            return self._update_page_with_content(
                 title=title, page_type=page_type, path=path,
                 existing_content=content, top_k=top_k,
             )
-            results.append(r)
+
+        with ThreadPoolExecutor(max_workers=min(len(items), 6)) as executor:
+            futures = {executor.submit(_update_one, item): item[0] for item in items}
+            for future in as_completed(futures):
+                title = futures[future]
+                try:
+                    results.append(future.result())
+                except Exception as exc:
+                    results.append({"status": "error", "title": title, "reason": str(exc)})
 
         updated = [r for r in results if r.get("status") == "updated"]
         unchanged = [r for r in results if r.get("status") == "no_changes"]

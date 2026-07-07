@@ -1,4 +1,4 @@
-# Iris 3.11.4 — 项目执行说明
+# Iris 3.11.6 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -11,9 +11,9 @@
 
 | 维度 | 数据 |
 |------|------|
-| 源代码 | ~17,300 行，94 个文件，19 个模块 |
+| 源代码 | ~18,600 行，95 个文件，19 个模块 |
 | CLI 命令 | 45 个 |
-| 单元测试 | 169 个（13 个测试文件） |
+| 单元测试 | 277 个（24 个测试文件） |
 | Claude Code Skill | 6 个项目级 Skill |
 | 数据源 | 594 个文档，3,402 个 Chunk |
 | 向量索引 | 5,810 条，25 MB |
@@ -136,7 +136,7 @@ Stage 3 (base model)  → 整合润色输出
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.11.4 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.11.6 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.8 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.2/3.4 | 配置文件 Schema |
 
@@ -159,7 +159,7 @@ Stage 3 (base model)  → 整合润色输出
 
 ```
 iris3/
-├── pyproject.toml              # 产品版本 3.11.4
+├── pyproject.toml              # 产品版本 3.11.6
 ├── README.md
 ├── CLAUDE.md                   # 本文件
 ├── CHANGELOG.md                # 完整版本历史
@@ -182,10 +182,11 @@ iris3/
 │   ├── app/cli/                # CLI 框架（45 命令）
 │   ├── app/transcribe_meeting/ # 会议转录
 │   ├── feishu/                 # 飞书文档/聊天提炼
+│   ├── utils/                  # 工具函数（含 paths.py 公共路径工具）
 │   └── trello/                 # Trello 看板
 ├── scripts/                    # CLI 入口 + 委托脚本
 ├── templates/                  # Prompt / Wiki 模板
-├── tests/                      # 单元测试（169 用例）
+├── tests/                      # 单元测试（277 用例，24 测试文件）
 ├── .claude/skills/             # 项目级 Claude Code Skill（6 个）
 └── memory/                     # Claude 工作记忆
 ```
@@ -206,6 +207,12 @@ iris3/
 ---
 
 ## 近期变更
+
+### v3.11.6 (2026-07-07)
+全项目深度优化（第二轮）：19 项安全/bug/性能/测试修复。P0 修复包括图片路径安全检查、feishu 时间戳 UTC 统一、transcribe-meeting LLM 失败 fallback、generator 死代码清理；P1 包括 chat_digest 待办表格转义/排重缓存、wiki update_all_pages 并发化（~4.5min→15s）、storage ImportError 告警、ValidationError 字段级错误；新增 8 个测试文件 +58 用例，测试总数 277。
+
+### v3.11.5 (2026-07-07)
+代码审查优化（第一轮）：12 项修复，含 Stage 1 preview 注入、UTC 时间窗口、ModelManagerError 捕获、reasoning_content fallback、quality_score 判断、OP 缓存哈希扩展等。新建 `utils/paths.py` 公共路径工具，合并重复 JSONL 加载函数。
 
 ### v3.11.4 (2026-07-07)
 build-biweekly-report 流水线修复：多期去重 + 跨方向 brief 路由 + Stage 1 缓存 + base_model 统一。

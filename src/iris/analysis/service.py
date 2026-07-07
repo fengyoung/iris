@@ -18,6 +18,7 @@ from iris.llm.service import LLMService
 from iris.qa import QAService
 from iris.utils.logging import IrisLogger
 from iris.utils.prompting import PromptTemplateLoader
+from iris.utils.paths import resolve_source_root as _resolve_source_root
 
 from ._helpers import render_evidence_blocks, render_structured_evidence
 
@@ -117,9 +118,7 @@ class AnalysisReportService:
 
         dry_run=True 时：仅收集文件 + 解析 OP，输出清单和方向匹配预览，不执行 LLM 阶段。
         """
-        from datetime import timezone
-
-        now = datetime.now(timezone.utc)
+        now = datetime.now()  # 本地时间，与文件名日期语义一致
         biweekly_cfg = self._config.app.get("biweekly_report", {})
         lookback_days = biweekly_cfg.get("lookback_days", 14)
         two_weeks_ago = now - timedelta(days=lookback_days)
@@ -129,7 +128,7 @@ class AnalysisReportService:
             query = f"近两周({period})工作进展"
 
         op_doc = self._load_op_document()
-        files = self._collect_recent_files(two_weeks_ago.replace(tzinfo=None))
+        files = self._collect_recent_files(two_weeks_ago)
 
         if not files:
             return ReportResponse(query=query, mode="llm",
@@ -228,7 +227,7 @@ class AnalysisReportService:
         if not op_doc:
             return {"directions": []}
 
-        content_hash = self._content_hash(op_doc, 500)
+        content_hash = self._content_hash(op_doc, len(op_doc))
 
         # 检查缓存
         if cache_path.exists():
@@ -345,7 +344,7 @@ class AnalysisReportService:
             preview = f["content"][:300].replace("\n", " ")
             inventory_lines.append(
                 f"[{f['label']}] | {f['date'].strftime('%m%d')} | {f['dir']} | "
-                f"{f['char_count']}字"
+                f"{f['char_count']}字 | 摘要：{preview}"
             )
         file_inventory = "\n".join(inventory_lines)
         all_labels = {f["label"] for f in files}
@@ -818,6 +817,7 @@ class AnalysisReportService:
                     self._op_text_cache = text  # 全文保留，LLM 自行判断重点
                     return self._op_text_cache
         self._op_text_cache = ""
+        logger.warning("未找到 OP 规划文档（01-目标管理/*.md），Stage 0a 将返回空方向")
         return ""
 
     # ── 历史双周报（去重衔接） ──────────────────────────────
@@ -967,8 +967,8 @@ class AnalysisReportService:
         按文件名 YYYYMMDD 过滤（fallback 到 frontmatter 日期）。
         成员周报每人只保留最新一份。
         """
-        # 目录名 → 标签映射
-        _DIR_MAP = {
+        # 目录名 → 标签映射（默认值，可通过 app.json biweekly_report.dir_map 覆盖）
+        _DEFAULT_DIR_MAP = {
             "方案报告": ("03-方案报告", "方案报告"),
             "讨论思考": ("04-讨论思考", "讨论思考"),
             "会议纪要": ("05-会议纪要", "会议纪要"),
@@ -976,6 +976,8 @@ class AnalysisReportService:
         }
 
         biweekly_cfg = self._config.app.get("biweekly_report", {})
+        cfg_dir_map = biweekly_cfg.get("dir_map", {})
+        _DIR_MAP = {**_DEFAULT_DIR_MAP, **{k: tuple(v) for k, v in cfg_dir_map.items()}}
         enabled_sources = biweekly_cfg.get("data_sources",
             ["成员周报", "会议纪要", "讨论思考", "方案报告"])
 
@@ -994,6 +996,7 @@ class AnalysisReportService:
         for dir_name, dir_label in target_dirs:
             dir_path = source_root / dir_name
             if not dir_path.exists():
+                logger.warning("  双周报数据目录不存在: %s", dir_path)
                 continue
             for f in sorted(dir_path.glob("*.md")):
                 # 先读取文件内容（只读一次）
@@ -1047,7 +1050,13 @@ class AnalysisReportService:
             review_prompt = self._prompt_loader.render("report_review.md", {"query": query, "draft": draft, "structured_context": structured_ctx})
             review_resp = self._llm.generate(prompt=review_prompt, route_context={"input_type": "text", "task_type": "analysis", "complexity": "complex", "user_selected_role": "adv_model"}).text
             review_data = _parse_review_json(review_resp)
-            if not review_data or review_data.get("quality_score", 5) >= 4:
+            if not review_data:
+                return draft, review_data, False
+            score = review_data.get("quality_score")
+            if score is None:
+                logger.warning("review_data 缺少 quality_score 字段，跳过修订")
+                return draft, review_data, False
+            if score >= 4:
                 return draft, review_data, False
             issues_text = "\n".join(f"- {i}" for i in review_data.get("issues", []))
             suggestions_text = "\n".join(f"- {s}" for s in review_data.get("suggestions", []))
@@ -1279,18 +1288,6 @@ def _group_briefs_by_subarea(briefs: list, direction: dict) -> dict:
 
     # 清理空组
     return {k: v for k, v in groups.items() if v}
-
-
-def _resolve_source_root(bundle) -> Optional[Path]:
-    """解析数据源根目录（第一个启用的数据源的 path）。"""
-    sources = bundle.data_source.get("sources", {})
-    for cfg in sources.values():
-        if cfg.get("enabled") and cfg.get("path"):
-            p = Path(cfg["path"]).resolve()
-            if p.exists():
-                return p
-    return None
-
 
 def _build_file_manifest(files: list[dict]) -> str:
     """构建 LLM 输入的文件清单文本。

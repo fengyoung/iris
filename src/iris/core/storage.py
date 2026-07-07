@@ -157,7 +157,8 @@ class ChunkStore:
         """加载全部 chunks 为 ChunkRecord 列表（供 LocalRetriever 使用）。"""
         try:
             from iris.ingest.chunker import ChunkRecord
-        except ImportError:
+        except ImportError as exc:
+            logger.warning("无法加载 ChunkRecord，load_all() 返回空列表: %s", exc)
             return []
         conn = self._get_conn()
         rows = conn.execute("SELECT * FROM chunk_store ORDER BY source_name, relative_path").fetchall()

@@ -311,8 +311,9 @@ class FeishuClient:
             if not created_ts:
                 return ""
             try:
-                # node-get 返回 Unix 时间戳（秒）
-                dt = datetime.fromtimestamp(int(created_ts))
+                # node-get 返回 Unix 时间戳（秒），统一转为 UTC ISO 格式
+                from datetime import timezone as _tz
+                dt = datetime.fromtimestamp(int(created_ts), tz=_tz.utc)
                 return dt.isoformat()
             except (ValueError, TypeError, OSError):
                 return ""

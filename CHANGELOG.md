@@ -4,6 +4,72 @@
 
 ---
 
+## v3.11.6 (2026-07-07)
+
+### 全项目深度优化（第二轮，19项）
+
+**P0 — 功能性 Bug：**
+- **feishu/doc_convert.py**：图片下载路径安全检查，防止路径逃逸出 img_dir（深度防御）
+- **feishu/client.py + _shared.py**：`fromtimestamp` 统一加 `tz=timezone.utc`，消除文档创建日期时区偏差
+- **transcribe_meeting/pipeline.py**：`_call_llm` 包 `LLMProviderError`，LLM 不可用时返回含原始转写的 fallback 而非 crash
+- **wiki/generator.py**：删除 `_parse_frontmatter_field` 中 `return` 后的死代码（行 310）
+
+**P1 — 静默失效/性能：**
+- **feishu/chat_digest.py**：待办表格字段含 `|` 时正确合并为事项列；排重索引实例级缓存，消除批量处理时的重复磁盘读取
+- **wiki/generator.py**：`update_all_pages` 改为 `ThreadPoolExecutor(max_workers=6)` 并发执行，91页从~4.5分钟压缩至单页最大耗时
+- **feishu/doc_convert.py**：写入异常从 `except Exception` 改为先检查 `content` 字段再 `except OSError`，消除误导性错误信息
+- **core/storage.py**：`load_all` 的 `ImportError` 从静默丢弃改为记录 warning，区分"库为空"和"导入失败"
+- **config/loader.py**：Pydantic `ValidationError` 单独处理，格式化 `.errors()` 字段级错误替代宽泛异常包装
+
+**P2 — 设计改进：**
+- **core/agent_adapter.py**：`_invoke_wiki_lint` 在 wiki 配置缺失时提前返回错误，不再创建指向当前目录的空 Path
+- **memory/lifecycle.py**：`_merge_corrections` 时间相等时新值优先（`>=` 替代 `>`），允许重新导入纠正错误记录
+
+**P2 — 测试覆盖（+58 用例）：**
+新增 8 个测试文件，覆盖原先零覆盖的核心模块：
+  - `test_transcribe_meeting.py`：duration/date/footer 计算 + LLM 失败 fallback（14 用例）
+  - `test_feishu_chat_digest.py`：classify/表格转义/排重缓存（9 用例）
+  - `test_feishu_doc_convert.py`：路由/扩展名/标题插入（8 用例）
+  - `test_storage.py`：ChunkStore CRUD/load_all（8 用例）
+  - `test_output_formatter.py`：各命令格式化/边界（6 用例）
+  - `test_cli_helpers.py`：emit/路径/status（5 用例）
+  - `test_wiki_generator.py`：update_all_pages/write_page（4 用例）
+  - `test_qa_service.py`：local/llm 模式/降级（4 用例）
+
+**P3 — 代码清理：**
+- **llm/provider.py**：提取 `_dispatch_provider_call` 方法，消除 `force_model` 分支与 `_try_call` 闭包的 ~60 行重复 provider 分发逻辑
+
+**测试：** 277 passed（219 原有 + 58 新增）
+
+---
+
+## v3.11.5 (2026-07-07)
+
+### 深度代码审查优化（12 项）
+
+**P0 — 功能性 Bug 修复：**
+- **Stage 1 preview 注入**：`_stage1_filter_files` 中 `preview` 变量计算后未注入 `file_inventory`，LLM 方向分类时看不到文件内容，导致分类准确性下降；现已注入为每行末尾摘要字段
+- **ModelManagerError 捕获**：`_build_fallback_chain` else 分支的 `ModelManagerError` 不是 `LLMProviderError` 子类，逃逸所有捕获导致裸 traceback；现已包装为 `LLMProviderError`
+- **UTC 时间窗口**：`build_biweekly_report` 用 UTC 时间计算 lookback 窗口再剥 tzinfo，UTC+8 下边界日文件系统性丢失；改为全程使用本地时间
+
+**P1 — 静默失效修复：**
+- **reasoning_content fallback**：content 为非空 list 但无 text 条目时 `not content` 为 False，跳过 reasoning fallback 直接抛错；移除冗余条件
+- **quality_score 缺失**：审查结果缺少 `quality_score` 字段时被误判为"通过"（默认值 5 ≥ 4）；改为单独处理并记录 warning
+- **OP 缓存哈希窗口**：`_stage0a_parse_op` 用前 500 字节哈希，文档中后段新增方向不感知；扩展为全文哈希
+- **OP 文档静默失败**：找不到 OP 文档时静默返回 `""`；补充 warning 日志
+
+**P2 — 配置脆弱性：**
+- **`_DIR_MAP` 配置化**：硬编码物理路径（如 `07-成员周报`）与 `data_source.json` 脱节；保留默认值同时支持 `app.json biweekly_report.dir_map` 覆盖，目录不存在时输出 warning
+
+**P3 — 代码质量：**
+- **提取 `resolve_source_root`**：新建 `src/iris/utils/paths.py`，`service.py` 和 `handlers.py` 中的重复实现统一导入
+- **合并 JSONL 加载函数**：`_load_batch_items` / `_load_review_items` 80% 代码重复，提取为 `_load_wiki_items_from_jsonl(path, only_selected=False)` 后保留向后兼容包装
+- **提取时间戳解析**：`lifecycle.py` `age()` / `list_stale()` 的重复时间戳判断逻辑提取为 `_is_item_stale(item, cutoff)` 静态方法
+
+**测试：** 219 passed（全量回归，无新增/删除）
+
+---
+
 ## v3.11.4 (2026-07-07)
 
 ### build-biweekly-report 流水线修复

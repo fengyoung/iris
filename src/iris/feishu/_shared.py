@@ -133,8 +133,8 @@ def extract_date(time_str: str) -> str:
     except (ValueError, TypeError):
         pass
     try:
-        # Try Unix timestamp (seconds since epoch)
-        dt = datetime.fromtimestamp(int(time_str))
+        # Try Unix timestamp (seconds since epoch), always UTC
+        dt = datetime.fromtimestamp(int(time_str), tz=timezone.utc)
         return dt.strftime("%Y%m%d")
     except (ValueError, TypeError, OSError):
         return ""
