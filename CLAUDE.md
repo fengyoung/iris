@@ -1,4 +1,4 @@
-# Iris 3.11.6 — 项目执行说明
+# Iris 3.11.7 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -11,9 +11,9 @@
 
 | 维度 | 数据 |
 |------|------|
-| 源代码 | ~18,600 行，95 个文件，19 个模块 |
+| 源代码 | ~19,200 行，98 个文件，19 个模块 |
 | CLI 命令 | 45 个 |
-| 单元测试 | 277 个（24 个测试文件） |
+| 单元测试 | 315 个（26 个测试文件） |
 | Claude Code Skill | 6 个项目级 Skill |
 | 数据源 | 594 个文档，3,402 个 Chunk |
 | 向量索引 | 5,810 条，25 MB |
@@ -136,7 +136,7 @@ Stage 3 (base model)  → 整合润色输出
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.11.6 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.11.7 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.8 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.2/3.4 | 配置文件 Schema |
 
@@ -159,7 +159,7 @@ Stage 3 (base model)  → 整合润色输出
 
 ```
 iris3/
-├── pyproject.toml              # 产品版本 3.11.6
+├── pyproject.toml              # 产品版本 3.11.7
 ├── README.md
 ├── CLAUDE.md                   # 本文件
 ├── CHANGELOG.md                # 完整版本历史
@@ -186,7 +186,7 @@ iris3/
 │   └── trello/                 # Trello 看板
 ├── scripts/                    # CLI 入口 + 委托脚本
 ├── templates/                  # Prompt / Wiki 模板
-├── tests/                      # 单元测试（277 用例，24 测试文件）
+├── tests/                      # 单元测试（315 用例，26 测试文件）
 ├── .claude/skills/             # 项目级 Claude Code Skill（6 个）
 └── memory/                     # Claude 工作记忆
 ```
@@ -207,6 +207,9 @@ iris3/
 ---
 
 ## 近期变更
+
+### v3.11.7 (2026-07-07)
+analysis/service.py 职责拆分重构：新建 `_biweekly_collector.py`（数据层）、`_biweekly_cache.py`（缓存层）、`_biweekly_types.py`（TypedDict 契约），Stage 0a~4 委托子组件，保留全部向后兼容。新增 38 测试用例，测试总数 315。
 
 ### v3.11.6 (2026-07-07)
 全项目深度优化（第二轮）：19 项安全/bug/性能/测试修复。P0 修复包括图片路径安全检查、feishu 时间戳 UTC 统一、transcribe-meeting LLM 失败 fallback、generator 死代码清理；P1 包括 chat_digest 待办表格转义/排重缓存、wiki update_all_pages 并发化（~4.5min→15s）、storage ImportError 告警、ValidationError 字段级错误；新增 8 个测试文件 +58 用例，测试总数 277。

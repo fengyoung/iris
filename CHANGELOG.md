@@ -4,6 +4,25 @@
 
 ---
 
+## v3.11.7 (2026-07-07)
+
+### analysis/service.py 职责拆分重构 + 测试补全
+
+**重构（零行为变更）：**
+- 新建 `_biweekly_collector.py`（252行）：文件收集/OP文档加载/历史双周报加载，不依赖 LLM，可独立测试
+- 新建 `_biweekly_cache.py`（161行）：所有 Stage 磁盘缓存读写（op_directions/stage1_filter/style_guide/file_briefs）
+- 新建 `_biweekly_types.py`（36行）：Stage 间 TypedDict 数据契约（FileEntry/FileBrief）
+- `service.py` 精简：Stage 0a~4 改为委托 `self._collector` 和 `self._cache`，保留全部向后兼容方法
+- `AnalysisReportService` 所有静态方法保持向后兼容，外部调用方无需修改
+
+**测试补全（+38 用例）：**
+- `test_biweekly_cache.py`（21用例）：命中/失效/损坏/清理逻辑全覆盖
+- `test_biweekly_collector.py`（17用例）：文件收集/日期过滤/成员去重/OP加载/历史报告/自定义dir_map
+
+**测试：** 315 passed（277 + 38）
+
+---
+
 ## v3.11.6 (2026-07-07)
 
 ### 全项目深度优化（第二轮，19项）
