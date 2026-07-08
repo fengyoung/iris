@@ -27,6 +27,20 @@ def count_chinese(text: str) -> int:
     return sum(1 for c in text if '一' <= c <= '鿿' or '㐀' <= c <= '䶿')
 
 
+def exceeds_char_limit(text: str, max_total: int = 20, max_chinese: int = 10) -> bool:
+    """检查文本是否超过字符限制（总长度或中文字数）。
+
+    ASR 热词/替换映射的通用长度校验，asr_hotwords / asr_formatter 共用。
+    """
+    if not text:
+        return False
+    if len(text) > max_total:
+        return True
+    if count_chinese(text) > max_chinese:
+        return True
+    return False
+
+
 def estimate_tokens(text: str) -> int:
     """估算文本的 token 数量（非精确，适用于上下文预算控制）。"""
     chinese_chars = len(_CHINESE_RE.findall(text))

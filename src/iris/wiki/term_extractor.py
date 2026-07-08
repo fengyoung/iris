@@ -23,6 +23,7 @@ import hashlib
 import json
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -392,10 +393,15 @@ class TermExtractor:
 
         from iris.llm import LLMRequest
 
-        for start in range(0, len(terms), self._BATCH_SIZE):
-            batch = terms[start:start + self._BATCH_SIZE]
-            prompt = self._build_misreadings_prompt(batch)
+        # 分批：每批独立回填自身 AsrTerm 的 mis_asr，批间无共享状态 → 可并发
+        batches = [
+            terms[start:start + self._BATCH_SIZE]
+            for start in range(0, len(terms), self._BATCH_SIZE)
+        ]
 
+        def _run_batch(idx_batch):
+            idx, batch = idx_batch
+            prompt = self._build_misreadings_prompt(batch)
             try:
                 response = provider.generate(
                     LLMRequest(
@@ -410,10 +416,15 @@ class TermExtractor:
                 )
                 self._parse_misreadings_response(response.text, batch)
             except Exception as exc:
+                if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                    raise
                 print(
-                    f"[warn] 第 {start//self._BATCH_SIZE + 1} 批 ASR 误识别生成失败: {exc}",
+                    f"[warn] 第 {idx + 1} 批 ASR 误识别生成失败: {exc}",
                     file=sys.stderr,
                 )
+
+        with ThreadPoolExecutor(max_workers=min(len(batches), 8)) as executor:
+            list(executor.map(_run_batch, enumerate(batches)))
 
         return terms
 

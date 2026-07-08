@@ -1,4 +1,4 @@
-# Iris 3.11.7 — 项目执行说明
+# Iris 3.11.8 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -136,7 +136,7 @@ Stage 3 (base model)  → 整合润色输出
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.11.7 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.11.8 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.8 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.2/3.4 | 配置文件 Schema |
 
@@ -159,7 +159,7 @@ Stage 3 (base model)  → 整合润色输出
 
 ```
 iris3/
-├── pyproject.toml              # 产品版本 3.11.7
+├── pyproject.toml              # 产品版本 3.11.8
 ├── README.md
 ├── CLAUDE.md                   # 本文件
 ├── CHANGELOG.md                # 完整版本历史
@@ -207,6 +207,9 @@ iris3/
 ---
 
 ## 近期变更
+
+### v3.11.8 (2026-07-08)
+build-asr-prompt 性能与质量优化（6 项）：Phase 1 热词提取、Phase 2 误识别生成两段 LLM 批量调用并发化（`ThreadPoolExecutor`，跨批去重下沉、无共享状态竞争）；Phase 3 校正 Prompt 强化——`build_optimize_prompt` 要求「校正策略」覆盖 6 类 ASR 错误模式并附判断依据+领域实例，篇幅上限 1200→2200 字，实测 prompt 从 ~776 增至 ~2960 字。另修复 `--asr-mode prompt` 热词缺失、`_exceeds_char_limit` 上提去重、Phase 3 死代码清理、strip 转义笔误。测试保持 315 全绿。
 
 ### v3.11.7 (2026-07-07)
 analysis/service.py 职责拆分重构：新建 `_biweekly_collector.py`（数据层）、`_biweekly_cache.py`（缓存层）、`_biweekly_types.py`（TypedDict 契约），Stage 0a~4 委托子组件，保留全部向后兼容。新增 38 测试用例，测试总数 315。

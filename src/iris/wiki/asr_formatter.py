@@ -13,18 +13,10 @@ from typing import Dict, List, Optional, Set
 from .term_extractor import AsrTerm, AsrPromptVersion
 
 
-from iris.utils.tokenization import count_chinese as _count_chinese  # noqa: E402 — 向后兼容别名
-
-
-def _exceeds_char_limit(text: str, max_total: int = 20, max_chinese: int = 10) -> bool:
-    """检查文本是否超过字符限制（总长度或中文字数）。"""
-    if not text:
-        return False
-    if len(text) > max_total:
-        return True
-    if _count_chinese(text) > max_chinese:
-        return True
-    return False
+from iris.utils.tokenization import (  # noqa: E402 — 向后兼容别名
+    count_chinese as _count_chinese,
+    exceeds_char_limit as _exceeds_char_limit,
+)
 
 
 

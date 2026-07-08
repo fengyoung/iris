@@ -4,6 +4,25 @@
 
 ---
 
+## v3.11.8 (2026-07-08)
+
+### build-asr-prompt 性能与质量优化（6 项）
+
+**性能（LLM 调用并发化）：**
+- `LLMHotwordExtractor.extract`（Phase 1）：分批热词提取由串行改 `ThreadPoolExecutor`（≤6 并发）；跨批去重下沉到末尾统一处理，各批用独立局部去重集，消除共享 `seen` 竞争，`executor.map` 保持批次顺序
+- `TermExtractor.generate_misreadings`（Phase 2）：分批误识别生成改并发（≤8）；各批只回填自身 `AsrTerm.mis_asr`，天然无竞争
+- 效果：`all` 模式墙钟从「批数×单批耗时」降为「单批耗时×⌈批数/并发度⌉」，与 v3.11.6 wiki 并发化同量级
+
+**质量（Phase 3 校正 Prompt 强化）：**
+- `LLMPromptOptimizer.build_optimize_prompt`：强化「校正策略」指令，要求覆盖 6 类 ASR 典型错误模式（词典优先/人名同音消歧/中英混排缩写/专名边界/数字版本号/分词纠错），每维度带「判断依据 + 领域实例」
+- 篇幅约束 1200→1500~2200 汉字，`max_tokens` 4096→6144；实测校正 prompt 从 ~776 字增至 ~2960 字，策略段占比 80%
+
+**修复与清理：**
+- `--asr-mode prompt` 现也提取热词供优化器使用（原先仅 `all`/`hotwords` 提取，`prompt` 模式热词为空）
+- `_exceeds_char_limit` 上提到 `utils/tokenization.py:exceeds_char_limit`，消除 `asr_hotwords`/`asr_formatter` 双份定义
+- 移除 handler Phase 3 不可达的 `if not terms:` 重提取分支（死代码）
+- 修正 `_clean_text_term` strip 字符集里误入的 `\"` 转义笔误，补齐中英直/弯引号
+
 ## v3.11.7 (2026-07-07)
 
 ### analysis/service.py 职责拆分重构 + 测试补全

@@ -422,21 +422,23 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
     provider = llm_service.get_provider()
 
     # ── Phase 1：LLM 热词提取 ────────────────────────────
+    # prompt 模式也提取热词——供 Phase 3 优化器语境样例使用（但不落盘热词文件）
     hotwords: List[str] = []
-    if mode in ("all", "hotwords"):
+    hotwords_file = ""
+    if mode in ("all", "hotwords", "prompt"):
         print("[asr] Phase 1: LLM 热词提取...", file=sys.stderr)
         hotword_extractor = LLMHotwordExtractor(pages)
         max_hotwords = getattr(args, "max_hotwords", 490) or 490
         hotwords = hotword_extractor.extract(provider, max_hotwords=max_hotwords)
 
-        hotwords_path = f"asr-hotwords-{today}.txt"
-        if args.output_file and mode != "all":
-            hotwords_path = args.output_file
-        hotwords_file = format_hotwords_file(
-            hotwords, bundle.root / "output" / hotwords_path
-        )
-    else:
-        hotwords_file = ""
+        # 仅在需要热词文件的模式写盘；prompt 模式只将热词喂给优化器
+        if mode in ("all", "hotwords"):
+            hotwords_path = f"asr-hotwords-{today}.txt"
+            if args.output_file and mode != "all":
+                hotwords_path = args.output_file
+            hotwords_file = format_hotwords_file(
+                hotwords, bundle.root / "output" / hotwords_path
+            )
 
     # ── Phase 2：术语提取 + 替换词典 ─────────────────────
     terms: List = []
@@ -474,14 +476,7 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
     prompt = ""
     output_path = ""
     if mode in ("all", "prompt"):
-        if not terms:
-            # 需要 terms 数据，先提取
-            extractor = TermExtractor(pages)
-            terms = extractor.extract_terms()
-            bump = getattr(args, "bump", "auto") or "auto"
-            new_version = determine_new_version(pages, data_dir, bump=bump)
-            terms = extractor.generate_misreadings(terms, provider)
-
+        # terms 与 new_version 已在 Phase 2 填充（"all"/"prompt" 均经过 Phase 2）
         print("[asr] Phase 3: LLM Prompt 优化压缩...", file=sys.stderr)
         new_version.term_count = len(terms)
         new_version.wiki_page_count = len(pages)

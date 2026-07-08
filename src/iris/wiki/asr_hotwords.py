@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Optional, Set
 
 from ._constants import get_wiki_prefix
@@ -106,23 +107,15 @@ def _build_hotwords_prompt(batch: List[WikiPageInfo]) -> str:
 [{{"term":"团队成员J"}},{{"term":"图像采集3.0"}},{{"term":"MMoE"}},{{"term":"BM25"}},...]"""
 
 
-from iris.utils.tokenization import count_chinese as _count_chinese  # noqa: E402 — 向后兼容别名
-
-
-def _exceeds_char_limit(text: str, max_total: int = 20, max_chinese: int = 10) -> bool:
-    """检查文本是否超过字符限制（总长度或中文字数）。"""
-    if not text:
-        return False
-    if len(text) > max_total:
-        return True
-    if _count_chinese(text) > max_chinese:
-        return True
-    return False
+from iris.utils.tokenization import (  # noqa: E402 — 向后兼容别名
+    count_chinese as _count_chinese,
+    exceeds_char_limit as _exceeds_char_limit,
+)
 
 
 def _clean_text_term(term: str) -> str:
     """清理单个热词：去除控制字符、首尾标点、空白。"""
-    t = term.strip().strip('，。；：、！？"\"''「」『』【】《》（）()[]{}')
+    t = term.strip().strip("，。；：、！？\"'“”‘’「」『』【】《》（）()[]{}")
     t = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", t)
     t = t.replace("�", "")
     return t.strip()
@@ -219,13 +212,17 @@ class LLMHotwordExtractor:
         from iris.llm import LLMRequest
 
         batches = _build_page_batches(self._pages)
-        all_hotwords: List[str] = []
-        seen: set = set()
 
-        print(f"[asr] 热词提取：{len(batches)} 批，共 {len(self._pages)} 页",
+        print(f"[asr] 热词提取：{len(batches)} 批并发，共 {len(self._pages)} 页",
               file=sys.stderr)
 
-        for idx, batch in enumerate(batches):
+        def _run_batch(idx_batch) -> List[str]:
+            """处理单批页面：LLM 提取 → 清理 → 质量过滤。
+
+            每批使用独立的局部去重集，跨批去重统一交由末尾的最终去重完成，
+            从而消除并发下的共享状态竞争。
+            """
+            idx, batch = idx_batch
             prompt = _build_hotwords_prompt(batch)
             try:
                 response = provider.generate(
@@ -239,26 +236,32 @@ class LLMHotwordExtractor:
                     temperature=0.3,
                     max_tokens=8192,
                 )
-                batch_terms = _parse_hotwords_response(response.text, seen)
+                local_seen: set = set()
+                batch_terms = _parse_hotwords_response(response.text, local_seen)
                 # 后处理：质量过滤 + 文本清理
                 clean_batch = []
                 for t in batch_terms:
                     cleaned = _clean_text_term(t)
                     if not _is_valid_hotword(cleaned):
-                        # 从 seen 中移除无效条目，避免废词占用
-                        key = cleaned.lower().replace(" ", "")
-                        if key in seen:
-                            seen.discard(key)
                         continue
                     clean_batch.append(cleaned)
-                all_hotwords.extend(clean_batch)
-                print(f"  [asr] 第 {idx+1} 批 → {len(batch_terms)} 个候选（过滤后 {len(clean_batch)}）（累计 {len(all_hotwords)}）",
+                print(f"  [asr] 第 {idx+1} 批 → {len(batch_terms)} 个候选（过滤后 {len(clean_batch)}）",
                       file=sys.stderr)
+                return clean_batch
             except Exception as exc:
                 if isinstance(exc, (KeyboardInterrupt, SystemExit)):
                     raise
                 print(f"  [warn] 第 {idx+1} 批热词提取失败: {exc}",
                       file=sys.stderr)
+                return []
+
+        # 并发执行；executor.map 保持批次顺序，去重优先保留靠前批次的写法
+        with ThreadPoolExecutor(max_workers=min(len(batches), 6)) as executor:
+            batch_results = list(executor.map(_run_batch, enumerate(batches)))
+
+        all_hotwords: List[str] = []
+        for clean_batch in batch_results:
+            all_hotwords.extend(clean_batch)
 
         # 最终去重（防御性）
         final = []
