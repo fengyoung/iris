@@ -4,7 +4,35 @@
 
 ---
 
-## v3.11.8 (2026-07-08)
+## v3.11.9 (2026-07-08)
+
+### 安全加固 + 工程质量优化 + 测试补全（315 → 384 测试）
+
+**安全加固（开源准备）：**
+- S1: 双周报 footer 签名去硬编码 — `report_author` 改从 `config/app.json biweekly_report.report_author` 读取，空值时不追加署名行（`analysis/service.py`、`handlers.py`、`biweekly_stage4_assemble.md`）
+- S2: 模板敏感内容脱敏 — `biweekly_stage3_direction.md` / `biweekly_report.md` 中的真实员工姓名及具体决策内容替换为通用匿名示例
+- S3: `discovery_rules.py` 脱敏 — `LOW_VALUE_TITLES` 移除含真实员工姓名的条目，`STOPWORDS` 移除内部品牌词 `exampleorg`
+- S4: LLM Prompt 业务域配置化 — 新建 `wiki/_constants.build_domain_context(app_config)`；`term_extractor` / `asr_hotwords` / `asr_prompt_optimizer` 三处 Prompt 中的公司名/部门名/业务域改从 `config/app.json organization` 字段注入；`handlers.py` 统一构建 `domain_context` 传入；`app.json.example` 新增 `organization` 和 `retrieval` 配置段
+- S5: 日志截断敏感内容 — `_sanitize_log_payload`：`markdown` 字段截断至前 200 字，`blocks` 只保留 `relative_path` 和 `score`
+- S6: ASR Prompt 示例脱敏 — `asr_hotwords.py` / `term_extractor.py` / `asr_prompt_optimizer.py` 输出格式示例中的真实员工姓名（团队成员J、团队成员E）和项目名（图像采集3.0、质检自动化）替换为通用占位；`biweekly_stage3_direction.md` 反例示范脱敏；`biweekly_stage4_assemble.md` 移除 LLM 无法执行的条件签名指令
+
+**工程质量：**
+- Q1: `EnhancedRetriever._cache` 线程安全 — 新增 `threading.Lock`，`_cache_get`/`_cache_set` 加锁，修复 `update_all_pages` 并发场景下的竞态
+- Q2: 封装 `ModelManager._models` 私有属性访问 — 新增 `ModelManager.find_model_by_name()` 公开方法，`provider._find_model_by_name` 改为委托调用
+- Q3: `QueryRewriter.SYNONYM_MAP` 配置化 — 新增 `__init__(extra_synonyms)` 参数，与默认词典合并；`EnhancedRetriever` 从 `app.json retrieval.synonym_extensions` 加载扩展
+- Q4: 检索评分魔法数字命名常量化 — 提取 `_BOOST_DEFINITION=2.0` / `_BOOST_TIMELINE=1.8` / `_BOOST_PROJECT=1.2` 并加注释说明来源
+- Q5: RRF 融合参数配置化 — `_rrf_fuse` 增加 `bm25_bonus` 参数，`search()` 从 `app.json retrieval.rrf` 读取，`app.json.example` 新增配置段
+- Q6: Wiki 内容提取加固 — `_extract_wiki_content` 优先用严格正则 `---\ntitle:` 定位 frontmatter，降级时记录 warning 日志，防止含 `---` 代码块时误匹配
+
+**测试补全（+69 用例，315 → 384）：**
+- `test_complex_input_pipeline.py`（新建，10 用例）：三阶段正常路径 / Stage1 失败 / Stage2 失败降级 / to_dict 序列化
+- `test_retrieval_enhanced.py`（新建，22 用例）：RRF 融合排序/权重/纯向量命中/top_k / LRU 缓存线程安全/TTL/驱逐 / QueryRewriter 扩展同义词合并 / parse_ranked_ids / apply_rank_order
+- `test_wiki_update_validation.py`（新建，18 用例）：`_validate_update_output` 三分支 / `_extract_wiki_content` 严格正则/代码块/对话前缀/降级 / `build_domain_context` 全配置/空配置/仅 name/无 name
+- `test_memory_lifecycle.py`（新建，13 用例）：`_is_item_stale` 5 边界 / `age()` 全超期/全保留/混合 / `list_stale` / `detect_conflicts` / `summarize` 裁剪
+- `test_biweekly_pipeline.py`（追加，8 用例）：`_sanitize_log_payload` 5 场景 / `report_author` 追加/不追加/防重复
+- `test_provider_fallback.py`（追加，5 用例）：`find_model_by_name` 按名/按 ID/不存在/含 api_key/含 _model_id
+
+
 
 ### build-asr-prompt 性能与质量优化（6 项）
 

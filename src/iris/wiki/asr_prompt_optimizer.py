@@ -32,6 +32,7 @@ class LLMPromptOptimizer:
     def build_optimize_prompt(
         hotwords: List[str],
         terms: List[AsrTerm],
+        domain_context: str = "",
     ) -> str:
         """构建提示词——让 LLM 生成策略型校正 prompt，而非术语列表。"""
         persons = [t for t in terms if t.category == "person"]
@@ -57,8 +58,7 @@ class LLMPromptOptimizer:
         return f"""你是 ASR 校正提示词专家。你需要为语音转写（ASR）后处理生成一份 LLM 校正系统提示词。
 
 ## 背景
-这是「转转」集团「技术研发部」的内部语音场景（会议讨论、项目沟通），
-主要涉及方向：二手商品商品质检 AI、搜索推荐算法、大模型训练与应用、视频审核。
+{domain_context or "这是一个专业团队的内部语音场景（会议讨论、项目沟通）。"}
 
 ## 校正资源说明
 系统已配备一份**替换词典**（{len(terms)} 术语 × 平均 3-5 条误识别映射），
@@ -73,15 +73,15 @@ class LLMPromptOptimizer:
 1. **词典优先**：先检查替换词典覆盖的词，命中即直接替换；未覆盖时才进入下列推断。
 2. **人名同音/近音消歧**：中文人名最易错。声母混淆（zh↔z、ch↔c、sh↔s、n↔l、r↔l、h↔f）、
    韵母混淆（an↔ang、en↔eng、in↔ing、ian↔ie）、近形字。必须匹配成员名单（{all_person_names}），
-   音近则按名单校正（如「万滔/万陶/万逃」→「团队成员E」）。
+   音近则按名单校正（如「张山/章三」→「张三」）。
 3. **中英混排与英文缩写**：英文缩写保持全大写（DNN、OCR、MMoE、BM25）；字母被音译还原（如「爱吃200」→「H200」）；
    大小写变体归一（qwen/QWEN→Qwen）；中英文之间加空格（「Qwen大模型」→「Qwen 大模型」）。
-4. **专有名词/项目名边界完整性**：长项目名不得被截断或误拆（如「图像采集3.0 AI外观定级」不能截断为「图像采集3.0」，
-   「视频审核与在线评估」不能拆成两段）；以词典/名单中的完整写法为准。
+4. **专有名词/项目名边界完整性**：长项目名不得被截断或误拆（如「AI外观定级系统」不能截断为「AI外观」，
+   「视频审核与在线稽查」不能拆成两段）；以词典/名单中的完整写法为准。
 5. **数字与版本号读法**：技术语境（版本号、参数、日期）用阿拉伯数字，口语语境（约数、估数）保留中文数字；
    处理「三点零↔3.0」「三零↔30」等读法歧义。
-6. **ASR 分词错误纠正**：识别「一字被吞、两字被并、边界偏移」（如「质检自动化」被误分割为「质检智能画」），
-   结合领域上下文（二手商品质检 / 推荐算法 / 大模型 / 视频审核）从多个候选中选出正确写法。
+6. **ASR 分词错误纠正**：识别「一字被吞、两字被并、边界偏移」（如「智能化」被误分割为「智能画」），
+   结合领域上下文从多个候选中选出正确写法。
 
 ## 润色规则（需要在 prompt 中体现）
 1. 修正 ASR 常见的口语填充（嗯、啊、那个、这个）
@@ -135,11 +135,12 @@ class LLMPromptOptimizer:
         hotwords: List[str],
         terms: List[AsrTerm],
         provider: "EnvironmentConfiguredLLMProvider",
+        domain_context: str = "",
     ) -> str:
         """LLM 调用一次，生成策略型校正 prompt。"""
         from iris.llm import LLMRequest
 
-        prompt = LLMPromptOptimizer.build_optimize_prompt(hotwords, terms)
+        prompt = LLMPromptOptimizer.build_optimize_prompt(hotwords, terms, domain_context)
         try:
             response = provider.generate(
                 LLMRequest(

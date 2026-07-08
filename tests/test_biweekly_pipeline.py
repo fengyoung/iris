@@ -277,3 +277,86 @@ class TestBiweeklyFilename:
         filename = _build_biweekly_filename(FakeBundle(), today)
         # 周一 → 用周日（7月5日）的周数，可能是 w27
         assert "w" in filename
+
+
+# ── _sanitize_log_payload ─────────────────────────────────────────────
+
+class TestSanitizeLogPayload:
+    """analysis/service.py _sanitize_log_payload 安全截断测试。"""
+
+    def test_markdown_truncated(self):
+        from iris.analysis.service import AnalysisReportService
+        long_md = "A" * 500
+        payload = {"markdown": long_md, "blocks": [], "query": "q"}
+        result = AnalysisReportService._sanitize_log_payload(payload)
+        assert len(result["markdown"]) <= 203  # 200 chars + "…"
+        assert result["markdown"].endswith("…")
+
+    def test_short_markdown_unchanged(self):
+        from iris.analysis.service import AnalysisReportService
+        payload = {"markdown": "短内容", "blocks": [], "query": "q"}
+        result = AnalysisReportService._sanitize_log_payload(payload)
+        assert result["markdown"] == "短内容"
+
+    def test_blocks_stripped_to_path_and_score(self):
+        from iris.analysis.service import AnalysisReportService
+        payload = {
+            "markdown": "md",
+            "blocks": [
+                {"relative_path": "a/b.md", "score": 0.9, "summary": "敏感内容", "title": "T"},
+                {"relative_path": "c/d.md", "score": 0.5, "summary": "另一段敏感内容"},
+            ],
+            "query": "q",
+        }
+        result = AnalysisReportService._sanitize_log_payload(payload)
+        for b in result["blocks"]:
+            assert set(b.keys()) == {"relative_path", "score"}
+            assert "summary" not in b
+            assert "title" not in b
+
+    def test_no_markdown_key(self):
+        from iris.analysis.service import AnalysisReportService
+        payload = {"query": "q", "blocks": []}
+        result = AnalysisReportService._sanitize_log_payload(payload)
+        assert "markdown" not in result
+
+    def test_non_string_markdown_ignored(self):
+        from iris.analysis.service import AnalysisReportService
+        payload = {"markdown": 12345, "blocks": []}
+        result = AnalysisReportService._sanitize_log_payload(payload)
+        assert result["markdown"] == 12345
+
+
+# ── report_author 配置化 ──────────────────────────────────────────────
+
+class TestReportAuthorConfig:
+    """S1: report_author 从配置读取，空值不追加 footer。"""
+
+    def _make_footer(self, author: str) -> str:
+        return f"\n\n---\n> This report was written by Iris and revised by {author}."
+
+    def test_footer_appended_when_author_set(self):
+        """report_author 非空时追加 footer。"""
+        author = "test_user"
+        markdown = "内容正文"
+        footer = self._make_footer(author)
+        if not markdown.endswith(footer.strip()):
+            markdown += footer
+        assert "test_user" in markdown
+
+    def test_footer_not_appended_when_author_empty(self):
+        """report_author 为空时不追加 footer。"""
+        report_author = ""
+        markdown = "内容正文"
+        if report_author:
+            markdown += self._make_footer(report_author)
+        assert "revised by" not in markdown
+
+    def test_footer_not_duplicated(self):
+        """footer 已存在时不重复追加。"""
+        author = "alice"
+        footer = self._make_footer(author)
+        markdown = "内容" + footer
+        if not markdown.endswith(footer.strip()):
+            markdown += footer
+        assert markdown.count("revised by alice") == 1

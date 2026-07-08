@@ -86,24 +86,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
 
     def _find_model_by_name(self, model_name: str) -> Optional[Dict[str, Any]]:
         """在所有角色中按 model 字段或 model_id 查找模型配置（含 api_key）。"""
-        for role, role_cfg in self._model_manager._models.items():
-            # 兼容 dict 和 Pydantic RoleModels
-            models = role_cfg.get("models", {}) if isinstance(role_cfg, dict) else getattr(role_cfg, "models", {})
-            for model_id, cfg in models.items():
-                # cfg 可能是 dict 或 Pydantic ModelItem
-                cfg_model = cfg.get("model") if isinstance(cfg, dict) else getattr(cfg, "model", None)
-                if cfg_model == model_name or model_id == model_name:
-                    if isinstance(cfg, dict):
-                        return dict(cfg, _model_id=model_id)
-                    # Pydantic ModelItem → dict
-                    result = {"model": cfg_model, "_model_id": model_id,
-                              "api_key": getattr(cfg, "api_key", ""),
-                              "api_base_url": getattr(cfg, "api_base_url", ""),
-                              "provider": getattr(cfg, "provider", ""),
-                              "timeout_seconds": getattr(cfg, "timeout_seconds", 60),
-                              "max_retries": getattr(cfg, "max_retries", 0)}
-                    return result
-        return None
+        return self._model_manager.find_model_by_name(model_name)
 
     def _dispatch_provider_call(
         self,

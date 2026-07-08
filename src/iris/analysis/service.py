@@ -63,6 +63,19 @@ class AnalysisReportService:
     def _content_hash(text: str, prefix_len: int = 2000) -> str:
         return BiweeklyCache.content_hash(text, prefix_len)
 
+    @staticmethod
+    def _sanitize_log_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+        """日志安全处理：截断 markdown 全文，精简 blocks 证据原文，避免完整知识库内容写入日志。"""
+        result = dict(payload)
+        if "markdown" in result and isinstance(result["markdown"], str):
+            result["markdown"] = result["markdown"][:200] + "…" if len(result["markdown"]) > 200 else result["markdown"]
+        if "blocks" in result and isinstance(result["blocks"], list):
+            result["blocks"] = [
+                {"relative_path": b.get("relative_path", ""), "score": b.get("score", 0)}
+                for b in result["blocks"]
+            ]
+        return result
+
     # ── _review_and_revise（供 build_report 使用）────────────────
 
     def build_report(self, query: str, *, top_k: int = 6, mode: str = "llm", two_stage: bool = False) -> ReportResponse:
@@ -87,20 +100,20 @@ class AnalysisReportService:
                 if two_stage:
                     markdown, review_result, revised = self._review_and_revise(query=query, draft=markdown, structured=structured, llm_payload=llm_payload)
                 result = ReportResponse(query=query, mode="llm", markdown=markdown, blocks=blocks, structured=structured, llm=llm_payload, review=review_result, revised=revised)
-                self._logger.log("analysis_report", result.to_dict())
+                self._logger.log("analysis_report", self._sanitize_log_payload(result.to_dict()))
                 return result
             except LLMProviderError as exc:
                 self._logger.log("analysis_llm_fallback", {"query": query, "reason": str(exc)})
                 sections = _load_report_sections(self._config.app)
                 markdown = _build_local_report(query, qa_response.answer, blocks, structured, sections=sections)
                 result = ReportResponse(query=query, mode="local_fallback", markdown=markdown, blocks=blocks, structured=structured, llm={"fallback_used": True, "reason": str(exc)})
-                self._logger.log("analysis_report", result.to_dict())
+                self._logger.log("analysis_report", self._sanitize_log_payload(result.to_dict()))
                 return result
 
         sections = _load_report_sections(self._config.app)
         markdown = _build_local_report(query, qa_response.answer, blocks, structured, sections=sections)
         result = ReportResponse(query=query, mode="local", markdown=markdown, blocks=blocks, structured=structured, llm={"fallback_used": False})
-        self._logger.log("analysis_report", result.to_dict())
+        self._logger.log("analysis_report", self._sanitize_log_payload(result.to_dict()))
         return result
 
     def build_biweekly_report(self, *, query: str = "", mode: str = "llm",
@@ -194,9 +207,11 @@ class AnalysisReportService:
             markdown = markdown.strip()
             if not markdown.startswith("*时间周期"):
                 markdown = f"*时间周期：{period}*\n\n{markdown}"
-            footer = "\n\n---\n> This report was written by Iris and revised by maintainer."
-            if not markdown.endswith(footer.strip()):
-                markdown += footer
+            report_author = (self._config.app.get("biweekly_report", {}).get("report_author") or "").strip()
+            if report_author:
+                footer = f"\n\n---\n> This report was written by Iris and revised by {report_author}."
+                if not markdown.endswith(footer.strip()):
+                    markdown += footer
 
             llm_payload = {
                 "fallback_used": False,

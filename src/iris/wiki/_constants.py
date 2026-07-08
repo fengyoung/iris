@@ -89,3 +89,32 @@ def get_prefix_to_type_map() -> Dict[str, str]:
 def get_type_config_map() -> Dict[str, Dict[str, str]]:
     """{page_type: {dir, name}} 映射（替代 navigation.py 的局部 reshape）。"""
     return {k: {"dir": v[0], "name": v[2]} for k, v in PAGE_TYPE_CONFIG.items()}
+
+
+def build_domain_context(app_config: dict) -> str:
+    """从 app.json 的 organization 配置段构建领域背景描述字符串。
+
+    当 organization 未配置时，返回通用占位描述，确保 Prompt 不含硬编码业务信息。
+    """
+    org = app_config.get("organization", {}) if app_config else {}
+    name = (org.get("name") or "").strip()
+    department = (org.get("department") or "").strip()
+    domains = [d for d in (org.get("domains") or []) if isinstance(d, str) and d.strip()]
+
+    if not name and not department and not domains:
+        return "这是一个专业团队的知识库。"
+
+    parts = []
+    if name and department:
+        parts.append(f"这是「{name}」旗下「{department}」的知识库。")
+    elif name:
+        parts.append(f"这是「{name}」的知识库。")
+    elif department:
+        parts.append(f"这是「{department}」的知识库。")
+
+    if domains:
+        parts.append("部门聚焦方向：")
+        for d in domains:
+            parts.append(f"- {d}")
+
+    return "\n".join(parts)

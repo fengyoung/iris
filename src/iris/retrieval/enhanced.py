@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 import time
 from collections import OrderedDict
 from dataclasses import asdict, dataclass
@@ -22,6 +23,11 @@ from iris.wiki.searcher import WikiSearcher
 logger = logging.getLogger("iris.retrieval.enhanced")
 SPLIT_RE = re.compile(r"[\s,，。；;、]+")
 _MIN_LOCAL_CANDIDATES = 12
+
+# 答案导向的得分提升系数（基于实验确定：覆盖率/MRR 在当前语料下最优）
+_BOOST_DEFINITION = 2.0   # 定义类问题：含"定义/术语/含义/缩写"的 chunk 加权
+_BOOST_TIMELINE = 1.8     # 时间线问题：含"进展/里程碑/阶段/计划"的 chunk 加权
+_BOOST_PROJECT = 1.2      # 项目类问题：含"目标/进展/结论/下一步"的 chunk 加权
 
 
 @dataclass(frozen=True)
@@ -61,12 +67,28 @@ class QueryRewriter:
                    "项目": ["项目", "专项", "方向"], "决议": ["决议", "结论", "决定"],
                    "进展": ["进展", "当前", "阶段", "里程碑"]}
 
+    def __init__(self, extra_synonyms: Optional[Dict[str, List[str]]] = None):
+        """初始化查询改写器。
+
+        Args:
+            extra_synonyms: 从 app.json retrieval.synonym_extensions 加载的扩展同义词，
+                            与默认 SYNONYM_MAP 合并（扩展项优先覆盖默认项）。
+        """
+        if extra_synonyms:
+            merged = dict(self.SYNONYM_MAP)
+            for key, synonyms in extra_synonyms.items():
+                existing = merged.get(key, [])
+                merged[key] = list(dict.fromkeys(existing + synonyms))
+            self._synonym_map = merged
+        else:
+            self._synonym_map = self.SYNONYM_MAP
+
     def rewrite(self, query: str, plan: QueryPlan | None = None) -> RewrittenQuery:
         parts = [part.strip() for part in SPLIT_RE.split(query) if part.strip()]
         expanded: List[str] = []
         for part in parts:
             expanded.append(part)
-            for key, synonyms in self.SYNONYM_MAP.items():
+            for key, synonyms in self._synonym_map.items():
                 if key in part or part in synonyms:
                     for synonym in synonyms:
                         if synonym not in expanded:
@@ -87,7 +109,8 @@ class EnhancedRetriever:
         self._config = config
         self._local = LocalRetriever(config)
         self._planner = QueryPlanner()
-        self._rewriter = QueryRewriter()
+        extra_synonyms = (config.app or {}).get("retrieval", {}).get("synonym_extensions")
+        self._rewriter = QueryRewriter(extra_synonyms=extra_synonyms)
         self._llm = LLMService(config)
         self._wiki_searcher = WikiSearcher(config) if config.wiki else None
         self._prompt_loader = PromptTemplateLoader(config)
@@ -97,25 +120,28 @@ class EnhancedRetriever:
             self._vector_indexes = _load_vector_indexes(config)
         self._llm_planner = LLMQueryPlanner(self._llm.get_provider(), self._prompt_loader)
         self._cache: OrderedDict = OrderedDict()
+        self._cache_lock = threading.Lock()
 
     def _cache_key(self, query: str, top_k: int, mode: str) -> str:
         return f"{query}::t{top_k}::m{mode}"
 
     def _cache_get(self, key: str) -> Optional[EnhancedRetrievalResult]:
-        entry = self._cache.get(key)
-        if entry is None:
-            return None
-        result, cached_at = entry
-        if time.monotonic() - cached_at > self._CACHE_TTL:
-            del self._cache[key]
-            return None
-        self._cache.move_to_end(key)
-        return result
+        with self._cache_lock:
+            entry = self._cache.get(key)
+            if entry is None:
+                return None
+            result, cached_at = entry
+            if time.monotonic() - cached_at > self._CACHE_TTL:
+                del self._cache[key]
+                return None
+            self._cache.move_to_end(key)
+            return result
 
     def _cache_set(self, key: str, result: EnhancedRetrievalResult) -> None:
-        self._cache[key] = (result, time.monotonic())
-        while len(self._cache) > self._CACHE_MAXSIZE:
-            self._cache.popitem(last=False)
+        with self._cache_lock:
+            self._cache[key] = (result, time.monotonic())
+            while len(self._cache) > self._CACHE_MAXSIZE:
+                self._cache.popitem(last=False)
 
     def search(self, query: str, *, top_k: int = 5, mode: str = "local",
                query_plan: Optional[QueryPlan] = None) -> EnhancedRetrievalResult:
@@ -141,7 +167,14 @@ class EnhancedRetriever:
                         if score > vector_candidates.get(cid, -1):
                             vector_candidates[cid] = score
                 if vector_candidates:
-                    hits = _rrf_fuse(hits, vector_candidates, top_k=max(top_k * 4, _MIN_LOCAL_CANDIDATES))
+                    rrf_cfg = (self._config.app or {}).get("retrieval", {}).get("rrf", {})
+                    hits = _rrf_fuse(
+                        hits, vector_candidates, top_k=max(top_k * 4, _MIN_LOCAL_CANDIDATES),
+                        k=rrf_cfg.get("k", 60),
+                        lexical_weight=rrf_cfg.get("lexical_weight", 0.5),
+                        vector_weight=rrf_cfg.get("vector_weight", 0.5),
+                        bm25_bonus=rrf_cfg.get("bm25_bonus", 0.02),
+                    )
                     vector_hit_ids = list(vector_candidates.keys())
                     vector_enabled = True
             except EmbedderError:
@@ -178,11 +211,11 @@ class EnhancedRetriever:
             score = hit.score
             joined = (hit.title + " " + " > ".join(hit.section_path) + " " + hit.content_preview).lower()
             if query_plan.query_intent == "definition" and any(w in joined for w in ("定义", "术语", "含义", "缩写")):
-                score += 2.0
+                score += _BOOST_DEFINITION
             if query_plan.query_intent == "timeline" and any(w in joined for w in ("进展", "里程碑", "阶段", "计划", "当前")):
-                score += 1.8
+                score += _BOOST_TIMELINE
             if query_plan.question_type == "project" and any(w in joined for w in ("目标", "进展", "结论", "下一步")):
-                score += 1.2
+                score += _BOOST_PROJECT
             boosted.append(hit.with_score(score))
         boosted.sort(key=lambda item: (-item.score, item.relative_path, item.line_start))
         return boosted
@@ -240,12 +273,14 @@ def _apply_rank_order(hits, ranked_ids, *, top_k: int) -> List[RetrievalHit]:
 
 
 def _rrf_fuse(lexical_hits, vector_scores, *, top_k: int, k: int = 60,
-              lexical_weight: float = 0.5, vector_weight: float = 0.5) -> List[RetrievalHit]:
+              lexical_weight: float = 0.5, vector_weight: float = 0.5,
+              bm25_bonus: float = 0.02) -> List[RetrievalHit]:
     """RRF + 向量语义融合。
 
     RRF 得分量级 ~[0, 0.02]，归一化 BM25 得分量级 ~[0, 1]。
     各占一半权重，避免 BM25 原始分（5-20+）完全支配排序。
     同时包含纯向量命中（超出 lexical_hits 范围的新发现）。
+    参数通过 config/app.json retrieval.rrf 配置，默认值在函数签名中。
     """
     lexical_rrf = {}
     for rank, hit in enumerate(lexical_hits, start=1):
@@ -259,7 +294,6 @@ def _rrf_fuse(lexical_hits, vector_scores, *, top_k: int, k: int = 60,
 
     # 归一化 BM25 得分，量级对齐 RRF 得分
     max_lexical = max((h.score for h in lexical_hits if h.score > 0), default=1.0)
-    bm25_bonus = 0.02  # BM25 归一化后对融合得分的贡献系数
 
     result = []
     for cid in ranked_ids:

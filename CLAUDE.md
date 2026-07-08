@@ -1,4 +1,4 @@
-# Iris 3.11.8 — 项目执行说明
+# Iris 3.11.9 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -13,7 +13,7 @@
 |------|------|
 | 源代码 | ~19,200 行，98 个文件，19 个模块 |
 | CLI 命令 | 45 个 |
-| 单元测试 | 315 个（26 个测试文件） |
+| 单元测试 | 384 个（29 个测试文件） |
 | Claude Code Skill | 6 个项目级 Skill |
 | 数据源 | 594 个文档，3,402 个 Chunk |
 | 向量索引 | 5,810 条，25 MB |
@@ -136,7 +136,7 @@ Stage 3 (base model)  → 整合润色输出
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.11.8 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.11.9 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.8 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.2/3.4 | 配置文件 Schema |
 
@@ -159,7 +159,7 @@ Stage 3 (base model)  → 整合润色输出
 
 ```
 iris3/
-├── pyproject.toml              # 产品版本 3.11.8
+├── pyproject.toml              # 产品版本 3.11.9
 ├── README.md
 ├── CLAUDE.md                   # 本文件
 ├── CHANGELOG.md                # 完整版本历史
@@ -186,7 +186,7 @@ iris3/
 │   └── trello/                 # Trello 看板
 ├── scripts/                    # CLI 入口 + 委托脚本
 ├── templates/                  # Prompt / Wiki 模板
-├── tests/                      # 单元测试（315 用例，26 测试文件）
+├── tests/                      # 单元测试（384 用例，29 测试文件）
 ├── .claude/skills/             # 项目级 Claude Code Skill（6 个）
 └── memory/                     # Claude 工作记忆
 ```
@@ -207,6 +207,9 @@ iris3/
 ---
 
 ## 近期变更
+
+### v3.11.9 (2026-07-08)
+安全加固（开源准备）+ 工程质量优化 + 测试补全（315→384）：S1 报告署名配置化（report_author 字段）、S2-S6 模板/Prompt 敏感内容脱敏（真实姓名/业务域/项目名替换为通用占位）、Q1 检索缓存线程安全（threading.Lock）、Q2 ModelManager 封装（find_model_by_name 公开方法）、Q3 SYNONYM_MAP 配置化（synonym_extensions）、Q4 评分常量命名（_BOOST_*）、Q5 RRF 参数配置化（retrieval.rrf）、Q6 Wiki 内容提取严格正则兜底；新增 4 个测试文件（complex_input pipeline / retrieval enhanced / wiki update / memory lifecycle）+ 3 个已有文件追加，共新增 69 用例，384 全绿。
 
 ### v3.11.8 (2026-07-08)
 build-asr-prompt 性能与质量优化（6 项）：Phase 1 热词提取、Phase 2 误识别生成两段 LLM 批量调用并发化（`ThreadPoolExecutor`，跨批去重下沉、无共享状态竞争）；Phase 3 校正 Prompt 强化——`build_optimize_prompt` 要求「校正策略」覆盖 6 类 ASR 错误模式并附判断依据+领域实例，篇幅上限 1200→2200 字，实测 prompt 从 ~776 增至 ~2960 字。另修复 `--asr-mode prompt` 热词缺失、`_exceeds_char_limit` 上提去重、Phase 3 死代码清理、strip 转义笔误。测试保持 315 全绿。

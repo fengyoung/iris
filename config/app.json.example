@@ -34,13 +34,30 @@
     "max_block_summary_chars": 320,
     "max_wiki_summary_chars": 220
   },
+  "retrieval": {
+    "synonym_extensions": {},
+    "rrf": {
+      "lexical_weight": 0.5,
+      "vector_weight": 0.5,
+      "k": 60,
+      "bm25_bonus": 0.02
+    },
+    "_note": "synonym_extensions: 自定义同义词扩展，格式 {\"词\": [\"同义词1\", \"同义词2\"]}，与内置词典合并。rrf: BM25+向量融合参数，通常无需调整。"
+  },
+  "organization": {
+    "name": "",
+    "department": "",
+    "domains": [],
+    "_note": "name: 公司/组织名称；department: 部门名称；domains: 业务领域列表（用于 LLM Prompt 中的领域背景描述，开源时留空即可）。示例：name='Acme Corp', department='技术研发部', domains=['AI质检','推荐算法','大模型应用']。"
+  },
   "biweekly_report": {
     "author_name": "",
     "author_info": "你是一个技术团队负责人的写作助手。",
+    "report_author": "",
     "data_sources": ["成员周报", "会议纪要", "讨论思考", "方案报告"],
     "lookback_days": 14,
     "dedup_window_days": 35,
-    "_note": "author_name 用于生成文件名（如 双周报-w25-张三-20260621.md）；author_info 用于 prompt 角色定义。data_sources 控制扫描的目录（成员周报/会议纪要/讨论思考/方案报告），可增减。lookback_days 控制数据源时间窗口（默认14天）。dedup_window_days 控制历史报告去重窗口（默认35天，覆盖当月+上月最后一期）。"
+    "_note": "author_name 用于生成文件名（如 双周报-w25-张三-20260621.md）；author_info 用于 prompt 角色定义；report_author 用于报告末尾署名（留空则不追加署名行）。data_sources 控制扫描的目录（成员周报/会议纪要/讨论思考/方案报告），可增减。lookback_days 控制数据源时间窗口（默认14天）。dedup_window_days 控制历史报告去重窗口（默认35天，覆盖当月+上月最后一期）。"
   },
   "logging": {
     "level": "info",

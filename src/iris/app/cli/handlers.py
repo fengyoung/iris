@@ -217,10 +217,12 @@ def handle_build_biweekly_report(args, bundle, logger) -> int:
         path = Path(output)
         path.parent.mkdir(parents=True, exist_ok=True)
         markdown = result.markdown.strip()
-        # 追加尾注
-        footer = "\n\n---\n> This report was written by Iris and revised by maintainer."
-        if not markdown.endswith(footer.strip()):
-            markdown += footer
+        # 追加尾注（report_author 为空时不追加）
+        report_author = (bundle.app.get("biweekly_report", {}).get("report_author") or "").strip()
+        if report_author:
+            footer = f"\n\n---\n> This report was written by Iris and revised by {report_author}."
+            if not markdown.endswith(footer.strip()):
+                markdown += footer
         path.write_text(markdown, encoding="utf-8")
         payload["output_file"] = str(path)
 
@@ -421,6 +423,10 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
     llm_service = LLMService(bundle)
     provider = llm_service.get_provider()
 
+    # 从配置构建领域背景描述（无配置时使用通用占位）
+    from iris.wiki._constants import build_domain_context
+    domain_context = build_domain_context(bundle.app)
+
     # ── Phase 1：LLM 热词提取 ────────────────────────────
     # prompt 模式也提取热词——供 Phase 3 优化器语境样例使用（但不落盘热词文件）
     hotwords: List[str] = []
@@ -429,7 +435,8 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
         print("[asr] Phase 1: LLM 热词提取...", file=sys.stderr)
         hotword_extractor = LLMHotwordExtractor(pages)
         max_hotwords = getattr(args, "max_hotwords", 490) or 490
-        hotwords = hotword_extractor.extract(provider, max_hotwords=max_hotwords)
+        hotwords = hotword_extractor.extract(provider, max_hotwords=max_hotwords,
+                                             domain_context=domain_context)
 
         # 仅在需要热词文件的模式写盘；prompt 模式只将热词喂给优化器
         if mode in ("all", "hotwords"):
@@ -460,7 +467,8 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
             # LLM 生成误识别映射
             print(f"[asr] Phase 2: 术语 {len(terms)} 个 → LLM 误识别生成...",
                   file=sys.stderr)
-            terms = extractor.generate_misreadings(terms, provider)
+            terms = extractor.generate_misreadings(terms, provider,
+                                                   domain_context=domain_context)
 
             max_mappings = getattr(args, "max_mappings", 990) or 990
             max_chars = getattr(args, "max_chars", 20) or 20
@@ -483,7 +491,7 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
 
         # LLM 优化器生成紧凑 prompt
         optimizer = LLMPromptOptimizer()
-        prompt = optimizer.optimize(hotwords, terms, provider)
+        prompt = optimizer.optimize(hotwords, terms, provider, domain_context=domain_context)
         if not prompt:
             prompt = render_asr_prompt(
                 terms, new_version, output_format="standard"

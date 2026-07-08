@@ -242,27 +242,37 @@ class WikiGenerator:
     def _extract_wiki_content(text: str) -> str:
         """从 LLM 响应中提取 Wiki Markdown（剥离代码块包裹、定位 YAML frontmatter 起点）。"""
         text = text.strip()
-        # 尝试提取 ```markdown ... ``` 中的内容
+        # 1. 优先严格正则：以 --- 开头、下一行是 title: 的 frontmatter（最可靠）
+        m_strict = re.search(r"(?:^|\n)(---\s*\ntitle:.*?)(?=\Z)", text, re.DOTALL)
+        if m_strict:
+            return m_strict.group(1).strip()
+        # 2. 提取 ```markdown ... ``` 中的内容
         m = re.search(r"```(?:markdown)?\s*\n(.*?)```", text, re.DOTALL)
         if m:
-            return m.group(1).strip()
-        # 如果文本以 YAML frontmatter 开头，直接返回
+            candidate = m.group(1).strip()
+            if candidate.startswith("---"):
+                return candidate
+            # 若代码块内容不含 frontmatter，继续后续 heuristic
+        # 3. 如果文本以 YAML frontmatter 开头，直接返回
         if text.startswith("---"):
             return text
-        # 尝试查找 ---\ntitle: 开头的 frontmatter
+        # 4. 尝试查找 ---\ntitle: 开头的 frontmatter
         idx = text.find("\n---\n")
         if idx != -1:
             candidate = text[idx + 1:]
             if candidate.strip().startswith("---"):
                 return candidate.strip()
-        # 尝试查找 ---\ntitle:（文本可能以对话开始）
+        # 5. 尝试查找 ---\ntitle:（文本可能以对话开始）
         fm_start = text.find("---\ntitle:")
         if fm_start != -1:
-            # 从前面一个 --- 开始
             prev = text.rfind("---", 0, fm_start)
             if prev != -1:
                 return text[prev:].strip()
-        # 降级：返回原文本
+        # 降级：返回原文本（记录 warning 便于发现 LLM 输出异常）
+        import logging as _logging
+        _logging.getLogger("iris.wiki.generator").warning(
+            "无法定位 Wiki frontmatter，已降级返回原始 LLM 输出（前100字）: %s", text[:100]
+        )
         return text
 
     def _fallback_markdown(self, *, page_type: str, title: str, query: str,

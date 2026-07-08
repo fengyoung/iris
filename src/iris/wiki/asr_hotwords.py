@@ -39,7 +39,7 @@ def _build_page_batches(pages: List[WikiPageInfo]) -> List[List[WikiPageInfo]]:
     return batches
 
 
-def _build_hotwords_prompt(batch: List[WikiPageInfo]) -> str:
+def _build_hotwords_prompt(batch: List[WikiPageInfo], domain_context: str = "") -> str:
     """为一批页面构建热词提取 LLM prompt。
 
     每页传递完整结构信息（摘要、全量章节标题、粗体术语、Wiki 链接），
@@ -73,11 +73,7 @@ def _build_hotwords_prompt(batch: List[WikiPageInfo]) -> str:
     return f"""你是语音识别（ASR）热词提取专家。你需要为一个专业工作领域的 Wiki 知识库提取热词。
 
 ## 领域背景
-这是「转转」集团旗下「技术研发部」的知识库。部门聚焦方向：
-- 二手商品商品质检 AI 化（某检测项目 拆修检测、图像采集3.0 外观定级、包袋AI评估）
-- 搜索推荐算法与工程
-- 大模型训练与业务应用
-- 视频审核与在线评估
+{domain_context or "这是一个专业团队的知识库。"}
 
 ## 任务
 从以下 {len(batch)} 个 Wiki 页面中提取最重要的热词，用于 paraformer 等中文 ASR 模型的
@@ -88,9 +84,9 @@ def _build_hotwords_prompt(batch: List[WikiPageInfo]) -> str:
 2. **项目名/系统名**：内部项目、平台、系统的完整名称
 3. **技术术语**：算法名、框架名、技术栈（中文 + 英文）
 4. **英文缩写**：DNN、OCR、MMoE、BERT、BM25、H200 等专有缩写
-5. **品牌/产品名**：转转、Qwen、阿里云、豆包、千问 等
-6. **中英混排**：图像采集3.0、qwen3.5、iPhone16、Node2Vec 等
-7. **业务术语**：质检自动化、定级一致性、图像验证、流水线 等
+5. **品牌/产品名**：公司自有品牌、外部产品名（如 Qwen、阿里云、豆包）等
+6. **中英混排**：含版本号或字母的词组（如 Model-v2、iPhone16、Node2Vec 等）
+7. **业务术语**：行业专有表达、流程名词、定级/评估类术语等
 
 ## 质量要求
 - 每个热词 2-20 个字符，超过 20 字符的拆分为多个短词
@@ -104,7 +100,7 @@ def _build_hotwords_prompt(batch: List[WikiPageInfo]) -> str:
 {chr(10).join(page_descs)}
 
 ## 输出格式
-[{{"term":"团队成员J"}},{{"term":"图像采集3.0"}},{{"term":"MMoE"}},{{"term":"BM25"}},...]"""
+[{{"term":"张三"}},{{"term":"Model-v2"}},{{"term":"MMoE"}},{{"term":"BM25"}},...]"""
 
 
 from iris.utils.tokenization import (  # noqa: E402 — 向后兼容别名
@@ -196,6 +192,7 @@ class LLMHotwordExtractor:
         self,
         provider: "EnvironmentConfiguredLLMProvider",
         max_hotwords: int = 490,
+        domain_context: str = "",
     ) -> List[str]:
         """分批次调用 LLM 提取热词，去重合并。
 
@@ -223,7 +220,7 @@ class LLMHotwordExtractor:
             从而消除并发下的共享状态竞争。
             """
             idx, batch = idx_batch
-            prompt = _build_hotwords_prompt(batch)
+            prompt = _build_hotwords_prompt(batch, domain_context)
             try:
                 response = provider.generate(
                     LLMRequest(

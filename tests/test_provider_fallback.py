@@ -242,3 +242,66 @@ class TestFallbackLoop:
                 max_retries=3,
             )
             assert text == "ok"
+
+
+# ── ModelManager.find_model_by_name ──────────────────────────────────
+
+class TestFindModelByName:
+    """Q2: ModelManager.find_model_by_name 公开封装方法测试。"""
+
+    def _make_manager(self):
+        from pathlib import Path
+        import tempfile
+        from iris.llm.model_manager import ModelManager
+        models = {
+            "base_model": {
+                "enabled": True,
+                "default_model_id": "m1",
+                "models": {
+                    "m1": {"model": "deepseek-chat", "provider": "deepseek",
+                           "api_key": "sk-x", "api_base_url": "https://api.x.com/v1",
+                           "timeout_seconds": 60, "max_retries": 0},
+                },
+            },
+            "adv_model": {
+                "enabled": True,
+                "default_model_id": "m2",
+                "models": {
+                    "m2": {"model": "qwen-vl", "provider": "qwen",
+                           "api_key": "sk-y", "api_base_url": "https://api.y.com/v1",
+                           "timeout_seconds": 60, "max_retries": 0},
+                },
+            },
+        }
+        with tempfile.TemporaryDirectory() as d:
+            return ModelManager(models, Path(d))
+
+    def test_find_by_model_name(self):
+        mgr = self._make_manager()
+        cfg = mgr.find_model_by_name("deepseek-chat")
+        assert cfg is not None
+        assert cfg["model"] == "deepseek-chat"
+
+    def test_find_by_model_id(self):
+        mgr = self._make_manager()
+        cfg = mgr.find_model_by_name("m2")
+        assert cfg is not None
+        assert cfg["model"] == "qwen-vl"
+
+    def test_find_nonexistent_returns_none(self):
+        mgr = self._make_manager()
+        assert mgr.find_model_by_name("no-such-model") is None
+
+    def test_find_includes_api_key(self):
+        """返回的配置应包含 api_key（用于 provider 内部调用）。"""
+        mgr = self._make_manager()
+        cfg = mgr.find_model_by_name("deepseek-chat")
+        assert "api_key" in cfg
+        assert cfg["api_key"] == "sk-x"
+
+    def test_find_includes_model_id(self):
+        """返回的配置应附带 _model_id 字段。"""
+        mgr = self._make_manager()
+        cfg = mgr.find_model_by_name("deepseek-chat")
+        assert "_model_id" in cfg
+        assert cfg["_model_id"] == "m1"
