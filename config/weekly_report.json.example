@@ -1,8 +1,9 @@
 {
-  "version": "3.2",
+  "version": "3.3",
   "scan": {
+    "mode": "search",
     "folders": ["INBOX", "周报"],
-    "_note": "文件夹名称，视邮件系统和目录结构配置"
+    "_note": "mode=search 跨全文件夹按关键词搜索（推荐，避免 IMPORTANT 周报漏扫）；mode=folder 按 folders list（旧行为）"
   },
   "filters": {
     "subject_keywords": ["周报", "周会", "week report", "weekly"],

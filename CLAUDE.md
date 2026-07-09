@@ -1,4 +1,4 @@
-# Iris 3.11.9 — 项目执行说明
+# Iris 3.11.10 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -13,7 +13,7 @@
 |------|------|
 | 源代码 | ~19,200 行，98 个文件，19 个模块 |
 | CLI 命令 | 45 个 |
-| 单元测试 | 384 个（29 个测试文件） |
+| 单元测试 | 397 个（30 个测试文件） |
 | Claude Code Skill | 6 个项目级 Skill |
 | 数据源 | 594 个文档，3,402 个 Chunk |
 | 向量索引 | 5,810 条，25 MB |
@@ -136,9 +136,9 @@ Stage 3 (base model)  → 整合润色输出
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.11.9 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.11.10 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.8 | CLI 命令集 / agent-spec 格式 |
-| **数据版本** | `config/*.json` | 3.2/3.4 | 配置文件 Schema |
+| **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
 > 只有真正发生变化的层才递增版本号。
 
@@ -159,7 +159,7 @@ Stage 3 (base model)  → 整合润色输出
 
 ```
 iris3/
-├── pyproject.toml              # 产品版本 3.11.9
+├── pyproject.toml              # 产品版本 3.11.10
 ├── README.md
 ├── CLAUDE.md                   # 本文件
 ├── CHANGELOG.md                # 完整版本历史
@@ -207,6 +207,9 @@ iris3/
 ---
 
 ## 近期变更
+
+### v3.11.10 (2026-07-09)
+extract-weekly-reports 扫描漏人修复：白名单 12 人本周 10 人提交，CLI 原仅扫到 3 人（静默漏 7 人）。根因 `scan_triage` 走「folder + time_range」list 路径，带 IMPORTANT 标签的周报散落在 priority/自定义文件夹、落在 list 首屏 50 封之外被漏扫。修复——`scan_triage` 新增 `query` 参数走**跨全文件夹 search 路径**（`--query` + 仅 time_range 不带 folder）；`scan_mailbox` 新增 search 模式（按 `subject_keywords` 逐关键词搜索合并 + fetch 正文前白名单预筛，message GET ~50→~12 次）；`EmailFilter` 排除「发件人已撤回邮件」通知 + 同人保留 date 最新一封（团队成员C 3 封→1 封）；配置新增 `scan.mode`（默认 `search`，保留 `folder` 兜底，weekly_report.json schema 3.2→3.3）。实测命中 3→10 人。新增 `test_weekly_report_extract.py`（13 用例），测试 384 → 397 全绿。
 
 ### v3.11.9 (2026-07-08)
 安全加固（开源准备）+ 工程质量优化 + 测试补全（315→384）：S1 报告署名配置化（report_author 字段）、S2-S6 模板/Prompt 敏感内容脱敏（真实姓名/业务域/项目名替换为通用占位）、Q1 检索缓存线程安全（threading.Lock）、Q2 ModelManager 封装（find_model_by_name 公开方法）、Q3 SYNONYM_MAP 配置化（synonym_extensions）、Q4 评分常量命名（_BOOST_*）、Q5 RRF 参数配置化（retrieval.rrf）、Q6 Wiki 内容提取严格正则兜底；新增 4 个测试文件（complex_input pipeline / retrieval enhanced / wiki update / memory lifecycle）+ 3 个已有文件追加，共新增 69 用例，384 全绿。

@@ -4,7 +4,23 @@
 
 ---
 
-## v3.11.9 (2026-07-08)
+## v3.11.10 (2026-07-09)
+
+### extract-weekly-reports 扫描漏人修复 + 测试补全（384 → 397 测试）
+
+**问题**：白名单 12 人本周实际 10 人提交周报，`extract-weekly-reports` CLI 仅扫到 3 人，静默漏掉 7 人（团队成员B、刘备、团队成员A、团队成员G、团队成员D、团队成员H、团队成员I）。根因 `LarkMailScanner.scan_triage` 走「folder + time_range」list 路径，这些成员的周报带 `IMPORTANT` 标签、散落在 priority/自定义文件夹并落在 list 首屏 50 封之外，list 路径捞不到；search 路径（`--query`，跨全文件夹）可一次命中。
+
+**修复（`scripts/extract_weekly_reports.py` + `config/weekly_report.json`）：**
+- `scan_triage` 新增 `query` 参数：非空时走跨全文件夹 search 路径（追加 `--query`，filter 仅带 `time_range` 不带 folder）；为空保持旧 folder-list 行为（向后兼容）
+- `scan_mailbox` 新增 search 模式：按 `subject_keywords` 逐关键词搜索、按 `message_id` 合并去重；在逐封拉取完整正文前新增 `_prefilter_summaries`（按白名单 email 子串 + 主题关键词预筛 summary），message GET 由 ~50 次降至 ~12 次
+- `EmailFilter`：新增 `is_recall_notice` 排除「发件人已撤回邮件」通知；`filter_emails` 同一发件人按日期保留最新一封（团队成员C本周重复 3 封 → 1 封干净版）
+- 配置层：`config/weekly_report.json` 新增 `scan.mode`（默认 `search`，保留 `folder` 兜底），schema 版本 3.2 → 3.3；同步 `.example`
+- 实测：dry-run 命中 3 → 10 人，10 位白名单提交成员 w27 周报全部落地 `SOURCE/07-成员周报`
+
+**测试补全（+13 用例，384 → 397）：**
+- `test_weekly_report_extract.py`（新建，13 用例）：scan_triage search/folder 路径命令组装（`--query` 有无、filter 是否带 folder）/ `scan_mode` 解析（默认 search、非法值兜底）/ `_prefilter_summaries` 白名单+关键词预筛与空白名单透传 / `EmailFilter` 撤回通知排除 + 同人保留最新 + 非白名单/无关键词剔除
+
+---
 
 ### 安全加固 + 工程质量优化 + 测试补全（315 → 384 测试）
 

@@ -74,6 +74,15 @@ class ExtractWeeklyReportsConfig:
             folders = [folders]
         return folders
 
+    @property
+    def scan_mode(self) -> str:
+        """扫描模式：'search'（跨文件夹关键词搜索，默认）或 'folder'（按文件夹 list，旧行为）。
+
+        search 模式解决 IMPORTANT 标签周报散落在 inbox/priority list 首屏之外被漏扫的问题。
+        """
+        mode = self._raw.get("scan", {}).get("mode", "search")
+        return mode if mode in ("search", "folder") else "search"
+
     # ── filters ───────────────────────────────────────
 
     @property
@@ -117,6 +126,9 @@ class ExtractWeeklyReportsConfig:
 # 邮件过滤
 # ─────────────────────────────────────────────────────────
 
+# 飞书「发件人已撤回邮件：...」通知邮件的主题前缀，需排除（否则会生成空/垃圾报告）
+RECALL_SUBJECT_PREFIX = "发件人已撤回邮件"
+
 
 class EmailFilter:
     """根据白名单和主题关键词过滤周报邮件（移植自 _weekly-reports-from-email/filter.py）。"""
@@ -149,6 +161,11 @@ class EmailFilter:
         subject_lower = subject.lower()
         return any(kw in subject_lower for kw in self.subject_keywords)
 
+    @staticmethod
+    def is_recall_notice(subject: str) -> bool:
+        """是否为「发件人已撤回邮件」通知。"""
+        return bool(subject) and subject.lstrip().startswith(RECALL_SUBJECT_PREFIX)
+
     def get_sender_name(self, from_addr: Dict) -> str:
         """获取发件人的规范姓名。"""
         email = (from_addr.get("mail_address") or from_addr.get("email") or "").lower()
@@ -162,22 +179,45 @@ class EmailFilter:
             return email.split("@")[0]
         return "Unknown"
 
+    @staticmethod
+    def _sort_date(email_data: Dict) -> str:
+        """取可比较的日期字符串用于「保留最新」（YYYY-MM-DD... 字典序即时间序）。"""
+        return (
+            email_data.get("date_formatted")
+            or email_data.get("date")
+            or ""
+        )
+
     def filter_emails(self, emails: List[Dict]) -> List[Dict]:
-        """过滤邮件列表，保留白名单发件人的周报邮件。"""
-        weekly_reports = []
+        """过滤邮件列表，保留白名单发件人的周报邮件。
+
+        - 排除「发件人已撤回邮件」通知
+        - 同一发件人若发了多封（重复/更正），仅保留日期最新的一封
+        """
+        candidates = []
         for email_data in emails:
             from_addr = email_data.get("from", {})
             subject = email_data.get("subject", "")
 
             if not self.is_whitelisted_sender(from_addr):
                 continue
+            if self.is_recall_notice(subject):
+                continue
             if not self.has_weekly_report_keyword(subject):
                 continue
 
             email_data["sender_name"] = self.get_sender_name(from_addr)
-            weekly_reports.append(email_data)
+            candidates.append(email_data)
 
-        return weekly_reports
+        # 同一发件人保留最新一封（团队成员C本周有重复的「质检后端周报」）
+        latest_by_sender: Dict[str, Dict] = {}
+        for em in candidates:
+            sender = em.get("sender_name", "")
+            prev = latest_by_sender.get(sender)
+            if prev is None or self._sort_date(em) >= self._sort_date(prev):
+                latest_by_sender[sender] = em
+
+        return list(latest_by_sender.values())
 
 
 # ─────────────────────────────────────────────────────────
@@ -316,6 +356,7 @@ class LarkMailScanner:
         days_back: int = 7,
         max_results: int = 200,
         folder: str = "INBOX",
+        query: Optional[str] = None,
     ) -> List[Dict]:
         """通过 +triage 扫描邮件摘要。
 
@@ -324,6 +365,8 @@ class LarkMailScanner:
             days_back: 往前推的天数
             max_results: 最大返回数
             folder: 邮件文件夹，默认 INBOX（支持 SENT/DRAFT/TRASH/SPAM/ARCHIVED 等系统文件夹和自定义文件夹）
+            query: 全文搜索关键词。非空时走 search 路径（跨全文件夹，忽略 folder），
+                   用于捞取被归档到 priority/自定义文件夹的周报（list 路径会漏）
 
         Returns:
             邮件摘要列表 [{message_id, subject, from, date, folder, labels, thread_id}]
@@ -341,22 +384,31 @@ class LarkMailScanner:
         start_str = start_date.strftime("%Y-%m-%dT%H:%M:%S+08:00")
         end_str = end_date.strftime("%Y-%m-%dT%H:%M:%S+08:00")
 
-        # 解析文件夹名→ID（支持中文名称自动映射）
-        resolved_folder = self._resolve_folder(folder)
+        use_search = bool(query)
 
         # 构建 filter
+        # search 路径：只带 time_range（跨全文件夹）；folder 路径：带 folder + time_range
         # 注意：time_range 与 folder_id 不兼容，自定义文件夹由代码端过滤
-        use_client_filter = resolved_folder.isdigit()
+        use_client_filter = False
         filter_obj: Dict[str, Any] = {}
-        if use_client_filter:
-            filter_obj["folder_id"] = resolved_folder
-        else:
-            filter_obj["folder"] = resolved_folder
+        if use_search:
             filter_obj["time_range"] = {"start_time": start_str, "end_time": end_str}
+        else:
+            # 解析文件夹名→ID（支持中文名称自动映射）
+            resolved_folder = self._resolve_folder(folder)
+            use_client_filter = resolved_folder.isdigit()
+            if use_client_filter:
+                filter_obj["folder_id"] = resolved_folder
+            else:
+                filter_obj["folder"] = resolved_folder
+                filter_obj["time_range"] = {"start_time": start_str, "end_time": end_str}
 
         triage_filter = json.dumps(filter_obj)
 
-        print(f"📬 扫描: {start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')}")
+        if use_search:
+            print(f"🔍 搜索「{query}」: {start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')}")
+        else:
+            print(f"📬 扫描: {start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')}")
 
         # 翻页拉取，确保不遗漏
         all_messages: List[Dict] = []
@@ -373,6 +425,8 @@ class LarkMailScanner:
                 "--max", str(max_results),
                 "--format", "json",
             ]
+            if use_search:
+                cmd_args += ["--query", query]
             if page_token:
                 cmd_args += ["--page-token", page_token]
 
@@ -462,23 +516,66 @@ class LarkMailScanner:
         return data
 
 
+def _prefilter_summaries(
+    summaries: List[Dict], config: ExtractWeeklyReportsConfig
+) -> List[Dict]:
+    """按白名单发件人 + 主题关键词预筛 summary，减少完整正文拉取次数。
+
+    summary 的 from 是字符串（"姓名 <email>"），故按 email 子串匹配。
+    预筛结果是 EmailFilter 结果的超集（不排除撤回通知），不会丢掉合法周报。
+    无白名单时不预筛，保持兼容。
+    """
+    whitelist_emails = {
+        s.get("email", "").lower() for s in config.sender_whitelist if s.get("email")
+    }
+    if not whitelist_emails:
+        return summaries
+    keywords = [kw.lower() for kw in config.subject_keywords]
+
+    kept: List[Dict] = []
+    for s in summaries:
+        from_str = (s.get("from") or "").lower()
+        subject_lower = (s.get("subject") or "").lower()
+        if not any(email in from_str for email in whitelist_emails):
+            continue
+        if not any(kw in subject_lower for kw in keywords):
+            continue
+        kept.append(s)
+    return kept
+
+
 def scan_mailbox(config: ExtractWeeklyReportsConfig) -> List[Dict]:
-    """扫描邮箱（支持多文件夹）并返回邮件完整内容列表（对外主函数）。"""
+    """扫描邮箱并返回邮件完整内容列表（对外主函数）。
+
+    默认 search 模式：按 subject_keywords 跨全文件夹关键词搜索，避免带 IMPORTANT 标签的周报
+    散落在 priority/自定义文件夹时被 folder list 路径漏扫。folder 模式保留旧的按文件夹 list 行为。
+    """
     scanner = LarkMailScanner()
     all_summaries: List[Dict] = []
 
-    # Step 1: 遍历所有配置的文件夹
-    for folder in config.scan_folders:
-        print(f"\n📁 文件夹: {folder}")
-        summaries = scanner.scan_triage(
-            date_from=config.date_from,
-            days_back=config.date_range_days,
-            max_results=200,
-            folder=folder,
-        )
-        all_summaries.extend(summaries)
+    if config.scan_mode == "search":
+        # 按关键词逐个搜索（跨全文件夹），合并去重
+        for kw in config.subject_keywords:
+            summaries = scanner.scan_triage(
+                date_from=config.date_from,
+                days_back=config.date_range_days,
+                max_results=200,
+                query=kw,
+            )
+            all_summaries.extend(summaries)
+    else:
+        # 旧行为：遍历配置的文件夹 list
+        for folder in config.scan_folders:
+            print(f"\n📁 文件夹: {folder}")
+            summaries = scanner.scan_triage(
+                date_from=config.date_from,
+                days_back=config.date_range_days,
+                max_results=200,
+                folder=folder,
+            )
+            all_summaries.extend(summaries)
 
-    # 按日期降序排列，去重（同一封邮件可能出现在多个文件夹）
+    # 按日期降序排列，去重（同一封邮件可能命中多个关键词/文件夹）
     seen_ids: set = set()
     unique_summaries: List[Dict] = []
     for s in sorted(all_summaries, key=lambda x: x.get("date", ""), reverse=True):
@@ -488,7 +585,11 @@ def scan_mailbox(config: ExtractWeeklyReportsConfig) -> List[Dict]:
             unique_summaries.append(s)
 
     print(f"\n   总计获取 {len(all_summaries)} 封（去重后 {len(unique_summaries)} 封）")
-    summaries = unique_summaries
+
+    # 白名单预筛：fetch 完整正文前先裁掉无关邮件，把 message GET 次数降到白名单周报数量级
+    summaries = _prefilter_summaries(unique_summaries, config)
+    if len(summaries) != len(unique_summaries):
+        print(f"   白名单预筛后待取: {len(summaries)} 封")
 
     if not summaries:
         return []
