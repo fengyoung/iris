@@ -51,11 +51,6 @@ STAGE1_PROMPT = """你是一个专业的票据识别助手。请仔细查看这�
    - destination: 终点
    - amount: 金额（数字，保留两位小数）
    - is_airport_or_station: 布尔值，仅当起点或终点为机场或城际火车站时为 true
-   - route_type: "to_airport_station" / "from_airport_station" / "city" / "unknown"
-     to_airport_station = 起点是机场/城际火车站
-     from_airport_station = 终点是机场/城际火车站
-     city = 市内常规行程
-     unknown = 无法判断
 5. 如果信息模糊或无法确定，合理推断并标注
 6. 只需输出 JSON 数组，不要添加其他文字说明"""
 
@@ -131,19 +126,7 @@ class TripEntry:
     destination: str
     amount: float
     is_airport_or_station: bool
-    route_type: str
     source_file: str = ""
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "date": self.date,
-            "time": self.time,
-            "origin": self.origin,
-            "destination": self.destination,
-            "amount": self.amount,
-            "is_airport_or_station": self.is_airport_or_station,
-            "route_type": self.route_type,
-        }
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any], source_file: str = "") -> "TripEntry":
@@ -154,7 +137,6 @@ class TripEntry:
             destination=d["destination"],
             amount=float(d.get("amount", 0)),
             is_airport_or_station=bool(d.get("is_airport_or_station", False)),
-            route_type=d.get("route_type", "unknown"),
             source_file=source_file,
         )
 
@@ -248,15 +230,11 @@ def resolve_input_pages(paths: List[str]) -> List[PageImage]:
 # ── Stage 1: adv_model 多模态理解 ────────────────────────────
 
 
-# ── Stage 1: adv_model 多模态理解 ────────────────────────────
-
-
 def _process_single_page(
     page_img: PageImage,
     provider: EnvironmentConfiguredLLMProvider,
 ) -> List[TripEntry]:
     """处理单张图片：调用多模态 API（含指数退避重试），返回行程条目。"""
-    b64_kb = page_img.size_bytes / 1024
     print(f"  [图片] {page_img.name}  ({page_img.size_kb:.0f} KB)", file=sys.stderr)
     content_parts = [
         {"type": "text", "text": STAGE1_PROMPT},
@@ -291,7 +269,7 @@ def stage1_extract_entries(
     provider: EnvironmentConfiguredLLMProvider,
     page_images: List[PageImage],
 ) -> List[TripEntry]:
-    """调用 adv_model 并行提取所有行程条目（ThreadPoolExecutor 并发，最多 4 页同时处理）。"""
+    """调用 adv_model 并行提取所有行程条目（ThreadPoolExecutor 并发，最多 2 页同时处理）。"""
     all_entries: List[TripEntry] = []
     max_workers = min(2, len(page_images))
 
@@ -342,7 +320,7 @@ def stage2_consolidate(
 ) -> str:
     """调用 base_model 合并、排序、区分差旅并计算报销。"""
     lines = []
-    for i, e in enumerate(sorted(entries, key=lambda x: (x.date, x.time)), 1):
+    for i, e in enumerate(entries, 1):
         lines.append(f"{i}. [{e.date} {e.time}] {e.origin} → {e.destination}  "
                      f"¥{e.amount:.2f}  "
                      f"{'【机场/车站】' if e.is_airport_or_station else '【市内】'}  "
@@ -368,7 +346,7 @@ def stage2_consolidate(
             if attempt < len(backoff):
                 print(f"   等待 {wait}s 后重试...", file=sys.stderr)
                 time.sleep(wait)
-    return "[错误] base_model 调用失败，已重试 3 次"
+    raise RuntimeError("base_model 调用失败，已重试 3 次")
 
 
 # ── CLI ────────────────────────────────────────────────────────
@@ -411,7 +389,11 @@ def main():
 
     # Stage 2: base_model 整合
     print("\n[Stage 2] base_model 整合分析...", file=sys.stderr)
-    result = stage2_consolidate(provider, entries)
+    try:
+        result = stage2_consolidate(provider, entries)
+    except RuntimeError as exc:
+        print(f"\n[错误] {exc}", file=sys.stderr)
+        sys.exit(1)
 
     # 输出
     print("\n" + "=" * 50, file=sys.stderr)
@@ -420,9 +402,12 @@ def main():
     if args.output:
         out_path = Path(args.output)
     else:
-        # 自动生成文件名：最早的起始日期 ~ 最晚的结束日期
-        from_date = min(e.date for e in entries if e.date)
-        to_date = max(e.date for e in entries if e.date)
+        # 自动生成文件名：最早起始日期 ~ 最晚结束日期
+        dates = [e.date for e in entries if e.date]
+        if dates:
+            from_date, to_date = min(dates), max(dates)
+        else:
+            from_date = to_date = "unknown"
         out_path = PROJECT_ROOT / "output" / f"差旅报销汇总-{from_date}~{to_date}.md"
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
