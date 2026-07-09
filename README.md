@@ -1,10 +1,10 @@
-# Iris 3.11.10
+# Iris 3.11.12
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
 
-**v3.11.10** — extract-weekly-reports 扫描漏人修复（folder list → 跨全文件夹 search）+ 测试补全（384 → 397）。
+**v3.11.12** — extract-didi-travel PDF 文字直接提取 + 表格输出；wiki-lint --fix 噪音链接正则修复。
 
 ## 开发路线
 
@@ -89,6 +89,8 @@ SOURCE/                     LLM-WIKI/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.11.12** | 2026-07-09 | extract-didi-travel PDF 文字直接提取 + 转置表格输出；wiki-lint --fix 噪音链接正则修复（避免误删 frontmatter），397 测试 |
+| **v3.11.11** | 2026-07-09 | extract-didi-travel 代码审查 8 项修复，397 测试 |
 | **v3.11.10** | 2026-07-09 | extract-weekly-reports 扫描漏人修复：folder list → 跨全文件夹 search + 白名单预筛 + 撤回/重复去重，命中 3→10 人，384→397 测试 |
 | **v3.11.9** | 2026-07-08 | 安全加固（开源准备）+ 工程质量 6 项 + 测试补全，315→384 测试 |
 | **v3.11.8** | 2026-07-08 | build-asr-prompt 性能与质量优化：Phase 1/2 并发化 + Phase 3 校正策略强化，315 测试 |

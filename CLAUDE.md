@@ -1,4 +1,4 @@
-# Iris 3.11.10 — 项目执行说明
+# Iris 3.11.12 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
