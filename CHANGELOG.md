@@ -4,6 +4,47 @@
 
 ---
 
+## v3.11.12 (2026-07-09)
+
+### extract-didi-travel PDF 文字直接提取 + 表格输出格式
+
+**核心改进：**
+- PDF 解析新增文字提取路径：`pdf_extract_text()` 优先从文字型 PDF 直接提取文字，扫描件才降级为多模态图像理解
+- `resolve_input_pages()` 拆分为 `resolve_inputs()`，返回 `(text_inputs, page_images)` 两路输入
+- 新增 `PdfTextInput` dataclass 承载文字型 PDF 内容
+- 新增 `_process_text_input()`：将 PDF 文字送 base_model 解析，替代 adv_model 图像理解
+- `stage1_extract_entries()` 同时处理两路输入：文字路径串行，图像路径并发
+- 新增 `STAGE1_TEXT_PROMPT`：专为文字型 PDF 设计，处理跨行断行问题
+
+**输出格式改进：**
+- Stage2 输出由逐条纵向格式改为转置 Markdown 表格（行为字段，列为差旅+总计），与报销单图表格式一致
+
+**效果：**
+- 文字型 PDF 无图像识别误差，金额准确率 100%（原图像路径漏识别 ¥20）
+- 速度更快，无需多模态 API 调用
+
+---
+
+## v3.11.11 (2026-07-09)
+
+### extract-didi-travel 代码审查修复（8 项）
+
+**死代码清理：**
+- 删除 `_process_single_page` 中未使用的 `b64_kb` 变量（与 `size_kb` 属性重复）
+- 删除 `TripEntry.to_dict()` 方法（流水线中无任何调用方）
+- 删除 `TripEntry.route_type` 字段及 Stage1 Prompt 中对应的 JSON 字段说明（Stage2 从不消费，浪费 LLM token）
+
+**Bug 修复：**
+- 自动命名逻辑：`min()`/`max()` 在全空日期时抛 `ValueError`，改为先收集非空日期列表，空时回退文件名为 `unknown`
+- Stage2 失败处理：原先将错误字符串静默写入输出文件，改为 `raise RuntimeError`，`main()` catch 后打印错误并 `sys.exit(1)`
+
+**代码质量：**
+- 删除重复的 `# ── Stage 1: adv_model 多模态理解` section 注释头
+- 修正 `stage1_extract_entries` docstring："最多 4 页" → "最多 2 页"（与 `min(2, ...)` 对齐）
+- 删除 `stage2_consolidate` 内对 `entries` 的冗余排序（`stage1_extract_entries` 末尾已排序）
+
+---
+
 ## v3.11.10 (2026-07-09)
 
 ### extract-weekly-reports 扫描漏人修复 + 测试补全（384 → 397 测试）

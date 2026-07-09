@@ -101,7 +101,7 @@ Stage 3 (base model)  → 整合润色输出
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.11.10 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.11.12 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.8 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -142,6 +142,6 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.11.10 (2026-07-09)** — extract-weekly-reports 扫描漏人修复：`scan_triage` 由 folder-list 改为跨全文件夹 search（命中 3→10 人）+ 白名单预筛 + 撤回/重复去重，配置新增 `scan.mode`；测试 384→397。
+**当前 v3.11.12 (2026-07-09)** — extract-didi-travel 新增 PDF 文字直接提取路径（文字型 PDF 不再走多模态图像识别，金额准确率 100%，速度更快）；输出格式改为转置 Markdown 表格（行为字段，列为差旅+总计）。
 
 > 完整版本历史（v3.11.9 及更早）见 [CHANGELOG.md](CHANGELOG.md)。

@@ -2,7 +2,7 @@
 """滴滴行程单差旅报销信息提取工具。
 
 双阶段流水线：
-  Stage1: adv_model (Qwen3.5-plus) 多模态理解行程单图片 → 结构化文本条目
+  Stage1: 优先直接提取 PDF 文字（文字型 PDF），降级为 adv_model 多模态理解图片（扫描件）
   Stage2: base_model (Deepseek) 合并/排序/区分差旅 → 输出报销汇总
 
 用法：
@@ -33,6 +33,28 @@ from iris.llm import EnvironmentConfiguredLLMProvider, LLMProviderError, LLMRequ
 
 # ── Prompt ─────────────────────────────────────────────────────
 
+STAGE1_TEXT_PROMPT = """你是一个专业的票据解析助手。以下是从滴滴行程单 PDF 中直接提取的文字内容，请解析所有行程信息。
+
+注意：文字可能因 PDF 排版而跨行断开，请根据上下文合并还原完整字段。
+行程单头部会标注年份（如"行程起止日期：2026-05-24 至 2026-06-30"），请用该年份补全所有日期。
+
+要求：
+1. 逐条提取每一笔行程记录，包括：日期、时间、起点、终点、金额
+2. 日期格式补全为 YYYY-MM-DD，时间格式为 HH:MM
+3. 判断起点或终点是否为机场或火车站（仅限城际交通枢纽，如"深圳宝安机场"、"北京西站"等）。
+   城市内地铁站不属于城际车站，不要标记为机场/车站。
+4. 输出格式为 JSON 数组，每条记录包含以下字段：
+   - date: 日期 (YYYY-MM-DD 格式)
+   - time: 时间 (HH:MM 格式)
+   - origin: 起点
+   - destination: 终点
+   - amount: 金额（数字，保留两位小数）
+   - is_airport_or_station: 布尔值，仅当起点或终点为机场或城际火车站时为 true
+5. 只需输出 JSON 数组，不要添加其他文字说明
+
+以下是 PDF 文字内容：
+{text}"""
+
 STAGE1_PROMPT = """你是一个专业的票据识别助手。请仔细查看这张行程单截图，提取所有行程信息。
 
 要求：
@@ -51,11 +73,6 @@ STAGE1_PROMPT = """你是一个专业的票据识别助手。请仔细查看这�
    - destination: 终点
    - amount: 金额（数字，保留两位小数）
    - is_airport_or_station: 布尔值，仅当起点或终点为机场或城际火车站时为 true
-   - route_type: "to_airport_station" / "from_airport_station" / "city" / "unknown"
-     to_airport_station = 起点是机场/城际火车站
-     from_airport_station = 终点是机场/城际火车站
-     city = 市内常规行程
-     unknown = 无法判断
 5. 如果信息模糊或无法确定，合理推断并标注
 6. 只需输出 JSON 数组，不要添加其他文字说明"""
 
@@ -81,26 +98,23 @@ STAGE2_PROMPT = """你是一个差旅报销分析专家。请根据以下所有�
    - 目的城市
    - 往返机场/车站费用（求和）
    - 目的城市交通费（求和，即非机场/车站的行程）
-   - 单次差旅总费用
-5. 汇总所有差旅的总报销金额
+   - 单次差旅费用
+5. 汇总所有差旅的往返机场/车站费用总计、目的城市交通费总计、总报销金额
 
 ## 输出格式
 
-请严格按照以下 Markdown 格式输出，不要添加额外说明：
+请严格按照以下 Markdown 表格格式输出（行为字段，列为各次差旅+总计列），不要添加额外说明。
+N 为实际差旅次数，依此类推。
 
-**差旅信息-01**
-起始日期：YYYY-MM-DD
-结束日期：YYYY-MM-DD
-天数：N
-目的城市：城市名
-往返机场/车站费用：XX.XX
-目的城市交通费：XX.XX
-单次差旅费用：XX.XX
-
-**差旅信息-02**
-...
-
-**总报销费用：XXXX.XX**
+| | 差旅信息-01 | 差旅信息-02 | ... | 差旅信息-N | 总计费用 |
+|---|---|---|---|---|---|
+| 起始日期 | YYYY-MM-DD | YYYY-MM-DD | ... | YYYY-MM-DD | |
+| 完成日期 | YYYY-MM-DD | YYYY-MM-DD | ... | YYYY-MM-DD | |
+| 天数 | N | N | ... | N | |
+| 目的城市 | 城市名 | 城市名 | ... | 城市名 | |
+| 往返机场/车站费用 | XX.XX | XX.XX | ... | XX.XX | XX.XX |
+| 目的城市交通费用 | XX.XX | XX.XX | ... | XX.XX | XX.XX |
+| 单次差旅费用 | XX.XX | XX.XX | ... | XX.XX | XX.XX |
 
 以下是所有行程条目：
 
@@ -123,6 +137,13 @@ class PageImage:
 
 
 @dataclass
+class PdfTextInput:
+    """从文字型 PDF 直接提取的文字内容。"""
+    name: str
+    text: str
+
+
+@dataclass
 class TripEntry:
     """单条行程记录。"""
     date: str
@@ -131,19 +152,7 @@ class TripEntry:
     destination: str
     amount: float
     is_airport_or_station: bool
-    route_type: str
     source_file: str = ""
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "date": self.date,
-            "time": self.time,
-            "origin": self.origin,
-            "destination": self.destination,
-            "amount": self.amount,
-            "is_airport_or_station": self.is_airport_or_station,
-            "route_type": self.route_type,
-        }
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any], source_file: str = "") -> "TripEntry":
@@ -154,7 +163,6 @@ class TripEntry:
             destination=d["destination"],
             amount=float(d.get("amount", 0)),
             is_airport_or_station=bool(d.get("is_airport_or_station", False)),
-            route_type=d.get("route_type", "unknown"),
             source_file=source_file,
         )
 
@@ -164,6 +172,21 @@ class TripEntry:
 
 
 # ── PDF → 图片 ────────────────────────────────────────────────
+
+TEXT_MIN_CHARS_PER_PAGE = 200  # 低于此值视为扫描件，降级走图像路径
+
+
+def pdf_extract_text(pdf_path: Path) -> str | None:
+    """尝试从 PDF 提取文字。若所有页面文字量不足，返回 None（视为扫描件）。"""
+    import fitz
+    doc = fitz.open(str(pdf_path))
+    pages_text = [doc[i].get_text() for i in range(doc.page_count)]
+    page_count = doc.page_count
+    doc.close()
+    total_chars = sum(len(t) for t in pages_text)
+    if total_chars < TEXT_MIN_CHARS_PER_PAGE * page_count:
+        return None
+    return "\n".join(pages_text)
 
 
 def pdf_to_page_images(pdf_path: Path, dpi: int = 85) -> List[PageImage]:
@@ -222,9 +245,14 @@ IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
 PDF_EXTENSIONS = {".pdf"}
 
 
-def resolve_input_pages(paths: List[str]) -> List[PageImage]:
-    """将输入路径解析为内存 PageImage 列表（PDF 自动转图片，无临时文件）。"""
-    pages: List[PageImage] = []
+def resolve_inputs(paths: List[str]):
+    """将输入路径解析为文字输入列表和图像输入列表。
+
+    文字型 PDF → PdfTextInput；扫描件 PDF / 图片文件 → PageImage。
+    返回 (text_inputs, page_images)。
+    """
+    text_inputs: List[PdfTextInput] = []
+    page_images: List[PageImage] = []
 
     for raw in paths:
         p = Path(raw).expanduser().resolve()
@@ -233,22 +261,55 @@ def resolve_input_pages(paths: List[str]) -> List[PageImage]:
             continue
 
         if p.suffix.lower() in IMAGE_EXTENSIONS:
-            pages.append(file_to_page_image(p))
+            page_images.append(file_to_page_image(p))
             print(f"[图片] {p.name}", file=sys.stderr)
         elif p.suffix.lower() in PDF_EXTENSIONS:
-            imgs = pdf_to_page_images(p)
-            pages.extend(imgs)
-            print(f"[PDF] {p.name} → {len(imgs)} 页", file=sys.stderr)
+            text = pdf_extract_text(p)
+            if text:
+                text_inputs.append(PdfTextInput(name=p.name, text=text))
+                print(f"[PDF/文字] {p.name} → 直接文字提取", file=sys.stderr)
+            else:
+                imgs = pdf_to_page_images(p)
+                page_images.extend(imgs)
+                print(f"[PDF/扫描] {p.name} → {len(imgs)} 页图像", file=sys.stderr)
         else:
             print(f"[警告] 不支持的文件格式，跳过: {p}", file=sys.stderr)
 
-    return pages
+    return text_inputs, page_images
 
 
-# ── Stage 1: adv_model 多模态理解 ────────────────────────────
+# ── Stage 1: 提取行程条目 ─────────────────────────────────────
 
 
-# ── Stage 1: adv_model 多模态理解 ────────────────────────────
+def _process_text_input(
+    text_input: PdfTextInput,
+    provider: EnvironmentConfiguredLLMProvider,
+) -> List[TripEntry]:
+    """处理文字型 PDF：直接将文字送给 base_model 解析，返回行程条目。"""
+    print(f"  [文字] {text_input.name}  ({len(text_input.text)} 字符)", file=sys.stderr)
+    prompt = STAGE1_TEXT_PROMPT.format(text=text_input.text)
+
+    backoff = [5, 15, 30]
+    for attempt, wait in enumerate(backoff, 1):
+        try:
+            response = provider.generate(
+                LLMRequest(prompt=prompt, route_context={
+                    "input_type": "text",
+                    "task_type": "analysis",
+                    "complexity": "standard",
+                    "use_case": "analysis",
+                }),
+            )
+            entries = _parse_stage1_output(response.text, source_file=text_input.name)
+            return entries
+        except LLMProviderError as exc:
+            print(f"   尝试 {attempt}/{len(backoff)} 失败: {exc}", file=sys.stderr)
+            if attempt < len(backoff):
+                print(f"   等待 {wait}s 后重试...", file=sys.stderr)
+                time.sleep(wait)
+
+    print(f"  [跳过] 无法处理该文件（已重试 {len(backoff)} 次）", file=sys.stderr)
+    return []
 
 
 def _process_single_page(
@@ -256,7 +317,6 @@ def _process_single_page(
     provider: EnvironmentConfiguredLLMProvider,
 ) -> List[TripEntry]:
     """处理单张图片：调用多模态 API（含指数退避重试），返回行程条目。"""
-    b64_kb = page_img.size_bytes / 1024
     print(f"  [图片] {page_img.name}  ({page_img.size_kb:.0f} KB)", file=sys.stderr)
     content_parts = [
         {"type": "text", "text": STAGE1_PROMPT},
@@ -289,25 +349,34 @@ def _process_single_page(
 
 def stage1_extract_entries(
     provider: EnvironmentConfiguredLLMProvider,
+    text_inputs: List[PdfTextInput],
     page_images: List[PageImage],
 ) -> List[TripEntry]:
-    """调用 adv_model 并行提取所有行程条目（ThreadPoolExecutor 并发，最多 4 页同时处理）。"""
+    """提取所有行程条目：文字型 PDF 走文本路径，图像型走多模态路径（并发）。"""
     all_entries: List[TripEntry] = []
-    max_workers = min(2, len(page_images))
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        fut_map = {
-            executor.submit(_process_single_page, img, provider): img
-            for img in page_images
-        }
-        for fut in as_completed(fut_map):
-            img = fut_map[fut]
-            try:
-                entries = fut.result()
-                all_entries.extend(entries)
-                print(f"  ✓ {img.name} → {len(entries)} 条行程", file=sys.stderr)
-            except Exception as exc:
-                print(f"  ✗ {img.name} 处理异常: {exc}", file=sys.stderr)
+    # 文字型 PDF：串行处理（通常只有少数几个文件）
+    for text_input in text_inputs:
+        entries = _process_text_input(text_input, provider)
+        print(f"  ✓ {text_input.name} → {len(entries)} 条行程", file=sys.stderr)
+        all_entries.extend(entries)
+
+    # 图像型：并发处理
+    if page_images:
+        max_workers = min(2, len(page_images))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            fut_map = {
+                executor.submit(_process_single_page, img, provider): img
+                for img in page_images
+            }
+            for fut in as_completed(fut_map):
+                img = fut_map[fut]
+                try:
+                    entries = fut.result()
+                    all_entries.extend(entries)
+                    print(f"  ✓ {img.name} → {len(entries)} 条行程", file=sys.stderr)
+                except Exception as exc:
+                    print(f"  ✗ {img.name} 处理异常: {exc}", file=sys.stderr)
 
     all_entries.sort(key=lambda x: (x.date, x.time))
     return all_entries
@@ -342,7 +411,7 @@ def stage2_consolidate(
 ) -> str:
     """调用 base_model 合并、排序、区分差旅并计算报销。"""
     lines = []
-    for i, e in enumerate(sorted(entries, key=lambda x: (x.date, x.time)), 1):
+    for i, e in enumerate(entries, 1):
         lines.append(f"{i}. [{e.date} {e.time}] {e.origin} → {e.destination}  "
                      f"¥{e.amount:.2f}  "
                      f"{'【机场/车站】' if e.is_airport_or_station else '【市内】'}  "
@@ -368,7 +437,7 @@ def stage2_consolidate(
             if attempt < len(backoff):
                 print(f"   等待 {wait}s 后重试...", file=sys.stderr)
                 time.sleep(wait)
-    return "[错误] base_model 调用失败，已重试 3 次"
+    raise RuntimeError("base_model 调用失败，已重试 3 次")
 
 
 # ── CLI ────────────────────────────────────────────────────────
@@ -384,21 +453,22 @@ def main():
     config = load_config_bundle(PROJECT_ROOT)
     provider = EnvironmentConfiguredLLMProvider(config)
 
-    # 解析输入文件（PDF 自动转内存图片，无临时文件）
+    # 解析输入文件（文字型 PDF 直接提取文字，扫描件/图片转内存图像）
     print("=" * 50, file=sys.stderr)
     print("滴滴行程单差旅报销提取", file=sys.stderr)
     print("=" * 50, file=sys.stderr)
-    page_images = resolve_input_pages(args.files)
-    if not page_images:
+    text_inputs, page_images = resolve_inputs(args.files)
+    if not text_inputs and not page_images:
         print("[错误] 没有可处理的文件", file=sys.stderr)
         sys.exit(1)
-    print(f"\n待分析图片: {len(page_images)} 张", file=sys.stderr)
-    total_kb = sum(p.size_kb for p in page_images)
-    print(f"图片总大小: {total_kb:.0f} KB", file=sys.stderr)
+    if page_images:
+        print(f"\n待分析图片: {len(page_images)} 张", file=sys.stderr)
+        total_kb = sum(p.size_kb for p in page_images)
+        print(f"图片总大小: {total_kb:.0f} KB", file=sys.stderr)
 
-    # Stage 1: adv_model 理解
-    print("\n[Stage 1] adv_model 多模态理解...", file=sys.stderr)
-    entries = stage1_extract_entries(provider, page_images)
+    # Stage 1: 提取行程条目
+    print("\n[Stage 1] 提取行程条目...", file=sys.stderr)
+    entries = stage1_extract_entries(provider, text_inputs, page_images)
     if not entries:
         print("[错误] 未提取到任何行程条目", file=sys.stderr)
         sys.exit(1)
@@ -411,7 +481,11 @@ def main():
 
     # Stage 2: base_model 整合
     print("\n[Stage 2] base_model 整合分析...", file=sys.stderr)
-    result = stage2_consolidate(provider, entries)
+    try:
+        result = stage2_consolidate(provider, entries)
+    except RuntimeError as exc:
+        print(f"\n[错误] {exc}", file=sys.stderr)
+        sys.exit(1)
 
     # 输出
     print("\n" + "=" * 50, file=sys.stderr)
@@ -420,9 +494,12 @@ def main():
     if args.output:
         out_path = Path(args.output)
     else:
-        # 自动生成文件名：最早的起始日期 ~ 最晚的结束日期
-        from_date = min(e.date for e in entries if e.date)
-        to_date = max(e.date for e in entries if e.date)
+        # 自动生成文件名：最早起始日期 ~ 最晚结束日期
+        dates = [e.date for e in entries if e.date]
+        if dates:
+            from_date, to_date = min(dates), max(dates)
+        else:
+            from_date = to_date = "unknown"
         out_path = PROJECT_ROOT / "output" / f"差旅报销汇总-{from_date}~{to_date}.md"
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
