@@ -9,15 +9,7 @@
 
 ### 当前规模
 
-| 维度 | 数据 |
-|------|------|
-| 源代码 | ~19,200 行，98 个文件，19 个模块 |
-| CLI 命令 | 45 个 |
-| 单元测试 | 397 个（30 个测试文件） |
-| Claude Code Skill | 6 个项目级 Skill |
-| 数据源 | 594 个文档，3,402 个 Chunk |
-| 向量索引 | 5,810 条，25 MB |
-| Wiki 页面 | 91 页（领域 6 / 概念 7 / 项目 8 / 人物 70） |
+~19,200 行 / 98 文件 / 19 模块 · CLI 45 命令 · 单元测试 397（30 文件）· 6 个项目级 Skill · Wiki 91 页 · 数据源 594 文档 / 3,402 Chunk · 向量索引 5,810 条。
 
 ### 关键路径
 
@@ -52,19 +44,7 @@ Obsidian 仓库：.../WORKSPACE/
 | 项目 (project) | `03-项目/` | `项目-` | 8 |
 | 人物 (person) | `04-人物/` | `人物-` | 70 |
 
-Wiki 命令一览：
-
-| 命令 | 说明 |
-|------|------|
-| `discover-wiki` | 从 Chunk 中发现 Wiki 候选（4 种类型，分层排序） |
-| `build-wiki` | 生成 Wiki 页面（单页/批量/审核模式） |
-| `build-wiki-nav` | 维护 index.md 总索引 |
-| `wiki-pipeline` | 发现→审核→生成全流程 |
-| `wiki-lint` / `wiki-lint --fix` | 6 维健康检查 / 自动修复 |
-| `wiki-update` | 增量更新（daily-start 自动集成） |
-| `enrich-persons` | 飞书通讯录自动补充人物 Wiki 部门/邮箱 |
-| `deep-eval` | Wiki 深度评估（引用准确性 + 全面性） |
-| `build-asr-prompt` | 三段 LLM Pipeline：热词 → 误识别 → 策略 Prompt |
+Wiki 命令：`discover-wiki`（发现候选，4 类型分层排序）· `build-wiki`（生成页面，单页/批量/审核）· `build-wiki-nav`（维护 index.md）· `wiki-pipeline`（发现→审核→生成）· `wiki-lint [--fix]`（6 维健康检查/修复）· `wiki-update`（增量更新，daily-start 集成）· `enrich-persons`（飞书通讯录补充人物部门/邮箱）· `deep-eval`（深度评估：引用准确性+全面性）· `build-asr-prompt`（三段 Pipeline：热词→误识别→策略 Prompt）。
 
 ### 飞书集成
 
@@ -88,13 +68,7 @@ Wiki 命令一览：
 
 ### 记忆系统（5 子模块）
 
-| 模块 | 职责 |
-|------|------|
-| `lifecycle.py` | 自治维护（老化/冲突检测/合并） |
-| `long_term.py` | 用户画像 + 概念纠正 |
-| `session.py` | 会话记忆 |
-| `working.py` | 工作上下文（Markdown 文件） |
-| `manager.py` | 统一编排（浏览/删除/导入/导出） |
+`lifecycle.py`（自治维护：老化/冲突检测/合并）· `long_term.py`（用户画像+概念纠正）· `session.py`（会话记忆）· `working.py`（工作上下文 Markdown）· `manager.py`（统一编排：浏览/删除/导入/导出）。
 
 ### 复杂输入三阶段流水线
 
@@ -108,16 +82,7 @@ Stage 3 (base model)  → 整合润色输出
 
 ## 配置体系
 
-```
-优先级：OS 环境变量 > .env 文件 > macOS Keychain
-```
-
-| 层 | 文件 | 版本控制 |
-|----|------|---------|
-| ① | `.env` | gitignored |
-| ② | `config/*.json` | gitignored |
-| ③ | `config/*.json.example` | 版本控制 |
-| ④ | `data/` | 全 gitignore |
+优先级：**OS 环境变量 > `.env` > macOS Keychain**。分层：`.env`（gitignored）· `config/*.json`（gitignored）· `config/*.json.example`（版本控制）· `data/`（全 gitignore）。
 
 ### 关键环境变量
 
@@ -146,12 +111,7 @@ Stage 3 (base model)  → 整合润色输出
 
 ## 技术栈
 
-- Python 3.9+
-- OpenAI 兼容 LLM API（DeepSeek / 百炼 / Qwen）
-- Pydantic v2（配置类型安全校验）
-- lark-cli（飞书接口层）
-- macOS Keychain（可选密钥存储）
-- PyMuPDF / python-docx（文档处理）
+Python 3.9+ · OpenAI 兼容 LLM API（DeepSeek / 百炼 / Qwen）· Pydantic v2（配置校验）· lark-cli（飞书接口层）· PyMuPDF / python-docx（文档处理）· macOS Keychain（可选密钥存储）。
 
 ---
 
@@ -159,86 +119,29 @@ Stage 3 (base model)  → 整合润色输出
 
 ```
 iris3/
-├── pyproject.toml              # 产品版本 3.11.10
-├── README.md
-├── CLAUDE.md                   # 本文件
-├── CHANGELOG.md                # 完整版本历史
-├── .env.example                # 环境变量模板
-├── config/                     # 配置（*.json gitignored, *.example 版本控制）
-├── data/                       # 运行时数据（全 gitignore）
-├── src/iris/
-│   ├── config/                 # 配置加载 + Pydantic v2 校验
-│   ├── llm/                    # LLM Provider + 路由 + LLMService
-│   ├── core/                   # 核心抽象（类型/锁/写保护/存储/Agent适配器）
-│   ├── memory/                 # 记忆系统（5 子模块）
-│   ├── ingest/                 # 数据源扫描/切块
-│   ├── retrieval/              # 混合检索（BM25 + 向量 + RRF）
-│   ├── qa/                     # 检索问答
-│   ├── wiki/                   # Wiki 体系（16 文件，最大模块）
-│   ├── analysis/               # 分析报告/思维导图
-│   ├── evaluation/             # Wiki 深度评估
-│   ├── complex_input/          # 多模态输入检测 + 三阶段流水线
-│   ├── output/                 # 输出格式化 + Markdown→DOCX 转换
-│   ├── app/cli/                # CLI 框架（45 命令）
-│   ├── app/transcribe_meeting/ # 会议转录
-│   ├── feishu/                 # 飞书文档/聊天提炼
-│   ├── utils/                  # 工具函数（含 paths.py 公共路径工具）
-│   └── trello/                 # Trello 看板
-├── scripts/                    # CLI 入口 + 委托脚本
-├── templates/                  # Prompt / Wiki 模板
-├── tests/                      # 单元测试（384 用例，29 测试文件）
-├── .claude/skills/             # 项目级 Claude Code Skill（6 个）
-└── memory/                     # Claude 工作记忆
+├── src/iris/          # 19 模块（见下）
+├── scripts/           # CLI 入口 + 委托脚本
+├── templates/         # Prompt / Wiki 模板
+├── tests/             # 397 用例，30 文件
+├── config/            # *.json gitignored，*.example 版本控制
+├── data/              # 运行时数据（全 gitignore）
+├── .claude/skills/    # 项目级 Skill（6 个）
+├── memory/            # Claude 工作记忆
+└── pyproject.toml · README · CLAUDE · CHANGELOG.md
 ```
+
+**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService）· `core`（类型/锁/写保护/存储/Agent 适配）· `memory`（记忆 5 子模块）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF）· `qa`（检索问答）· `wiki`（Wiki 体系，最大模块）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估）· `complex_input`（多模态三阶段）· `output`（格式化+DOCX）· `app/cli`（45 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py）· `trello`（看板）。
 
 ---
 
-## Claude Code Skill
+## Claude Code Skill（6 个项目级）
 
-| Skill | 功能 |
-|------|------|
-| `iris-wiki` | Wiki 发现→审核→生成 |
-| `iris-feishu-import` | 飞书文档/聊天交互式导入 |
-| `iris-meeting` | 音频转写→纪要→归档 |
-| `iris-ask` | 知识库问答 + 多模态理解 |
-| `iris-report` | 分析报告/思维导图/双周报 |
-| `iris-health` | 知识库质量巡检 |
+`iris-wiki`（发现→审核→生成）· `iris-feishu-import`（飞书文档/聊天导入）· `iris-meeting`（转写→纪要→归档）· `iris-ask`（问答+多模态）· `iris-report`（分析报告/思维导图/双周报）· `iris-health`（质量巡检）。
 
 ---
 
 ## 近期变更
 
-### v3.11.10 (2026-07-09)
-extract-weekly-reports 扫描漏人修复：白名单 12 人本周 10 人提交，CLI 原仅扫到 3 人（静默漏 7 人）。根因 `scan_triage` 走「folder + time_range」list 路径，带 IMPORTANT 标签的周报散落在 priority/自定义文件夹、落在 list 首屏 50 封之外被漏扫。修复——`scan_triage` 新增 `query` 参数走**跨全文件夹 search 路径**（`--query` + 仅 time_range 不带 folder）；`scan_mailbox` 新增 search 模式（按 `subject_keywords` 逐关键词搜索合并 + fetch 正文前白名单预筛，message GET ~50→~12 次）；`EmailFilter` 排除「发件人已撤回邮件」通知 + 同人保留 date 最新一封（团队成员C 3 封→1 封）；配置新增 `scan.mode`（默认 `search`，保留 `folder` 兜底，weekly_report.json schema 3.2→3.3）。实测命中 3→10 人。新增 `test_weekly_report_extract.py`（13 用例），测试 384 → 397 全绿。
+**当前 v3.11.10 (2026-07-09)** — extract-weekly-reports 扫描漏人修复：`scan_triage` 由 folder-list 改为跨全文件夹 search（命中 3→10 人）+ 白名单预筛 + 撤回/重复去重，配置新增 `scan.mode`；测试 384→397。
 
-### v3.11.9 (2026-07-08)
-安全加固（开源准备）+ 工程质量优化 + 测试补全（315→384）：S1 报告署名配置化（report_author 字段）、S2-S6 模板/Prompt 敏感内容脱敏（真实姓名/业务域/项目名替换为通用占位）、Q1 检索缓存线程安全（threading.Lock）、Q2 ModelManager 封装（find_model_by_name 公开方法）、Q3 SYNONYM_MAP 配置化（synonym_extensions）、Q4 评分常量命名（_BOOST_*）、Q5 RRF 参数配置化（retrieval.rrf）、Q6 Wiki 内容提取严格正则兜底；新增 4 个测试文件（complex_input pipeline / retrieval enhanced / wiki update / memory lifecycle）+ 3 个已有文件追加，共新增 69 用例，384 全绿。
-
-### v3.11.8 (2026-07-08)
-build-asr-prompt 性能与质量优化（6 项）：Phase 1 热词提取、Phase 2 误识别生成两段 LLM 批量调用并发化（`ThreadPoolExecutor`，跨批去重下沉、无共享状态竞争）；Phase 3 校正 Prompt 强化——`build_optimize_prompt` 要求「校正策略」覆盖 6 类 ASR 错误模式并附判断依据+领域实例，篇幅上限 1200→2200 字，实测 prompt 从 ~776 增至 ~2960 字。另修复 `--asr-mode prompt` 热词缺失、`_exceeds_char_limit` 上提去重、Phase 3 死代码清理、strip 转义笔误。测试保持 315 全绿。
-
-### v3.11.7 (2026-07-07)
-analysis/service.py 职责拆分重构：新建 `_biweekly_collector.py`（数据层）、`_biweekly_cache.py`（缓存层）、`_biweekly_types.py`（TypedDict 契约），Stage 0a~4 委托子组件，保留全部向后兼容。新增 38 测试用例，测试总数 315。
-
-### v3.11.6 (2026-07-07)
-全项目深度优化（第二轮）：19 项安全/bug/性能/测试修复。P0 修复包括图片路径安全检查、feishu 时间戳 UTC 统一、transcribe-meeting LLM 失败 fallback、generator 死代码清理；P1 包括 chat_digest 待办表格转义/排重缓存、wiki update_all_pages 并发化（~4.5min→15s）、storage ImportError 告警、ValidationError 字段级错误；新增 8 个测试文件 +58 用例，测试总数 277。
-
-### v3.11.5 (2026-07-07)
-代码审查优化（第一轮）：12 项修复，含 Stage 1 preview 注入、UTC 时间窗口、ModelManagerError 捕获、reasoning_content fallback、quality_score 判断、OP 缓存哈希扩展等。新建 `utils/paths.py` 公共路径工具，合并重复 JSONL 加载函数。
-
-### v3.11.4 (2026-07-07)
-build-biweekly-report 流水线修复：多期去重 + 跨方向 brief 路由 + Stage 1 缓存 + base_model 统一。
-
-### v3.11.3 (2026-07-05)
-build-biweekly-report 全面重构：文件级时间窗口扫描 + 时效性加权 + 引用格式简化。
-
-### v3.11.2 (2026-07-03)
-force_model 参数 + 111 份历史纪要翻新 + 人物歧义处理。
-
-### v3.11.1 (2026-07-03)
-transcribe-meeting 三项修复：日期从文件名提取、时长从时间戳计算、尾注自动追加。
-
-### v3.11.0 (2026-07-03)
-新增 6 个项目级 Claude Code Skill，知识库操作从 CLI 扩展到对话式交互。
-
-> 更早版本变更详见 [CHANGELOG.md](CHANGELOG.md)。
+> 完整版本历史（v3.11.9 及更早）见 [CHANGELOG.md](CHANGELOG.md)。
