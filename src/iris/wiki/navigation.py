@@ -127,8 +127,10 @@ KNOWN_TECH_TERMS = frozenset({
 })
 # 源文档引用模式（含路径前缀如 "会议纪要/20260518-..."）
 SOURCE_REF_PATTERN = re.compile(r"^(?:.*/)?\d{8}-")
-# 超短噪音
-NOISE_LINK_PATTERN = re.compile(r"^[.\-#]{1,3}$|^_{2,}$|^\.{2,}$", re.MULTILINE)
+# 超短噪音链接目标匹配（用于 lint 判断：[[target]] 中的 target 是否为噪音）
+NOISE_LINK_PATTERN = re.compile(r"^[.\-#]{1,3}$|^_{2,}$|^\.{2,}$")
+# 噪音 Wiki 链接整体匹配（用于全文替换，不误删 frontmatter 的 --- 分隔符）
+NOISE_WIKILINK_PATTERN = re.compile(r"\[\[(?:[.\-#]{1,3}|_{2,}|\.{2,})\]\]")
 
 # LLM 引用不存在页面的常见模式（业务概念，非 Wiki 页面）
 EXTERNAL_CONCEPT_PATTERNS = [
@@ -239,8 +241,7 @@ def _char_sequence_match(short: str, long: str) -> bool:
 
 def _clean_noise_links(content: str) -> str:
     """清理 Wiki 页面中的超短噪音链接（[[.]]、[[#]]、[[---]] 等）。"""
-    import re
-    return NOISE_LINK_PATTERN.sub("", content)
+    return NOISE_WIKILINK_PATTERN.sub("", content)
 
 
 def lint_wiki(wiki_root: Path, data_root: Optional[Path] = None) -> Dict[str, Any]:
@@ -484,8 +485,8 @@ def fix_wiki(wiki_root: Path) -> Dict[str, Any]:
             text = title_fix
             actions["title_fixed"].append(md_file.name)
 
-        # 清理超短噪音链接 [[.]]、[[#]]、[[---]] 等
-        cleaned = NOISE_LINK_PATTERN.sub("", text)
+        # 清理超短噪音链接 [[.]]、[[#]]、[[---]] 等（用 NOISE_WIKILINK_PATTERN 避免误删 frontmatter ---)
+        cleaned = NOISE_WIKILINK_PATTERN.sub("", text)
         # 删除因清理产生的空 [[]]
         cleaned = _re.sub(r"\[\[\]\]", "", cleaned)
         if cleaned != text:
