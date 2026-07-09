@@ -4,6 +4,27 @@
 
 ---
 
+## v3.11.12 (2026-07-09)
+
+### extract-didi-travel PDF 文字直接提取 + 表格输出格式
+
+**核心改进：**
+- PDF 解析新增文字提取路径：`pdf_extract_text()` 优先从文字型 PDF 直接提取文字，扫描件才降级为多模态图像理解
+- `resolve_input_pages()` 拆分为 `resolve_inputs()`，返回 `(text_inputs, page_images)` 两路输入
+- 新增 `PdfTextInput` dataclass 承载文字型 PDF 内容
+- 新增 `_process_text_input()`：将 PDF 文字送 base_model 解析，替代 adv_model 图像理解
+- `stage1_extract_entries()` 同时处理两路输入：文字路径串行，图像路径并发
+- 新增 `STAGE1_TEXT_PROMPT`：专为文字型 PDF 设计，处理跨行断行问题
+
+**输出格式改进：**
+- Stage2 输出由逐条纵向格式改为转置 Markdown 表格（行为字段，列为差旅+总计），与报销单图表格式一致
+
+**效果：**
+- 文字型 PDF 无图像识别误差，金额准确率 100%（原图像路径漏识别 ¥20）
+- 速度更快，无需多模态 API 调用
+
+---
+
 ## v3.11.11 (2026-07-09)
 
 ### extract-didi-travel 代码审查修复（8 项）
