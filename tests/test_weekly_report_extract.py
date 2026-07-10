@@ -26,8 +26,8 @@ _spec.loader.exec_module(ewr)
 
 
 WHITELIST = [
-    {"name": "团队成员C", "email": "chenwei@example.com"},
-    {"name": "团队成员D", "email": "liguangming@example.com"},
+    {"name": "张三", "email": "zhangsan@example.com"},
+    {"name": "李四", "email": "lisi@example.com"},
 ]
 KEYWORDS = ["周报", "周会", "week report", "weekly"]
 
@@ -119,10 +119,10 @@ def test_scan_mode_resolution(raw, expected):
 def test_prefilter_keeps_whitelist_with_keyword():
     cfg = _StubConfig(WHITELIST, KEYWORDS)
     summaries = [
-        {"from": "团队成员C <chenwei@example.com>", "subject": "质检后端周报-2026/07/06"},
-        {"from": "团队成员D <liguangming@example.com>", "subject": "【周报】搜索算法"},
+        {"from": "张三 <zhangsan@example.com>", "subject": "质检后端周报-2026/07/06"},
+        {"from": "李四 <lisi@example.com>", "subject": "【周报】搜索算法"},
         {"from": "路人 <stranger@example.com>", "subject": "周报 外部"},   # 非白名单
-        {"from": "团队成员C <chenwei@example.com>", "subject": "报销单据"},   # 无关键词
+        {"from": "张三 <zhangsan@example.com>", "subject": "报销单据"},   # 无关键词
     ]
     out = ewr._prefilter_summaries(summaries, cfg)
     subjects = {s["subject"] for s in out}
@@ -148,8 +148,8 @@ def test_is_recall_notice():
 def test_filter_excludes_recall_and_keeps_report():
     f = ewr.EmailFilter(WHITELIST, KEYWORDS)
     emails = [
-        _make_email("chenwei@example.com", "发件人已撤回邮件：质检后端周报-2026/07/06", "2026-07-06 14:24"),
-        _make_email("chenwei@example.com", "质检后端周报-2026/07/06", "2026-07-06 14:49"),
+        _make_email("zhangsan@example.com", "发件人已撤回邮件：质检后端周报-2026/07/06", "2026-07-06 14:24"),
+        _make_email("zhangsan@example.com", "质检后端周报-2026/07/06", "2026-07-06 14:49"),
     ]
     out = f.filter_emails(emails)
     assert len(out) == 1
@@ -159,8 +159,8 @@ def test_filter_excludes_recall_and_keeps_report():
 def test_filter_keeps_latest_per_sender():
     f = ewr.EmailFilter(WHITELIST, KEYWORDS)
     emails = [
-        _make_email("chenwei@example.com", "质检后端周报-2026/07/06", "2026-07-06 14:33"),
-        _make_email("chenwei@example.com", "质检后端周报-2026/07/06", "2026-07-06 14:49"),
+        _make_email("zhangsan@example.com", "质检后端周报-2026/07/06", "2026-07-06 14:33"),
+        _make_email("zhangsan@example.com", "质检后端周报-2026/07/06", "2026-07-06 14:49"),
     ]
     out = f.filter_emails(emails)
     assert len(out) == 1
@@ -170,10 +170,10 @@ def test_filter_keeps_latest_per_sender():
 def test_filter_multiple_senders_and_drops_nonmatching():
     f = ewr.EmailFilter(WHITELIST, KEYWORDS)
     emails = [
-        _make_email("chenwei@example.com", "质检后端周报", "2026-07-06 14:49"),
-        _make_email("liguangming@example.com", "【周报】搜索算法团队成员D", "2026-07-03 15:34"),
+        _make_email("zhangsan@example.com", "质检后端周报", "2026-07-06 14:49"),
+        _make_email("lisi@example.com", "【周报】搜索算法李四", "2026-07-03 15:34"),
         _make_email("stranger@example.com", "周报 外部", "2026-07-05 00:00"),   # 非白名单
-        _make_email("chenwei@example.com", "普通邮件无关键词", "2026-07-07 00:00"),  # 无关键词
+        _make_email("zhangsan@example.com", "普通邮件无关键词", "2026-07-07 00:00"),  # 无关键词
     ]
     out = f.filter_emails(emails)
-    assert sorted(e["sender_name"] for e in out) == ["团队成员D", "团队成员C"]
+    assert sorted(e["sender_name"] for e in out) == ["张三", "李四"]

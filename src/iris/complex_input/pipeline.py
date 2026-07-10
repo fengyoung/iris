@@ -268,8 +268,8 @@ class ComplexInputPipeline:
         """
         if stage2_output.startswith("[Stage2 失败]"):
             prompt = (
-                f"用户问题：{{query}}\n\n"
-                f"输入类型：{{file_type}}\n\n"
+                f"用户问题：{query}\n\n"
+                f"输入类型：{file_type}\n\n"
                 f"多模态分析不可用。请根据已有信息尽可能回答用户。"
             )
         else:

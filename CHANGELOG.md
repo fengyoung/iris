@@ -4,6 +4,33 @@
 
 ---
 
+## v3.11.13 (2026-07-10)
+
+### 开源脱敏全面清理
+
+**源码脱敏：**
+- `src/iris/analysis/service.py`：`_SUB_AREA_KEYWORDS` 字典清空，移除 11 个硬编码内部业务子领域词条（某检测项目 / 图像采集3.0 / 图像验证 / 视频审核 / 在线评估 / 工作流 / 消费品类 / 二手商品 / 兴趣品类 / 推荐 / 搜索），改为用户自定义注释说明；移除注释中员工姓名
+- `src/iris/wiki/navigation.py`：`EXTERNAL_CONCEPT_PATTERNS` 从 15 个业务特定正则缩减为 2 个通用示例，添加用户自定义说明
+- `src/iris/wiki/term_extractor.py`、`src/iris/analysis/_biweekly_types.py`：移除注释/文档字符串中的员工姓名与内部项目代号
+- `templates/prompt/biweekly_stage3_direction.md`、`biweekly_stage1_filter.md`：示例中的内部项目代号替换为通用占位符
+- `scripts/extract_weekly_reports.py`：移除注释中的员工姓名及真实企业邮箱域名
+
+**测试数据脱敏（9 个测试文件）：**
+- 员工真实姓名（团队成员A / 团队成员B / 团队成员C / 团队成员D / 团队成员E / 团队成员F 等）→ 张三 / 李四 / 王小明 / 王五 / 赵六
+- 内部项目代号（某检测项目 / 图像采集3.0 / 图像验证 / 视频审核 / 在线评估）→ 项目Alpha / Beta / Gamma / Delta / Epsilon
+- 企业邮箱（`*@example.com`）→ `*@example.com`
+
+**Git 追踪清理：**
+- `.gitignore` 新增：`.claude/scheduled_tasks.json`、`.claude/scheduled_tasks.lock`、`方案清单.md`、`需求清单.md`
+- `git rm --cached` 取消追踪上述 4 个文件（文件保留在磁盘）
+
+**同期 Bug 修复（测试数据替换后发现）：**
+- `test_deep_eval.py`：`search_sources_by_keywords(["拍照"])` 关键词与新内容不匹配 → 改为 `["项目Beta"]`
+- `test_biweekly_dedup.py`：`"低好能"` 断言在 SAMPLE_REPORT 更新后变为空洞真值 → 改为 `"长尾品类"`
+- `test_weekly_report_extract.py`：`sorted(["李四","张三"])` Unicode 字典序错误 → 修正为 `["张三","李四"]`
+
+---
+
 ## v3.11.12 (2026-07-09)
 
 ### extract-didi-travel PDF 文字直接提取 + 表格输出格式

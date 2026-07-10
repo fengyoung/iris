@@ -21,7 +21,7 @@ test
 
 ## 参考来源
 1. [SOURCE/path/to/doc.md:42] 该方案将准确率提升到 95%
-2. [SOURCE/other.md:10] 图像采集3.0 项目启动
+2. [SOURCE/other.md:10] 项目Beta 项目启动
 """
         entries = parse_references(content)
         assert len(entries) == 2
@@ -67,16 +67,16 @@ some content
 class TestExtractPageTitle:
     def test_from_frontmatter(self):
         content = """---
-title: 图像采集3.0 项目
+title: 项目Beta 项目
 type: project
 ---
 正文内容
 """
-        assert extract_page_title(content, "file.md") == "图像采集3.0 项目"
+        assert extract_page_title(content, "file.md") == "项目Beta 项目"
 
     def test_fallback_to_filename(self):
         content = """# 没有 frontmatter 的内容"""
-        assert extract_page_title(content, "图像采集3.0.md") == "图像采集3.0"
+        assert extract_page_title(content, "项目Beta.md") == "项目Beta"
 
 
 class TestSourceLocator:
@@ -96,7 +96,7 @@ class TestSourceLocator:
                     "relative_path": "SOURCE/test/doc.md",
                     "line_start": 11,
                     "line_end": 20,
-                    "content": "这是测试文档的第二段内容，提到了图像采集3.0项目。",
+                    "content": "这是测试文档的第二段内容，提到了项目Beta项目。",
                 },
                 {
                     "relative_path": "SOURCE/other.md",
@@ -116,7 +116,7 @@ class TestSourceLocator:
 
         # 按行号查找
         content = locator.lookup("SOURCE/test/doc.md", line_number=15)
-        assert "图像采集3.0" in content
+        assert "项目Beta" in content
 
         # 不存在的文件
         assert locator.lookup("SOURCE/nonexistent.md") is None
@@ -149,8 +149,8 @@ class TestSourceLocator:
         summary_path = tmp_path / "chunk_summary.json"
         summary_path.write_text(json.dumps({
             "chunks": [
-                {"relative_path": "SOURCE/图像采集3.0/设计文档.md", "line_start": 1, "line_end": 5,
-                 "content": "图像采集3.0 设计"},
+                {"relative_path": "SOURCE/项目Beta/设计文档.md", "line_start": 1, "line_end": 5,
+                 "content": "项目Beta 设计"},
                 {"relative_path": "SOURCE/其他/不相关.md", "line_start": 1, "line_end": 5,
                  "content": "无关内容"},
             ],
@@ -159,9 +159,9 @@ class TestSourceLocator:
         locator = SourceLocator([str(summary_path)])
         locator.load()
 
-        results = locator.search_sources_by_keywords(["拍照"], max_results=3)
+        results = locator.search_sources_by_keywords(["项目Beta"], max_results=3)
         assert len(results) == 1
-        assert "图像采集3.0" in results[0]
+        assert "项目Beta" in results[0]
 
 
 class TestDeepEvalResult:

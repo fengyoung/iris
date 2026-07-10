@@ -133,23 +133,11 @@ NOISE_LINK_PATTERN = re.compile(r"^[.\-#]{1,3}$|^_{2,}$|^\.{2,}$")
 NOISE_WIKILINK_PATTERN = re.compile(r"\[\[(?:[.\-#]{1,3}|_{2,}|\.{2,})\]\]")
 
 # LLM 引用不存在页面的常见模式（业务概念，非 Wiki 页面）
+# 用于过滤 wiki-lint 中不应被视为断裂链接的 [[引用]]。
+# 用户可根据自己的业务领域在此添加需要豁免的模式。
 EXTERNAL_CONCEPT_PATTERNS = [
     re.compile(p) for p in [
-        r"^C2P",
-        r"^AI评",
-        r"^鉴定师",
-        r"^LV品牌",
-        r"^demo网页",
-        r"^数据链路追踪",
-        r"^门店 AI 需求",
-        r"^二手商品货架进销存",
-        r"^价格策略与定价",
-        r"^集团",
-        r"^VOC-CCR",
-        r"^主搜算法",
-        r"^质检AI应用",
-        r"^拍照3\.0某流程优化方案",
-        r"^视频审核与质检在线评估",
+        r"^demo",
         r"^项目周会 ·",
     ]
 ]

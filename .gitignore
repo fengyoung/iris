@@ -43,6 +43,14 @@ Thumbs.db
 # Claude Code 本地配置（权限规则 / 个人偏好）
 .claude/settings.json
 
+# Claude Code 运行时状态（调度任务等）
+.claude/scheduled_tasks.json
+.claude/scheduled_tasks.lock
+
+# 项目规划文档（含内部业务上下文，不随仓库公开）
+方案清单.md
+需求清单.md
+
 # Memory (Claude working memory - user-specific)
 /memory/
 

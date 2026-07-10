@@ -13,7 +13,7 @@ class FileEntry(dict):
     """数据源文件条目（TypedDict 语义，兼容 Python 3.9）。
 
     字段：
-        label:      引用标签（如"团队成员B周报-0703"）
+        label:      引用标签（如"张三周报-0703"）
         date:       文件日期（datetime，从文件名或 frontmatter 提取）
         dir:        目录标签（如"成员周报"）
         filename:   文件名（不含路径）

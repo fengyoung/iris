@@ -33,9 +33,9 @@ SAMPLE_REPORT = """
 
 **关键进展：**
 
-- 某检测项目拆修检测安卓机型覆盖达151款，整体检出率约4.7%。（来源：团队成员E周报-0608）
-- 图像采集3.0细分成色一致性经历三阶段爬坡达91%。（来源：团队成员B周报-0613）
-- 图像验证包袋全场景直检率首次突破35.8%。（来源：团队成员B周报-0613）
+- 项目Alpha检测安卓机型覆盖达151款，整体检出率约4.7%。（来源：张三周报-0608）
+- 项目Beta分析精度一致性经历三阶段爬坡达91%。（来源：李四周报-0613）
+- 项目Gamma全场景直检率首次突破35.8%。（来源：李四周报-0613）
 
 ## 搜索推荐
 
@@ -45,8 +45,8 @@ SAMPLE_REPORT = """
 
 **关键进展：**
 
-- LLM-based相关性全量上线，兴趣品类类整体支付提袋率+24.37%。（来源：团队成员D周报）
-- 首页金刚低好能流量调控全量，低价商品曝光占比+10.31%。（来源：团队成员H周报）
+- LLM-based相关性全量上线，长尾品类整体支付提袋率+24.37%。（来源：王五周报）
+- 首页流量调控全量，低价商品曝光占比+10.31%。（来源：赵六周报）
 """
 
 
@@ -56,15 +56,15 @@ class TestExtractDirectionSection:
     def test_extract_standard_direction(self):
         """提取标准方向章节。"""
         content = _extract_direction_section(SAMPLE_REPORT, "质检\"标准+工艺\"智能化")
-        assert "某检测项目拆修检测" in content
-        assert "图像采集3.0" in content
+        assert "项目Alpha检测" in content
+        assert "项目Beta" in content
         assert "关键进展" in content
 
     def test_extract_second_direction(self):
         """提取第二个方向章节。"""
         content = _extract_direction_section(SAMPLE_REPORT, "搜索推荐")
         assert "LLM-based" in content
-        assert "低好能" in content
+        assert "长尾品类" in content
 
     def test_extract_nonexistent_direction(self):
         """不存在的方向返回空。"""
@@ -88,7 +88,7 @@ content
         content = _extract_direction_section(SAMPLE_REPORT, "质检\"标准+工艺\"智能化")
         # 不应包含搜索推荐方向的内容
         assert "LLM-based" not in content
-        assert "低好能" not in content
+        assert "长尾品类" not in content
 
 
 # ── Key Bullets 提取 ─────────────────────────────────────
@@ -145,7 +145,7 @@ FAKE_DIRECTION = {
     "id": 1,
     "name": "质检\"标准+工艺\"智能化",
     "strategic_quote": "构建验功能、验成色、验真假的质检能力",
-    "scope_summary": "覆盖某检测项目、图像采集3.0、图像验证",
+    "scope_summary": "覆盖项目Alpha、项目Beta、项目Gamma",
     "key_indicators": ["检出率", "直检率"],
     "sub_areas": [],
 }

@@ -105,14 +105,14 @@ class TestBuildFileManifest:
         files = [{
             "date": datetime(2026, 7, 1),
             "dir": "成员周报",
-            "filename": "20260701-周报-w26-团队成员B.md",
-            "label": "团队成员B周报-0701",
-            "content": "## 本周工作\n\n- 完成某检测项目分类模型上线",
+            "filename": "20260701-周报-w26-李四.md",
+            "label": "李四周报-0701",
+            "content": "## 本周工作\n\n- 完成项目Alpha分类模型上线",
             "char_count": 50,
         }]
         result = _build_file_manifest(files)
         assert "成员周报" in result
-        assert "团队成员B周报-0701" in result
+        assert "李四周报-0701" in result
         assert "2026-07-01" in result
 
     def test_multiple_dirs(self):
@@ -211,13 +211,13 @@ class TestConceptBoundaries:
             "id": 1,
             "name": "方向一",
             "sub_areas": [
-                {"name": "1.1 【验功能】某检测项目拆修检测", "owner": "团队成员B", "goal": "测试"},
-                {"name": "1.2 【验成色】图像采集3.0", "owner": "团队成员B", "goal": "测试"},
+                {"name": "1.1 【验功能】项目Alpha检测", "owner": "李四", "goal": "测试"},
+                {"name": "1.2 【验成色】项目Beta", "owner": "李四", "goal": "测试"},
             ]
         }
         concepts = _collect_direction_concepts(direction)
-        assert "某检测项目拆修检测" in concepts
-        assert "图像采集3.0" in concepts
+        assert "项目Alpha检测" in concepts
+        assert "项目Beta" in concepts
 
     def test_no_sub_areas(self):
         """无子领域返回空列表。"""
@@ -228,16 +228,16 @@ class TestConceptBoundaries:
     def test_build_boundaries_text(self):
         """构建边界描述文本。"""
         bounds = {
-            "own": ["某检测项目拆修检测", "图像采集3.0"],
+            "own": ["项目Alpha检测", "项目Beta"],
             "others": {
-                "方向二：执行过程": ["视频审核", "在线评估"],
+                "方向二：执行过程": ["项目Delta", "项目Epsilon"],
             }
         }
         text = _build_boundaries_text("方向一", bounds)
-        assert "某检测项目拆修检测" in text
-        assert "图像采集3.0" in text
-        assert "视频审核" in text
-        assert "在线评估" in text
+        assert "项目Alpha检测" in text
+        assert "项目Beta" in text
+        assert "项目Delta" in text
+        assert "项目Epsilon" in text
         assert "严格排除" in text
 
 

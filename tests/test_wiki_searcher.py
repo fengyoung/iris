@@ -29,7 +29,7 @@ class TestTokenize:
         assert "质检自动化进展" in tokens
 
     def test_mixed_text(self):
-        tokens = tokenize("某检测项目项目进展")
+        tokens = tokenize("Alpha项目进展")
         # 中文和英文被合并为一个token，这是分词器的行为
         assert len(tokens) > 0
 
@@ -47,12 +47,12 @@ class TestInferTitleFromFilename:
         assert result == "MMoE架构"
 
     def test_project_prefix(self):
-        result = _infer_title_from_filename(Path("项目-某检测项目手机拆修检测.md"))
-        assert result == "某检测项目手机拆修检测"
+        result = _infer_title_from_filename(Path("项目-Alpha智能检测.md"))
+        assert result == "Alpha智能检测"
 
     def test_person_prefix(self):
-        result = _infer_title_from_filename(Path("人物-团队成员B.md"))
-        assert result == "团队成员B"
+        result = _infer_title_from_filename(Path("人物-李四.md"))
+        assert result == "李四"
 
     def test_no_prefix(self):
         result = _infer_title_from_filename(Path("index.md"))

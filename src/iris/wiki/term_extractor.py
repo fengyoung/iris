@@ -104,7 +104,7 @@ def _truncate_context(text: str, max_chars: int = 60) -> str:
         idx = clean.find(sep)
         if 0 < idx <= max_chars:
             return clean[:idx + 1]
-    # 没有句号时按长度截断，不用逗号（会留下"团队成员J是技术研发部成员，"这类半截句子）
+    # 没有句号时按长度截断，不用逗号（逗号截断会产生语义不完整的半截句子）
     return clean[:max_chars].rstrip() + "…"
 
 
@@ -317,8 +317,8 @@ class TermExtractor:
             人物-张三.md title="张三" → 张三（一致，用 title）
             概念-AgenticCloud与AIAgent.md title="Agentic Cloud 与 AI Agent"
                 → AgenticCloud与AIAgent（title 仅在 filename 上加空格）
-            项目-拍照30AI外观定级项目.md title="图像采集3.0 AI外观定级项目"
-                → 图像采集3.0 AI外观定级项目（保留正确的 3.0）
+            项目-项目Beta3AI分析.md title="项目Beta 3.0 AI分析"
+                → 项目Beta 3.0 AI分析（保留正确的 3.0）
         """
         prefix = get_wiki_prefix(page_type)
         name_from_file = page.path.stem
@@ -467,7 +467,7 @@ class TermExtractor:
    - 连读误判：全大写→全小写、字母间加空格（DNN→D N N）
 4. **中文术语**：同音词/近音词替换，注意分词错误（「智能化检测」→「智能」+「化检测」
    被 ASR 误分割为「智能画检测」）
-5. **项目名/长名词**：逐字替换 + 可能的简化（「在线评估与稽查项目」→「在线评估稽查」）
+5. **项目名/长名词**：逐字替换 + 可能的简化（「智能审核与稽查项目」→「智能审核稽查」）
 
 ## 质量约束
 - 误识别必须是真实语音转写中最可能发生的，不能只是随机的同音字

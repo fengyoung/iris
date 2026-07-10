@@ -25,8 +25,8 @@ class TestBm25FullContent:
                 self.section_path = []
                 self.source_name = "test"
 
-        long_text = "图像采集3.0 项目 里程碑 iPhone 全量 标准化 拍摄 " * 20  # ~160 词
-        short_preview = "图像采集3.0 项目"  # 仅 2 词
+        long_text = "项目Beta 项目 里程碑 iPhone 全量 标准化 拍摄 " * 20  # ~160 词
+        short_preview = "项目Beta 项目"  # 仅 2 词
 
         chunk = FakeChunk(content=long_text, content_preview=short_preview)
 
@@ -45,9 +45,9 @@ class TestBm25FullContent:
         query_tokens = tokenize(query)
 
         class FakeChunk:
-            content = "图像采集3.0 项目涉及 iPhone 全量标准化拍摄流程 " * 10
-            content_preview = "图像采集3.0 项目"
-            title = "图像采集3.0 项目"
+            content = "项目Beta 项目涉及 iPhone 全量标准化拍摄流程 " * 10
+            content_preview = "项目Beta 项目"
+            title = "项目Beta 项目"
             section_path = []
             token_freq = {}
 
@@ -86,7 +86,7 @@ class TestQaTokenBudget:
         """中英混排文本 token 估算不同于 len()。"""
         text_cn = "这是一个中文测试句子用于验证token估算"
         text_en = "This is an English test sentence for token estimation"
-        text_mixed = "图像采集3.0 iPhone 全量 标准化 拍摄 SOP 4步法"
+        text_mixed = "项目Beta iPhone 全量 标准化 拍摄 SOP 4步法"
 
         cn_estimate = estimate_tokens(text_cn)
         en_estimate = estimate_tokens(text_en)

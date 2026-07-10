@@ -8,7 +8,7 @@
 用法：
     python scripts/extract_weekly_reports.py run --pretty
     python scripts/extract_weekly_reports.py status
-    python scripts/extract_weekly_reports.py sender-add --name "姓名" --email "x@example.com"
+    python scripts/extract_weekly_reports.py sender-add --name "姓名" --email "name@example.com"
 """
 
 from __future__ import annotations
@@ -209,7 +209,7 @@ class EmailFilter:
             email_data["sender_name"] = self.get_sender_name(from_addr)
             candidates.append(email_data)
 
-        # 同一发件人保留最新一封（团队成员C本周有重复的「质检后端周报」）
+        # 同一发件人保留最新一封（防止同一周期内重复提交覆盖）
         latest_by_sender: Dict[str, Dict] = {}
         for em in candidates:
             sender = em.get("sender_name", "")

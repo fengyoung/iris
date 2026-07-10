@@ -150,7 +150,7 @@ python3 scripts/run_cli.py build-biweekly-report --to-source
 |------|------|
 | 标准生成 | `python3 scripts/run_cli.py build-biweekly-report --to-source` |
 | 预览检查 | `python3 scripts/run_cli.py build-biweekly-report --dry-run` |
-| 指定风格 | `python3 scripts/run_cli.py build-biweekly-report --to-source --style-from 双周报-w25-团队成员J-20260621.md` |
+| 指定风格 | `python3 scripts/run_cli.py build-biweekly-report --to-source --style-from 双周报-w25-20260621.md` |
 | 手动输出 | `python3 scripts/run_cli.py build-biweekly-report --output-file output/双周报.md` |
 
 ## 常见场景

@@ -48,7 +48,7 @@ class TestAtomicWrite:
         from iris.wiki.navigation import _atomic_write
 
         target = tmp_path / "unicode.md"
-        content = "图像采集3.0 项目里程碑 🎯 iPhone 全量标准化\n\n中文内容测试"
+        content = "项目Beta 里程碑 🎯 iPhone 全量标准化\n\n中文内容测试"
 
         _atomic_write(target, content)
         assert target.read_text(encoding="utf-8") == content

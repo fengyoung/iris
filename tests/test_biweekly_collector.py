@@ -157,8 +157,8 @@ class TestBuildCitationLabel:
         assert label == "张三周报-0703"
 
     def test_meeting_minutes(self):
-        label = BiweeklyCollector._build_citation_label("20260702-项目讨论-某检测项目检测.md", "会议纪要")
-        assert label == "项目讨论-某检测项目检测-0702"
+        label = BiweeklyCollector._build_citation_label("20260702-项目讨论-项目Alpha检测.md", "会议纪要")
+        assert label == "项目讨论-项目Alpha检测-0702"
 
     def test_discussion(self):
         label = BiweeklyCollector._build_citation_label("20260701-内部讨论-质检自动化.md", "讨论思考")

@@ -23,12 +23,12 @@ class TestExtractDateFromPath:
 
     def test_standard_weekly_report(self):
         """标准成员周报格式。"""
-        d = AnalysisReportService._extract_date_from_path("20250621-周报-w25-团队成员B.md")
+        d = AnalysisReportService._extract_date_from_path("20250621-周报-w25-李四.md")
         assert d == datetime(2025, 6, 21)
 
     def test_meeting_minutes(self):
         """会议纪要格式。"""
-        d = AnalysisReportService._extract_date_from_path("20260702-项目讨论-某检测项目拆修检测.md")
+        d = AnalysisReportService._extract_date_from_path("20260702-项目讨论-项目Alpha检测.md")
         assert d == datetime(2026, 7, 2)
 
     def test_discussion(self):
@@ -38,7 +38,7 @@ class TestExtractDateFromPath:
 
     def test_no_date(self):
         """无日期文件名返回 None。"""
-        d = AnalysisReportService._extract_date_from_path("周报-团队成员B.md")
+        d = AnalysisReportService._extract_date_from_path("周报-李四.md")
         assert d is None
 
     def test_invalid_date(self):
@@ -102,22 +102,22 @@ class TestExtractPersonFromFilename:
 
     def test_standard_weekly_report(self):
         """标准成员周报格式: YYYYMMDD-周报-w{week}-{name}.md。"""
-        name = AnalysisReportService._extract_person_from_filename("20250621-周报-w25-团队成员B.md")
-        assert name == "团队成员B"
+        name = AnalysisReportService._extract_person_from_filename("20250621-周报-w25-李四.md")
+        assert name == "李四"
 
     def test_two_char_name(self):
         """两字人名。"""
-        name = AnalysisReportService._extract_person_from_filename("20250613-周报-w24-团队成员A.md")
-        assert name == "团队成员A"
+        name = AnalysisReportService._extract_person_from_filename("20250613-周报-w24-张三.md")
+        assert name == "张三"
 
     def test_three_char_name(self):
         """三字人名。"""
-        name = AnalysisReportService._extract_person_from_filename("20250608-周报-w23-团队成员F.md")
-        assert name == "团队成员F"
+        name = AnalysisReportService._extract_person_from_filename("20250608-周报-w23-王小明.md")
+        assert name == "王小明"
 
     def test_not_weekly_report(self):
         """非成员周报格式返回 None。"""
-        name = AnalysisReportService._extract_person_from_filename("20260702-项目讨论-某检测项目拆修检测.md")
+        name = AnalysisReportService._extract_person_from_filename("20260702-项目讨论-项目Alpha检测.md")
         assert name is None
 
     def test_fallback_dash_format(self):
@@ -135,16 +135,16 @@ class TestBuildCitationLabel:
     def test_weekly_report_person(self):
         """成员周报提取人名。"""
         label = AnalysisReportService._build_citation_label(
-            "20250621-周报-w25-团队成员B.md", "成员周报")
-        assert "团队成员B周报" in label
+            "20250621-周报-w25-李四.md", "成员周报")
+        assert "李四周报" in label
         assert "0621" in label or "06" in label
 
     def test_meeting_minutes(self):
         """会议纪要保留完整描述。"""
         label = AnalysisReportService._build_citation_label(
-            "20260702-项目讨论-某检测项目拆修检测-H2检出率目标测算.md", "会议纪要")
+            "20260702-项目讨论-项目Alpha检测-H2检出率目标测算.md", "会议纪要")
         assert "项目讨论" in label
-        assert "某检测项目" in label
+        assert "项目Alpha" in label
         assert "0702" in label
 
     def test_discussion(self):
