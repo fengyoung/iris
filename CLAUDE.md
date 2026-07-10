@@ -1,4 +1,4 @@
-# Iris 3.11.14 — 项目执行说明
+# Iris 3.11.15 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -101,7 +101,7 @@ Stage 3 (base model)  → 整合润色输出
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.11.14 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.11.15 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.8 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -142,6 +142,6 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.11.14 (2026-07-10)** — 新增 `iris-process` Skill：富媒体输入自动调用 route-model 路由，走三阶段 process 流水线（图片完整支持，PDF/文档部分支持）；修复 `complex_input/pipeline.py` Stage 3 失败路径 f-string 模板变量未替换 bug；`iris-ask` 职责收窄为纯文本问答，富媒体改走 `iris-process`。
+**当前 v3.11.15 (2026-07-10)** — Trello 客户端 Python 3.13 SSL 兼容修复；env 变量 `${VAR}` 占位符解析；持续集成 397 测试。
 
 > 完整版本历史（v3.11.13 及更早）见 [CHANGELOG.md](CHANGELOG.md)。

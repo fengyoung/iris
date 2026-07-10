@@ -1,10 +1,10 @@
-# Iris 3.11.14
+# Iris 3.11.15
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
 
-**v3.11.14** — 新增 `iris-process` Skill（富媒体路由 + 三阶段流水线）；修复 Stage 3 f-string 模板变量未替换 bug；iris-ask 职责边界明确为纯文本，397 测试。
+**v3.11.15** — Trello 客户端 Python 3.13 SSL 兼容修复 + env 变量 `${VAR}` 占位符解析；持续集成 397 测试。
 
 ## 开发路线
 
@@ -89,6 +89,7 @@ SOURCE/                     LLM-WIKI/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.11.15** | 2026-07-10 | Trello Python 3.13 SSL 兼容修复 + env 变量解析；持续集成 397 测试 |
 | **v3.11.14** | 2026-07-10 | 新增 iris-process Skill（富媒体路由+三阶段流水线）；Stage 3 模板 bug 修复；iris-ask 职责边界清晰化，397 测试 |
 | **v3.11.13** | 2026-07-10 | 开源脱敏清理：源码/测试/模板内部信息移除，`_SUB_AREA_KEYWORDS` 用户自定义，`.gitignore` 补全，397 测试 |
 | **v3.11.12** | 2026-07-09 | extract-didi-travel PDF 文字直接提取 + 转置表格输出；wiki-lint --fix 噪音链接正则修复（避免误删 frontmatter），397 测试 |

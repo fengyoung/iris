@@ -57,5 +57,11 @@ Thumbs.db
 # Benchmarks
 .benchmarks/
 
+# Temp quality docs
+.tmp_quality_docs/
+
+# Random temp files
+PjMMbaKyroI3X4xMHJ4c0hIln3g
+
 # Pytest
 .pytest_cache/

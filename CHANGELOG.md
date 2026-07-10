@@ -4,6 +4,52 @@
 
 ---
 
+## v3.11.15 (2026-07-10)
+
+### Bug 修复
+
+**Trello 客户端 Python 3.13 SSL 兼容：**
+- 新增 `_TrelloHTTPSConnection` 类，IP 直连时使用正确 SNI hostname
+- `_request` 按 URL 类型分流：IP → `_request_via_ip` / 域名 → `urlopen`
+- 修复 `_make_trello_url` 域名回退双 `/1` 路径 bug
+- `_load_trello_config` 增加 `resolve_env_vars` 解析 `${VAR}` 占位符
+
+---
+
+## v3.11.14 (2026-07-10)
+
+### 新功能
+
+- **新增 `iris-process` Skill**：富媒体输入自动检测 → `route-model` 路由 → 三阶段 process 流水线
+- **职责边界清晰化**：`iris-ask` 收窄为纯文本问答，富媒体改走 `iris-process`
+
+### Bug 修复
+
+- `complex_input/pipeline.py` Stage 3 失败路径 f-string 模板变量未替换（`{{query}}` → `{query}`）
+
+### 开源脱敏（未发布随 3.11.14 批量提交）
+
+**源码脱敏：**
+- `src/iris/analysis/service.py`：`_SUB_AREA_KEYWORDS` 字典清空，移除 11 个硬编码内部业务子领域词条（某检测项目 / 图像采集3.0 / 图像验证 / 视频审核 / 在线评估 / 工作流 / 消费品类 / 二手商品 / 兴趣品类 / 推荐 / 搜索），改为用户自定义注释说明；移除注释中员工姓名
+- `src/iris/wiki/navigation.py`：`EXTERNAL_CONCEPT_PATTERNS` 从 15 个业务特定正则缩减为 2 个通用示例，添加用户自定义说明
+- `src/iris/wiki/term_extractor.py`、`src/iris/analysis/_biweekly_types.py`：移除注释/文档字符串中的员工姓名与内部项目代号
+- `templates/prompt/biweekly_stage3_direction.md`、`biweekly_stage1_filter.md`：示例中的内部项目代号替换为通用占位符
+- `scripts/extract_weekly_reports.py`：移除注释中的员工姓名及真实企业邮箱域名
+- `iris-report SKILL.md` 移除个人姓名示例
+
+**测试数据脱敏（9 个测试文件）：**
+- 员工真实姓名 → 张三 / 李四 / 王小明 / 王五 / 赵六；内部项目代号 → 项目Alpha / Beta / Gamma / Delta / Epsilon
+- 企业邮箱（`*@example.com`）→ `*@example.com`
+
+**Git 追踪清理：**
+- `.gitignore` 新增：`.claude/scheduled_tasks.json`、`.claude/scheduled_tasks.lock`、`方案清单.md`、`需求清单.md`
+- `git rm --cached` 取消追踪上述 4 个文件（文件保留在磁盘）
+
+**同期 Bug 修复（测试数据替换后发现）：**
+- `test_deep_eval.py`、`test_biweekly_dedup.py`、`test_weekly_report_extract.py` 断言调整
+
+---
+
 ## v3.11.13 (2026-07-10)
 
 ### 开源脱敏全面清理
