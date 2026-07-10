@@ -2,10 +2,12 @@
 
 DNS 解析使用独立子进程 dig + 线程安全缓存，通过 URL 重写（IP 替换域名）
 + 自定义 Host 头实现，避免全局 socket.getaddrinfo monkey-patch。
+IP 直连时通过自定义 HTTPS 连接设置正确的 SNI hostname，确保证书校验通过。
 """
 
 from __future__ import annotations
 
+import http.client
 import json
 import socket
 import ssl
@@ -14,7 +16,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 from urllib import error, request
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 TRELLO_API_BASE = "https://api.trello.com/1"
 _TRELLO_DOMAIN = "api.trello.com"
@@ -66,13 +68,30 @@ def _make_trello_url(path: str) -> str:
     """
     ip = _resolve_via_dns(_TRELLO_DOMAIN)
     if ip != _TRELLO_DOMAIN:
-        # 使用 https://IP/path 并添加 Host header
         return f"https://{ip}{path}"
-    return f"{TRELLO_API_BASE}{path}"
+    return f"https://{_TRELLO_DOMAIN}{path}"
 
 
 class TrelloClientError(RuntimeError):
     """Trello API 错误。"""
+
+
+class _TrelloHTTPSConnection(http.client.HTTPSConnection):
+    """支持 IP 直连 + 正确 SNI hostname 的 HTTPS 连接。
+
+    Python 3.13 的 urllib 在 URL 为 IP 时会将 IP 作为 SNI hostname，
+    导致证书校验失败。此连接类允许指定独立的 SNI hostname。
+    """
+
+    _sni_hostname: str = ""
+
+    def connect(self) -> None:
+        self.sock = socket.create_connection((self.host, self.port), self.timeout)
+        if self._tunnel_host:
+            self._tunnel()
+        # IP 直连时使用真实域名作为 SNI hostname，确保 TLS 证书校验通过
+        sni = self._sni_hostname or self.host
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=sni)
 
 
 class TrelloClient:
@@ -202,14 +221,16 @@ class TrelloClient:
                        if v is not None)
         full_path = f"/1{path}?{qs}"
         url = _make_trello_url(full_path)
-
-        # 自定义 SSL context（TLS 1.2+，验证证书）
-        ssl_context = ssl.create_default_context()
+        parsed = urlparse(url)
 
         req = request.Request(url=url, method=method)
-        # 如果使用了 IP 直连，设置正确的 Host 头
         req.add_header("Host", _TRELLO_DOMAIN)
 
+        # IP 直连时使用自定义 HTTPS 连接，确保 SNI hostname 为域名
+        if parsed.hostname and _is_ipv4(parsed.hostname):
+            return self._request_via_ip(method, req, parsed)
+
+        ssl_context = ssl.create_default_context()
         try:
             with request.urlopen(req, timeout=30, context=ssl_context) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
@@ -218,6 +239,34 @@ class TrelloClient:
             raise TrelloClientError(f"Trello HTTP {exc.code}: {detail}") from exc
         except error.URLError as exc:
             raise TrelloClientError(f"Trello 网络错误: {exc}") from exc
+        return self._parse_response(raw)
+
+    def _request_via_ip(self, method: str, req: request.Request,
+                        parsed) -> Any:
+        """通过 IP 直连 + 自定义 SNI hostname 发起请求。"""
+        hostname = parsed.hostname
+        port = parsed.port or 443
+        selector = parsed.path
+        if parsed.query:
+            selector += "?" + parsed.query
+
+        ssl_context = ssl.create_default_context()
+        conn = _TrelloHTTPSConnection(hostname, port, context=ssl_context, timeout=30)
+        conn._sni_hostname = _TRELLO_DOMAIN
+
+        try:
+            conn.request(method, selector, body=req.data, headers=dict(req.headers))
+            resp = conn.getresponse()
+            raw = resp.read().decode("utf-8", errors="replace")
+            if resp.status >= 400:
+                raise TrelloClientError(f"Trello HTTP {resp.status}: {raw}")
+        except (socket.timeout, OSError, ssl.SSLError) as exc:
+            raise TrelloClientError(f"Trello 网络错误: {exc}") from exc
+        finally:
+            conn.close()
+        return self._parse_response(raw)
+
+    def _parse_response(self, raw: str) -> Any:
         if not raw.strip():
             return {}
         try:

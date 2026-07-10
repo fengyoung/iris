@@ -12,7 +12,7 @@ _SRC = _PROJECT_ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from iris.config.loader import load_config_bundle
+from iris.config.loader import load_config_bundle, resolve_env_vars, load_env_file
 from iris.trello.client import TrelloClientError
 from iris.trello.service import TrelloService
 from iris.trello.llm import TrelloLLM
@@ -24,7 +24,11 @@ def _load_trello_config(project_root: str) -> dict:
     if not config_path.exists():
         raise SystemExit(f"缺少 Trello 配置文件: {config_path}")
     with config_path.open("r", encoding="utf-8") as f:
-        return json.load(f)
+        raw_config = json.load(f)
+    # 加载 .env 并解析 ${VAR} 占位符（TRELLO_API_KEY / TRELLO_TOKEN 等）
+    root_path = Path(project_root).resolve()
+    env = load_env_file(root_path / ".env")
+    return resolve_env_vars(raw_config, env)
 
 
 def _emit(command: str, payload: dict, *, pretty: bool) -> None:
