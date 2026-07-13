@@ -314,11 +314,8 @@ class MemoryLifecycle:
             return {"items": {}, "updated_at": None}
 
     def _save_archive(self, data: Dict[str, Any]) -> None:
-        self._archive_path.parent.mkdir(parents=True, exist_ok=True)
-        self._archive_path.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        from iris.memory.long_term import _atomic_write_json
+        _atomic_write_json(self._archive_path, data)
 
 
 def _now_iso() -> str:

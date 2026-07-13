@@ -4,17 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
-import random
-import socket
-import time
 from typing import Any, Dict, List, Optional
-from urllib import error, request
 
 logger = logging.getLogger(__name__)
 
 # 默认参数
 _DEFAULT_TEMPERATURE = 0.2
-_MAX_BACKOFF_SECONDS = 60  # 指数退避上限
 
 from iris.config.loader import ConfigBundle
 from iris.core.llm_types import LLMRequest, LLMResponse  # 从 core/ 迁移（消除循环依赖）
@@ -389,41 +384,9 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
 
     def _post_json(self, url: str, payload: Dict[str, Any], headers: Dict[str, str], *,
                    timeout: int = 60, max_retries: int = 0) -> Dict[str, Any]:
-        body = json.dumps(payload).encode("utf-8")
-        req = request.Request(url=url, data=body, method="POST")
-        req.add_header("Content-Type", "application/json")
-        for key, value in headers.items():
-            req.add_header(key, value)
-
-        last_exc: Optional[Exception] = None
-        for attempt in range(max_retries + 1):
-            if attempt > 0:
-                backoff = min(2 ** attempt + random.uniform(0, 1), _MAX_BACKOFF_SECONDS)
-                time.sleep(backoff)
-
-            try:
-                with request.urlopen(req, timeout=timeout) as response:
-                    raw = response.read().decode("utf-8")
-            except error.HTTPError as exc:
-                detail = exc.read().decode("utf-8", errors="replace")
-                last_exc = LLMProviderError(f"LLM 请求失败: HTTP {exc.code} -> {detail}")
-                if exc.code != 429 and exc.code < 500:
-                    raise last_exc
-                continue
-            except error.URLError as exc:
-                last_exc = LLMProviderError(f"LLM 网络请求失败: {exc}")
-                continue
-            except socket.timeout as exc:
-                last_exc = LLMProviderError("LLM 请求超时")
-                continue
-
-            try:
-                return json.loads(raw)
-            except json.JSONDecodeError as exc:
-                last_exc = LLMProviderError("LLM 返回了无法解析的 JSON")
-                continue
-
-        raise last_exc or LLMProviderError("LLM 请求失败，已达最大重试次数")
+        from iris.core.http_client import http_post_json
+        return http_post_json(url, payload, headers, timeout=timeout, max_retries=max_retries,
+                             error_factory=lambda msg: LLMProviderError(f"LLM 请求失败: {msg}"))
 
 
 class NullLLMProvider(BaseLLMProvider):

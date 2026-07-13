@@ -51,8 +51,8 @@ class SessionMemoryStore:
             "last_mode": mode,
             "updated_at": datetime.now().isoformat(timespec="seconds"),
         }
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        from iris.memory.long_term import _atomic_write_json
+        _atomic_write_json(self._path, payload)
         return payload
 
 

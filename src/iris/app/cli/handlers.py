@@ -618,6 +618,8 @@ def handle_build_vector_index(args, bundle, logger) -> int:
         _emit_output(args.command, {"error": "embedding 配置不完整"}, pretty=args.pretty)
         return 1
 
+    from iris.ingest import iter_chunk_items
+    from iris.ingest.chunker import ChunkRecord
     metadata_root = bundle.root / "data" / "metadata"
     sources = bundle.data_source.get("sources", {})
     target_sources = {args.source: sources[args.source]} if args.source and args.source in sources else sources
@@ -627,9 +629,7 @@ def handle_build_vector_index(args, bundle, logger) -> int:
         if not summary_path.exists():
             results.append({"source": source_name, "status": "skipped", "reason": "chunk_summary 不存在"})
             continue
-        payload = json.loads(summary_path.read_text(encoding="utf-8"))
-        from iris.ingest.chunker import ChunkRecord
-        chunks = [ChunkRecord(**item) for item in payload["chunks"]]
+        chunks = [ChunkRecord(**item) for item in iter_chunk_items(metadata_root, {source_name: sources.get(source_name, {})})]
         index_path = metadata_root / f"{source_name}_vector_index"
         existing = VectorIndex(index_path)
         existing.load()

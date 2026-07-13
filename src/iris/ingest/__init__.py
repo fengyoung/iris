@@ -1,6 +1,6 @@
 """文档扫描与索引模块。"""
 
-from .chunker import ChunkRecord, ChunkSlim, ChunkSummary, MarkdownChunker
+from .chunker import ChunkRecord, ChunkSlim, ChunkSummary, MarkdownChunker, iter_chunk_items
 from .pdf_extractor import PDFExtractor, PDFExtractorError
 from .scanner import DocumentRecord, MarkdownScanner, ScanSummary
 
@@ -14,4 +14,5 @@ __all__ = [
     "PDFExtractor",
     "PDFExtractorError",
     "ScanSummary",
+    "iter_chunk_items",
 ]

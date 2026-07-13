@@ -2,12 +2,7 @@
 
 from __future__ import annotations
 
-import json
-import random
-import socket
-import time
 from typing import List, Optional
-from urllib import error, request
 
 
 class EmbedderError(RuntimeError):
@@ -36,35 +31,10 @@ class TextEmbedder:
         return vectors[0] if vectors else []
 
     def _post_json(self, url: str, payload: dict) -> dict:
-        body = json.dumps(payload).encode("utf-8")
-        req = request.Request(url=url, data=body, method="POST")
-        req.add_header("Content-Type", "application/json")
-        req.add_header("Authorization", f"Bearer {self._api_key}")
-        last_exc: Optional[Exception] = None
-        for attempt in range(self._max_retries + 1):
-            if attempt > 0:
-                time.sleep(2 ** attempt + random.uniform(0, 1))
-            try:
-                with request.urlopen(req, timeout=self._timeout) as response:
-                    raw = response.read().decode("utf-8")
-            except error.HTTPError as exc:
-                detail = exc.read().decode("utf-8", errors="replace")
-                last_exc = EmbedderError(f"Embedding HTTP {exc.code}: {detail}")
-                if exc.code != 429 and exc.code < 500:
-                    raise last_exc
-                continue
-            except error.URLError as exc:
-                last_exc = EmbedderError(f"Embedding 网络错误: {exc}")
-                continue
-            except socket.timeout:
-                last_exc = EmbedderError("Embedding 超时")
-                continue
-            try:
-                return json.loads(raw)
-            except json.JSONDecodeError as exc:
-                last_exc = EmbedderError(f"Embedding 返回非 JSON: {exc}")
-                continue
-        raise last_exc or EmbedderError("Embedding 请求失败，已达最大重试次数")
+        from iris.core.http_client import http_post_json
+        return http_post_json(url, payload, {"Authorization": f"Bearer {self._api_key}"},
+                             timeout=self._timeout, max_retries=self._max_retries,
+                             error_factory=lambda msg: EmbedderError(f"Embedding {msg}"))
 
 
 def build_embedder_from_config(llm_config: dict) -> Optional[TextEmbedder]:

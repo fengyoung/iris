@@ -362,6 +362,24 @@ def _build_structural_tags(relative_path: str, section_path: List[str], content:
     return tags
 
 
+def iter_chunk_items(metadata_root: Path, sources: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
+    """遍历所有已启用数据源的 chunk 条目，统一 JSON 加载与异常处理。
+
+    供 searcher / discovery / handlers 复用，消除分散在 3 处的重复加载逻辑。
+    """
+    for source_name, cfg in sources.items():
+        if isinstance(cfg, dict) and not cfg.get("enabled", True):
+            continue
+        summary_path = metadata_root / f"{source_name}_chunk_summary.json"
+        if not summary_path.exists():
+            continue
+        try:
+            payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        yield from payload.get("chunks", [])
+
+
 def _extract_fields(text: str) -> Dict[str, List[str]]:
     if len(text) < 20:
         return {}

@@ -4,6 +4,47 @@
 
 ---
 
+## v3.11.16 (2026-07-13)
+
+### 安全加固（P0）
+
+**Memory 原子写入：**
+- 新增 `_atomic_write_json()` 函数（`tempfile.mkstemp` + `os.replace`），崩溃不损坏 JSON
+- 覆盖 `long_term.py`、`session.py`、`working.py`、`lifecycle.py` 全部 `_save` 路径
+
+**API Key 明文提醒：**
+- 新增 `_check_plaintext_keys()` — 启动时检测 `.env` 中的 API Key/Token，输出 stderr 安全提醒，建议迁移到 macOS Keychain
+
+**LLMQueryPlanner 实现：**
+- `LLMQueryPlanner.enhance()` 从空桩升级为完整实现：低置信度（generic/topic 意图或实体 <2）触发 LLM 语义增强，异常优雅回退规则规划
+
+### 工程质量（P1）
+
+**HTTP 客户端去重（-85 行重复代码）：**
+- 新增 `core/http_client.py`：`http_post_json()` 统一 POST + 指数退避重试逻辑
+- `provider.py` 和 `embedder.py` 的 `_post_json` 改为委托共享工具
+- 清理 `provider.py` 不再需要的 `random`/`socket`/`time`/`urllib` 导入
+
+**Chunk JSON 加载去重：**
+- 新增 `ingest.chunker.iter_chunk_items()` 生成器，统一 3 处重复的 chunk_summary 加载模式
+- `searcher.py`、`discovery.py`、`handlers.py` 全部切换
+
+### 测试（+63 用例）
+
+- 新增 `test_http_client.py`（14 用例）：POST 成功/重试/耗尽/不可重试/自定义异常/边界
+- 新增 `test_planner.py`（23 用例）：意图识别/实体提取/LLM 增强触发/降级回退
+- 新增 `test_chunker.py`（8 用例）：空源/禁用源/缺失/多源/损坏 JSON 容错
+- 新增 `test_config_security.py`（11 用例）：明文 Key 检测/原子写入/内容完整性
+
+### 项目指标
+
+- 测试：397 → **460**（34 文件）
+- 源文件：98 → **99**（+`http_client.py`）
+- 模块：19 → **20**
+- 知识库：689 文档 / 3,956 Chunk / 6,789 向量
+
+---
+
 ## v3.11.15 (2026-07-10)
 
 ### Bug 修复

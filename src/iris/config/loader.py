@@ -196,6 +196,7 @@ def load_config_bundle(
     if env_file is None:
         env_file = root / ".env"
     env = load_env_file(env_file)
+    _check_plaintext_keys(env_file)
 
     # 配置文件加载，支持 .example 回退
     loaded: Dict[str, Any] = {}
@@ -249,6 +250,30 @@ def load_config_bundle(
             )
             raise ConfigError(f"配置校验失败: {errors}") from exc
         raise ConfigError(f"配置加载异常: {exc}") from exc
+
+
+def _check_plaintext_keys(env_path: Optional[Path]) -> None:
+    """检测 .env 中是否包含明文 API Key，输出安全提醒。"""
+    if not env_path or not env_path.exists():
+        return
+    content = env_path.read_text(encoding="utf-8")
+    key_count = 0
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "=" in stripped and any(kw in stripped.upper() for kw in ("API_KEY", "APIKEY", "TOKEN", "SECRET")):
+            key_count += 1
+    if key_count:
+        msg = (
+            f"⚠️  安全提醒：.env 文件中检测到 {key_count} 个明文 API Key/Token。"
+            "建议迁移到 macOS Keychain（`iris secrets-set --key <NAME>`），"
+            "然后从 .env 中移除对应明文值。"
+        )
+        # 使用 logging 和 stderr 双通道输出，确保用户能看到
+        logger.warning(msg)
+        import sys
+        print(msg, file=sys.stderr)
 
 
 def _load_json(path: Path) -> Dict[str, Any]:

@@ -154,20 +154,13 @@ class CandidateDiscovery:
         return None
 
     def _load_chunks(self):
+        from iris.ingest import iter_chunk_items
         chunks = []
-        for source_name, cfg in self._config.data_source.get("sources", {}).items():
-            if cfg.get("enabled", True):
-                summary_path = self._metadata_root / f"{source_name}_chunk_summary.json"
-                if summary_path.exists():
-                    try:
-                        payload = json.loads(summary_path.read_text(encoding="utf-8"))
-                        for item in payload.get("chunks", []):
-                            try:
-                                chunks.append(ChunkSlim.from_dict(item))
-                            except (TypeError, ValueError):
-                                continue
-                    except (json.JSONDecodeError, OSError):
-                        continue
+        for item in iter_chunk_items(self._metadata_root, self._config.data_source.get("sources", {})):
+            try:
+                chunks.append(ChunkSlim.from_dict(item))
+            except (TypeError, ValueError):
+                continue
         return chunks
 
     def export_jsonl(self, candidates: List[CandidateItem], path: Path) -> Path:

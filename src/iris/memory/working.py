@@ -36,8 +36,20 @@ class WorkingContextStore:
     def save(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """保存工作上下文到文件。"""
         payload["updated_at"] = datetime.now().isoformat(timespec="seconds")
+        import os, tempfile
+        rendered = self._render(payload)
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(self._render(payload), encoding="utf-8")
+        fd, tmp = tempfile.mkstemp(suffix=".md", prefix=".tmp-", dir=self._path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(rendered)
+            os.replace(tmp, self._path)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
         return payload
 
     def update(self, *, current_task: str = None, pending_items: List[str] = None,

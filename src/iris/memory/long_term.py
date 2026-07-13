@@ -108,8 +108,7 @@ class UserProfileMemoryStore:
         self._save(payload)
 
     def _save(self, payload: Dict[str, Any]) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        _atomic_write_json(self._path, payload)
 
 
 class CorrectionMemoryStore:
@@ -218,8 +217,25 @@ class CorrectionMemoryStore:
         self._save(payload)
 
     def _save(self, payload: Dict[str, Any]) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        _atomic_write_json(self._path, payload)
+
+
+def _atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
+    """原子写入 JSON：先写临时文件，再 os.replace 保证崩溃不损坏数据。"""
+    import os
+    import tempfile
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(suffix=".json", prefix=".tmp-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _long_term_dir(config: ConfigBundle) -> Path:

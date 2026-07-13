@@ -103,19 +103,72 @@ def _extract_entities(query: str) -> List[str]:
 
 
 class LLMQueryPlanner:
-    """低置信度时调用 LLM 增强查询规划。
+    """LLM 增强查询规划：低置信度时调用 LLM 做语义增强和实体识别。
 
-    当前为占位实现（步骤 2.3 简化阶段）：直接返回规则规划结果。
-    未来将在此处接入 LLM 对低置信度查询的语义增强和实体识别。
+    使用 LLM 对规则规划结果进行二次分析：校验意图分类、补全实体、推断时间范围。
+    仅在规则规划置信度低（关键词匹配弱、实体稀疏）时触发，避免不必要的 LLM 调用。
     """
 
+    _LOW_CONFIDENCE_INTENTS = {"general", "topic"}
+    _MIN_ENTITIES_FOR_SKIP = 2
+
     def __init__(self, llm_provider, prompt_loader):
-        self._llm_provider = llm_provider
-        self._prompt_loader = prompt_loader
+        self._llm = llm_provider
+        self._prompts = prompt_loader
 
     def enhance(self, rule_plan: QueryPlan) -> QueryPlan:
-        """[占位] 返回规则规划结果，LLM 增强尚未启用。"""
+        """LLM 增强：低置信度时调用模型二次分析，否则返回原规划。"""
+        if not self._should_enhance(rule_plan):
+            return rule_plan
+        try:
+            enhanced = self._call_llm_enhance(rule_plan)
+            if enhanced:
+                return enhanced
+        except Exception:
+            logger.warning("LLM 查询增强失败，回退规则规划", exc_info=True)
         return rule_plan
+
+    def _should_enhance(self, plan: QueryPlan) -> bool:
+        """判断是否需要 LLM 增强：意图 generic / 实体不足。"""
+        if plan.query_intent not in self._LOW_CONFIDENCE_INTENTS:
+            return len(plan.entities) < self._MIN_ENTITIES_FOR_SKIP
+        return True
+
+    def _call_llm_enhance(self, plan: QueryPlan) -> Optional[QueryPlan]:
+        """调用 LLM 做语义增强，成功返回新 QueryPlan，失败返回 None。"""
+        from iris.llm import LLMRequest
+
+        prompt = (
+            f"分析以下查询，提取关键信息并以 JSON 返回：\n"
+            f"查询：{plan.original_query}\n"
+            f"规则预判：意图={plan.query_intent}，类型={plan.question_type}，时间={plan.time_scope}\n"
+            f'返回格式：{{"intent":"definition|comparison|timeline|risk|reason|general",'
+            f'"question_type":"project|term|topic","time_scope":"recent|historical|unspecified",'
+            f'"entities":["实体1","实体2"],"keywords":["关键词1"]}}'
+        )
+
+        request = LLMRequest(
+            prompt=prompt,
+            route_context={"input_type": "text", "task_type": "query_enhancement", "use_case": "retrieval"},
+        )
+        response = self._llm.generate(request, temperature=0.0, max_tokens=256)
+        if not response or not response.text:
+            return None
+
+        data = json.loads(response.text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip())
+        return QueryPlan(
+            original_query=plan.original_query,
+            normalized_query=plan.normalized_query,
+            query_intent=str(data.get("intent", plan.query_intent)),
+            question_type=str(data.get("question_type", plan.question_type)),
+            time_scope=str(data.get("time_scope", plan.time_scope)),
+            entities=list(data.get("entities", plan.entities)),
+            keywords=list(data.get("keywords", plan.keywords)),
+            preferred_sources=list(plan.preferred_sources),
+            answer_focus=list(plan.answer_focus),
+            explain=plan.explain + ["LLM 增强已应用"],
+            llm_enhanced=True,
+        )
 
 
 def _extract_keywords(query: str) -> List[str]:
