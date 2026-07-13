@@ -9,7 +9,14 @@ from pathlib import Path
 
 import pytest
 
+from iris.config import loader as _loader
 from iris.config.loader import _check_plaintext_keys
+
+
+@pytest.fixture(autouse=True)
+def _reset_plaintext_warning():
+    """每个测试前重置去重标志，确保独立运行。"""
+    _loader._plaintext_keys_warned = False
 from iris.memory.long_term import _atomic_write_json
 
 

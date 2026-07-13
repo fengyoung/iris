@@ -4,6 +4,37 @@
 
 ---
 
+## v3.11.17 (2026-07-13)
+
+### 安全加固
+
+**.env→Keychain 密钥迁移：**
+- 4 个 API Key（DEEPSEEK_API_KEY / BAILIAN_API_KEY / TRELLO_API_KEY / TRELLO_TOKEN）从 `.env` 明文迁移到 macOS Keychain
+- `.env` 中对应行已注释保留为标记，不再影响安全扫描
+
+**去重安全提醒：**
+- `_check_plaintext_keys()` 新增进程级去重标志 `_plaintext_keys_warned`，同一进程只输出一次提醒
+- 空值占位（如 `LARK_APP_SECRET=`）不再计入明文计数
+
+### Bug 修复
+
+**secrets-list 输出不全：**
+- macOS `security` 命令输出包含 `<blob>` 标签（如 `"acct"<blob>="KEY_NAME"`），原有 regex 未匹配导致多 key 漏显示
+- `list_secrets()` 重构为遍历已知键名表 + `get_secret()`，确保所有已存储密钥正确显示
+
+### 测试
+
+- 新增 `test_config_security` 中 `_reset_plaintext_warning` fixture，每个测试前重置去重标志，保证独立运行
+- 460 → 461 测试
+
+### 项目指标
+
+- 单元测试：**461**（34 文件）
+- 数据源文档：691
+- Keychain 密钥：4 个已保护
+
+---
+
 ## v3.11.16 (2026-07-13)
 
 ### 安全加固（P0）

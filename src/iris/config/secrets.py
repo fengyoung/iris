@@ -112,26 +112,20 @@ def delete_secret(key: str) -> bool:
 def list_secrets() -> List[str]:
     """列出 Keychain 中所有 Iris 密钥名称（不显示值）。
 
+    macOS security 命令一次只能查询单个 -a（account），所以需要遍历已知键名验证存在性。
+    这不如全量枚举优雅，但 Keychain API 层面不支持 service 下所有 account 的批量列表。
+
     Returns:
         密钥名称列表
     """
-    try:
-        result = subprocess.run(
-            [
-                "security", "find-generic-password",
-                "-s", KEYCHAIN_SERVICE,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        # 从 security 的输出中提取密钥名称（-a 对应的 account）
-        names: List[str] = []
-        for line in result.stdout.split("\n"):
-            if '"acct"' in line or "acct" in line:
-                match = re.search(r'"acct"[^=]*=\s*"([^"]+)"', line)
-                if match:
-                    names.append(match.group(1))
-        return names
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return []
+    # 常见键名列表（新增键名时追加）
+    _KNOWN_KEYS = [
+        "DEEPSEEK_API_KEY", "BAILIAN_API_KEY",
+        "TRELLO_API_KEY", "TRELLO_TOKEN",
+        "LARK_APP_ID", "LARK_APP_SECRET",
+    ]
+    names: List[str] = []
+    for key in _KNOWN_KEYS:
+        if get_secret(key):
+            names.append(key)
+    return names

@@ -252,8 +252,14 @@ def load_config_bundle(
         raise ConfigError(f"配置加载异常: {exc}") from exc
 
 
+_plaintext_keys_warned = False
+
+
 def _check_plaintext_keys(env_path: Optional[Path]) -> None:
-    """检测 .env 中是否包含明文 API Key，输出安全提醒。"""
+    """检测 .env 中是否包含明文 API Key，输出安全提醒（同进程仅一次）。"""
+    global _plaintext_keys_warned
+    if _plaintext_keys_warned:
+        return
     if not env_path or not env_path.exists():
         return
     content = env_path.read_text(encoding="utf-8")
@@ -263,14 +269,18 @@ def _check_plaintext_keys(env_path: Optional[Path]) -> None:
         if not stripped or stripped.startswith("#"):
             continue
         if "=" in stripped and any(kw in stripped.upper() for kw in ("API_KEY", "APIKEY", "TOKEN", "SECRET")):
+            # 跳过空值占位（如 LARK_APP_SECRET=）
+            val = stripped.split("=", 1)[1].strip().strip('"').strip("'")
+            if not val:
+                continue
             key_count += 1
     if key_count:
+        _plaintext_keys_warned = True
         msg = (
             f"⚠️  安全提醒：.env 文件中检测到 {key_count} 个明文 API Key/Token。"
             "建议迁移到 macOS Keychain（`iris secrets-set --key <NAME>`），"
             "然后从 .env 中移除对应明文值。"
         )
-        # 使用 logging 和 stderr 双通道输出，确保用户能看到
         logger.warning(msg)
         import sys
         print(msg, file=sys.stderr)
