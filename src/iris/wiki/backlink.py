@@ -19,11 +19,14 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from iris.utils.shared import atomic_write_json, now_iso
 
 from .context_loader import WikiContextLoader
+
+if TYPE_CHECKING:
+    from .context_loader import WikiPageInfo
 
 logger = logging.getLogger(__name__)
 
@@ -41,15 +44,16 @@ _SOURCE_REF_RE = re.compile(r"^(?:.*/)?\d{8}-")
 class BacklinkIndex:
     """反向引用索引。
 
-    inbound: {被引用页面标题: [引用它的页面标题列表]}
+    inbound:  {被引用页面标题: [引用它的页面标题列表]}
     outbound: {页面标题: [它引用的页面标题列表]}
-    orphans: 零入链页面列表
+    orphans:  零入链页面列表
+    unique_inbound_edges: 去重后的入链边总数（= sum(len(v) for v in inbound.values())）
     """
     inbound: Dict[str, List[str]] = field(default_factory=dict)
     outbound: Dict[str, List[str]] = field(default_factory=dict)
     orphans: List[str] = field(default_factory=list)
     total_pages: int = 0
-    total_links: int = 0
+    unique_inbound_edges: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -57,7 +61,7 @@ class BacklinkIndex:
             "outbound": self.outbound,
             "orphans": self.orphans,
             "total_pages": self.total_pages,
-            "total_links": self.total_links,
+            "unique_inbound_edges": self.unique_inbound_edges,
         }
 
     @classmethod
@@ -67,7 +71,9 @@ class BacklinkIndex:
             outbound=data.get("outbound", {}),
             orphans=data.get("orphans", []),
             total_pages=data.get("total_pages", 0),
-            total_links=data.get("total_links", 0),
+            # 兼容旧格式：total_links 是旧字段名
+            unique_inbound_edges=data.get("unique_inbound_edges",
+                                          data.get("total_links", 0)),
         )
 
 
@@ -103,6 +109,32 @@ class BacklinkBuilder:
         pages = self._load_pages_with_links()
         self._cache = self._build_index(pages)
         return self._cache
+
+    def build_from_wiki_pages(self, pages: "List[WikiPageInfo]") -> BacklinkIndex:
+        """从已加载的 WikiPageInfo 列表构建反向引用索引（零文件扫描）。
+
+        供 WikiGraph.refresh() 使用，避免重复扫描 Wiki 目录。
+        """
+        links: Dict[str, List[str]] = {}
+        for page_info in pages:
+            title = page_info.title
+            if not title:
+                continue
+            raw_links = _LINK_RE.findall(page_info.body)
+            cleaned: List[str] = []
+            for raw in raw_links:
+                target = raw.split("|")[0].split("#")[0].strip()
+                if not target:
+                    continue
+                if _NOISE_TARGET_RE.match(target):
+                    continue
+                if _SOURCE_REF_RE.match(target):
+                    continue
+                cleaned.append(target)
+            links[title] = cleaned
+        index = self._build_index(links)
+        self._cache = index
+        return index
 
     def invalidate_cache(self) -> None:
         """清除缓存，下次 build() 将重新扫描。"""
@@ -201,5 +233,5 @@ class BacklinkBuilder:
             outbound=pages,
             orphans=orphans,
             total_pages=len(all_titles),
-            total_links=unique_links,
+            unique_inbound_edges=unique_links,
         )

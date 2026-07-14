@@ -114,6 +114,7 @@ class ComplexInputPipeline:
         Returns:
             PipelineResult
         """
+        from iris.utils.constants import FILE_TYPE_DOCUMENT as _DOC_TYPE
         detection = self._detector.detect(query, file_paths=file_paths)
 
         if not detection.is_complex:
@@ -137,25 +138,31 @@ class ComplexInputPipeline:
             )
 
         # Stage 1: base_model 生成 adv_model 指令
-        stage1_text, stage1_model = self._stage1_prompt_gen(
-            query, detection.file_type
-        )
-        if stage1_text.startswith("[Stage1 失败]"):
-            result = PipelineResult(
-                query=query,
-                is_complex=True,
-                file_type=detection.file_type,
-                stage1_prompt=stage1_text,
-                stage1_model=stage1_model,
-                stage2_output=None,
-                stage2_model=None,
-                stage3_output=f"指令生成阶段不可用：{stage1_text}",
-                stage3_model=stage1_model,
-                file_paths=detection.file_paths,
-                detection_reason=detection.reason,
+        # DOCX 路径 Stage 2 不调用 LLM，Stage 1 可以省略 API 调用，
+        # 直接用查询文本作为提取指令即可。
+        if detection.file_type == _DOC_TYPE:
+            stage1_text = query
+            stage1_model = None
+        else:
+            stage1_text, stage1_model = self._stage1_prompt_gen(
+                query, detection.file_type
             )
-            self._maybe_write_output(result, output_path)
-            return result
+            if stage1_text.startswith("[Stage1 失败]"):
+                result = PipelineResult(
+                    query=query,
+                    is_complex=True,
+                    file_type=detection.file_type,
+                    stage1_prompt=stage1_text,
+                    stage1_model=stage1_model,
+                    stage2_output=None,
+                    stage2_model=None,
+                    stage3_output=f"指令生成阶段不可用：{stage1_text}",
+                    stage3_model=stage1_model,
+                    file_paths=detection.file_paths,
+                    detection_reason=detection.reason,
+                )
+                self._maybe_write_output(result, output_path)
+                return result
 
         # Stage 2: adv_model 多模态理解
         stage2_text, stage2_model = self._stage2_multimodal(
@@ -296,8 +303,8 @@ class ComplexInputPipeline:
         content_parts.append({"type": "text", "text": "\n".join(header_lines)})
 
         adapter = PdfAdapter()
-        total_images = 0
         pdf_errors: List[str] = []
+        any_pdf_success = False
 
         for pdf_path in detection.file_paths:
             try:
@@ -305,6 +312,8 @@ class ComplexInputPipeline:
             except PdfAdapterError as exc:
                 pdf_errors.append(f"{Path(pdf_path).name}: {exc}")
                 continue
+
+            any_pdf_success = True
 
             # PDF 文字摘要
             total_pages = pdf_content.total_pages
@@ -321,7 +330,6 @@ class ComplexInputPipeline:
                 content_parts.append(
                     {"type": "image_url", "image_url": {"url": img.data_url}}
                 )
-                total_images += 1
 
             # 记录非致命错误
             if pdf_content.error:
@@ -332,11 +340,7 @@ class ComplexInputPipeline:
                 {"type": "text", "text": f"\n处理警告：{'; '.join(pdf_errors)}"}
             )
 
-        # 如果全部 PDF 处理失败，返回错误
-        if total_images == 0 and not any(
-            p.get("type") == "text" and "提取文字" in str(p.get("text", ""))
-            for p in content_parts
-        ):
+        if not any_pdf_success:
             return (
                 f"[Stage2 跳过] 所有 PDF 文件处理失败：{'; '.join(pdf_errors) if pdf_errors else '未知错误'}",
                 None,

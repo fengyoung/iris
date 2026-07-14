@@ -31,6 +31,7 @@ class QAService:
         self._working_context = WorkingContextStore(config)
         self._memory_updater = MemoryUpdater(config)
         self._logger = IrisLogger(config)
+        self._graph_cache: Any = None      # 惰性加载并缓存 WikiGraph（None=未尝试, False=不可用）
 
     def ask(self, question: str, *, top_k: int = 5, mode: str = "local") -> QAResponse:
         memory_updates = self._memory_updater.apply_updates(question)
@@ -179,16 +180,26 @@ class QAService:
                                                           "structured_context": structured_context,
                                                           "graph_context": graph_context})
 
+    def _get_graph(self) -> "Any":
+        """惰性加载并缓存 WikiGraph 实例（会话内只读一次磁盘）。"""
+        if self._graph_cache is None:
+            try:
+                from iris.wiki.graph import WikiGraph
+                g = WikiGraph(self._config)
+                self._graph_cache = g if g.load() else False
+            except Exception:
+                self._graph_cache = False
+        return self._graph_cache if self._graph_cache is not False else None
+
     def _render_graph_context(self, wiki_hits: list) -> str:
         """从知识图谱加载相关实体上下文（静默失败，图谱不存在时返回空）。"""
         if not wiki_hits:
             return "无"
         try:
-            from iris.wiki.graph import WikiGraph
-            graph = WikiGraph(self._config)
-            if not graph.load():
+            graph = self._get_graph()
+            if graph is None:
                 return "无"
-            related_parts: list[str] = []
+            related_parts: List[str] = []
             for hit in wiki_hits[:3]:
                 title = hit.get("title", "")
                 if not title:
@@ -196,7 +207,7 @@ class QAService:
                 entities = graph.related_entities(title)
                 if not entities:
                     continue
-                lines = [f"📎 {title} 的相关实体："]
+                lines = [f"{title} 的相关实体："]
                 for ptype, items in entities.items():
                     item_strs = [f"{it['title']}({it['relation']})" for it in items[:4]]
                     lines.append(f"  {ptype}: {', '.join(item_strs)}")

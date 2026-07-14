@@ -185,8 +185,8 @@ class TestLoadRecentBiweeklies:
         report_dir.mkdir(parents=True)
         recent = (datetime.now() - timedelta(days=7)).strftime("%Y%m%d")
         old = (datetime.now() - timedelta(days=40)).strftime("%Y%m%d")
-        (report_dir / f"双周报-w27-maintainer-{recent}.md").write_text("近期报告", encoding="utf-8")
-        (report_dir / f"双周报-w22-maintainer-{old}.md").write_text("旧报告", encoding="utf-8")
+        (report_dir / f"双周报-w27-testuser-{recent}.md").write_text("近期报告", encoding="utf-8")
+        (report_dir / f"双周报-w22-testuser-{old}.md").write_text("旧报告", encoding="utf-8")
         bundle = _make_bundle(tmp_path, source_dir=src)
         c = BiweeklyCollector(bundle)
         results = c.load_recent_biweeklies(since_days=35)
@@ -197,7 +197,7 @@ class TestLoadRecentBiweeklies:
         src = tmp_path / "SOURCE"
         (src / "06-我的周报").mkdir(parents=True)
         d = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
-        (src / "06-我的周报" / f"双周报-w27-maintainer-{d}.md").write_text(
+        (src / "06-我的周报" / f"双周报-w27-testuser-{d}.md").write_text(
             "报告正文\n\n> This report was written by Iris.", encoding="utf-8")
         bundle = _make_bundle(tmp_path, source_dir=src)
         c = BiweeklyCollector(bundle)

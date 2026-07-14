@@ -965,13 +965,21 @@ def _daily_wiki_maintenance(bundle, chunk_summaries) -> tuple:
     except Exception as exc:
         person_enrich_result = {"status": "error", "reason": str(exc)}
 
-    # 知识图谱增量刷新（静默失败）
+    # 知识图谱增量刷新（静默失败，仅刷新节点和 wikilink 边，不调用 LLM）
     try:
         from iris.wiki.graph import WikiGraph
+        from iris.wiki.context_loader import WikiContextLoader
+        from iris.wiki.backlink import BacklinkBuilder
         graph = WikiGraph(bundle)
         graph.load()
-        graph.build_nodes()
-        graph.build_edges_from_backlinks()
+        wiki_root_path = graph._wiki_root
+        if wiki_root_path.exists():
+            loader = WikiContextLoader(wiki_root_path)
+            pages = loader.load_pages()
+            graph.build_nodes(_pages=pages)
+            backlink_builder = BacklinkBuilder(wiki_root_path)
+            backlink_index = backlink_builder.build_from_wiki_pages(pages)
+            graph.build_edges_from_backlinks(backlink_index)
         graph.save()
     except Exception:
         pass

@@ -55,7 +55,7 @@ class TestBacklinkBuilder:
         builder = BacklinkBuilder(tmp_path / "nonexistent")
         index = builder.build()
         assert index.total_pages == 0
-        assert index.total_links == 0
+        assert index.unique_inbound_edges == 0
         assert index.orphans == []
 
     def test_build_index(self, tmp_path):
@@ -65,7 +65,7 @@ class TestBacklinkBuilder:
         index = builder.build()
 
         assert index.total_pages == 4
-        assert index.total_links > 0
+        assert index.unique_inbound_edges > 0
 
         # 验证入链：搜索 被 排序 引用
         assert "排序" in index.inbound.get("搜索", [])
@@ -175,7 +175,7 @@ class TestBacklinkPersistence:
         restored = BacklinkIndex.from_dict(d)
 
         assert restored.total_pages == index.total_pages
-        assert restored.total_links == index.total_links
+        assert restored.unique_inbound_edges == index.unique_inbound_edges
         assert restored.orphans == index.orphans
 
 
@@ -204,7 +204,7 @@ class TestBacklinkEdgeCases:
         builder = BacklinkBuilder(wiki_root)
         index = builder.build()
         assert index.total_pages == 1
-        assert index.total_links == 0
+        assert index.unique_inbound_edges == 0
         assert "空" in index.orphans
 
     def test_self_link_not_counted(self, tmp_path):
@@ -216,4 +216,4 @@ class TestBacklinkEdgeCases:
         builder = BacklinkBuilder(wiki_root)
         index = builder.build()
         # 自引用会出现在出入链中（这是正确的 wikilink 行为）
-        assert index.total_links == 1
+        assert index.unique_inbound_edges == 1

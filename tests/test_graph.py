@@ -234,9 +234,15 @@ class TestGraphQueries:
         graph.build_nodes()
         graph.build_edges_from_backlinks()
 
+        # 搜索.md 引用了 [[张三]]，wikilink 边双向，因此 张三↔搜索 直接相邻
         path = graph.find_path("张三", "搜索")
-        # 张三 → 项目Alpha → 搜索 或 张三 → 搜索(通过搜索页面引用)
-        assert path is not None or True  # BFS 路径可能存在
+        assert path is not None, "张三 到 搜索 应存在路径"
+        assert len(path) >= 1
+        # 路径中的每条边两端节点都应在图中
+        node_ids = set(graph._nodes.keys())
+        for edge in path:
+            assert edge.source in node_ids
+            assert edge.target in node_ids
 
     def test_find_path_same_node(self, tmp_path):
         wiki_root = _make_wiki_root(tmp_path)
@@ -357,6 +363,63 @@ class TestGraphRefresh:
 
 
 # ── 工具函数 ───────────────────────────────────────────────
+
+
+class TestParseTriples:
+    """_parse_triples 兼容逐行 JSON 和 JSON 数组两种 LLM 输出格式。"""
+
+    def _make_graph_with_nodes(self, tmp_path) -> "WikiGraph":
+        wiki_root = _make_wiki_root(tmp_path)
+        bundle = _make_config_bundle(tmp_path, wiki_root)
+        g = WikiGraph(bundle)
+        g.build_nodes()
+        return g
+
+    def test_parse_line_by_line(self, tmp_path):
+        g = self._make_graph_with_nodes(tmp_path)
+        text = (
+            '{"source": "项目-项目Alpha", "target": "人物-张三", "relation": "负责", "confidence": 0.9}\n'
+            '{"source": "项目-项目Alpha", "target": "概念-排序", "relation": "使用", "confidence": 0.8}\n'
+        )
+        edges = g._parse_triples(text, "项目-项目Alpha")
+        assert len(edges) == 2
+        relations = {e.relation for e in edges}
+        assert "负责" in relations and "使用" in relations
+
+    def test_parse_json_array(self, tmp_path):
+        g = self._make_graph_with_nodes(tmp_path)
+        text = '[{"source": "项目-项目Alpha", "target": "人物-张三", "relation": "负责", "confidence": 0.9}, {"source": "项目-项目Alpha", "target": "概念-排序", "relation": "使用", "confidence": 0.8}]'
+        edges = g._parse_triples(text, "项目-项目Alpha")
+        assert len(edges) == 2
+
+    def test_parse_json_array_multiline(self, tmp_path):
+        g = self._make_graph_with_nodes(tmp_path)
+        text = (
+            '[\n'
+            '  {"source": "项目-项目Alpha", "target": "人物-张三", "relation": "负责", "confidence": 0.9},\n'
+            '  {"source": "项目-项目Alpha", "target": "概念-排序", "relation": "使用", "confidence": 0.8}\n'
+            ']'
+        )
+        edges = g._parse_triples(text, "项目-项目Alpha")
+        assert len(edges) == 2
+
+    def test_parse_empty_array(self, tmp_path):
+        g = self._make_graph_with_nodes(tmp_path)
+        edges = g._parse_triples("[]", "项目-项目Alpha")
+        assert edges == []
+
+    def test_parse_unknown_target_skipped(self, tmp_path):
+        g = self._make_graph_with_nodes(tmp_path)
+        text = '[{"source": "项目-项目Alpha", "target": "人物-不存在", "relation": "负责", "confidence": 0.9}]'
+        edges = g._parse_triples(text, "项目-项目Alpha")
+        assert edges == []
+
+    def test_confidence_clamped(self, tmp_path):
+        g = self._make_graph_with_nodes(tmp_path)
+        text = '[{"source": "项目-项目Alpha", "target": "人物-张三", "relation": "负责", "confidence": 5.0}]'
+        edges = g._parse_triples(text, "项目-项目Alpha")
+        assert len(edges) == 1
+        assert edges[0].confidence == 1.0
 
 
 class TestGraphUtils:

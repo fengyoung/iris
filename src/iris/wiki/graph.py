@@ -34,7 +34,7 @@ from iris.utils.shared import atomic_write_json, now_iso
 
 from ._constants import get_display_name, get_all_types
 from .backlink import BacklinkBuilder, BacklinkIndex
-from .context_loader import WikiContextLoader
+from .context_loader import WikiContextLoader, WikiPageInfo
 
 logger = logging.getLogger(__name__)
 
@@ -118,27 +118,32 @@ class WikiGraph:
         self._relations_dir = self._data_dir / "relations"
 
         # 运行时状态
-        self._nodes: Dict[str, GraphNode] = {}     # id → GraphNode
-        self._edges: List[GraphEdge] = []           # 全部边
-        self._adjacency: Dict[str, List[str]] = {}  # id → [neighbor_ids]
+        self._nodes: Dict[str, GraphNode] = {}              # id → GraphNode
+        self._edges: List[GraphEdge] = []                   # 全部边
+        self._adjacency: Dict[str, List[str]] = {}          # id → [neighbor_ids]（无向）
+        self._out_edges: Dict[str, List[GraphEdge]] = {}    # id → outbound edges（有向，find_path 用）
 
     # ══════════════════════════════════════════════════════════
     # 第一层：节点构建
     # ══════════════════════════════════════════════════════════
 
-    def build_nodes(self) -> List[GraphNode]:
+    def build_nodes(self, *, _pages: Optional[List[WikiPageInfo]] = None) -> List[GraphNode]:
         """从 Wiki 页面 frontmatter 全量构建实体节点（零 LLM 成本）。
+
+        Args:
+            _pages: 预加载的 WikiPageInfo 列表（供 refresh() 内部复用，避免重复扫描）
 
         Returns:
             新构建的节点列表
         """
-        if not self._wiki_root.exists():
-            return []
+        if _pages is None:
+            if not self._wiki_root.exists():
+                return []
+            loader = WikiContextLoader(self._wiki_root)
+            _pages = loader.load_pages()
 
-        loader = WikiContextLoader(self._wiki_root)
         nodes: Dict[str, GraphNode] = {}
-
-        for page_info in loader.load_pages():
+        for page_info in _pages:
             title = page_info.title
             if not title:
                 continue
@@ -224,6 +229,7 @@ class WikiGraph:
         full: bool = False,
         page_title: Optional[str] = None,
         chunk_size: int = _DEFAULT_CHUNK_SIZE,
+        _pages: Optional[List[WikiPageInfo]] = None,
     ) -> List[GraphEdge]:
         """通过 LLM 提取语义关系边。
 
@@ -239,7 +245,14 @@ class WikiGraph:
             新提取的 LLM 边列表
         """
         if not self._nodes:
-            self.build_nodes()
+            self.build_nodes(_pages=_pages)
+
+        # 若调用方未传入，则按需加载（保持独立调用时的行为）
+        if _pages is None:
+            loader = WikiContextLoader(self._wiki_root)
+            _pages = loader.load_pages() if self._wiki_root.exists() else []
+
+        all_pages = {pi.title: pi for pi in _pages}
 
         # 确定要处理的页面列表
         if page_title:
@@ -251,7 +264,7 @@ class WikiGraph:
         elif full:
             pages_to_process = list(self._nodes.keys())
         else:
-            pages_to_process = self._find_changed_pages()
+            pages_to_process = self._find_changed_pages(_pages=_pages)
 
         if not pages_to_process:
             logger.info("无页面需要关系提取")
@@ -263,10 +276,6 @@ class WikiGraph:
 
         # 构建实体列表（供 LLM prompt 使用）
         entity_list = self._format_entity_list()
-
-        # 分批处理
-        loader = WikiContextLoader(self._wiki_root)
-        all_pages = {pi.title: pi for pi in loader.load_pages()}
 
         all_new_edges: List[GraphEdge] = []
         seen_edge_keys: Set[Tuple[str, str, str, str]] = {
@@ -383,7 +392,7 @@ class WikiGraph:
     ) -> Optional[List[GraphEdge]]:
         """BFS 查找两个节点之间的最短路径（边列表）。
 
-        使用邻接表索引，O(V+E) 而非 O(V×E)。
+        使用 _out_edges 持久索引，避免每次调用重建 O(E) 的临时 dict。
         """
         from_id = self._resolve_node_id(from_title)
         to_id = self._resolve_node_id(to_title)
@@ -393,14 +402,6 @@ class WikiGraph:
         if from_id == to_id:
             return []
 
-        # 构建按 source 索引的边列表（一次遍历）
-        out_edges: Dict[str, List[GraphEdge]] = {}
-        for edge in self._edges:
-            out_edges.setdefault(edge.source, []).append(edge)
-            # wikilink 边允许反向遍历
-            if edge.source_type == "wikilink":
-                out_edges.setdefault(edge.target, []).append(edge)
-
         queue = deque([(from_id, [])])
         visited = {from_id}
 
@@ -409,15 +410,8 @@ class WikiGraph:
             if len(path) >= max_hops:
                 continue
 
-            for edge in out_edges.get(current, []):
-                # 确定遍历方向
-                if edge.source == current:
-                    next_id = edge.target
-                elif edge.target == current:
-                    next_id = edge.source
-                else:
-                    continue
-
+            for edge in self._out_edges.get(current, []):
+                next_id = edge.target if edge.source == current else edge.source
                 if next_id in visited:
                     continue
 
@@ -610,6 +604,8 @@ class WikiGraph:
     def refresh(self, *, full_llm: bool = False, page_title: Optional[str] = None) -> Dict[str, Any]:
         """一键刷新图谱：节点 → backlink 边 → LLM 边。
 
+        Wiki 目录只扫描一次，三层都复用同一份页面列表。
+
         Args:
             full_llm: 是否全量重建 LLM 关系
             page_title: 仅重建指定页面的关系
@@ -619,17 +615,27 @@ class WikiGraph:
         """
         report: Dict[str, Any] = {"nodes": 0, "wikilink_edges": 0, "llm_edges": 0}
 
+        # 一次性加载所有 Wiki 页面，三层共用
+        pages: List[WikiPageInfo] = []
+        if self._wiki_root.exists():
+            loader = WikiContextLoader(self._wiki_root)
+            pages = loader.load_pages()
+
         # 1. 节点
-        nodes = self.build_nodes()
+        nodes = self.build_nodes(_pages=pages)
         report["nodes"] = len(nodes)
 
-        # 2. 反向引用边
-        backlink_edges = self.build_edges_from_backlinks()
+        # 2. 反向引用边（复用预加载页面，避免重复扫描）
+        builder = BacklinkBuilder(self._wiki_root)
+        backlink_index = builder.build_from_wiki_pages(pages)
+        backlink_edges = self.build_edges_from_backlinks(backlink_index)
         report["wikilink_edges"] = len(backlink_edges)
 
-        # 3. LLM 关系边
+        # 3. LLM 关系边（复用预加载页面）
         try:
-            llm_edges = self.extract_relations(full=full_llm, page_title=page_title)
+            llm_edges = self.extract_relations(
+                full=full_llm, page_title=page_title, _pages=pages
+            )
             report["llm_edges"] = len(llm_edges)
         except LLMProviderError as exc:
             report["llm_error"] = str(exc)
@@ -695,20 +701,38 @@ class WikiGraph:
         return "\n".join(lines)
 
     def _rebuild_adjacency(self) -> None:
-        """从边列表重建邻接表。"""
+        """从边列表重建邻接表和有向出边索引。
+
+        neighbors()/find_orphans()/find_bridges() 使用无向邻接表（_adjacency）。
+        find_path() 使用有向出边索引（_out_edges）以避免重复构建。
+        所有边（wikilink 和 LLM）在无向邻接表中均双向展开。
+        """
         self._adjacency.clear()
+        self._out_edges.clear()
         for edge in self._edges:
+            # 无向邻接（两端都可到达对方，用于 neighbors / orphan 分析）
             self._adjacency.setdefault(edge.source, []).append(edge.target)
+            self._adjacency.setdefault(edge.target, []).append(edge.source)
+            # 有向出边（保持语义方向，用于 find_path）
+            self._out_edges.setdefault(edge.source, []).append(edge)
+            # wikilink 边在路径搜索中允许反向遍历
             if edge.source_type == "wikilink":
-                # wikilink 边双向
-                self._adjacency.setdefault(edge.target, []).append(edge.source)
+                self._out_edges.setdefault(edge.target, []).append(edge)
 
-    def _find_changed_pages(self) -> List[str]:
-        """找出内容 mtime 晚于缓存的页面（增量更新用）。"""
+    def _find_changed_pages(
+        self, *, _pages: Optional[List[WikiPageInfo]] = None
+    ) -> List[str]:
+        """找出内容 mtime 晚于缓存的页面（增量更新用）。
+
+        Args:
+            _pages: 预加载的 WikiPageInfo 列表，None 则自动加载
+        """
+        if _pages is None:
+            loader = WikiContextLoader(self._wiki_root)
+            _pages = loader.load_pages()
+
         changed: List[str] = []
-        loader = WikiContextLoader(self._wiki_root)
-
-        for page_info in loader.load_pages():
+        for page_info in _pages:
             title = page_info.title
             if not title:
                 continue
@@ -768,34 +792,58 @@ class WikiGraph:
         return edges
 
     def _parse_triples(self, text: str, source_id: str) -> List[GraphEdge]:
-        """从 LLM 输出解析 JSON 行格式的三元组。"""
+        """从 LLM 输出解析三元组，兼容逐行 JSON 对象和 JSON 数组两种格式。"""
         edges: List[GraphEdge] = []
+
+        # 优先尝试整体解析为 JSON（数组或单对象）
+        stripped = text.strip()
+        if stripped.startswith("[") or stripped.startswith("{"):
+            try:
+                parsed = json.loads(stripped)
+                candidates = parsed if isinstance(parsed, list) else [parsed]
+                for obj in candidates:
+                    edge = self._triple_obj_to_edge(obj, source_id)
+                    if edge:
+                        edges.append(edge)
+                if edges:
+                    return edges
+            except (json.JSONDecodeError, ValueError, TypeError):
+                pass
+
+        # 回退：逐行解析（每行一个 JSON 对象）
         for line in text.splitlines():
             line = line.strip()
-            if not line or line == "[]":
+            if not line or line in ("[]", "[", "]"):
                 continue
+            line = line.rstrip(",")
             try:
                 obj = json.loads(line)
-                if not isinstance(obj, dict):
-                    continue
-                target = obj.get("target", "")
-                relation = obj.get("relation", "")
-                if not target or not relation:
-                    continue
-                if target not in self._nodes:
-                    continue
-                confidence = float(obj.get("confidence", 0.5))
-                edges.append(GraphEdge(
-                    source=source_id,
-                    target=target,
-                    relation=relation,
-                    source_type="llm",
-                    confidence=min(max(confidence, 0.0), 1.0),
-                    evidence_page=source_id,
-                ))
+                edge = self._triple_obj_to_edge(obj, source_id)
+                if edge:
+                    edges.append(edge)
             except (json.JSONDecodeError, ValueError, TypeError):
                 continue
         return edges
+
+    def _triple_obj_to_edge(self, obj: Any, source_id: str) -> Optional[GraphEdge]:
+        """将单个三元组 dict 转换为 GraphEdge，校验失败返回 None。"""
+        if not isinstance(obj, dict):
+            return None
+        target = obj.get("target", "")
+        relation = obj.get("relation", "")
+        if not target or not relation:
+            return None
+        if target not in self._nodes:
+            return None
+        confidence = min(max(float(obj.get("confidence", 0.5)), 0.0), 1.0)
+        return GraphEdge(
+            source=source_id,
+            target=target,
+            relation=relation,
+            source_type="llm",
+            confidence=confidence,
+            evidence_page=source_id,
+        )
 
     def _save_page_relations(self, title: str, edges: List[GraphEdge]) -> None:
         """缓存单页关系提取结果。"""

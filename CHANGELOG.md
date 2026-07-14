@@ -4,6 +4,46 @@
 
 ---
 
+## v3.12.1 (2026-07-14)
+
+### 性能优化
+
+**知识图谱单次扫描（wiki/graph.py）：**
+- `refresh()` 重构：Wiki 目录只扫描一次，节点层 / wikilink 边层 / LLM 边层共用同一份 `WikiPageInfo` 列表，消除 3 次重复 I/O
+- `build_nodes()` / `extract_relations()` / `_find_changed_pages()` 新增 `_pages` 参数接受预加载列表
+- `_out_edges` 持久有向索引：`_rebuild_adjacency()` 同时维护，`find_path()` 不再每次调用重建 O(E) 临时字典
+- `BacklinkBuilder.build_from_wiki_pages()` 新方法：从已加载 `WikiPageInfo` 构建反向引用索引，零文件 I/O
+
+**QA 图谱惰性缓存（qa/service.py）：**
+- 新增 `_graph_cache` 字段：会话内首次调用时加载 `WikiGraph`，后续命中缓存不再重复读磁盘
+- 提取 `_get_graph()` 方法统一管理加载逻辑
+
+### Bug 修复
+
+**三元组解析兼容性（wiki/graph.py）：**
+- `_parse_triples()` 重写：优先尝试整体解析 JSON 数组/对象，回退至逐行解析；原仅支持逐行格式，LLM 返回 JSON 数组时全部丢失
+- 提取 `_triple_obj_to_edge()` 辅助方法，消除重复校验逻辑
+- 行解析容错：跳过 `[`、`]` 单行，去除行尾逗号
+
+**DOCX 流水线优化（complex_input/pipeline.py）：**
+- DOCX 路径跳过 Stage 1 LLM 调用（Stage 2 已是纯文本提取，不需要 adv_model 指令）
+- PDF 失败检测改为 `any_pdf_success` flag，替代原本依赖 `total_images > 0` 的脆弱逻辑
+
+**其他修复：**
+- `qa/service.py`：移除图谱上下文中的 emoji 前缀；`list[str]` → `List[str]` 修复 Python 3.9 兼容
+- `wiki/graph.py _rebuild_adjacency()`：LLM 边现在也在无向邻接表中双向展开（原只有 wikilink 边双向），修复 `neighbors()` 结果不全问题
+
+### 工程
+
+- `pyproject.toml` 新增 `[tool.pytest.ini_options]`：`pythonpath = ["src"]`，`testpaths = ["tests"]`，无需 `PYTHONPATH` 前缀即可运行测试
+- `BacklinkIndex.unique_inbound_edges`：字段重命名（兼容旧 `total_links`），语义更准确
+
+### 测试
+
+- 532 → **538**（+6）：`test_backlink.py` 覆盖 `build_from_wiki_pages()`；`test_graph.py` 覆盖 JSON 数组解析 / `_out_edges` 索引 / `_triple_obj_to_edge`；存量测试修复（`test_biweekly_collector` / `test_pydantic_config`）
+
+---
+
 ## v3.12.0 (2026-07-14)
 
 ### 新功能
