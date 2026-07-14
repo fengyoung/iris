@@ -11,6 +11,7 @@ from .provider import (
 )
 from .router import ModelRouter, RoutingDecision
 from .service import GenerationResult, LLMService
+from .usage_tracker import UsageTracker
 
 __all__ = [
     "BaseLLMProvider",
@@ -27,4 +28,5 @@ __all__ = [
     "RoutingDecision",
     "encode_model_ref",
     "decode_model_ref",
+    "UsageTracker",
 ]

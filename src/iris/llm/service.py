@@ -30,6 +30,8 @@ class GenerationResult:
     model: str = ""
     api_base_url: str = ""
     matched_rule: str = ""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 
 class LLMService:
@@ -91,6 +93,8 @@ class LLMService:
                 model=response.model or "",
                 api_base_url=response.api_base_url or "",
                 matched_rule=response.matched_rule or "",
+                prompt_tokens=response.prompt_tokens,
+                completion_tokens=response.completion_tokens,
             )
         except LLMProviderError as exc:
             logger.error("LLM 文本生成失败: %s", exc)

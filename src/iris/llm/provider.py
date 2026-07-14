@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +66,8 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         self._config = config
         self._router = ModelRouter(config)
         self._model_manager = ModelManager(config.llm["models"], config.root / "data")
+        from iris.llm.usage_tracker import UsageTracker
+        self._tracker = UsageTracker(config.root / "data")
 
     def get_active_model_config(self, role: str) -> Dict[str, Any]:
         """获取指定角色的当前活跃模型配置（不含 api_key）。"""
@@ -95,8 +97,8 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         max_retries: Optional[int] = None,
-    ) -> str:
-        """按 provider 类型分发 API 调用（消除 force_model 与 _try_call 的重复）。"""
+    ) -> Tuple[str, int, int]:
+        """按 provider 类型分发 API 调用，返回 (text, prompt_tokens, completion_tokens)。"""
         timeout = cfg.get("timeout_seconds", 60)
         effective_retries = max_retries if max_retries is not None else cfg.get("max_retries", 0)
         if provider_name in self.OPENAI_COMPATIBLE_PROVIDERS:
@@ -132,14 +134,20 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
             provider_name = str(model_cfg["provider"]).lower()
             if max_tokens is None:
                 max_tokens = model_cfg.get("max_tokens")
-            text = self._dispatch_provider_call(
+            text, pt, ct = self._dispatch_provider_call(
                 api_base, api_key, model_name, request_data.prompt, provider_name, model_cfg,
                 temperature=temperature, max_tokens=max_tokens, max_retries=max_retries,
+            )
+            self._tracker.record(
+                model=model_name, provider=provider_name,
+                route_role="forced", matched_rule="force_model",
+                prompt_tokens=pt, completion_tokens=ct,
             )
             return LLMResponse(
                 text=text, selected_role="forced", provider=provider_name,
                 model=model_name, api_base_url=api_base,
                 matched_rule="force_model",
+                prompt_tokens=pt, completion_tokens=ct,
             )
 
         decision = self._router.route(request_data.route_context)
@@ -153,7 +161,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
             except ModelManagerError:
                 pass
 
-        def _try_call(api_base: str, api_key: str, model_name: str, cfg: Dict[str, Any]) -> str:
+        def _try_call(api_base: str, api_key: str, model_name: str, cfg: Dict[str, Any]) -> Tuple[str, int, int]:
             """文本 API 调用闭包，捕获 prompt / temperature / max_tokens。"""
             return self._dispatch_provider_call(
                 api_base, api_key, model_name, request_data.prompt,
@@ -161,13 +169,19 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
                 temperature=temperature, max_tokens=max_tokens, max_retries=max_retries,
             )
 
-        text, role, provider_name, model_name, api_base = self._fallback_loop(
+        text, role, provider_name, model_name, api_base, pt, ct = self._fallback_loop(
             decision, _try_call,
+        )
+        self._tracker.record(
+            model=model_name, provider=provider_name,
+            route_role=role, matched_rule=decision.matched_rule,
+            prompt_tokens=pt, completion_tokens=ct,
         )
         return LLMResponse(
             text=text, selected_role=role, provider=provider_name,
             model=model_name, api_base_url=api_base,
             matched_rule=decision.matched_rule,
+            prompt_tokens=pt, completion_tokens=ct,
         )
 
     def _build_fallback_chain(
@@ -222,7 +236,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
             error_label: 错误消息中的调用类型前缀
 
         Returns:
-            (text, role, provider_name, model_name, api_base_url)
+            (text, role, provider_name, model_name, api_base_url, prompt_tokens, completion_tokens)
         """
         fallback_chain = self._build_fallback_chain(decision)
         tried_models: List[str] = []
@@ -246,7 +260,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
 
             api_base_url = model_config["api_base_url"]
             try:
-                text = call_fn(api_base_url, api_key, model_config["model"], model_config)
+                text, pt, ct = call_fn(api_base_url, api_key, model_config["model"], model_config)
 
                 if role != decision.selected_role or model_id != self._model_manager.get_active_model_id(role):
                     logger.warning("模型降级: %s/%s → %s/%s",
@@ -254,7 +268,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
                                    self._model_manager.get_active_model_id(decision.selected_role),
                                    role, model_id)
 
-                return text, role, str(model_config["provider"]).lower(), model_config["model"], api_base_url
+                return text, role, str(model_config["provider"]).lower(), model_config["model"], api_base_url, pt, ct
 
             except LLMProviderError as exc:
                 last_error = exc
@@ -277,7 +291,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
     ) -> str:
         decision = self._router.route(route_context)
 
-        def _try_multimodal(api_base: str, api_key: str, model_name: str, cfg: Dict[str, Any]) -> str:
+        def _try_multimodal(api_base: str, api_key: str, model_name: str, cfg: Dict[str, Any]) -> Tuple[str, int, int]:
             """多模态 API 调用闭包，捕获 content_parts。"""
             provider_name = str(cfg["provider"]).lower()
             if provider_name not in self.OPENAI_COMPATIBLE_PROVIDERS:
@@ -289,10 +303,16 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
                 temperature=temperature, timeout=timeout, max_retries=effective_retries,
             )
 
-        text, _role, _provider, _model, _api_base = self._fallback_loop(
+        text, _role, _provider, _model, _api_base, pt, ct = self._fallback_loop(
             decision, _try_multimodal,
             model_filter=lambda cfg: cfg.get("multimodal", False),
             error_label="多模态 LLM",
+        )
+        self._tracker.record(
+            model=_model, provider=_provider,
+            route_role=_role, matched_rule=decision.matched_rule,
+            prompt_tokens=pt, completion_tokens=ct,
+            is_multimodal=True,
         )
         return text
 
@@ -319,10 +339,11 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         max_tokens: Optional[int] = None,
         timeout: int = 60,
         max_retries: int = 0,
-    ) -> str:
+    ) -> Tuple[str, int, int]:
         """统一的 OpenAI 兼容 Chat Completions 调用。
 
         content 可以是 str（纯文本）或 list[dict]（多模态 content_parts）。
+        返回 (text, prompt_tokens, completion_tokens)。
         """
         endpoint = _join_url(api_base_url, "/chat/completions")
         payload: Dict[str, Any] = {
@@ -339,7 +360,10 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
             timeout=timeout,
             max_retries=max_retries,
         )
-        return _extract_chat_completions_text(data)
+        usage = data.get("usage", {})
+        pt = int(usage.get("prompt_tokens", 0))
+        ct = int(usage.get("completion_tokens", 0))
+        return _extract_chat_completions_text(data), pt, ct
 
     # 向后兼容：保留旧方法名，内部委托给统一方法
     def _call_openai_compatible(
@@ -349,7 +373,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         max_tokens: Optional[int] = None,
         timeout: int = 60,
         max_retries: int = 0,
-    ) -> str:
+    ) -> Tuple[str, int, int]:
         return self._call_openai_chat(
             api_base_url, api_key, model, prompt,
             temperature=temperature, max_tokens=max_tokens,
@@ -362,7 +386,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         temperature: Optional[float] = None,
         timeout: int = 60,
         max_retries: int = 0,
-    ) -> str:
+    ) -> Tuple[str, int, int]:
         return self._call_openai_chat(
             api_base_url, api_key, model, content_parts,
             temperature=temperature, timeout=timeout, max_retries=max_retries,
@@ -370,7 +394,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
 
     def _call_anthropic(self, api_base_url: str, api_key: str, model: str, prompt: str,
                         max_tokens: Optional[int] = None,
-                        max_retries: int = 0) -> str:
+                        max_retries: int = 0) -> Tuple[str, int, int]:
         endpoint = _join_url(api_base_url, "/messages")
         payload = {
             "model": model,
@@ -391,7 +415,11 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
             },
             max_retries=max_retries,
         )
-        return _extract_anthropic_text(data)
+        # Anthropic API 用 input_tokens / output_tokens
+        usage = data.get("usage", {})
+        pt = int(usage.get("input_tokens", 0))
+        ct = int(usage.get("output_tokens", 0))
+        return _extract_anthropic_text(data), pt, ct
 
     def _post_json(self, url: str, payload: Dict[str, Any], headers: Dict[str, str], *,
                    timeout: int = 60, max_retries: int = 0) -> Dict[str, Any]:

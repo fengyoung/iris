@@ -1,10 +1,10 @@
-# Iris 3.12.1
+# Iris 3.13.0
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
 
-**v3.12.1** — 图谱性能优化（Wiki 单次扫描 + 持久出边索引）+ QA 图谱惰性缓存 + JSON 解析兼容 + 测试工具配置；持续集成 538 测试。
+**v3.13.0** — LLM 用量统计（SQLite 记录调用/token，支持分模型汇总 + 日/周/月/年聚合）+ `usage-stats` 命令；持续集成 554 测试。
 
 ## 开发路线
 
@@ -52,6 +52,7 @@ python scripts/run_cli.py daily-start
 | 记忆 | `memory-*`, `working-set`, `sync-memory` | 记忆管理 / 工作上下文 |
 | 人物 | `enrich-persons` | 飞书通讯录自动补充人物 Wiki 的部门/邮箱信息 |
 | 工具 | `process`, `trello`, `extract-weekly-reports` | 图文处理（图片/PDF/DOCX）/ 看板 / 周报提取 |
+| 用量 | `usage-stats [--by day/week/month/year]` | LLM 调用/token 消耗统计（分模型 + 汇总，多粒度聚合） |
 | 系统 | `daily-start`, `check-config`, `status`, `diagnose` | 日常维护（含图谱增量刷新）/ 配置检查 |
 
 ## 知识库结构
@@ -84,12 +85,13 @@ SOURCE/                     LLM-WIKI/
 - Pydantic v2（配置类型安全校验）
 - lark-cli（飞书接口，步骤 3）
 - macOS Keychain（可选密钥存储）
-- 538 个单元测试（39 个测试文件）
+- 554 个单元测试（40 个测试文件）
 
 ## 版本历史
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.13.0** | 2026-07-14 | LLM 用量统计（SQLite 记录调用/token，分模型 + 汇总，日/周/月/年聚合）+ usage-stats 命令；554 测试 |
 | **v3.12.1** | 2026-07-14 | 图谱刷新单次 Wiki 扫描 + 持久 _out_edges 索引 + QA 图谱惰性缓存 + _parse_triples JSON 数组兼容 + pytest 工具配置；538 测试 |
 | **v3.12.0** | 2026-07-14 | 知识图谱（节点+wikilink边+LLM关系提取）+ PDF/DOCX多模态 + 反向引用索引 + 代码审查14项修复；持续集成 532 测试 |
 | **v3.11.17** | 2026-07-13 | .env→Keychain 密钥迁移 + secrets-list 修复 + 去重安全提醒修复；持续集成 461 测试 |

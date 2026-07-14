@@ -94,9 +94,9 @@ class TestFallbackLoop:
 
         def call_fn(api_base, api_key, model_name, cfg):
             call_count[0] += 1
-            return f"response-from-{model_name}"
+            return f"response-from-{model_name}", 0, 0
 
-        text, role, provider_name, model_name, api_base = provider._fallback_loop(
+        text, role, provider_name, model_name, api_base, pt, ct = provider._fallback_loop(
             decision, call_fn,
         )
 
@@ -118,9 +118,9 @@ class TestFallbackLoop:
             call_count[0] += 1
             if model_name == "base-1":
                 raise LLMProviderError("base-1 挂了")
-            return f"response-from-{model_name}"
+            return f"response-from-{model_name}", 0, 0
 
-        text, role, provider_name, model_name, api_base = provider._fallback_loop(
+        text, role, provider_name, model_name, api_base, pt, ct = provider._fallback_loop(
             decision, call_fn,
         )
 
@@ -141,9 +141,9 @@ class TestFallbackLoop:
             call_count[0] += 1
             if model_name in ("base-1", "base-2"):
                 raise LLMProviderError(f"{model_name} 挂了")
-            return f"response-from-{model_name}"
+            return f"response-from-{model_name}", 0, 0
 
-        text, role, provider_name, model_name, api_base = provider._fallback_loop(
+        text, role, provider_name, model_name, api_base, pt, ct = provider._fallback_loop(
             decision, call_fn,
         )
 
@@ -177,9 +177,9 @@ class TestFallbackLoop:
 
         def call_fn(api_base, api_key, model_name, cfg):
             call_count[0] += 1
-            return f"response-from-{model_name}"
+            return f"response-from-{model_name}", 0, 0
 
-        text, role, provider_name, model_name, api_base = provider._fallback_loop(
+        text, role, provider_name, model_name, api_base, pt, ct = provider._fallback_loop(
             decision, call_fn,
             model_filter=lambda cfg: cfg.get("multimodal", False),
         )
@@ -209,9 +209,9 @@ class TestFallbackLoop:
 
         def call_fn(api_base, api_key, model_name, cfg):
             call_count[0] += 1
-            return f"response-from-{model_name}"
+            return f"response-from-{model_name}", 0, 0
 
-        text, role, provider_name, model_name, api_base = provider._fallback_loop(
+        text, role, provider_name, model_name, api_base, pt, ct = provider._fallback_loop(
             decision, call_fn,
         )
 
@@ -223,7 +223,7 @@ class TestFallbackLoop:
         """generate() 接受 max_retries 覆盖参数。"""
         provider = self._make_provider(tmp_path)
 
-        with patch.object(provider, '_call_openai_compatible', return_value="ok"):
+        with patch.object(provider, '_call_openai_compatible', return_value=("ok", 10, 5)):
             response = provider.generate(
                 LLMRequest(prompt="test", route_context={"task_type": "qa"}),
                 max_retries=5,
@@ -235,7 +235,7 @@ class TestFallbackLoop:
         """generate_multimodal() 接受 max_retries 覆盖参数。"""
         provider = self._make_provider(tmp_path)
 
-        with patch.object(provider, '_call_openai_compatible_multimodal', return_value="ok"):
+        with patch.object(provider, '_call_openai_compatible_multimodal', return_value=("ok", 20, 8)):
             text = provider.generate_multimodal(
                 [{"type": "text", "text": "test"}],
                 {"task_type": "qa"},

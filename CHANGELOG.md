@@ -4,6 +4,48 @@
 
 ---
 
+## v3.13.0 (2026-07-14)
+
+### 新功能
+
+**LLM 用量统计（llm/usage_tracker.py）：**
+- 全新 `UsageTracker`：每次 LLM 调用自动记录到本地 SQLite（`data/llm_usage.db`），零新依赖（stdlib `sqlite3`）
+- 捕获维度：时间戳 / 模型 / provider / 路由角色 / 匹配规则 / 输入 token / 输出 token / 是否多模态
+- 捕获点在 provider 层汇聚：文本走 `_fallback_loop()`、`force_model` 直连、多模态走 `generate_multimodal()`，三条路径全覆盖
+- 从 API 响应提取 usage：OpenAI 兼容用 `prompt_tokens` / `completion_tokens`，Anthropic 用 `input_tokens` / `output_tokens`
+- 聚合查询支持四种时间粒度：`day` / `week` / `month` / `year`（SQLite `strftime` 分组，无额外依赖）
+- 支持分模型统计（`stats_by_model()`）与汇总统计（`stats()`），可按模型名和起始日期过滤
+- 全程静默失败：DB 初始化 / 写入 / 查询任一失败均不影响主流程 LLM 调用
+
+**CLI 命令 `usage-stats`：**
+- `iris usage-stats [--by day|week|month|year] [--model <name>] [--since YYYY-MM-DD] [--pretty]`
+- `--pretty` 输出：时间段汇总表（调用次数 / 输入 / 输出 / 合计 token）+ 末段的按模型分布明细
+- 默认 JSON 输出便于程序消费
+
+### 数据流改造
+
+- `LLMResponse` / `GenerationResult` 新增 `prompt_tokens` / `completion_tokens` 字段（默认 0，向后兼容）
+- `_call_openai_chat` / `_call_anthropic` / `_dispatch_provider_call` / `_fallback_loop` 返回值由 `str` 改为 `(text, prompt_tokens, completion_tokens)` 元组，token 数逐层透传至 tracker
+
+### 覆盖范围说明
+
+- 仅统计 Iris 自身经 provider 发出的 LLM 调用（CLI 命令 + 调用 CLI 的 Skill）
+- 不含：Claude Code 本体（走 Anthropic API，在 Iris 之外）、Whisper 音频转写（非 token 计费）、飞书接口
+
+### 测试
+
+- 538 → **554**（+16）：新增 `test_usage_tracker.py` 覆盖初始化 / record / 四种时间粒度聚合 / 模型过滤 / 起始日期过滤 / 按模型分布 / 非法粒度校验
+- `test_provider_fallback.py`：mock 返回值同步为 `(text, pt, ct)` 元组
+
+### 项目指标
+
+- 源文件：104 → **105**（+1：usage_tracker.py）
+- 测试文件：39 → **40**（+1）
+- 单元测试：538 → **554**（+16）
+- CLI 命令：46 → **47**（+usage-stats）
+
+---
+
 ## v3.12.1 (2026-07-14)
 
 ### 性能优化

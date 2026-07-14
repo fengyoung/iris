@@ -1,4 +1,4 @@
-# Iris 3.12.1 — 项目执行说明
+# Iris 3.13.0 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~20,700 行 / 104 文件 / 20 模块 · CLI 46 命令 · 单元测试 538（39 文件）· 7 个项目级 Skill · Wiki 91 页 · 知识图谱节点 91 / 关系边 ~200 · 数据源 691 文档 / 3,956 Chunk · 向量索引 6,789 条。
+~20,900 行 / 105 文件 / 20 模块 · CLI 47 命令 · 单元测试 554（40 文件）· 7 个项目级 Skill · Wiki 91 页 · 知识图谱节点 91 / 关系边 ~200 · 数据源 691 文档 / 3,956 Chunk · 向量索引 6,789 条。
 
 ### 关键路径
 
@@ -112,7 +112,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.12.1 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.13.0 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.8 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -133,7 +133,7 @@ iris3/
 ├── src/iris/          # 20 模块（见下）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
-├── tests/             # 538 用例，39 文件
+├── tests/             # 554 用例，40 文件
 ├── config/            # *.json gitignored，*.example 版本控制
 ├── data/              # 运行时数据（全 gitignore）
 ├── .claude/skills/    # 项目级 Skill（7 个）
@@ -141,7 +141,7 @@ iris3/
 └── pyproject.toml · README · CLAUDE · CHANGELOG.md
 ```
 
-**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService）· `core`（类型/锁/写保护/存储/Agent 适配）· `memory`（记忆 5 子模块）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF）· `qa`（检索问答+图谱注入）· `wiki`（Wiki 体系 + backlink/graph，最大模块）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估）· `complex_input`（多模态三阶段：图片/PDF/DOCX）· `output`（格式化+DOCX）· `app/cli`（46 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py / shared.py）· `trello`（看板）。
+**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配）· `memory`（记忆 5 子模块）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF）· `qa`（检索问答+图谱注入）· `wiki`（Wiki 体系 + backlink/graph，最大模块）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估）· `complex_input`（多模态三阶段：图片/PDF/DOCX）· `output`（格式化+DOCX）· `app/cli`（47 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py / shared.py）· `trello`（看板）。
 
 ---
 
@@ -153,6 +153,8 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.12.1 (2026-07-14)** — 图谱刷新单次 Wiki 扫描 + 持久 _out_edges 索引 + QA 图谱惰性缓存 + JSON 数组解析兼容 + pytest 配置；持续集成 538 测试。
+**当前 v3.13.0 (2026-07-14)** — LLM 用量统计（`usage_tracker.py` SQLite 记录调用/token，分模型 + 汇总，日/周/月/年聚合）+ `usage-stats` 命令；持续集成 554 测试。
+
+> 覆盖范围：仅统计 Iris 自身经 provider 发出的 LLM 调用（CLI + 调用 CLI 的 Skill），不含 Claude Code 本体 / Whisper 转写 / 飞书接口。
 
 > 完整版本历史（v3.11.17 及更早）见 [CHANGELOG.md](CHANGELOG.md)。

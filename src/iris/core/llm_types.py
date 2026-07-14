@@ -28,3 +28,5 @@ class LLMResponse:
     model: str
     api_base_url: str
     matched_rule: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0

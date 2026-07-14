@@ -27,6 +27,7 @@ COMMANDS = [
     "working-clear", "process", "transcribe-meeting", "batch-transcribe", "daily-start",
     "secrets-set", "secrets-list", "secrets-delete",
     "build-graph",
+    "usage-stats",
     # ── 委托命令 ──
     "trello", "extract-weekly-reports", "extract-didi-travel",
     "sync-memory", "feishu-doc-convert", "chat-digest",
@@ -122,6 +123,11 @@ def build_parser() -> argparse.ArgumentParser:
     # 知识图谱
     parser.add_argument("--full", action="store_true", help="build-graph 全量重建 LLM 关系")
     parser.add_argument("--page", default="", help="build-graph 单页重建")
+    # 用量统计
+    parser.add_argument("--by", default="month", choices=["day", "week", "month", "year"],
+                        help="usage-stats 时间粒度（默认 month）")
+    parser.add_argument("--model", default="", help="usage-stats 过滤模型名称")
+    parser.add_argument("--since", default="", help="usage-stats 起始日期 YYYY-MM-DD")
     # 聊天提炼
     parser.add_argument("--group", default="", help="chat-digest 群聊名称")
     parser.add_argument("--user", default="", help="chat-digest 用户名称（单聊）")

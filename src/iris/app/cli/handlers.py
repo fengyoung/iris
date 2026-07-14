@@ -1180,6 +1180,62 @@ def _strip_version_suffix(stem: str) -> str:
     return _VERSION_SUFFIX_PATTERN.sub("", stem)
 
 
+def handle_usage_stats(args, bundle, logger) -> int:
+    from iris.llm.usage_tracker import UsageTracker
+
+    by = getattr(args, "by", "month") or "month"
+    model_filter = getattr(args, "model", None) or None
+    since = getattr(args, "since", None) or None
+
+    tracker = UsageTracker(bundle.root / "data")
+    rows = tracker.stats(by=by, model=model_filter, since=since)
+
+    if args.pretty:
+        if not rows:
+            print("暂无用量数据（尚未发生任何 LLM 调用，或数据库路径有误）。")
+            return 0
+
+        period_label = {"day": "日期", "week": "周", "month": "月份", "year": "年份"}.get(by, by)
+        header = f"{period_label:<14} {'调用次数':>8} {'输入Token':>11} {'输出Token':>11} {'合计Token':>11}"
+        sep = "-" * len(header)
+        print(f"\n{header}")
+        print(sep)
+
+        total_calls = total_pt = total_ct = 0
+        for row in rows:
+            calls = row["calls"]
+            pt = row["prompt_tokens"]
+            ct = row["completion_tokens"]
+            tot = row["total_tokens"]
+            print(f"{row['period']:<14} {calls:>8,} {pt:>11,} {ct:>11,} {tot:>11,}")
+            total_calls += calls
+            total_pt += pt
+            total_ct += ct
+
+        print(sep)
+        print(f"{'合计':<14} {total_calls:>8,} {total_pt:>11,} {total_ct:>11,} {total_pt + total_ct:>11,}")
+
+        # 最后一个时间段的按模型分布
+        if rows:
+            last_period = rows[-1]["period"]
+            model_rows = tracker.stats_by_model(last_period, by=by)
+            if model_rows:
+                print(f"\n模型分布（{last_period}）：")
+                for r in model_rows:
+                    mname = r["model"]
+                    print(f"  {mname:<32} {r['calls']:>4} 次  "
+                          f"{r['prompt_tokens']:>8,} / {r['completion_tokens']:>8,} tokens")
+        return 0
+
+    _emit_output("usage-stats", {
+        "by": by,
+        "model_filter": model_filter,
+        "since": since,
+        "rows": rows,
+    }, pretty=False)
+    return 0
+
+
 # ── 命令分发表 ─────────────────────────────────────────────
 COMMAND_HANDLERS = {
     "check-config": handle_check_config,
@@ -1224,4 +1280,5 @@ COMMAND_HANDLERS = {
     "feishu-doc-convert": handle_feishu_doc_convert,
     "chat-digest": handle_chat_digest,
     "build-graph": handle_build_graph,
+    "usage-stats": handle_usage_stats,
 }
