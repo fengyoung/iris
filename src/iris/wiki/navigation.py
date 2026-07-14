@@ -327,16 +327,20 @@ def lint_wiki(wiki_root: Path, data_root: Optional[Path] = None) -> Dict[str, An
     # 统计排除的链接
     excluded_links = raw_broken_count - len(broken_links)
 
-    # ── 孤立页 ──────────────────────────────────────────
-    linked_titles = set()
-    for links in all_links.values():
-        for link in links:
-            linked_titles.add(link)
-    orphan_pages = []
-    for title, path in page_titles.items():
-        if title not in linked_titles:
-            if not any(title in refs for refs in all_links.values()):
-                orphan_pages.append(str(path.relative_to(wiki_root)))
+    # ── 孤立页（使用 BacklinkBuilder 统一检测） ──────────
+    from iris.wiki.backlink import BacklinkBuilder
+    backlink_builder = BacklinkBuilder(wiki_root)
+    backlink_index = backlink_builder.build()
+    orphan_pages_full = backlink_index.orphans
+    orphan_pages = sorted([
+        str(page_titles[t].relative_to(wiki_root))
+        for t in orphan_pages_full
+        if t in page_titles
+    ])
+
+    # 持久化反向引用索引（供 graph 等模块使用）
+    if data_root:
+        backlink_builder.save(data_root / "graph" / "backlink_index.json")
 
     # ── 索引质量检查 ────────────────────────────────────
     index_info: Dict[str, Any] = {}

@@ -10,7 +10,8 @@ from iris.config.loader import ConfigBundle
 # QA 通用模板（qa_project / qa_topic / qa_term 共用）
 _QA_TEMPLATE = (
     "用户问题：{{question}}\n最近会话：{{session_context}}\n长期记忆：{{profile_context}}\n"
-    "纠正规则：{{correction_context}}\n工作上下文：{{working_context}}\n上下文压缩信息：{{context_summary}}\n"
+    "纠正规则：{{correction_context}}\n工作上下文：{{working_context}}\n知识图谱关联：{{graph_context}}\n"
+    "上下文压缩信息：{{context_summary}}\n"
     "结构化证据：\n{{structured_context}}\nWiki 页面：\n{{wiki_lines}}\n候选证据：\n{{evidence_lines}}"
 )
 

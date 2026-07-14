@@ -4,6 +4,61 @@
 
 ---
 
+## v3.12.0 (2026-07-14)
+
+### 新功能
+
+**知识图谱（wiki/graph.py）：**
+- 三层架构：节点层（frontmatter 全量构建）→ wikilink 边（零 LLM 成本）→ LLM 关系边（增量提取）
+- 图查询：`neighbors()`（BFS 多跳）、`related_entities()`（按类型分组）、`find_path()`（最短路径）
+- 图分析：`find_orphans()`（零入链节点）、`find_bridges()`（跨类型桥接节点）、`density_report()`（密度/度分布）
+- LLM 关系提取：批量提取（负责/使用/属于/…）三元组，分页缓存增量更新
+- CLI：`iris build-graph [--full] [--page <title>]`
+- 集成：`daily-start` 自动增量刷新 · `wiki-lint` 孤页检测使用 BacklinkBuilder · `ask` LLM 模式注入图谱上下文
+
+**PDF 多模态支持（complex_input/pdf_adapter.py）：**
+- PyMuPDF 提取全部页面文字 + 渲染前 5 页为 base64 图片
+- Pipeline Stage 2 新增 `_stage2_pdf` 路径：文字+页面图片 → adv_model 多模态理解
+- 支持多文件、部分失败继续处理
+- 参数可配置：`max_render_pages`、`max_text_chars`、`render_scale`
+
+**DOCX 文字提取（complex_input/docx_adapter.py）：**
+- python-docx 提取段落文字 + 表格内容 + 嵌入图片检测
+- Pipeline Stage 2 新增 `_stage2_docx` 路径：纯文本提取（不做 LLM 调用）
+- 支持标题层级保留（Heading → # 前缀）
+
+**反向引用索引（wiki/backlink.py）：**
+- 扫描全部 `[[wikilink]]` 构建 `inbound` / `outbound` / `orphans` 双向映射
+- 带缓存机制（`invalidate_cache()`），避免重复全量扫描
+- `wiki-lint` 重构为使用 BacklinkBuilder，孤页检测结果一致
+
+### 工程质量
+
+**代码审查修复（14 项）：**
+- **Critical**: BacklinkBuilder 添加缓存避免 O(n²) 扫描；`_atomic_write_json` + `now_iso` 提取到 `utils/shared.py` 统一引用
+- **High**: `find_path` BFS 改为邻接表索引 O(V+E)；`extract_relations` 边去重；`backlink.save()` 改用原子写入；`_stage2_docx` 修正模型名
+- **Medium**: `batch_size` 重命名为 `chunk_size`；删除死代码 `_TYPE_TO_PREFIX`；`total_links` 去重后重新计数；`neighbors()` 改用标准 BFS
+- **Low**: 移除重复 `_now_iso()` / `_atomic_write_json` 定义；XML namespace 提取常量
+
+**Pipeline 架构重构：**
+- `_stage2_multimodal` 拆分为 4 条独立路径：`_stage2_images` / `_stage2_pdf` / `_stage2_docx` / 跳过
+- 新增 `utils/shared.py`（项目级共享工具：原子写入 + 时间戳）
+
+### 测试
+
+- 532 测试（+71）：`test_pdf_adapter.py`（13 用例）、`test_docx_adapter.py`（9 用例）、`test_backlink.py`（12 用例）、`test_graph.py`（18 用例）、`test_complex_input_pipeline.py`（+19 用例 PDF/DOCX/路由）
+- 测试覆盖所有新模块的：正常路径、异常路径、边界条件、持久化巡回
+
+### 项目指标
+
+- 源文件：99 → **104**（+5：pdf_adapter / docx_adapter / backlink / graph / shared）
+- 测试文件：34 → **39**（+5）
+- 单元测试：461 → **532**（+71）
+- CLI 命令：45 → **46**（+build-graph）
+- 模块：20（不变，子文件扩充）
+
+---
+
 ## v3.11.17 (2026-07-13)
 
 ### 安全加固
