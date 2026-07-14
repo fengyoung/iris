@@ -211,33 +211,48 @@ class ComplexInputPipeline:
     ) -> Tuple[str, Optional[str]]:
         """调用 adv_model 分析非文本内容。
 
-        图片类附件以 image_url 形式传入。非图片类型（PDF/DOCX/VIDEO）
-        暂不支持多模态直接读取，返回明确提示。
+        图片类附件以 image_url 形式传入。
+        PDF 附件通过 PdfAdapter 提取文字 + 页面渲染后送入多模态模型。
+        其他非图片/非 PDF 类型（DOCX/VIDEO）暂不支持，返回明确提示。
         """
         from iris.utils.constants import FILE_TYPE_IMAGE as _IMG
+        from iris.utils.constants import FILE_TYPE_PDF as _PDF
+        from iris.utils.constants import FILE_TYPE_DOCUMENT as _DOC
 
-        # 无编码图片 → 全部为非图片类型，暂不支持
-        if not detection.encoded_images:
-            unsupported = [p.split("/")[-1] for p in detection.file_paths]
-            return (
-                f"[Stage2 跳过] 检测到非图片文件，暂不支持多模态直接分析：{', '.join(unsupported)}。"
-                f"请先将文件转换为图片或文本格式。",
-                None,
-            )
+        # ── 路径 1：图片输入（已有逻辑） ─────────────────────
+        if detection.encoded_images:
+            return self._stage2_images(adv_prompt, detection)
 
-        # 构建多模态内容
+        # ── 路径 2：PDF 输入 ────────────────────────────────
+        if detection.file_type == _PDF:
+            return self._stage2_pdf(adv_prompt, detection)
+
+        # ── 路径 3：DOCX/DOC 输入（新增） ───────────────────
+        if detection.file_type == _DOC:
+            return self._stage2_docx(adv_prompt, detection)
+
+        # ── 路径 4：其他类型 → 跳过 ──────────────────────────
+        unsupported = [p.split("/")[-1] for p in detection.file_paths]
+        return (
+            f"[Stage2 跳过] 检测到非图片/非 PDF/非 DOCX 文件，暂不支持多模态直接分析：{', '.join(unsupported)}。"
+            f"请先将文件转换为图片、PDF 或 DOCX 格式。",
+            None,
+        )
+
+    def _stage2_images(
+        self, adv_prompt: str, detection: ComplexityResult
+    ) -> Tuple[str, Optional[str]]:
+        """Stage 2 图片路径：将 base64 编码的图片送入多模态模型。"""
         content_parts: List[Dict[str, Any]] = []
 
-        # 文件上下文说明（基于已编码图片）
+        # 文件上下文说明
         img_names = [img.path.split("/")[-1] for img in detection.encoded_images]
         file_context = (
             f"附件图片数：{len(detection.encoded_images)}\n"
             f"文件名：{', '.join(img_names)}"
         )
-
         content_parts.append({"type": "text", "text": f"{adv_prompt}\n\n{file_context}"})
 
-        # 附件是图片类型时才嵌入 base64 编码
         for img in detection.encoded_images:
             content_parts.append(
                 {"type": "image_url", "image_url": {"url": img.data_url}}
@@ -256,6 +271,142 @@ class ComplexInputPipeline:
             return text.strip(), model_info.get("model", "adv_model")
         except LLMProviderError as exc:
             return f"[Stage2 失败] adv_model 调用出错: {exc}", None
+
+    def _stage2_pdf(
+        self, adv_prompt: str, detection: ComplexityResult
+    ) -> Tuple[str, Optional[str]]:
+        """Stage 2 PDF 路径：提取文字 + 渲染页面 → 多模态模型。
+
+        对每个 PDF 文件：
+        1. 提取全部页面文字（截断以避免超出上下文）
+        2. 渲染前 5 页为图片供视觉理解
+        3. 构建混合 content_parts（文字 + 页面图片）
+        4. 送入 adv_model 多模态分析
+        """
+        from iris.complex_input.pdf_adapter import PdfAdapter, PdfAdapterError
+
+        content_parts: List[Dict[str, Any]] = []
+
+        # 构建分析指令
+        header_lines = [
+            adv_prompt,
+            "",
+            f"PDF 文件数：{len(detection.file_paths)}",
+        ]
+        content_parts.append({"type": "text", "text": "\n".join(header_lines)})
+
+        adapter = PdfAdapter()
+        total_images = 0
+        pdf_errors: List[str] = []
+
+        for pdf_path in detection.file_paths:
+            try:
+                pdf_content = adapter.process(pdf_path, max_render_pages=5, max_text_chars=6000)
+            except PdfAdapterError as exc:
+                pdf_errors.append(f"{Path(pdf_path).name}: {exc}")
+                continue
+
+            # PDF 文字摘要
+            total_pages = pdf_content.total_pages
+            text_header = (
+                f"\n---\n"
+                f"PDF: {Path(pdf_path).name}（共 {total_pages} 页，"
+                f"已渲染前 {pdf_content.rendered_pages} 页为图片）\n"
+                f"提取文字：\n{pdf_content.text}"
+            )
+            content_parts.append({"type": "text", "text": text_header})
+
+            # PDF 页面图片
+            for img in pdf_content.page_images:
+                content_parts.append(
+                    {"type": "image_url", "image_url": {"url": img.data_url}}
+                )
+                total_images += 1
+
+            # 记录非致命错误
+            if pdf_content.error:
+                pdf_errors.append(f"{Path(pdf_path).name}: {pdf_content.error}")
+
+        if pdf_errors:
+            content_parts.append(
+                {"type": "text", "text": f"\n处理警告：{'; '.join(pdf_errors)}"}
+            )
+
+        # 如果全部 PDF 处理失败，返回错误
+        if total_images == 0 and not any(
+            p.get("type") == "text" and "提取文字" in str(p.get("text", ""))
+            for p in content_parts
+        ):
+            return (
+                f"[Stage2 跳过] 所有 PDF 文件处理失败：{'; '.join(pdf_errors) if pdf_errors else '未知错误'}",
+                None,
+            )
+
+        try:
+            text = self._llm.generate_multimodal(
+                content_parts,
+                route_context={
+                    "input_type": "multimodal",
+                    "task_type": "image_understanding",
+                    "complexity": "complex",
+                },
+            )
+            model_info = self._llm.get_provider().get_active_model_config("adv_model")
+            return text.strip(), model_info.get("model", "adv_model")
+        except LLMProviderError as exc:
+            return f"[Stage2 失败] adv_model 调用出错: {exc}", None
+
+    def _stage2_docx(
+        self, adv_prompt: str, detection: ComplexityResult
+    ) -> Tuple[str, Optional[str]]:
+        """Stage 2 DOCX 路径：提取文字 → 返回纯文本分析结果。
+
+        DOCX 文件通常以文字为主，提取全文后直接作为分析结果。
+        如 DOCX 含嵌入图片，追加提示说明。
+        """
+        from iris.complex_input.docx_adapter import DocxAdapter, DocxAdapterError
+
+        text_parts: List[str] = [f"分析指令：{adv_prompt}\n"]
+
+        adapter = DocxAdapter()
+        docx_errors: List[str] = []
+        any_success = False
+
+        for docx_path in detection.file_paths:
+            try:
+                content = adapter.process(docx_path, max_text_chars=6000)
+            except DocxAdapterError as exc:
+                docx_errors.append(f"{Path(docx_path).name}: {exc}")
+                continue
+
+            any_success = True
+            header = (
+                f"\n---\n"
+                f"DOCX: {Path(docx_path).name}"
+                f"（{content.paragraph_count} 段, {content.table_count} 表格"
+            )
+            if content.has_images:
+                header += ", 含嵌入图片"
+            header += "）\n"
+            text_parts.append(header + content.text)
+
+            if content.error:
+                docx_errors.append(f"{Path(docx_path).name}: {content.error}")
+
+        if docx_errors:
+            text_parts.append(f"\n处理警告：{'; '.join(docx_errors)}")
+
+        # 如果全部 DOCX 处理失败
+        if not any_success:
+            return (
+                f"[Stage2 跳过] 所有 DOCX 文件处理失败："
+                f"{'; '.join(docx_errors) if docx_errors else '未知错误'}",
+                None,
+            )
+
+        # DOCX 路径不做 LLM 调用，仅提取文字，标记为纯文本处理
+        combined_text = "\n".join(text_parts)
+        return combined_text, "docx_text_extraction"
 
     # ── Stage 3: base_model 整合润色 ───────────────────────────────
 

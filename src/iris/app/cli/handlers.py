@@ -686,6 +686,44 @@ def handle_batch_transcribe(args, bundle, logger) -> int:
     return 0 if result["failed"] == 0 else 1
 
 
+# ── 知识图谱 ────────────────────────────────────────────
+
+
+def handle_build_graph(args, bundle, logger) -> int:
+    """构建/更新知识图谱。"""
+    from iris.wiki import WikiGraph
+
+    if not bundle.wiki or not bundle.wiki.get("wiki_root"):
+        _emit_output("build-graph", {"error": "Wiki 配置缺失"}, pretty=args.pretty)
+        return 1
+
+    full_llm = getattr(args, "full", False)
+    page_title = getattr(args, "page", "") or None
+
+    graph = WikiGraph(bundle)
+
+    # 尝试加载已有图谱
+    graph.load()
+
+    report = graph.refresh(full_llm=full_llm, page_title=page_title)
+
+    if args.pretty:
+        density = report.get("density", {})
+        print(f"## 知识图谱{'（全量重建）' if full_llm else ''}")
+        print(f"  节点: {report.get('nodes', 0)}")
+        print(f"  wikilink 边: {report.get('wikilink_edges', 0)}")
+        print(f"  LLM 关系边: {report.get('llm_edges', 0)}")
+        if report.get("llm_error"):
+            print(f"  LLM 错误: {report['llm_error']}")
+        print(f"  孤立节点: {report.get('orphan_count', 0)}")
+        if density:
+            print(f"  图密度: {density.get('density', 0)}")
+            print(f"  桥接节点: {density.get('bridges', 0)}")
+
+    _emit_output("build-graph", report, pretty=args.pretty)
+    return 0 if not report.get("llm_error") else 1
+
+
 def handle_feishu_doc_convert(args, bundle, logger) -> int:
     """飞书文档转本地 Markdown 并归档到 SOURCE。"""
     from iris.feishu.doc_convert import FeishuDocConverter
@@ -912,9 +950,6 @@ def _daily_wiki_maintenance(bundle, chunk_summaries) -> tuple:
 
     from iris.wiki.generator import WikiGenerator
     wiki_update_result = WikiGenerator(bundle).update_all_pages(top_k=4)
-    builder = WikiNavigationBuilder(bundle)
-    builder.build(write=True)
-    append_changelog(Path(bundle.wiki["wiki_root"]), "daily-start 自动维护")
 
     # 飞书通讯录人物信息丰富（静默失败，不影响主流程）
     try:
@@ -927,10 +962,23 @@ def _daily_wiki_maintenance(bundle, chunk_summaries) -> tuple:
             "ambiguous": enrich_result.ambiguous,
             "no_change": enrich_result.no_change,
         }
-        if enrich_result.updated:
-            builder.build(write=True)
     except Exception as exc:
         person_enrich_result = {"status": "error", "reason": str(exc)}
+
+    # 知识图谱增量刷新（静默失败）
+    try:
+        from iris.wiki.graph import WikiGraph
+        graph = WikiGraph(bundle)
+        graph.load()
+        graph.build_nodes()
+        graph.build_edges_from_backlinks()
+        graph.save()
+    except Exception:
+        pass
+
+    builder = WikiNavigationBuilder(bundle)
+    builder.build(write=True)
+    append_changelog(Path(bundle.wiki["wiki_root"]), "daily-start 自动维护")
 
     return wiki_update_result, person_enrich_result
 
@@ -1167,4 +1215,5 @@ COMMAND_HANDLERS = {
     "secrets-delete": handle_secrets_delete,
     "feishu-doc-convert": handle_feishu_doc_convert,
     "chat-digest": handle_chat_digest,
+    "build-graph": handle_build_graph,
 }

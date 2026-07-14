@@ -26,6 +26,7 @@ COMMANDS = [
     "memory-export", "memory-import", "working-set", "working-show",
     "working-clear", "process", "transcribe-meeting", "batch-transcribe", "daily-start",
     "secrets-set", "secrets-list", "secrets-delete",
+    "build-graph",
     # ── 委托命令 ──
     "trello", "extract-weekly-reports", "extract-didi-travel",
     "sync-memory", "feishu-doc-convert", "chat-digest",
@@ -118,6 +119,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--url", default="", help="feishu-doc-convert 飞书文档 URL（逗号分隔多文档）")
     parser.add_argument("--from-config", action="store_true", help="feishu-doc-convert / chat-digest 从配置文件读取目标列表")
     parser.add_argument("--dry-run", action="store_true", help="预览模式不写入文件（feishu-doc-convert/chat-digest/build-biweekly-report）")
+    # 知识图谱
+    parser.add_argument("--full", action="store_true", help="build-graph 全量重建 LLM 关系")
+    parser.add_argument("--page", default="", help="build-graph 单页重建")
     # 聊天提炼
     parser.add_argument("--group", default="", help="chat-digest 群聊名称")
     parser.add_argument("--user", default="", help="chat-digest 用户名称（单聊）")

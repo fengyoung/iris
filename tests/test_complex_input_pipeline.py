@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from iris.complex_input.detector import ComplexityResult, EncodedImage
 from iris.complex_input.pipeline import ComplexInputPipeline, PipelineResult, _safe_format
-from iris.complex_input.detector import ComplexityResult
 
 
 # ── _safe_format ──────────────────────────────────────────────────────
@@ -152,3 +153,411 @@ def test_pipeline_result_to_dict():
     assert d["is_complex"] is True
     assert d["stage3_output"] == "p3"
     assert d["file_paths"] == ["/f.png"]
+
+
+# ── PDF Stage 2 路由 ──────────────────────────────────────────────
+
+
+def _make_pipeline_with_mocks(config_bundle):
+    """构建 pipeline 并返回 pipeline + mock_llm_service。"""
+    with patch("iris.complex_input.pipeline.LLMService") as MockLLM:
+        mock_svc = MagicMock()
+        MockLLM.return_value = mock_svc
+        pipeline = ComplexInputPipeline(config_bundle)
+        pipeline._llm = mock_svc
+    return pipeline, mock_svc
+
+
+def test_stage2_routes_to_pdf_when_file_type_is_pdf(config_bundle):
+    """file_type=pdf 且无 encoded_images 时，路由到 _stage2_pdf。"""
+    pipeline, mock_svc = _make_pipeline_with_mocks(config_bundle)
+
+    detection = ComplexityResult(
+        is_complex=True,
+        file_type="pdf",
+        file_paths=["/tmp/test.pdf"],
+        reason="PDF 输入",
+        encoded_images=[],
+    )
+
+    with patch.object(pipeline, "_stage2_pdf", return_value=("PDF 分析结果", "qwen")) as mock_pdf:
+        result = pipeline._stage2_multimodal("分析 PDF", detection)
+        mock_pdf.assert_called_once()
+        assert result == ("PDF 分析结果", "qwen")
+
+
+def test_stage2_routes_to_images_when_encoded_images_present(config_bundle):
+    """有 encoded_images 时优先走图片路径（即使 file_type=pdf，mixed 场景）。"""
+    pipeline, mock_svc = _make_pipeline_with_mocks(config_bundle)
+
+    detection = ComplexityResult(
+        is_complex=True,
+        file_type="mixed",
+        file_paths=["/tmp/test.pdf", "/tmp/test.png"],
+        reason="混合输入",
+        encoded_images=[EncodedImage(path="/tmp/test.png", mime_type="image/png",
+                                      data_url="data:image/png;base64,xxx")],
+    )
+
+    with patch.object(pipeline, "_stage2_images", return_value=("图片结果", "qwen")) as mock_img, \
+         patch.object(pipeline, "_stage2_pdf", return_value=("PDF结果", "qwen")) as mock_pdf:
+        result = pipeline._stage2_multimodal("分析文件", detection)
+        mock_img.assert_called_once()
+        mock_pdf.assert_not_called()
+        assert result == ("图片结果", "qwen")
+
+
+def test_stage2_skips_unsupported_types(config_bundle):
+    """VIDEO 等不支持的类型返回跳过提示。"""
+    pipeline, mock_svc = _make_pipeline_with_mocks(config_bundle)
+
+    detection = ComplexityResult(
+        is_complex=True,
+        file_type="video",
+        file_paths=["/tmp/video.mp4"],
+        reason="视频输入",
+        encoded_images=[],
+    )
+
+    result_text, result_model = pipeline._stage2_multimodal("分析视频", detection)
+    assert "跳过" in result_text
+    assert result_model is None
+
+
+# ── _stage2_pdf 集成测试 ─────────────────────────────────────────
+
+
+def test_stage2_pdf_success(config_bundle):
+    """_stage2_pdf 成功调用多模态模型。"""
+    pipeline, mock_svc = _make_pipeline_with_mocks(config_bundle)
+
+    # Mock PdfAdapter.process 返回值
+    fake_pdf_content = MagicMock()
+    fake_pdf_content.total_pages = 3
+    fake_pdf_content.rendered_pages = 3
+    fake_pdf_content.text = "PDF text content"
+    fake_pdf_content.page_images = [
+        EncodedImage(path="/tmp/test.pdf#page=1", mime_type="image/png",
+                     data_url="data:image/png;base64,page1"),
+        EncodedImage(path="/tmp/test.pdf#page=2", mime_type="image/png",
+                     data_url="data:image/png;base64,page2"),
+        EncodedImage(path="/tmp/test.pdf#page=3", mime_type="image/png",
+                     data_url="data:image/png;base64,page3"),
+    ]
+    fake_pdf_content.error = None
+
+    # Mock LLM 多模态返回
+    mock_svc.generate_multimodal.return_value = "这是 PDF 的分析结果。"
+    mock_svc.get_provider.return_value.get_active_model_config.return_value = {
+        "model": "qwen3.7-plus"
+    }
+
+    detection = ComplexityResult(
+        is_complex=True,
+        file_type="pdf",
+        file_paths=["/tmp/test.pdf"],
+        reason="PDF 输入",
+        encoded_images=[],
+    )
+
+    with patch("iris.complex_input.pdf_adapter.PdfAdapter") as MockAdapter:
+        mock_adapter = MagicMock()
+        mock_adapter.process.return_value = fake_pdf_content
+        MockAdapter.return_value = mock_adapter
+
+        text, model = pipeline._stage2_pdf("请分析这份 PDF", detection)
+
+    assert "PDF 的分析结果" in text
+    assert model == "qwen3.7-plus"
+    mock_svc.generate_multimodal.assert_called_once()
+
+
+def test_stage2_pdf_adapter_error_graceful(config_bundle):
+    """PdfAdapter 抛出 PdfAdapterError 时优雅降级。"""
+    pipeline, mock_svc = _make_pipeline_with_mocks(config_bundle)
+
+    detection = ComplexityResult(
+        is_complex=True,
+        file_type="pdf",
+        file_paths=["/tmp/broken.pdf"],
+        reason="PDF 输入",
+        encoded_images=[],
+    )
+
+    with patch("iris.complex_input.pdf_adapter.PdfAdapter") as MockAdapter:
+        from iris.complex_input.pdf_adapter import PdfAdapterError
+        mock_adapter = MagicMock()
+        mock_adapter.process.side_effect = PdfAdapterError("PyMuPDF (fitz) 未安装")
+        MockAdapter.return_value = mock_adapter
+
+        text, model = pipeline._stage2_pdf("分析 PDF", detection)
+
+    # 全部 PDF 失败时返回跳过
+    assert "跳过" in text or "失败" in text
+    assert model is None
+
+
+def test_stage2_pdf_llm_error_fallback(config_bundle):
+    """LLM 多模态调用失败时返回错误文本。"""
+    pipeline, mock_svc = _make_pipeline_with_mocks(config_bundle)
+
+    fake_pdf_content = MagicMock()
+    fake_pdf_content.total_pages = 1
+    fake_pdf_content.rendered_pages = 1
+    fake_pdf_content.text = "Content"
+    fake_pdf_content.page_images = [
+        EncodedImage(path="/tmp/test.pdf#page=1", mime_type="image/png",
+                     data_url="data:image/png;base64,test")
+    ]
+    fake_pdf_content.error = None
+
+    from iris.llm import LLMProviderError
+    mock_svc.generate_multimodal.side_effect = LLMProviderError("API 不可用")
+
+    detection = ComplexityResult(
+        is_complex=True,
+        file_type="pdf",
+        file_paths=["/tmp/test.pdf"],
+        reason="PDF 输入",
+        encoded_images=[],
+    )
+
+    with patch("iris.complex_input.pdf_adapter.PdfAdapter") as MockAdapter:
+        mock_adapter = MagicMock()
+        mock_adapter.process.return_value = fake_pdf_content
+        MockAdapter.return_value = mock_adapter
+
+        text, model = pipeline._stage2_pdf("分析 PDF", detection)
+
+    assert "Stage2 失败" in text
+    assert model is None
+
+
+def test_stage2_pdf_multiple_files(config_bundle):
+    """多个 PDF 文件时全部处理。"""
+    pipeline, mock_svc = _make_pipeline_with_mocks(config_bundle)
+
+    fake_content_1 = MagicMock()
+    fake_content_1.total_pages = 2
+    fake_content_1.rendered_pages = 2
+    fake_content_1.text = "PDF 1 text"
+    fake_content_1.page_images = [
+        EncodedImage(path="/tmp/a.pdf#page=1", mime_type="image/png",
+                     data_url="data:image/png;base64,a1"),
+    ]
+    fake_content_1.error = None
+
+    fake_content_2 = MagicMock()
+    fake_content_2.total_pages = 1
+    fake_content_2.rendered_pages = 1
+    fake_content_2.text = "PDF 2 text"
+    fake_content_2.page_images = [
+        EncodedImage(path="/tmp/b.pdf#page=1", mime_type="image/png",
+                     data_url="data:image/png;base64,b1"),
+    ]
+    fake_content_2.error = None
+
+    mock_svc.generate_multimodal.return_value = "多文件分析结果"
+    mock_svc.get_provider.return_value.get_active_model_config.return_value = {
+        "model": "qwen3.7-plus"
+    }
+
+    detection = ComplexityResult(
+        is_complex=True,
+        file_type="pdf",
+        file_paths=["/tmp/a.pdf", "/tmp/b.pdf"],
+        reason="多 PDF 输入",
+        encoded_images=[],
+    )
+
+    with patch("iris.complex_input.pdf_adapter.PdfAdapter") as MockAdapter:
+        mock_adapter = MagicMock()
+        mock_adapter.process.side_effect = [fake_content_1, fake_content_2]
+        MockAdapter.return_value = mock_adapter
+
+        text, model = pipeline._stage2_pdf("分析 PDF", detection)
+
+    assert "多文件分析结果" in text
+    assert model == "qwen3.7-plus"
+    # 验证 process 被调用了两次（每个文件一次）
+    assert mock_adapter.process.call_count == 2
+
+
+def test_stage2_pdf_partial_failure_continues(config_bundle):
+    """多个 PDF 中某个失败时，其他继续处理。"""
+    pipeline, mock_svc = _make_pipeline_with_mocks(config_bundle)
+
+    fake_content = MagicMock()
+    fake_content.total_pages = 1
+    fake_content.rendered_pages = 1
+    fake_content.text = "OK PDF text"
+    fake_content.page_images = [
+        EncodedImage(path="/tmp/ok.pdf#page=1", mime_type="image/png",
+                     data_url="data:image/png;base64,ok"),
+    ]
+    fake_content.error = None
+
+    mock_svc.generate_multimodal.return_value = "部分成功分析"
+    mock_svc.get_provider.return_value.get_active_model_config.return_value = {
+        "model": "qwen3.7-plus"
+    }
+
+    detection = ComplexityResult(
+        is_complex=True,
+        file_type="pdf",
+        file_paths=["/tmp/broken.pdf", "/tmp/ok.pdf"],
+        reason="多 PDF 输入",
+        encoded_images=[],
+    )
+
+    with patch("iris.complex_input.pdf_adapter.PdfAdapter") as MockAdapter:
+        from iris.complex_input.pdf_adapter import PdfAdapterError
+        mock_adapter = MagicMock()
+        mock_adapter.process.side_effect = [
+            PdfAdapterError("无法打开文件"),
+            fake_content,
+        ]
+        MockAdapter.return_value = mock_adapter
+
+        text, model = pipeline._stage2_pdf("分析 PDF", detection)
+
+    # 至少成功的文件被处理了
+    assert "部分成功分析" in text
+    assert mock_adapter.process.call_count == 2
+
+
+# ── _stage2_images 重构后仍正常工作 ──────────────────────────────
+
+
+def test_stage2_images_still_works(config_bundle):
+    """重构后 _stage2_images 逻辑不变（从原 _stage2_multimodal 提取）。"""
+    pipeline, mock_svc = _make_pipeline_with_mocks(config_bundle)
+
+    mock_svc.generate_multimodal.return_value = "图片分析结果"
+    mock_svc.get_provider.return_value.get_active_model_config.return_value = {
+        "model": "qwen3.7-plus"
+    }
+
+    detection = ComplexityResult(
+        is_complex=True,
+        file_type="image",
+        file_paths=["/tmp/test.png"],
+        reason="图片输入",
+        encoded_images=[
+            EncodedImage(path="/tmp/test.png", mime_type="image/png",
+                         data_url="data:image/png;base64,imgdata"),
+        ],
+    )
+
+    text, model = pipeline._stage2_images("分析图片", detection)
+
+    assert "图片分析结果" in text
+    assert model == "qwen3.7-plus"
+    mock_svc.generate_multimodal.assert_called_once()
+
+    # 验证 content_parts 包含图片 data_url
+    call_args = mock_svc.generate_multimodal.call_args[0][0]
+    assert any(p.get("type") == "image_url" for p in call_args)
+
+
+def test_stage2_images_llm_error(config_bundle):
+    """图片路径 LLM 失败时的错误处理不变。"""
+    pipeline, mock_svc = _make_pipeline_with_mocks(config_bundle)
+
+    from iris.llm import LLMProviderError
+    mock_svc.generate_multimodal.side_effect = LLMProviderError("API 错误")
+
+    detection = ComplexityResult(
+        is_complex=True,
+        file_type="image",
+        file_paths=["/tmp/test.png"],
+        reason="图片输入",
+        encoded_images=[
+            EncodedImage(path="/tmp/test.png", mime_type="image/png",
+                         data_url="data:image/png;base64,imgdata"),
+        ],
+    )
+
+    text, model = pipeline._stage2_images("分析图片", detection)
+    assert "Stage2 失败" in text
+    assert model is None
+
+
+# ── _stage2_docx 集成测试 ─────────────────────────────────────
+
+
+def test_stage2_routes_to_docx_when_file_type_is_document(config_bundle):
+    """file_type=document 时路由到 _stage2_docx。"""
+    pipeline, mock_svc = _make_pipeline_with_mocks(config_bundle)
+
+    detection = ComplexityResult(
+        is_complex=True,
+        file_type="document",
+        file_paths=["/tmp/test.docx"],
+        reason="文档输入",
+        encoded_images=[],
+    )
+
+    with patch.object(pipeline, "_stage2_docx", return_value=("DOCX文字内容", "qwen")) as mock_docx:
+        result = pipeline._stage2_multimodal("分析文档", detection)
+        mock_docx.assert_called_once()
+        assert result == ("DOCX文字内容", "qwen")
+
+
+def test_stage2_docx_success(config_bundle):
+    """_stage2_docx 成功提取 DOCX 文字。"""
+    pipeline, mock_svc = _make_pipeline_with_mocks(config_bundle)
+
+    fake_docx_content = MagicMock()
+    fake_docx_content.text = "Document content here."
+    fake_docx_content.paragraph_count = 5
+    fake_docx_content.table_count = 0
+    fake_docx_content.has_images = False
+    fake_docx_content.error = None
+
+    mock_svc.get_provider.return_value.get_active_model_config.return_value = {
+        "model": "qwen3.7-plus"
+    }
+
+    detection = ComplexityResult(
+        is_complex=True,
+        file_type="document",
+        file_paths=["/tmp/test.docx"],
+        reason="文档输入",
+        encoded_images=[],
+    )
+
+    with patch("iris.complex_input.docx_adapter.DocxAdapter") as MockAdapter:
+        mock_adapter = MagicMock()
+        mock_adapter.process.return_value = fake_docx_content
+        MockAdapter.return_value = mock_adapter
+
+        text, model = pipeline._stage2_docx("分析文档", detection)
+
+    assert "Document content here" in text
+    assert model == "docx_text_extraction"
+
+
+def test_stage2_docx_adapter_error(config_bundle):
+    """DocxAdapter 抛出错误时优雅返回跳过。"""
+    pipeline, mock_svc = _make_pipeline_with_mocks(config_bundle)
+
+    detection = ComplexityResult(
+        is_complex=True,
+        file_type="document",
+        file_paths=["/tmp/broken.docx"],
+        reason="文档输入",
+        encoded_images=[],
+    )
+
+    with patch("iris.complex_input.docx_adapter.DocxAdapter") as MockAdapter:
+        from iris.complex_input.docx_adapter import DocxAdapterError
+        mock_adapter = MagicMock()
+        mock_adapter.process.side_effect = DocxAdapterError("无法打开文件")
+        MockAdapter.return_value = mock_adapter
+
+        text, model = pipeline._stage2_docx("分析文档", detection)
+
+    # 全部 DOCX 失败时返回跳过或错误信息
+    assert "跳过" in text or "Stage2" in text
+    assert model is None

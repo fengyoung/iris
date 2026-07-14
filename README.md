@@ -1,10 +1,10 @@
-# Iris 3.11.17
+# Iris 3.12.0
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
 
-**v3.11.17** — .env→Keychain 密钥迁移 + secrets-list 修复 + 去重安全提醒修复；持续集成 461 测试。
+**v3.12.0** — 知识图谱 + PDF/DOCX 多模态 + 反向引用索引 + 代码审查修复；持续集成 532 测试。
 
 ## 开发路线
 
@@ -42,16 +42,17 @@ python scripts/run_cli.py daily-start
 | 类别 | 命令 | 说明 |
 |------|------|------|
 | 数据管道 | `scan-source`, `build-chunks`, `build-vector-index` | 文档扫描 / 切块 / 向量索引 |
-| 检索问答 | `search`, `ask` | 混合检索（BM25 全文 + 向量）+ LLM 问答（支持图文输入） |
+| 检索问答 | `search`, `ask` | 混合检索（BM25 全文 + 向量）+ LLM 问答（支持图文输入，图谱增强） |
 | Wiki | `discover-wiki`, `build-wiki`, `wiki-update` | 发现 / 生成 / 增量更新 |
-| 质量保障 | `wiki-lint`, `wiki-lint --fix`, `deep-eval` | 结构检查 + 内容准确性/全面性校验 |
+| 知识图谱 | `build-graph [--full] [--page]` | 实体节点 + wikilink 边 + LLM 关系提取，增量更新 |
+| 质量保障 | `wiki-lint`, `wiki-lint --fix`, `deep-eval` | 结构检查 + 孤页检测 + 内容准确性/全面性校验 |
 | 报告 | `build-report`, `build-mindmap`, `build-biweekly-report` | 专题报告 / 思维导图 / 双周报 |
 | 会议 | `transcribe-meeting`, `batch-transcribe`, `build-asr-prompt` | 转录纪要 / 批量处理 / ASR 三段校正 |
 | 飞书 | `feishu-doc-convert`, `chat-digest` | 文档转换 / 聊天记录提炼 |
 | 记忆 | `memory-*`, `working-set`, `sync-memory` | 记忆管理 / 工作上下文 |
 | 人物 | `enrich-persons` | 飞书通讯录自动补充人物 Wiki 的部门/邮箱信息 |
-| 工具 | `process`, `trello`, `extract-weekly-reports` | 图文处理 / 看板 / 周报提取 |
-| 系统 | `daily-start`, `check-config`, `status`, `diagnose` | 日常维护 / 配置检查 |
+| 工具 | `process`, `trello`, `extract-weekly-reports` | 图文处理（图片/PDF/DOCX）/ 看板 / 周报提取 |
+| 系统 | `daily-start`, `check-config`, `status`, `diagnose` | 日常维护（含图谱增量刷新）/ 配置检查 |
 
 ## 知识库结构
 
@@ -83,12 +84,13 @@ SOURCE/                     LLM-WIKI/
 - Pydantic v2（配置类型安全校验）
 - lark-cli（飞书接口，步骤 3）
 - macOS Keychain（可选密钥存储）
-- 397 个单元测试（30 个测试文件）
+- 532 个单元测试（39 个测试文件）
 
 ## 版本历史
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.12.0** | 2026-07-14 | 知识图谱（节点+wikilink边+LLM关系提取）+ PDF/DOCX多模态 + 反向引用索引 + 代码审查14项修复；持续集成 532 测试 |
 | **v3.11.17** | 2026-07-13 | .env→Keychain 密钥迁移 + secrets-list 修复 + 去重安全提醒修复；持续集成 461 测试 |
 | **v3.11.16** | 2026-07-13 | P0 安全加固（Memory 原子写入 / LLMQueryPlanner 实现 / API Key 提醒）+ HTTP/Chunk 去重 + 测试 460 |
 | **v3.11.15** | 2026-07-10 | Trello Python 3.13 SSL 兼容修复 + env 变量解析；持续集成 397 测试 |

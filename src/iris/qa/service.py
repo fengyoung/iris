@@ -171,11 +171,39 @@ class QAService:
         profile_context = self._profile_memory.render_for_prompt()
         correction_context = self._correction_memory.render_for_prompt(question)
         working_context = self._working_context.render_for_prompt()
+        graph_context = self._render_graph_context(wiki_hits)
         return self._prompt_loader.render(template_name, {"question": question, "context_summary": str(context_meta),
                                                           "session_context": session_context, "profile_context": profile_context,
                                                           "correction_context": correction_context, "working_context": working_context,
                                                           "wiki_lines": wiki_lines, "evidence_lines": evidence_lines,
-                                                          "structured_context": structured_context})
+                                                          "structured_context": structured_context,
+                                                          "graph_context": graph_context})
+
+    def _render_graph_context(self, wiki_hits: list) -> str:
+        """从知识图谱加载相关实体上下文（静默失败，图谱不存在时返回空）。"""
+        if not wiki_hits:
+            return "无"
+        try:
+            from iris.wiki.graph import WikiGraph
+            graph = WikiGraph(self._config)
+            if not graph.load():
+                return "无"
+            related_parts: list[str] = []
+            for hit in wiki_hits[:3]:
+                title = hit.get("title", "")
+                if not title:
+                    continue
+                entities = graph.related_entities(title)
+                if not entities:
+                    continue
+                lines = [f"📎 {title} 的相关实体："]
+                for ptype, items in entities.items():
+                    item_strs = [f"{it['title']}({it['relation']})" for it in items[:4]]
+                    lines.append(f"  {ptype}: {', '.join(item_strs)}")
+                related_parts.append("\n".join(lines))
+            return "\n".join(related_parts) if related_parts else "无"
+        except Exception:
+            return "无"
 
     def _render_session_context(self, session_state):
         questions = session_state.get("recent_questions", [])[:3]
