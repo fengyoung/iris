@@ -65,3 +65,5 @@ PjMMbaKyroI3X4xMHJ4c0hIln3g
 
 # Pytest
 .pytest_cache/
+.coverage
+htmlcov/

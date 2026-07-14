@@ -4,6 +4,56 @@
 
 ---
 
+## v3.14.1 (2026-07-15)
+
+代码质量全面优化：CLI 模块拆分 + 高复杂度函数重构 + 测试补齐 + 覆盖率基础设施 + 异常审查 + 文档完善。
+
+### 代码重构
+
+**CLI handlers 按功能域拆分（app/cli/handlers.py → _handlers/ 子模块）：**
+- 1480 行单文件 → 80 行聚合层 + 4 子模块（`_wiki` / `_data` / `_content` / `_system`，最大 478 行）
+- `_cli_main.py` 零改动，`COMMAND_HANDLERS` 向后兼容
+- 所有 handler 函数及内部 helper 通过 `handlers.py` 重新导出
+
+**analysis/service.py 高复杂度函数重构：**
+- `_stage3_synthesize_directions()`（原 180 行，复杂度 ~43）→ 提取 `_s3_synthesize_direction_section()` 方法 + 5 个模块级辅助函数（`_s3_build_direction_index` / `_s3_index_briefs_by_direction` / `_s3_build_concept_boundaries` / `_s3_load_historical_context` / `_s3_extract_strategic_insights`）
+- 新增 `_s3_format_briefs()` 静态方法，分离 brief 格式化逻辑
+
+### 测试
+
+- 687 → **754**（+67）：
+  - 新增 `test_validation.py`（safe_int/float/parse_json/required_keys/get_str/get_list，32 用例）
+  - 新增 `test_embedder.py`（TextEmbedder 构造/配置/向量提取，16 用例）
+  - 新增 `test_llm_service.py`（GenerationResult 不可变性/LLMService 构造/generate 路由上下文，10 用例）
+  - 新增 `test_navigation.py`（NavBuildResult/字符序列匹配/日期提取/死链检测，19 用例）
+
+### 工程基础设施
+
+- **pytest-cov 集成**：`pyproject.toml` 新增 `[tool.coverage.run]` / `[tool.coverage.report]`，基线覆盖率 49%，`fail_under = 49`
+- **ruff BLE001 豁免**：`pyproject.toml` 新增 `[tool.ruff.lint]` 配置，项目级豁免盲 except（有意容错策略）
+- **`retrieval/searcher.py`** 静默吞错处补充 `logger.warning`（Chunk 索引加载失败）
+
+### 文档
+
+- README 补充「开发环境」章节（安装/测试/项目结构图）
+- CLAUDE.md 指标更新：测试 754 / 覆盖率 49% / 110 文件 / handlers 4 子模块
+- 优化清单 memory 同步至当前状态
+
+### 版本
+
+- 产品版本 3.14.0 → **3.14.1**
+- 协议版本保持 **3.9**（无新 CLI 命令）
+- 数据版本不变
+
+### 项目指标
+
+- 源文件：106 → **110**（+4：_handlers/ 子模块）
+- 测试文件：46 → **50**（+4）
+- 单元测试：687 → **754**（+67）
+- CLI 命令：48（不变）
+
+---
+
 ## v3.14.0 (2026-07-15)
 
 四方向全面优化：测试覆盖补齐 + 用量统计深化 + 图谱查询命令 + VIDEO 多模态。

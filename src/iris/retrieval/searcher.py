@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import re
 from collections import defaultdict
@@ -15,6 +16,8 @@ from iris.ingest.chunker import ChunkRecord
 from iris.retrieval.planner import QueryPlan
 
 from iris.utils.tokenization import TOKEN_RE, tokenize  # noqa: F811 — 统一分词
+
+logger = logging.getLogger(__name__)
 
 # BM25 参数
 _BM25_K1 = 1.5
@@ -157,7 +160,8 @@ class LocalRetriever:
                 self._chunks.append(chunk)
                 self._by_source.setdefault(chunk.source_name, []).append(chunk)
             return len(chunks) > 0
-        except Exception:
+        except Exception as exc:
+            logger.warning("Chunk 索引加载失败 (%s): %s", db_path, exc)
             return False
 
 

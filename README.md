@@ -1,10 +1,10 @@
-# Iris 3.14.0
+# Iris 3.14.1
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
 
-**v3.14.0** — 四方向全面优化：测试覆盖 554→687 + 用量成本估算（`usage-stats --cost` + 价格表 + `daily-start` 用量概要/预算预警）+ 知识图谱查询命令 `graph-query` + VIDEO 多模态（ffmpeg 抽帧 + Whisper 转写）。
+**v3.14.1** — 代码质量全面优化：CLI handlers 拆分（1480→80+4 子模块）+ analysis 高复杂度函数重构 + 测试 687→754（+67）+ pytest-cov 覆盖率 49% + except Exception 审查 + 文档完善。
 
 ## 开发路线
 
@@ -88,12 +88,56 @@ SOURCE/                     LLM-WIKI/
 - macOS Keychain（可选密钥存储）
 - PyMuPDF / python-docx（PDF/DOCX 处理）
 - ffmpeg（视频抽帧/抽音轨，视频处理必需）+ openai-whisper（音轨转写，可选）
-- 687 个单元测试（46 个测试文件）
+- 754 个单元测试（50 个测试文件），覆盖率 49%
+
+## 开发环境
+
+```bash
+# 克隆并安装（含开发依赖）
+git clone <repo-url> && cd iris3
+pip install -e ".[dev]"
+
+# 运行测试（含覆盖率报告）
+python -m pytest tests/ -q
+python -m pytest tests/ -q --cov=iris --cov-report=term
+
+# 配置（参考快速开始章节）
+cp config/*.json.example config/  # 然后编辑各 .json 填入实际值
+```
+
+### 项目结构
+
+```
+iris3/
+├── src/iris/           # 20 模块（见下）
+│   ├── app/cli/        # CLI 入口 + 48 命令处理器（4 子模块）
+│   ├── analysis/       # 分析服务（报告/思维导图/双周报）
+│   ├── complex_input/  # 多模态三阶段（图片/PDF/DOCX/VIDEO）
+│   ├── config/         # 配置加载 + Pydantic 校验
+│   ├── core/           # 类型/锁/存储/Agent 适配
+│   ├── evaluation/     # Wiki 深度评估
+│   ├── feishu/         # 飞书文档转换 + 聊天提炼
+│   ├── ingest/         # 文档扫描 + 切块
+│   ├── llm/            # Provider/路由/LLMService/用量统计
+│   ├── memory/         # 记忆系统（5 子模块）
+│   ├── output/         # 格式化 + DOCX 输出
+│   ├── qa/             # 检索增强问答
+│   ├── retrieval/      # BM25 + 向量 + RRF 混合检索
+│   ├── trello/         # Trello 看板
+│   ├── utils/          # 工具函数
+│   └── wiki/           # Wiki 体系（最大模块，含图谱/ASR/反向引用）
+├── scripts/            # CLI 入口 + 委托脚本
+├── templates/          # Prompt / Wiki 模板
+├── tests/              # 754 单元测试（50 文件）
+├── config/             # *.json gitignored，*.example 版本控制
+└── pyproject.toml      # 项目配置 + pytest/coverage/ruff 设置
+```
 
 ## 版本历史
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.14.1** | 2026-07-15 | 代码质量全面优化：CLI handlers 拆分（1480→80+4 子模块）+ analysis 重构 + 测试 687→754 + pytest-cov 49% + except Exception 审查 + 文档完善 |
 | **v3.14.0** | 2026-07-15 | 全面优化：测试 554→687 + 用量成本估算（usage-stats --cost + 价格表 + daily-start 概要/预算预警）+ 图谱查询命令 graph-query + VIDEO 多模态（ffmpeg 抽帧 + Whisper 转写）|
 | **v3.13.0** | 2026-07-14 | LLM 用量统计（SQLite 记录调用/token，分模型 + 汇总，日/周/月/年聚合）+ usage-stats 命令；554 测试 |
 | **v3.12.1** | 2026-07-14 | 图谱刷新单次 Wiki 扫描 + 持久 _out_edges 索引 + QA 图谱惰性缓存 + _parse_triples JSON 数组兼容 + pytest 工具配置；538 测试 |

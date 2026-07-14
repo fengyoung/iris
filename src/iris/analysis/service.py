@@ -536,170 +536,31 @@ class AnalysisReportService:
         """按方向并行合成章节。Returns {direction_name: markdown_section}."""
         style_text = json.dumps(style_guide, ensure_ascii=False, indent=2)
 
-        # 构建名称→方向映射，支持 ID 和名称两种匹配方式
-        dir_by_name: dict = {}
-        dir_by_id: dict = {}
-        for d in directions:
-            d_name = d.get("name", "")
-            d_id = d.get("id", 0)
-            if d_name:
-                dir_by_name[d_name] = d
-            if d_id:
-                dir_by_id[d_id] = d
+        # 构建方向索引
+        dir_by_name, dir_by_id = _s3_build_direction_index(directions)
+        # 按方向收集 brief
+        dir_brief_index = _s3_index_briefs_by_direction(
+            file_briefs, dir_by_name, dir_by_id)
+        # 概念边界
+        boundary_by_dir = _s3_build_concept_boundaries(directions)
+        # 历史上下文（去重 + 风格参考）
+        ctx = _s3_load_historical_context(self._collector, directions)
+        multi_dedup, prev_by_dir = ctx
 
-        # 按方向收集 brief — 加入所有 relevant_directions（含 primary）
-        # 修复：不再因 primary 独占而遗漏跨方向内容（一份文件可能横跨多个方向）
-        dir_brief_index: dict = {}
-        assigned_labels: set = set()
-        for label, brief in file_briefs.items():
-            relevant = brief.get("relevant_directions", [])
-            if not relevant:
-                # fallback: 无 relevant_directions 时用 primary
-                primary = brief.get("primary_direction")
-                if isinstance(primary, str) and primary.isdigit():
-                    primary = int(primary)
-                if isinstance(primary, int):
-                    relevant = [primary]
-            for ref in relevant:
-                ref_str = str(ref)
-                ref_int = int(ref) if isinstance(ref, (int, str)) and str(ref).isdigit() else None
-                matched = False
-                if ref in dir_by_name:
-                    d_name = dir_by_name[ref].get("name", "")
-                    matched = True
-                elif ref_str in dir_by_name:
-                    d_name = dir_by_name[ref_str].get("name", "")
-                    matched = True
-                elif ref_int is not None and ref_int in dir_by_id:
-                    d_name = dir_by_id[ref_int].get("name", "")
-                    matched = True
-                if matched:
-                    dir_brief_index.setdefault(d_name, []).append(brief)
-                    assigned_labels.add(label)
-
-        # ── 概念边界：从 OP 方向定义中提取 ──
-        boundary_by_dir: dict = {}
-        for d in directions:
-            d_name = d.get("name", "")
-            own_concepts = _collect_direction_concepts(d)
-            other_concepts: dict = {}
-            for od in directions:
-                if od.get("name") == d_name:
-                    continue
-                other_concepts[od.get("name", "")] = _collect_direction_concepts(od)
-            boundary_by_dir[d_name] = {"own": own_concepts, "others": other_concepts}
-
-        # ── 多期历史双周报逐方向提取（去重衔接） ──
-        recent_reports = self._collector.load_recent_biweeklies(since_days=35)
-        # 排除最新一份（如果存在），因为我们不希望与自己对比
-        # 实际上 _load_recent_biweeklies 返回的列表可能包含今天刚生成的报告，
-        # 但我们只关心历史报告（至少是 1 天前的），所以排除当天的。
-        today = datetime.now().strftime("%Y%m%d")
-        history_reports = [r for r in recent_reports
-                          if r["date"].strftime("%Y%m%d") != today]
-        multi_dedup: dict = {}
-        if history_reports:
-            multi_dedup = _build_multi_report_dedup_text(history_reports, directions)
-        # 兼容旧逻辑：保留最新一份完整内容用于风格参考
-        prev_report = recent_reports[0]["content"][:5000] if recent_reports else ""
-        prev_by_dir: dict = {}
-        if prev_report:
-            prev_by_dir = _extract_previous_direction_sections(prev_report, directions)
-
-        def _synthesize_one(direction: dict) -> tuple:
-            d_name = direction.get("name", "")
-            briefs_for_dir = dir_brief_index.get(d_name, [])
-
-            brief_lines = []
-            if briefs_for_dir:
-                # 当方向有子领域定义或 brief 较多时，按子领域分组
-                has_sub_areas = bool(direction.get("sub_areas"))
-                many_briefs = len(briefs_for_dir) > 8
-
-                if has_sub_areas and many_briefs:
-                    sub_groups = _group_briefs_by_subarea(briefs_for_dir, direction)
-                    for sub_name, items in sub_groups.items():
-                        brief_lines.append(f"### {sub_name}（{len(items)} 份）")
-                        for b in items:
-                            md = b.get("brief_md", "")
-                            if md:
-                                brief_lines.append(md)
-                                brief_lines.append("")
-                else:
-                    # brief 较少时仍按 dir_type 分组
-                    by_dir_type: dict = {}
-                    for b in briefs_for_dir:
-                        by_dir_type.setdefault(b.get("dir_type", "其他"), []).append(b)
-                    for dir_type, items in by_dir_type.items():
-                        brief_lines.append(f"### {dir_type}（{len(items)} 份）")
-                        for b in items:
-                            md = b.get("brief_md", "")
-                            if md:
-                                brief_lines.append(md)
-                                brief_lines.append("")
-            brief_text = "\n".join(brief_lines) if brief_lines else "（本期无相关文件）"
-
-            # 提取讨论思考类文件的战略洞察（用于增强分析段）
-            strategic_insights: list[str] = []
-            for b in briefs_for_dir:
-                for si in b.get("strategic_insights", []) or []:
-                    if si and si not in strategic_insights:
-                        strategic_insights.append(si)
-            insights_text = ""
-            if strategic_insights:
-                insight_lines = ["## 战略洞察（来自讨论思考，优先用于战略分析段）", ""]
-                insight_lines.extend(f"- {si}" for si in strategic_insights)
-                insights_text = "\n".join(insight_lines) + "\n"
-
-            dir_def = json.dumps(direction, ensure_ascii=False, indent=2)
-            # 概念边界
-            bounds = boundary_by_dir.get(d_name, {"own": [], "others": {}})
-            boundaries_text = _build_boundaries_text(d_name, bounds)
-            # 多期历史去重参考（优先使用多期去重文本）
-            dedup_text = multi_dedup.get(d_name, "")
-            if dedup_text:
-                prev_text = (
-                    "## 历史去重参考（仅供去重检查，禁止作为信息来源）\n\n"
-                    "⚠️ 以下内容来自历史双周报，**仅供检查本期是否重复**。"
-                    "**绝对禁止**从以下内容中提取进展、数据或来源标签用于本期报告。"
-                    "本期所有进展必须且只能来自「本期相关素材」中的 brief。\n\n"
-                    "去重规则：如果本期某条进展在历史中已出现（即使措辞不同，但事实相同），"
-                    "则不要重复输出。同一项工作的增量更新，只输出增量部分，"
-                    "并在表述中体现连续性（如'继上期xxx后，本期进一步yyy'）。\n\n"
-                    f"{dedup_text}\n"
-                )
-            else:
-                # 回退到单期去重
-                prev_text = prev_by_dir.get(d_name, "")
-                if prev_text:
-                    prev_text = f"## 上期双周报中该方向的内容（本期不要重复以下已提过的进展）\n\n{prev_text[:1500]}\n"
-                else:
-                    prev_text = ""
-            prompt = self._prompt_loader.render("biweekly_stage3_direction.md", {
-                "direction_def": dir_def,
-                "style_guide": style_text,
-                "direction_boundaries": boundaries_text,
-                "previous_direction_content": prev_text,
-                "strategic_insights": insights_text,
-                "file_briefs": brief_text,
-            })
-
-            result = self._llm.generate(prompt=prompt, route_context={
-                "input_type": "text", "task_type": "analysis",
-                "complexity": "standard", "use_case": "biweekly_report_stage3",
-            })
-
-            section = result.text.strip()
-            if section.startswith("```"):
-                section = re.sub(r'^```\w*\n?', '', section)
-                section = re.sub(r'\n?```$', '', section)
-
-            logger.info("  %s: 合成完成 (%d 字)", d_name[:25], len(section))
-            return d_name, section
-
+        # 并行合成每个方向的章节
         sections: dict = {}
         with ThreadPoolExecutor(max_workers=min(len(directions), 4)) as executor:
-            futures = {executor.submit(_synthesize_one, d): d for d in directions}
+            futures = {
+                executor.submit(
+                    self._s3_synthesize_direction_section,
+                    direction=d,
+                    dir_brief_index=dir_brief_index,
+                    boundary_by_dir=boundary_by_dir,
+                    multi_dedup=multi_dedup,
+                    prev_by_dir=prev_by_dir,
+                    style_text=style_text,
+                ): d for d in directions
+            }
             for future in as_completed(futures):
                 try:
                     name, section = future.result()
@@ -711,6 +572,96 @@ class AnalysisReportService:
                     sections[d_name] = f"## {d_name}\n\n> 战略定位待补充\n\n本期无显著进展。\n"
 
         return sections
+
+    def _s3_synthesize_direction_section(
+        self, *, direction: dict, dir_brief_index: dict,
+        boundary_by_dir: dict, multi_dedup: dict, prev_by_dir: dict,
+        style_text: str,
+    ) -> tuple:
+        """合成单个方向的章节内容。返回 (direction_name, markdown_section)。"""
+        d_name = direction.get("name", "")
+        briefs_for_dir = dir_brief_index.get(d_name, [])
+
+        brief_text = self._s3_format_briefs(briefs_for_dir, direction)
+        insights_text = _s3_extract_strategic_insights(briefs_for_dir)
+
+        # 概念边界
+        bounds = boundary_by_dir.get(d_name, {"own": [], "others": {}})
+        boundaries_text = _build_boundaries_text(d_name, bounds)
+
+        # 去重上下文
+        dedup_text = multi_dedup.get(d_name, "")
+        if dedup_text:
+            prev_text = (
+                "## 历史去重参考（仅供去重检查，禁止作为信息来源）\n\n"
+                "⚠️ 以下内容来自历史双周报，**仅供检查本期是否重复**。"
+                "**绝对禁止**从以下内容中提取进展、数据或来源标签用于本期报告。"
+                "本期所有进展必须且只能来自「本期相关素材」中的 brief。\n\n"
+                "去重规则：如果本期某条进展在历史中已出现（即使措辞不同，但事实相同），"
+                "则不要重复输出。同一项工作的增量更新，只输出增量部分，"
+                "并在表述中体现连续性（如'继上期xxx后，本期进一步yyy'）。\n\n"
+                f"{dedup_text}\n"
+            )
+        else:
+            prev_text = prev_by_dir.get(d_name, "")
+            if prev_text:
+                prev_text = f"## 上期双周报中该方向的内容（本期不要重复以下已提过的进展）\n\n{prev_text[:1500]}\n"
+
+        dir_def = json.dumps(direction, ensure_ascii=False, indent=2)
+        prompt = self._prompt_loader.render("biweekly_stage3_direction.md", {
+            "direction_def": dir_def,
+            "style_guide": style_text,
+            "direction_boundaries": boundaries_text,
+            "previous_direction_content": prev_text or "",
+            "strategic_insights": insights_text,
+            "file_briefs": brief_text,
+        })
+
+        result = self._llm.generate(prompt=prompt, route_context={
+            "input_type": "text", "task_type": "analysis",
+            "complexity": "standard", "use_case": "biweekly_report_stage3",
+        })
+
+        section = result.text.strip()
+        if section.startswith("```"):
+            section = re.sub(r'^```\w*\n?', '', section)
+            section = re.sub(r'\n?```$', '', section)
+
+        logger.info("  %s: 合成完成 (%d 字)", d_name[:25], len(section))
+        return d_name, section
+
+    @staticmethod
+    def _s3_format_briefs(briefs_for_dir: list, direction: dict) -> str:
+        """将 brief 列表格式化为 LLM 输入文本。按子领域或 dir_type 分组。"""
+        brief_lines = []
+        if not briefs_for_dir:
+            return "（本期无相关文件）"
+
+        has_sub_areas = bool(direction.get("sub_areas"))
+        many_briefs = len(briefs_for_dir) > 8
+
+        if has_sub_areas and many_briefs:
+            sub_groups = _group_briefs_by_subarea(briefs_for_dir, direction)
+            for sub_name, items in sub_groups.items():
+                brief_lines.append(f"### {sub_name}（{len(items)} 份）")
+                for b in items:
+                    md = b.get("brief_md", "")
+                    if md:
+                        brief_lines.append(md)
+                        brief_lines.append("")
+        else:
+            by_dir_type: dict = {}
+            for b in briefs_for_dir:
+                by_dir_type.setdefault(b.get("dir_type", "其他"), []).append(b)
+            for dir_type, items in by_dir_type.items():
+                brief_lines.append(f"### {dir_type}（{len(items)} 份）")
+                for b in items:
+                    md = b.get("brief_md", "")
+                    if md:
+                        brief_lines.append(md)
+                        brief_lines.append("")
+
+        return "\n".join(brief_lines) if brief_lines else "（本期无相关文件）"
 
     # ── Stage 4: 终稿组装 + 质量审查 ─────────────────────────
 
@@ -928,6 +879,106 @@ def _extract_direction_section(report: str, direction_name: str) -> str:
         elif line.startswith("## ") and any(k in line for k in keys):
             in_section = True
     return "\n".join(result_lines).strip()
+
+
+# ── Stage 3 数据准备辅助函数 ─────────────────────────────────
+
+
+def _s3_build_direction_index(directions: list) -> tuple[dict, dict]:
+    """构建方向名称/ID → 方向定义的索引。返回 (dir_by_name, dir_by_id)。"""
+    dir_by_name: dict = {}
+    dir_by_id: dict = {}
+    for d in directions:
+        d_name = d.get("name", "")
+        d_id = d.get("id", 0)
+        if d_name:
+            dir_by_name[d_name] = d
+        if d_id:
+            dir_by_id[d_id] = d
+    return dir_by_name, dir_by_id
+
+
+def _s3_index_briefs_by_direction(file_briefs: dict, dir_by_name: dict,
+                                   dir_by_id: dict) -> dict:
+    """按方向收集 brief，支持所有 relevant_directions（含 primary）。
+
+    修复：不再因 primary 独占而遗漏跨方向内容（一份文件可能横跨多个方向）。
+    """
+    dir_brief_index: dict = {}
+    for label, brief in file_briefs.items():
+        relevant = brief.get("relevant_directions", [])
+        if not relevant:
+            primary = brief.get("primary_direction")
+            if isinstance(primary, str) and primary.isdigit():
+                primary = int(primary)
+            if isinstance(primary, int):
+                relevant = [primary]
+        for ref in relevant:
+            ref_str = str(ref)
+            ref_int = int(ref) if isinstance(ref, (int, str)) and str(ref).isdigit() else None
+            d_name = ""
+            if ref in dir_by_name:
+                d_name = dir_by_name[ref].get("name", "")
+            elif ref_str in dir_by_name:
+                d_name = dir_by_name[ref_str].get("name", "")
+            elif ref_int is not None and ref_int in dir_by_id:
+                d_name = dir_by_id[ref_int].get("name", "")
+            if d_name:
+                dir_brief_index.setdefault(d_name, []).append(brief)
+    return dir_brief_index
+
+
+def _s3_build_concept_boundaries(directions: list) -> dict:
+    """从 OP 方向定义中提取概念边界。返回 {dir_name: {own: [...], others: {...}}}。"""
+    boundary_by_dir: dict = {}
+    for d in directions:
+        d_name = d.get("name", "")
+        own_concepts = _collect_direction_concepts(d)
+        other_concepts: dict = {}
+        for od in directions:
+            if od.get("name") == d_name:
+                continue
+            other_concepts[od.get("name", "")] = _collect_direction_concepts(od)
+        boundary_by_dir[d_name] = {"own": own_concepts, "others": other_concepts}
+    return boundary_by_dir
+
+
+def _s3_load_historical_context(collector, directions: list) -> tuple[dict, dict]:
+    """加载多期历史双周报，提取去重参考。
+
+    Returns:
+        (multi_dedup, prev_by_dir)
+        - multi_dedup: {dir_name: dedup_text} — 多期去重参考
+        - prev_by_dir: {dir_name: content} — 最近一期按方向章节（兼容）
+    """
+    from datetime import datetime
+    recent_reports = collector.load_recent_biweeklies(since_days=35)
+    today = datetime.now().strftime("%Y%m%d")
+    history_reports = [r for r in recent_reports
+                       if r["date"].strftime("%Y%m%d") != today]
+    multi_dedup: dict = {}
+    if history_reports:
+        multi_dedup = _build_multi_report_dedup_text(history_reports, directions)
+
+    prev_report = recent_reports[0]["content"][:5000] if recent_reports else ""
+    prev_by_dir: dict = {}
+    if prev_report:
+        prev_by_dir = _extract_previous_direction_sections(prev_report, directions)
+    return multi_dedup, prev_by_dir
+
+
+def _s3_extract_strategic_insights(briefs_for_dir: list) -> str:
+    """从讨论思考类 brief 中提取战略洞察文本。"""
+    strategic_insights: list[str] = []
+    for b in briefs_for_dir:
+        for si in b.get("strategic_insights", []) or []:
+            if si and si not in strategic_insights:
+                strategic_insights.append(si)
+    if not strategic_insights:
+        return ""
+    insight_lines = ["## 战略洞察（来自讨论思考，优先用于战略分析段）", ""]
+    insight_lines.extend(f"- {si}" for si in strategic_insights)
+    return "\n".join(insight_lines) + "\n"
 
 
 # ── 子领域分组 ──────────────────────────────────────────

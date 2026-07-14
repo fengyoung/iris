@@ -1,4 +1,4 @@
-# Iris 3.14.0 — 项目执行说明
+# Iris 3.14.1 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~21,500 行 / 106 文件 / 20 模块 · CLI 48 命令 · 单元测试 687（46 文件）· 7 个项目级 Skill · Wiki 91 页 · 知识图谱节点 91 / 关系边 ~200 · 数据源 691 文档 / 3,956 Chunk · 向量索引 6,789 条。
+~21,800 行 / 110 文件 / 20 模块 · CLI 48 命令（44 handler + 4 委托脚本，按功能域 4 子模块）· 单元测试 754（50 文件）· 覆盖率 49% · 7 个项目级 Skill · Wiki 91 页 · 知识图谱节点 91 / 关系边 ~200 · 数据源 691 文档 / 3,956 Chunk · 向量索引 6,789 条。
 
 ### 关键路径
 
@@ -112,7 +112,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.14.0 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.14.1 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.9 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -153,7 +153,7 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.14.0 (2026-07-15)** — 四方向全面优化：① 测试覆盖 554→687（analysis/ingest/trello/evaluation/video 补齐）② 用量统计深化（价格表 `config/llm_pricing.json` + `usage-stats --cost` 成本估算 + `daily-start` 用量概要与预算预警）③ 知识图谱查询命令 `graph-query`（neighbors/related/path/orphans/bridges/density，复用 `WikiGraph`）④ VIDEO 多模态（`video_adapter.py` ffmpeg 抽帧 + Whisper 转写，接入三阶段 `_stage2_video`）。
+**当前 v3.14.1 (2026-07-15)** — 代码质量全面优化：① CLI handlers 按功能域拆分为 4 子模块（1480→80 行聚合层）② `_stage3_synthesize_directions()` 高复杂度函数重构（提取 5 个子函数）③ 测试补齐 687→754（+67，新增 validation/embedder/llm_service/navigation 4 测试文件）④ pytest-cov 覆盖率基础设施（49%）⑤ 49 处 `except Exception` 审查 + ruff BLE001 项目级豁免 ⑥ README 补充开发环境搭建 + 项目结构图。
 
 > 覆盖范围：仅统计 Iris 自身经 provider 发出的 LLM 调用（CLI + 调用 CLI 的 Skill），不含 Claude Code 本体 / Whisper 转写 / 飞书接口。
 
