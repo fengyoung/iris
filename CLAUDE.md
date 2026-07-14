@@ -1,4 +1,4 @@
-# Iris 3.13.0 — 项目执行说明
+# Iris 3.14.0 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~20,900 行 / 105 文件 / 20 模块 · CLI 47 命令 · 单元测试 554（40 文件）· 7 个项目级 Skill · Wiki 91 页 · 知识图谱节点 91 / 关系边 ~200 · 数据源 691 文档 / 3,956 Chunk · 向量索引 6,789 条。
+~21,500 行 / 106 文件 / 20 模块 · CLI 48 命令 · 单元测试 687（46 文件）· 7 个项目级 Skill · Wiki 91 页 · 知识图谱节点 91 / 关系边 ~200 · 数据源 691 文档 / 3,956 Chunk · 向量索引 6,789 条。
 
 ### 关键路径
 
@@ -77,17 +77,17 @@ Wiki 命令：`discover-wiki`（发现候选，4 类型分层排序）· `build-
 - **第二层（反向引用边）**：从 `[[wikilink]]` 构建 `linked_to` 边，零 LLM 成本
 - **第三层（LLM 关系边）**：批量 LLM 提取语义关系（负责/使用/属于/…），增量更新
 
-CLI：`build-graph [--full] [--page <title>]`。集成到 `daily-start` 自动维护链。
+CLI：`build-graph [--full] [--page <title>]`（构建/更新）· `graph-query --op <neighbors|related|path|orphans|bridges|density> [--node/--to/--hops/--min-degree]`（查询）。集成到 `daily-start` 自动维护链。
 
 ### 复杂输入三阶段流水线
 
 ```
 Stage 1 (base model)  → 动态生成多模态分析指令
-Stage 2 (adv model)   → 图片/PDF/DOCX 多模态理解
+Stage 2 (adv model)   → 图片/PDF/DOCX/VIDEO 多模态理解
 Stage 3 (base model)  → 整合润色输出
 ```
 
-PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取段落+表格文字。
+PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取段落+表格文字；VIDEO 通过 ffmpeg 均匀抽帧 + Whisper 音轨转写（依赖缺失时优雅降级）。
 
 ---
 
@@ -112,8 +112,8 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.13.0 | 软件发布版本 |
-| **协议版本** | `src/iris/__init__.py` | 3.8 | CLI 命令集 / agent-spec 格式 |
+| **产品版本** | `pyproject.toml` | 3.14.0 | 软件发布版本 |
+| **协议版本** | `src/iris/__init__.py` | 3.9 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
 > 只有真正发生变化的层才递增版本号。
@@ -133,7 +133,7 @@ iris3/
 ├── src/iris/          # 20 模块（见下）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
-├── tests/             # 554 用例，40 文件
+├── tests/             # 687 用例，46 文件
 ├── config/            # *.json gitignored，*.example 版本控制
 ├── data/              # 运行时数据（全 gitignore）
 ├── .claude/skills/    # 项目级 Skill（7 个）
@@ -141,20 +141,20 @@ iris3/
 └── pyproject.toml · README · CLAUDE · CHANGELOG.md
 ```
 
-**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配）· `memory`（记忆 5 子模块）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF）· `qa`（检索问答+图谱注入）· `wiki`（Wiki 体系 + backlink/graph，最大模块）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估）· `complex_input`（多模态三阶段：图片/PDF/DOCX）· `output`（格式化+DOCX）· `app/cli`（47 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py / shared.py）· `trello`（看板）。
+**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配）· `memory`（记忆 5 子模块）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF）· `qa`（检索问答+图谱注入）· `wiki`（Wiki 体系 + backlink/graph，最大模块）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估）· `complex_input`（多模态三阶段：图片/PDF/DOCX/VIDEO）· `output`（格式化+DOCX）· `app/cli`（48 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py / shared.py）· `trello`（看板）。
 
 ---
 
 ## Claude Code Skill（7 个项目级）
 
-`iris-wiki`（发现→审核→生成）· `iris-feishu-import`（飞书文档/聊天导入）· `iris-meeting`（转写→纪要→归档）· `iris-ask`（问答）· `iris-process`（富媒体处理：图片/PDF/DOCX）· `iris-report`（分析报告/思维导图/双周报）· `iris-health`（质量巡检）。
+`iris-wiki`（发现→审核→生成）· `iris-feishu-import`（飞书文档/聊天导入）· `iris-meeting`（转写→纪要→归档）· `iris-ask`（问答）· `iris-process`（富媒体处理：图片/PDF/DOCX/视频）· `iris-report`（分析报告/思维导图/双周报）· `iris-health`（质量巡检）。
 
 ---
 
 ## 近期变更
 
-**当前 v3.13.0 (2026-07-14)** — LLM 用量统计（`usage_tracker.py` SQLite 记录调用/token，分模型 + 汇总，日/周/月/年聚合）+ `usage-stats` 命令；持续集成 554 测试。
+**当前 v3.14.0 (2026-07-15)** — 四方向全面优化：① 测试覆盖 554→687（analysis/ingest/trello/evaluation/video 补齐）② 用量统计深化（价格表 `config/llm_pricing.json` + `usage-stats --cost` 成本估算 + `daily-start` 用量概要与预算预警）③ 知识图谱查询命令 `graph-query`（neighbors/related/path/orphans/bridges/density，复用 `WikiGraph`）④ VIDEO 多模态（`video_adapter.py` ffmpeg 抽帧 + Whisper 转写，接入三阶段 `_stage2_video`）。
 
 > 覆盖范围：仅统计 Iris 自身经 provider 发出的 LLM 调用（CLI + 调用 CLI 的 Skill），不含 Claude Code 本体 / Whisper 转写 / 飞书接口。
 
-> 完整版本历史（v3.11.17 及更早）见 [CHANGELOG.md](CHANGELOG.md)。
+> 完整版本历史（v3.12.x 及更早）见 [CHANGELOG.md](CHANGELOG.md)。

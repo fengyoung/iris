@@ -158,3 +158,81 @@ class TestStatsByModel:
         self._seed(tracker, "2026-06-01", "m", "p", 100, 50)
         rows = tracker.stats_by_model("2026-07", by="month")
         assert rows == []
+
+
+# ── 价格表加载与成本估算 ──────────────────────────────────────
+
+import json  # noqa: E402
+from iris.llm.usage_tracker import load_pricing, lookup_price  # noqa: E402
+
+
+def _seed(tracker, date, model, provider, pt, ct):
+    with tracker._connect() as conn:
+        conn.execute(
+            "INSERT INTO api_calls (ts, date, model, provider, route_role, matched_rule, "
+            "prompt_tokens, completion_tokens, is_multimodal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (f"{date}T00:00:00", date, model, provider, "", "", pt, ct, 0),
+        )
+
+
+class TestLoadPricing:
+    def test_missing_file_returns_empty(self, tmp_path):
+        assert load_pricing(tmp_path) == {}
+
+    def test_loads_json(self, tmp_path):
+        (tmp_path / "llm_pricing.json").write_text(
+            json.dumps({"_currency": "USD", "deepseek": {"m": {"input_per_1k": 1, "output_per_1k": 2}}}),
+            encoding="utf-8",
+        )
+        pricing = load_pricing(tmp_path)
+        assert pricing["_currency"] == "USD"
+
+    def test_malformed_json_returns_empty(self, tmp_path):
+        (tmp_path / "llm_pricing.json").write_text("{not json", encoding="utf-8")
+        assert load_pricing(tmp_path) == {}
+
+
+class TestLookupPrice:
+    def test_exact_match(self):
+        pricing = {"deepseek": {"chat": {"input_per_1k": 0.001, "output_per_1k": 0.002}}}
+        assert lookup_price(pricing, "deepseek", "chat") == (0.001, 0.002)
+
+    def test_default_fallback(self):
+        pricing = {"_default": {"input_per_1k": 0.01, "output_per_1k": 0.02}}
+        assert lookup_price(pricing, "unknown", "x") == (0.01, 0.02)
+
+    def test_none_when_no_match_no_default(self):
+        assert lookup_price({}, "p", "m") is None
+
+
+class TestStatsWithCost:
+    def test_computes_per_period_cost(self, tracker):
+        # deepseek-chat: 1000 in / 1000 out
+        _seed(tracker, "2026-07-01", "deepseek-chat", "deepseek", 1000, 1000)
+        pricing = {"_currency": "CNY", "deepseek": {"deepseek-chat": {"input_per_1k": 0.001, "output_per_1k": 0.002}}}
+        result = tracker.stats_with_cost(by="month", pricing=pricing)
+        assert result["currency"] == "CNY"
+        assert result["unpriced_models"] == []
+        row = result["rows"][0]
+        # 1000/1000*0.001 + 1000/1000*0.002 = 0.003
+        assert row["cost"] == 0.003
+
+    def test_unpriced_model_listed_and_cost_none(self, tracker):
+        _seed(tracker, "2026-07-01", "mystery-model", "unknown", 500, 500)
+        result = tracker.stats_with_cost(by="month", pricing={})
+        assert "mystery-model" in result["unpriced_models"]
+        assert result["rows"][0]["cost"] is None
+
+    def test_partial_pricing_sums_priced_only(self, tracker):
+        _seed(tracker, "2026-07-01", "priced", "p", 1000, 0)
+        _seed(tracker, "2026-07-02", "unpriced", "p", 1000, 0)
+        pricing = {"p": {"priced": {"input_per_1k": 0.01, "output_per_1k": 0.0}}}
+        result = tracker.stats_with_cost(by="month", pricing=pricing)
+        # 同一月份：priced 贡献 1000/1000*0.01 = 0.01，unpriced 记入列表
+        assert result["rows"][0]["cost"] == 0.01
+        assert result["unpriced_models"] == ["unpriced"]
+
+    def test_no_pricing_all_none(self, tracker):
+        _seed(tracker, "2026-07-01", "m", "p", 100, 100)
+        result = tracker.stats_with_cost(by="month")
+        assert result["rows"][0]["cost"] is None

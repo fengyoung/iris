@@ -207,19 +207,37 @@ def test_stage2_routes_to_images_when_encoded_images_present(config_bundle):
         assert result == ("图片结果", "qwen")
 
 
-def test_stage2_skips_unsupported_types(config_bundle):
-    """VIDEO 等不支持的类型返回跳过提示。"""
+def test_stage2_routes_to_video_when_file_type_is_video(config_bundle):
+    """file_type=video 且无 encoded_images 时，路由到 _stage2_video。"""
     pipeline, mock_svc = _make_pipeline_with_mocks(config_bundle)
 
     detection = ComplexityResult(
         is_complex=True,
         file_type="video",
-        file_paths=["/tmp/video.mp4"],
+        file_paths=["/tmp/clip.mp4"],
         reason="视频输入",
         encoded_images=[],
     )
 
-    result_text, result_model = pipeline._stage2_multimodal("分析视频", detection)
+    with patch.object(pipeline, "_stage2_video", return_value=("视频分析结果", "qwen-vl")) as mock_video:
+        result = pipeline._stage2_multimodal("分析视频", detection)
+        mock_video.assert_called_once()
+        assert result == ("视频分析结果", "qwen-vl")
+
+
+def test_stage2_skips_unsupported_types(config_bundle):
+    """未知类型（非图片/PDF/DOCX/视频）返回跳过提示。"""
+    pipeline, mock_svc = _make_pipeline_with_mocks(config_bundle)
+
+    detection = ComplexityResult(
+        is_complex=True,
+        file_type="unknown",
+        file_paths=["/tmp/data.bin"],
+        reason="未知输入",
+        encoded_images=[],
+    )
+
+    result_text, result_model = pipeline._stage2_multimodal("分析文件", detection)
     assert "跳过" in result_text
     assert result_model is None
 
@@ -560,4 +578,106 @@ def test_stage2_docx_adapter_error(config_bundle):
 
     # 全部 DOCX 失败时返回跳过或错误信息
     assert "跳过" in text or "Stage2" in text
+    assert model is None
+
+
+# ── _stage2_video 集成测试 ────────────────────────────────────────
+
+from iris.complex_input.video_adapter import VideoContent, VideoAdapterError  # noqa: E402
+
+
+def _video_detection(paths=None):
+    return ComplexityResult(
+        is_complex=True,
+        file_type="video",
+        file_paths=paths or ["/tmp/clip.mp4"],
+        reason="视频输入",
+        encoded_images=[],
+    )
+
+
+def test_stage2_video_success(config_bundle):
+    """_stage2_video 成功：帧 + 转写送入多模态模型。"""
+    pipeline, mock_svc = _make_pipeline_with_mocks(config_bundle)
+    mock_svc.generate_multimodal.return_value = "视频内容分析结果。"
+    mock_svc.get_provider.return_value.get_active_model_config.return_value = {"model": "qwen-vl-max"}
+
+    fake_content = VideoContent(
+        path="/tmp/clip.mp4",
+        transcript="这是转写文本",
+        frames=[EncodedImage(path="/tmp/f0.jpg", mime_type="image/jpeg", data_url="data:image/jpeg;base64,xxx")],
+        duration_sec=12.0,
+        frame_count=1,
+        has_audio=True,
+    )
+    with patch("iris.complex_input.video_adapter.VideoAdapter") as MockAdapter:
+        instance = MockAdapter.return_value
+        instance.process.return_value = fake_content
+        text, model = pipeline._stage2_video("分析视频", _video_detection())
+
+    assert text == "视频内容分析结果。"
+    assert model == "qwen-vl-max"
+    mock_svc.generate_multimodal.assert_called_once()
+    # content_parts 应含转写文字与帧图片
+    call_args = mock_svc.generate_multimodal.call_args[0][0]
+    assert any(p.get("type") == "image_url" for p in call_args)
+    assert any("转写" in p.get("text", "") for p in call_args if p.get("type") == "text")
+
+
+def test_stage2_video_ffmpeg_missing_graceful(config_bundle):
+    """ffmpeg 缺失（VideoAdapter 构造抛错）时优雅降级为跳过提示。"""
+    pipeline, mock_svc = _make_pipeline_with_mocks(config_bundle)
+    with patch("iris.complex_input.video_adapter.VideoAdapter", side_effect=VideoAdapterError("ffmpeg 未安装")):
+        text, model = pipeline._stage2_video("分析视频", _video_detection())
+    assert "跳过" in text
+    assert "ffmpeg" in text
+    assert model is None
+    mock_svc.generate_multimodal.assert_not_called()
+
+
+def test_stage2_video_no_frames_no_transcript_skips(config_bundle):
+    """既无帧也无转写时返回跳过提示，不调用 LLM。"""
+    pipeline, mock_svc = _make_pipeline_with_mocks(config_bundle)
+    empty = VideoContent(path="/tmp/clip.mp4", transcript="", frames=[], has_audio=False,
+                         error="抽帧失败")
+    with patch("iris.complex_input.video_adapter.VideoAdapter") as MockAdapter:
+        MockAdapter.return_value.process.return_value = empty
+        text, model = pipeline._stage2_video("分析视频", _video_detection())
+    assert "跳过" in text
+    assert model is None
+    mock_svc.generate_multimodal.assert_not_called()
+
+
+def test_stage2_video_frames_only_no_audio(config_bundle):
+    """无音轨但有帧时仍走多模态分析。"""
+    pipeline, mock_svc = _make_pipeline_with_mocks(config_bundle)
+    mock_svc.generate_multimodal.return_value = "仅凭画面的分析"
+    mock_svc.get_provider.return_value.get_active_model_config.return_value = {"model": "qwen-vl-max"}
+    content = VideoContent(
+        path="/tmp/clip.mp4", transcript="", has_audio=False, frame_count=2,
+        frames=[
+            EncodedImage(path="/tmp/f0.jpg", mime_type="image/jpeg", data_url="data:image/jpeg;base64,a"),
+            EncodedImage(path="/tmp/f1.jpg", mime_type="image/jpeg", data_url="data:image/jpeg;base64,b"),
+        ],
+    )
+    with patch("iris.complex_input.video_adapter.VideoAdapter") as MockAdapter:
+        MockAdapter.return_value.process.return_value = content
+        text, model = pipeline._stage2_video("分析视频", _video_detection())
+    assert text == "仅凭画面的分析"
+    mock_svc.generate_multimodal.assert_called_once()
+
+
+def test_stage2_video_llm_error_fallback(config_bundle):
+    """多模态模型调用失败时返回 [Stage2 失败]。"""
+    from iris.llm import LLMProviderError
+    pipeline, mock_svc = _make_pipeline_with_mocks(config_bundle)
+    mock_svc.generate_multimodal.side_effect = LLMProviderError("API 不可用")
+    content = VideoContent(
+        path="/tmp/clip.mp4", transcript="有转写", has_audio=True, frame_count=1,
+        frames=[EncodedImage(path="/tmp/f0.jpg", mime_type="image/jpeg", data_url="data:image/jpeg;base64,a")],
+    )
+    with patch("iris.complex_input.video_adapter.VideoAdapter") as MockAdapter:
+        MockAdapter.return_value.process.return_value = content
+        text, model = pipeline._stage2_video("分析视频", _video_detection())
+    assert "[Stage2 失败]" in text
     assert model is None

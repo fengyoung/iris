@@ -197,3 +197,128 @@ class TestDeepEvalResult:
         d = deep_eval_result_to_json(result)
         assert d["total_pages"] == 1
         assert d["accuracy"]["overall_rate"] == 0.667
+
+
+# ── AccuracyVerifier（mock LLM + locator，无网络） ─────────────────
+
+
+class _FakeLLMResult:
+    def __init__(self, text: str):
+        self.text = text
+
+
+class _FakeLLM:
+    """LLMService 替身：返回预置文本或抛异常。"""
+
+    def __init__(self, text: str = "", *, error: Exception = None):
+        self._text = text
+        self._error = error
+        self.calls = 0
+
+    def generate(self, prompt, **kwargs):
+        self.calls += 1
+        if self._error is not None:
+            raise self._error
+        return _FakeLLMResult(self._text)
+
+
+class _FakeLocator:
+    """SourceLocator 替身：按路径返回预置内容。"""
+
+    def __init__(self, mapping: dict):
+        self._mapping = mapping
+
+    def lookup_with_context(self, path, line_number=None, **kwargs):
+        return self._mapping.get(path)
+
+
+def _entry(description="Wiki 描述内容", path="src/a.md", line=10):
+    return ReferenceEntry(raw="raw", source_path=path, line_number=line, description=description)
+
+
+class TestAccuracyVerifierVerifyOne:
+    def test_source_missing(self):
+        from iris.llm import LLMProviderError  # noqa: F401 - 保证导入路径可用
+
+        verifier = AccuracyVerifier(_FakeLLM("consistent|ok"), _FakeLocator({}))
+        verdict = verifier._verify_one(_entry())
+        assert verdict.verdict == "source_missing"
+
+    def test_empty_description_unverifiable(self):
+        verifier = AccuracyVerifier(
+            _FakeLLM("consistent|ok"),
+            _FakeLocator({"src/a.md": "源文档内容"}),
+        )
+        verdict = verifier._verify_one(_entry(description="   "))
+        assert verdict.verdict == "unverifiable"
+        assert "描述为空" in verdict.detail
+
+    def test_consistent_parsed_from_pipe(self):
+        llm = _FakeLLM("consistent|描述与源文档一致")
+        verifier = AccuracyVerifier(llm, _FakeLocator({"src/a.md": "源文档内容"}))
+        verdict = verifier._verify_one(_entry())
+        assert verdict.verdict == "consistent"
+        assert verdict.detail == "描述与源文档一致"
+        assert llm.calls == 1
+
+    def test_inconsistent_parsed_from_pipe(self):
+        verifier = AccuracyVerifier(
+            _FakeLLM("inconsistent|描述与源文档不符"),
+            _FakeLocator({"src/a.md": "源文档内容"}),
+        )
+        verdict = verifier._verify_one(_entry())
+        assert verdict.verdict == "inconsistent"
+        assert verdict.detail == "描述与源文档不符"
+
+    def test_unverifiable_keyword_fallback(self):
+        # 无竖线分隔时走关键词匹配（unverifiable 无子串歧义）
+        verifier = AccuracyVerifier(
+            _FakeLLM("模型认为 unverifiable"),
+            _FakeLocator({"src/a.md": "源文档内容"}),
+        )
+        verdict = verifier._verify_one(_entry())
+        assert verdict.verdict == "unverifiable"
+
+    def test_unknown_verdict_normalized_to_unverifiable(self):
+        verifier = AccuracyVerifier(
+            _FakeLLM("garbage|无法判断"),
+            _FakeLocator({"src/a.md": "源文档内容"}),
+        )
+        verdict = verifier._verify_one(_entry())
+        assert verdict.verdict == "unverifiable"
+
+    def test_llm_error_yields_unverifiable(self):
+        from iris.llm import LLMProviderError
+
+        verifier = AccuracyVerifier(
+            _FakeLLM(error=LLMProviderError("offline")),
+            _FakeLocator({"src/a.md": "源文档内容"}),
+        )
+        verdict = verifier._verify_one(_entry())
+        assert verdict.verdict == "unverifiable"
+        assert "LLM 调用失败" in verdict.detail
+
+
+class TestHasRelevantWikiContent:
+    def test_short_content_false(self):
+        verifier = AccuracyVerifier(_FakeLLM(), _FakeLocator({}))
+        assert verifier._has_relevant_wiki_content("短", _entry()) is False
+
+    def test_substantial_content_with_description_true(self):
+        verifier = AccuracyVerifier(_FakeLLM(), _FakeLocator({}))
+        long_content = "字" * 300
+        assert verifier._has_relevant_wiki_content(long_content, _entry()) is True
+
+    def test_substantial_content_without_description_false(self):
+        verifier = AccuracyVerifier(_FakeLLM(), _FakeLocator({}))
+        long_content = "字" * 300
+        assert verifier._has_relevant_wiki_content(long_content, _entry(description="")) is False
+
+
+class TestAccuracyVerifierVerify:
+    def test_verify_aggregates_verdicts(self):
+        llm = _FakeLLM("consistent|一致")
+        verifier = AccuracyVerifier(llm, _FakeLocator({"src/a.md": "源内容"}))
+        verdicts = verifier.verify([_entry(), _entry(path="src/a.md")])
+        assert len(verdicts) == 2
+        assert all(v.verdict == "consistent" for v in verdicts)

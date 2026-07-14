@@ -1,10 +1,10 @@
-# Iris 3.13.0
+# Iris 3.14.0
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
 
-**v3.13.0** — LLM 用量统计（SQLite 记录调用/token，支持分模型汇总 + 日/周/月/年聚合）+ `usage-stats` 命令；持续集成 554 测试。
+**v3.14.0** — 四方向全面优化：测试覆盖 554→687 + 用量成本估算（`usage-stats --cost` + 价格表 + `daily-start` 用量概要/预算预警）+ 知识图谱查询命令 `graph-query` + VIDEO 多模态（ffmpeg 抽帧 + Whisper 转写）。
 
 ## 开发路线
 
@@ -27,6 +27,7 @@ cp config/llm.json.example config/llm.json
 cp config/data_source.json.example config/data_source.json
 # 编辑上述文件，填入 API Key 和路径
 # llm.json 已预配置 DeepSeek (文本) + 百炼 Qwen (多模态) 双 Provider
+# 可选：cp config/llm_pricing.json.example config/llm_pricing.json 后填入单价，启用 usage-stats --cost 成本估算
 
 # 初始化知识库
 python scripts/run_cli.py scan-source
@@ -44,15 +45,15 @@ python scripts/run_cli.py daily-start
 | 数据管道 | `scan-source`, `build-chunks`, `build-vector-index` | 文档扫描 / 切块 / 向量索引 |
 | 检索问答 | `search`, `ask` | 混合检索（BM25 全文 + 向量）+ LLM 问答（支持图文输入，图谱增强） |
 | Wiki | `discover-wiki`, `build-wiki`, `wiki-update` | 发现 / 生成 / 增量更新 |
-| 知识图谱 | `build-graph [--full] [--page]` | 实体节点 + wikilink 边 + LLM 关系提取，增量更新 |
+| 知识图谱 | `build-graph [--full] [--page]`, `graph-query --op ...` | 实体节点 + wikilink 边 + LLM 关系提取，增量更新；邻居/相关/路径/孤页/桥接/密度查询 |
 | 质量保障 | `wiki-lint`, `wiki-lint --fix`, `deep-eval` | 结构检查 + 孤页检测 + 内容准确性/全面性校验 |
 | 报告 | `build-report`, `build-mindmap`, `build-biweekly-report` | 专题报告 / 思维导图 / 双周报 |
 | 会议 | `transcribe-meeting`, `batch-transcribe`, `build-asr-prompt` | 转录纪要 / 批量处理 / ASR 三段校正 |
 | 飞书 | `feishu-doc-convert`, `chat-digest` | 文档转换 / 聊天记录提炼 |
 | 记忆 | `memory-*`, `working-set`, `sync-memory` | 记忆管理 / 工作上下文 |
 | 人物 | `enrich-persons` | 飞书通讯录自动补充人物 Wiki 的部门/邮箱信息 |
-| 工具 | `process`, `trello`, `extract-weekly-reports` | 图文处理（图片/PDF/DOCX）/ 看板 / 周报提取 |
-| 用量 | `usage-stats [--by day/week/month/year]` | LLM 调用/token 消耗统计（分模型 + 汇总，多粒度聚合） |
+| 工具 | `process`, `trello`, `extract-weekly-reports` | 富媒体处理（图片/PDF/DOCX/视频）/ 看板 / 周报提取 |
+| 用量 | `usage-stats [--by day/week/month/year] [--cost]` | LLM 调用/token 消耗统计（分模型 + 汇总，多粒度聚合，可选成本估算） |
 | 系统 | `daily-start`, `check-config`, `status`, `diagnose` | 日常维护（含图谱增量刷新）/ 配置检查 |
 
 ## 知识库结构
@@ -85,12 +86,15 @@ SOURCE/                     LLM-WIKI/
 - Pydantic v2（配置类型安全校验）
 - lark-cli（飞书接口，步骤 3）
 - macOS Keychain（可选密钥存储）
-- 554 个单元测试（40 个测试文件）
+- PyMuPDF / python-docx（PDF/DOCX 处理）
+- ffmpeg（视频抽帧/抽音轨，视频处理必需）+ openai-whisper（音轨转写，可选）
+- 687 个单元测试（46 个测试文件）
 
 ## 版本历史
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.14.0** | 2026-07-15 | 全面优化：测试 554→687 + 用量成本估算（usage-stats --cost + 价格表 + daily-start 概要/预算预警）+ 图谱查询命令 graph-query + VIDEO 多模态（ffmpeg 抽帧 + Whisper 转写）|
 | **v3.13.0** | 2026-07-14 | LLM 用量统计（SQLite 记录调用/token，分模型 + 汇总，日/周/月/年聚合）+ usage-stats 命令；554 测试 |
 | **v3.12.1** | 2026-07-14 | 图谱刷新单次 Wiki 扫描 + 持久 _out_edges 索引 + QA 图谱惰性缓存 + _parse_triples JSON 数组兼容 + pytest 工具配置；538 测试 |
 | **v3.12.0** | 2026-07-14 | 知识图谱（节点+wikilink边+LLM关系提取）+ PDF/DOCX多模态 + 反向引用索引 + 代码审查14项修复；持续集成 532 测试 |

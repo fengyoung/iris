@@ -27,6 +27,7 @@ COMMANDS = [
     "working-clear", "process", "transcribe-meeting", "batch-transcribe", "daily-start",
     "secrets-set", "secrets-list", "secrets-delete",
     "build-graph",
+    "graph-query",
     "usage-stats",
     # ── 委托命令 ──
     "trello", "extract-weekly-reports", "extract-didi-travel",
@@ -123,11 +124,19 @@ def build_parser() -> argparse.ArgumentParser:
     # 知识图谱
     parser.add_argument("--full", action="store_true", help="build-graph 全量重建 LLM 关系")
     parser.add_argument("--page", default="", help="build-graph 单页重建")
+    # 图谱查询
+    parser.add_argument("--op", default="", choices=["", "neighbors", "related", "path", "orphans", "bridges", "density"],
+                        help="graph-query 操作类型")
+    parser.add_argument("--node", default="", help="graph-query 目标节点标题（neighbors/related/path）")
+    parser.add_argument("--to", default="", help="graph-query path 的终点节点标题")
+    parser.add_argument("--hops", type=int, default=1, help="graph-query neighbors 跳数（默认 1）")
+    parser.add_argument("--min-degree", type=int, default=3, dest="min_degree", help="graph-query bridges 最小度阈值（默认 3）")
     # 用量统计
     parser.add_argument("--by", default="month", choices=["day", "week", "month", "year"],
                         help="usage-stats 时间粒度（默认 month）")
     parser.add_argument("--model", default="", help="usage-stats 过滤模型名称")
     parser.add_argument("--since", default="", help="usage-stats 起始日期 YYYY-MM-DD")
+    parser.add_argument("--cost", action="store_true", help="usage-stats 按价格表估算费用（需 config/llm_pricing.json）")
     # 聊天提炼
     parser.add_argument("--group", default="", help="chat-digest 群聊名称")
     parser.add_argument("--user", default="", help="chat-digest 用户名称（单聊）")

@@ -724,6 +724,129 @@ def handle_build_graph(args, bundle, logger) -> int:
     return 0 if not report.get("llm_error") else 1
 
 
+def handle_graph_query(args, bundle, logger) -> int:
+    """查询已构建的知识图谱（neighbors/related/path/orphans/bridges/density）。"""
+    from iris.wiki import WikiGraph
+
+    if not bundle.wiki or not bundle.wiki.get("wiki_root"):
+        _emit_output("graph-query", {"error": "Wiki 配置缺失"}, pretty=args.pretty)
+        return 1
+
+    op = getattr(args, "op", "") or ""
+    node = getattr(args, "node", "") or ""
+    to = getattr(args, "to", "") or ""
+    hops = int(getattr(args, "hops", 1) or 1)
+    min_degree = int(getattr(args, "min_degree", 3) or 3)
+
+    graph = WikiGraph(bundle)
+    if not graph.load():
+        _emit_output("graph-query", {"error": "图谱尚未构建，请先运行 iris build-graph"}, pretty=args.pretty)
+        return 1
+
+    id_to_title = {nid: n.title for nid, n in graph._nodes.items()}
+
+    def _node_dict(n) -> dict:
+        return {"id": n.id, "title": n.title, "page_type": n.page_type}
+
+    payload: Dict[str, Any] = {"op": op}
+
+    if op == "neighbors":
+        if not node:
+            _emit_output("graph-query", {"error": "neighbors 需要 --node"}, pretty=args.pretty)
+            return 1
+        nodes = graph.neighbors(node, hops=hops)
+        payload.update({"node": node, "hops": hops, "count": len(nodes),
+                        "neighbors": [_node_dict(n) for n in nodes]})
+    elif op == "related":
+        if not node:
+            _emit_output("graph-query", {"error": "related 需要 --node"}, pretty=args.pretty)
+            return 1
+        payload.update({"node": node, "related": graph.related_entities(node)})
+    elif op == "path":
+        if not node or not to:
+            _emit_output("graph-query", {"error": "path 需要 --node 与 --to"}, pretty=args.pretty)
+            return 1
+        edges = graph.find_path(node, to)
+        if edges is None:
+            payload.update({"from": node, "to": to, "found": False, "edges": []})
+        else:
+            payload.update({"from": node, "to": to, "found": True,
+                            "hops": len(edges),
+                            "edges": [{"source": e.source, "target": e.target,
+                                       "relation": e.relation, "source_type": e.source_type}
+                                      for e in edges]})
+    elif op == "orphans":
+        orphans = graph.find_orphans()
+        payload.update({"count": len(orphans), "orphans": orphans})
+    elif op == "bridges":
+        payload.update({"min_degree": min_degree, "bridges": graph.find_bridges(min_degree=min_degree)})
+    elif op == "density":
+        payload.update({"density": graph.density_report()})
+    else:
+        _emit_output("graph-query", {"error": f"未知 op: {op!r}，可选: neighbors/related/path/orphans/bridges/density"},
+                     pretty=args.pretty)
+        return 1
+
+    if args.pretty:
+        _print_graph_query_pretty(op, payload, id_to_title)
+        return 0
+
+    _emit_output("graph-query", payload, pretty=False)
+    return 0
+
+
+def _print_graph_query_pretty(op: str, payload: Dict[str, Any], id_to_title: Dict[str, str]) -> None:
+    """graph-query --pretty 的可读输出。"""
+    if op == "neighbors":
+        print(f"## {payload['node']} 的邻居（{payload['hops']} 跳，共 {payload['count']} 个）")
+        by_type: Dict[str, list] = {}
+        for n in payload["neighbors"]:
+            by_type.setdefault(n["page_type"], []).append(n["title"])
+        for ptype, titles in sorted(by_type.items()):
+            print(f"  [{ptype}] {', '.join(sorted(titles))}")
+    elif op == "related":
+        related = payload["related"]
+        if not related:
+            print(f"{payload['node']} 无相关实体（或节点不存在）。")
+            return
+        print(f"## 与 {payload['node']} 相关的实体")
+        for ptype, items in sorted(related.items()):
+            entries = [f"{it['title']}（{it['relation']}）" for it in items]
+            print(f"  [{ptype}] {', '.join(entries)}")
+    elif op == "path":
+        if not payload["found"]:
+            print(f"未找到 {payload['from']} → {payload['to']} 的路径。")
+            return
+        # 从查询起点开始渲染（wikilink 边无向，需按 from 定向）
+        frm = payload["from"]
+        ends = [payload["edges"][0]["source"], payload["edges"][0]["target"]]
+        cur = next((c for c in ends if c == frm or id_to_title.get(c) == frm), ends[0])
+        parts = [id_to_title.get(cur, cur)]
+        for e in payload["edges"]:
+            nxt = e["target"] if e["source"] == cur else e["source"]
+            parts.append(f"→[{e['relation']}]→ {id_to_title.get(nxt, nxt)}")
+            cur = nxt
+        print(f"## 路径（{payload['hops']} 跳）")
+        print("  " + " ".join(parts))
+    elif op == "orphans":
+        print(f"## 孤立节点（零入链，共 {payload['count']} 个）")
+        for oid in payload["orphans"]:
+            print(f"  - {id_to_title.get(oid, oid)}")
+    elif op == "bridges":
+        bridges = payload["bridges"]
+        print(f"## 桥接节点（度 ≥ {payload['min_degree']}，共 {len(bridges)} 个）")
+        for b in bridges:
+            print(f"  - {b['title']} [{b['page_type']}] 度={b['degree']} 跨类型={'/'.join(b['connected_types'])}")
+    elif op == "density":
+        d = payload["density"]
+        print("## 知识图谱密度报告")
+        print(f"  节点数: {d['nodes']}    边数: {d['edges']}（wikilink {d['edges_wikilink']} / LLM {d['edges_llm']}）")
+        print(f"  图密度: {d['density']}    平均度: {d['avg_degree']}    最大度: {d['max_degree']}（{d['max_degree_node']}）")
+        print(f"  孤立节点: {d['orphans']}    桥接节点: {d['bridges']}")
+        if d.get("by_type"):
+            print("  类型分布: " + "  ".join(f"{k}={v}" for k, v in sorted(d["by_type"].items())))
+
+
 def handle_feishu_doc_convert(args, bundle, logger) -> int:
     """飞书文档转本地 Markdown 并归档到 SOURCE。"""
     from iris.feishu.doc_convert import FeishuDocConverter
@@ -870,6 +993,9 @@ def handle_daily_start(args, bundle, logger) -> int:
         bundle, chunk_summaries,
     )
 
+    # 5. LLM 用量概要（今日/本周/本月 + 预算预警）
+    usage_summary = _compute_daily_usage_summary(bundle)
+
     payload = {"memory_sync": {"scanned": sync_result.get("scanned", 0), "skipped": sync_result.get("skipped", 0),
                                 "corrections_added": sync_result.get("corrections_added", 0)},
                "memory_maintenance": maintenance_report, "scan": scan_info,
@@ -879,9 +1005,52 @@ def handle_daily_start(args, bundle, logger) -> int:
                "vector_index": vector_index_result,
                "wiki_discover": _auto_discover_wiki_for_daily(bundle, chunk_summaries),
                "wiki_update": wiki_update_result,
-               "person_enrich": person_enrich_result}
+               "person_enrich": person_enrich_result,
+               "usage_summary": usage_summary}
     _emit_output(args.command, payload, pretty=args.pretty)
     return 0
+
+
+def _compute_daily_usage_summary(bundle) -> dict:
+    """LLM 用量概要：今日/本周/本月调用与 token 汇总 + 预算预警（静默失败）。
+
+    仅从本地 usage DB 读取，不产生任何 LLM 调用。DB 为空时返回 {"status": "empty"}。
+    """
+    try:
+        from datetime import datetime, timezone
+        from iris.llm.usage_tracker import UsageTracker, load_pricing
+
+        tracker = UsageTracker(bundle.root / "data")
+        if tracker.total_records() == 0:
+            return {"status": "empty"}
+
+        now = datetime.now(tz=timezone.utc)
+        today_key = now.strftime("%Y-%m-%d")
+        week_key = now.strftime("%Y-W%W")
+        month_key = now.strftime("%Y-%m")
+
+        def _pick(rows, key):
+            for r in rows:
+                if r["period"] == key:
+                    return {"calls": r["calls"], "total_tokens": r["total_tokens"]}
+            return {"calls": 0, "total_tokens": 0}
+
+        today = _pick(tracker.stats(by="day"), today_key)
+        this_week = _pick(tracker.stats(by="week"), week_key)
+        this_month = _pick(tracker.stats(by="month"), month_key)
+
+        summary = {"status": "ok", "today": today, "this_week": this_week, "this_month": this_month}
+
+        # 预算预警：本月 token 超过 config/llm_pricing.json 中的 _budget.monthly_token_limit
+        pricing = load_pricing(bundle.root / "config")
+        limit = (pricing.get("_budget") or {}).get("monthly_token_limit")
+        if isinstance(limit, (int, float)) and limit > 0 and this_month["total_tokens"] > limit:
+            summary["budget_warning"] = (
+                f"本月已用 {this_month['total_tokens']:,} token，超过预算上限 {int(limit):,}"
+            )
+        return summary
+    except Exception as exc:  # noqa: BLE001 - 概要失败不应阻断 daily-start
+        return {"status": "error", "reason": str(exc)}
 
 
 def _daily_scan_and_chunk(bundle) -> tuple:
@@ -1181,14 +1350,25 @@ def _strip_version_suffix(stem: str) -> str:
 
 
 def handle_usage_stats(args, bundle, logger) -> int:
-    from iris.llm.usage_tracker import UsageTracker
+    from iris.llm.usage_tracker import UsageTracker, load_pricing
 
     by = getattr(args, "by", "month") or "month"
     model_filter = getattr(args, "model", None) or None
     since = getattr(args, "since", None) or None
+    show_cost = getattr(args, "cost", False)
 
     tracker = UsageTracker(bundle.root / "data")
-    rows = tracker.stats(by=by, model=model_filter, since=since)
+
+    unpriced: list = []
+    currency = "CNY"
+    if show_cost:
+        pricing = load_pricing(bundle.root / "config")
+        cost_result = tracker.stats_with_cost(by=by, model=model_filter, since=since, pricing=pricing)
+        rows = cost_result["rows"]
+        unpriced = cost_result["unpriced_models"]
+        currency = cost_result["currency"]
+    else:
+        rows = tracker.stats(by=by, model=model_filter, since=since)
 
     if args.pretty:
         if not rows:
@@ -1196,24 +1376,36 @@ def handle_usage_stats(args, bundle, logger) -> int:
             return 0
 
         period_label = {"day": "日期", "week": "周", "month": "月份", "year": "年份"}.get(by, by)
-        header = f"{period_label:<14} {'调用次数':>8} {'输入Token':>11} {'输出Token':>11} {'合计Token':>11}"
+        cost_col = f"{'估算费用':>12}" if show_cost else ""
+        header = f"{period_label:<14} {'调用次数':>8} {'输入Token':>11} {'输出Token':>11} {'合计Token':>11}{cost_col}"
         sep = "-" * len(header)
         print(f"\n{header}")
         print(sep)
 
         total_calls = total_pt = total_ct = 0
+        total_cost = 0.0
         for row in rows:
             calls = row["calls"]
             pt = row["prompt_tokens"]
             ct = row["completion_tokens"]
             tot = row["total_tokens"]
-            print(f"{row['period']:<14} {calls:>8,} {pt:>11,} {ct:>11,} {tot:>11,}")
+            cost_str = ""
+            if show_cost:
+                cost = row.get("cost")
+                cost_str = f"{cost:>12,.4f}" if cost is not None else f"{'—':>12}"
+                total_cost += cost or 0.0
+            print(f"{row['period']:<14} {calls:>8,} {pt:>11,} {ct:>11,} {tot:>11,}{cost_str}")
             total_calls += calls
             total_pt += pt
             total_ct += ct
 
         print(sep)
-        print(f"{'合计':<14} {total_calls:>8,} {total_pt:>11,} {total_ct:>11,} {total_pt + total_ct:>11,}")
+        total_cost_str = f"{total_cost:>12,.4f}" if show_cost else ""
+        print(f"{'合计':<14} {total_calls:>8,} {total_pt:>11,} {total_ct:>11,} {total_pt + total_ct:>11,}{total_cost_str}")
+        if show_cost:
+            print(f"（货币：{currency}）")
+            if unpriced:
+                print(f"⚠ 未定价模型（未计入费用）：{', '.join(unpriced)}")
 
         # 最后一个时间段的按模型分布
         if rows:
@@ -1231,6 +1423,9 @@ def handle_usage_stats(args, bundle, logger) -> int:
         "by": by,
         "model_filter": model_filter,
         "since": since,
+        "cost": show_cost,
+        "currency": currency if show_cost else None,
+        "unpriced_models": unpriced if show_cost else None,
         "rows": rows,
     }, pretty=False)
     return 0
@@ -1280,5 +1475,6 @@ COMMAND_HANDLERS = {
     "feishu-doc-convert": handle_feishu_doc_convert,
     "chat-digest": handle_chat_digest,
     "build-graph": handle_build_graph,
+    "graph-query": handle_graph_query,
     "usage-stats": handle_usage_stats,
 }

@@ -220,11 +220,14 @@ class ComplexInputPipeline:
 
         图片类附件以 image_url 形式传入。
         PDF 附件通过 PdfAdapter 提取文字 + 页面渲染后送入多模态模型。
-        其他非图片/非 PDF 类型（DOCX/VIDEO）暂不支持，返回明确提示。
+        DOCX 通过 DocxAdapter 提取纯文本。
+        VIDEO 通过 VideoAdapter 抽帧 + 音轨转写后送入多模态模型。
+        其余未知类型返回明确提示。
         """
         from iris.utils.constants import FILE_TYPE_IMAGE as _IMG
         from iris.utils.constants import FILE_TYPE_PDF as _PDF
         from iris.utils.constants import FILE_TYPE_DOCUMENT as _DOC
+        from iris.utils.constants import FILE_TYPE_VIDEO as _VIDEO
 
         # ── 路径 1：图片输入（已有逻辑） ─────────────────────
         if detection.encoded_images:
@@ -234,15 +237,19 @@ class ComplexInputPipeline:
         if detection.file_type == _PDF:
             return self._stage2_pdf(adv_prompt, detection)
 
-        # ── 路径 3：DOCX/DOC 输入（新增） ───────────────────
+        # ── 路径 3：DOCX/DOC 输入 ───────────────────────────
         if detection.file_type == _DOC:
             return self._stage2_docx(adv_prompt, detection)
 
-        # ── 路径 4：其他类型 → 跳过 ──────────────────────────
+        # ── 路径 4：VIDEO 输入 ──────────────────────────────
+        if detection.file_type == _VIDEO:
+            return self._stage2_video(adv_prompt, detection)
+
+        # ── 路径 5：其他类型 → 跳过 ──────────────────────────
         unsupported = [p.split("/")[-1] for p in detection.file_paths]
         return (
-            f"[Stage2 跳过] 检测到非图片/非 PDF/非 DOCX 文件，暂不支持多模态直接分析：{', '.join(unsupported)}。"
-            f"请先将文件转换为图片、PDF 或 DOCX 格式。",
+            f"[Stage2 跳过] 检测到不支持的文件类型，无法多模态分析：{', '.join(unsupported)}。"
+            f"请先将文件转换为图片、PDF、DOCX 或视频格式。",
             None,
         )
 
@@ -411,6 +418,90 @@ class ComplexInputPipeline:
         # DOCX 路径不做 LLM 调用，仅提取文字，标记为纯文本处理
         combined_text = "\n".join(text_parts)
         return combined_text, "docx_text_extraction"
+
+    def _stage2_video(
+        self, adv_prompt: str, detection: ComplexityResult
+    ) -> Tuple[str, Optional[str]]:
+        """Stage 2 视频路径：抽取关键帧 + 音轨转写 → 多模态模型。
+
+        对每个视频文件：
+        1. VideoAdapter 均匀采样关键帧（EncodedImage）
+        2. Whisper 转写音轨为文字（可选，依赖缺失时降级为空）
+        3. 构建混合 content_parts（转写文字 + 帧图片）送入 adv_model
+        全部视频既无帧也无转写时返回明确 [Stage2 跳过]。
+        """
+        from iris.complex_input.video_adapter import VideoAdapter, VideoAdapterError
+
+        # ffmpeg 缺失属致命依赖 → 直接降级提示
+        try:
+            adapter = VideoAdapter()
+        except VideoAdapterError as exc:
+            return (f"[Stage2 跳过] 视频处理不可用：{exc}", None)
+
+        content_parts: List[Dict[str, Any]] = [
+            {"type": "text", "text": f"{adv_prompt}\n\n视频文件数：{len(detection.file_paths)}"}
+        ]
+
+        video_errors: List[str] = []
+        any_frames = False
+        any_transcript = False
+
+        for video_path in detection.file_paths:
+            try:
+                vc = adapter.process(video_path, max_frames=6, max_transcript_chars=6000)
+            except VideoAdapterError as exc:
+                video_errors.append(f"{Path(video_path).name}: {exc}")
+                continue
+
+            header = (
+                f"\n---\n"
+                f"视频: {Path(video_path).name}"
+                f"（时长 {vc.duration_sec:.0f}s，采样 {vc.frame_count} 帧"
+                f"{'，含音轨' if vc.has_audio else '，无音轨'}）"
+            )
+            content_parts.append({"type": "text", "text": header})
+
+            if vc.transcript:
+                any_transcript = True
+                content_parts.append(
+                    {"type": "text", "text": f"音轨转写：\n{vc.transcript}"}
+                )
+
+            for img in vc.frames:
+                any_frames = True
+                content_parts.append(
+                    {"type": "image_url", "image_url": {"url": img.data_url}}
+                )
+
+            if vc.error:
+                video_errors.append(f"{Path(video_path).name}: {vc.error}")
+
+        if video_errors:
+            content_parts.append(
+                {"type": "text", "text": f"\n处理警告：{'; '.join(video_errors)}"}
+            )
+
+        # 既无帧也无转写 → 无可分析内容
+        if not any_frames and not any_transcript:
+            return (
+                f"[Stage2 跳过] 所有视频处理失败："
+                f"{'; '.join(video_errors) if video_errors else '未提取到任何帧或音轨'}",
+                None,
+            )
+
+        try:
+            text = self._llm.generate_multimodal(
+                content_parts,
+                route_context={
+                    "input_type": "multimodal",
+                    "task_type": "image_understanding",
+                    "complexity": "complex",
+                },
+            )
+            model_info = self._llm.get_provider().get_active_model_config("adv_model")
+            return text.strip(), model_info.get("model", "adv_model")
+        except LLMProviderError as exc:
+            return f"[Stage2 失败] adv_model 调用出错: {exc}", None
 
     # ── Stage 3: base_model 整合润色 ───────────────────────────────
 

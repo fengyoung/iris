@@ -1,7 +1,7 @@
 ---
 name: iris-process
-version: 1.0.0
-description: Iris 富媒体处理 — 自动检测图片/PDF/文档输入，调用 route-model 确认路由，走三阶段 process 流水线处理。当用户消息中含有图片、PDF、文档、截图路径时使用。
+version: 1.1.0
+description: Iris 富媒体处理 — 自动检测图片/PDF/文档/视频输入，调用 route-model 确认路由，走三阶段 process 流水线处理。当用户消息中含有图片、PDF、文档、视频、截图路径时使用。
 metadata:
   requires:
     bins: ["python3"]
@@ -10,16 +10,18 @@ metadata:
 
 # Iris 富媒体处理
 
-当用户输入包含图片、PDF、文档等非文本内容时，自动完成：路由决策 → 三阶段流水线处理 → 结果呈现。
+当用户输入包含图片、PDF、文档、视频等非文本内容时，自动完成：路由决策 → 三阶段流水线处理 → 结果呈现。
 
 ## 支持的文件类型
 
 | 类型 | 扩展名 | 支持程度 |
 |------|--------|----------|
-| 图片 | `.png` `.jpg` `.jpeg` `.gif` `.webp` `.bmp` | ✅ 完整三阶段 |
-| PDF | `.pdf` | ⚠️ Stage 2 跳过，Stage 3 基于文件名回答，建议先转图片 |
-| 文档 | `.doc` `.docx` | ⚠️ 同 PDF |
-| 视频 | `.mp4` `.mov` `.avi` `.mkv` `.webm` | ❌ 需先提取帧，见下文 |
+| 图片 | `.png` `.jpg` `.jpeg` `.gif` `.webp` `.bmp` | ✅ 完整三阶段（多模态视觉理解）|
+| PDF | `.pdf` | ✅ PyMuPDF 提取文字 + 逐页渲染送多模态模型 |
+| 文档 | `.doc` `.docx` | ✅ python-docx 提取段落+表格文字 |
+| 视频 | `.mp4` `.mov` `.avi` `.mkv` `.wmv` `.flv` `.webm` | ✅ ffmpeg 均匀抽帧 + Whisper 音轨转写送多模态模型 |
+
+> 视频处理依赖系统 `ffmpeg`（抽帧/抽音轨，必需）与 `openai-whisper`（音轨转写，可选）。ffmpeg 缺失时视频降级为"暂不支持"提示；whisper 缺失时仅丢弃转写、保留关键帧分析。
 
 ## Claude 的完整工作流
 
@@ -72,7 +74,7 @@ python scripts/run_cli.py process \
 
 **三阶段流水线说明**（运行时打印进度，Claude 无需干预）：
 - Stage 1 (base_model)：动态生成针对该文件类型的分析指令
-- Stage 2 (adv_model)：多模态理解图片/PDF 内容
+- Stage 2 (adv_model)：多模态理解 —— 图片直接送模型；PDF 提取文字+渲染页面；DOCX 提取文字；视频抽帧+音轨转写
 - Stage 3 (base_model)：整合知识库上下文，润色输出
 
 ### 步骤 4：呈现结果
@@ -88,15 +90,17 @@ python scripts/run_cli.py process \
 
 ### 视频文件
 
-`process` 命令不直接支持视频流。遇到视频文件时：
+`process` 命令**原生支持**视频（v3.14.0+）：直接传入视频路径即可，无需手动抽帧。
 
-- **如果是会议录音** → 建议转用 `iris-meeting` Skill
-- **如果是需要视觉理解的视频** → 提示用户先提取关键帧：
-  ```bash
-  # 每秒提取 1 帧，保存到 /tmp/frames/
-  ffmpeg -i input.mp4 -vf fps=1 /tmp/frames/frame_%04d.png
-  ```
-  再对关键帧执行 process
+```bash
+python scripts/run_cli.py process --query "总结这个视频的内容" --image "/path/clip.mp4"
+```
+
+流水线内部自动完成：ffmpeg 均匀抽取关键帧 + Whisper 转写音轨 → adv_model 综合画面与语音分析。
+
+- **如果是会议录音/录像且需要正式纪要归档** → 转用 `iris-meeting` Skill（含说话人、路由归档等专用能力）
+- **ffmpeg 未安装** → 视频路径会返回"暂不支持"提示，需先安装：`brew install ffmpeg`
+- **openai-whisper 未安装** → 仅丢弃音轨转写，仍会基于关键帧做视觉分析
 
 ### 用户想要快速轻量分析
 
@@ -146,4 +150,4 @@ curl -L "<URL>" -o /tmp/downloaded_image.png
 | 文件过大（>20MB） | 提示压缩图片后重试，或裁剪相关区域 |
 | adv_model 不可用 | route-model 输出会提示；建议检查 `config/llm.json` 中 adv_model 的 `enabled` 状态 |
 | process 超时 | Stage 2 可能因大文件超时；建议压缩或拆分文件 |
-| 视频格式不支持 | 提示用 ffmpeg 提取帧后重试 |
+| 视频处理无输出 | 检查 `ffmpeg`/`ffprobe` 是否安装（`which ffmpeg`）；音轨转写需 `openai-whisper` |

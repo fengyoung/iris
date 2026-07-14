@@ -450,3 +450,109 @@ class TestGraphDataClasses:
         assert edge.relation == "负责"
         assert edge.confidence == 0.9
         assert edge.source_type == "llm"
+
+
+# ── graph-query CLI handler ────────────────────────────────
+
+import json as _json  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+from iris.app.cli.handlers import handle_graph_query  # noqa: E402
+
+
+def _prepare_saved_graph(tmp_path):
+    """构建并持久化一个测试图谱，返回 bundle。"""
+    wiki_root = _make_wiki_root(tmp_path)
+    bundle = _make_config_bundle(tmp_path, wiki_root)
+    g = WikiGraph(bundle)
+    g.build_nodes()
+    g.build_edges_from_backlinks()
+    g.save()
+    return bundle
+
+
+def _run_query(bundle, capsys, **kwargs):
+    """调用 handle_graph_query（JSON 模式），返回 (exit_code, payload)。"""
+    args = SimpleNamespace(
+        op=kwargs.get("op", ""), node=kwargs.get("node", ""), to=kwargs.get("to", ""),
+        hops=kwargs.get("hops", 1), min_degree=kwargs.get("min_degree", 3),
+        pretty=False, command="graph-query",
+    )
+    code = handle_graph_query(args, bundle, None)
+    out = capsys.readouterr().out
+    payload = _json.loads(out) if out.strip() else {}
+    return code, payload
+
+
+class TestGraphQueryHandler:
+    def test_load_missing_graph_errors(self, tmp_path, capsys):
+        wiki_root = _make_wiki_root(tmp_path)
+        bundle = _make_config_bundle(tmp_path, wiki_root)
+        code, payload = _run_query(bundle, capsys, op="density")
+        assert code == 1
+        assert "build-graph" in payload["error"]
+
+    def test_neighbors(self, tmp_path, capsys):
+        bundle = _prepare_saved_graph(tmp_path)
+        code, payload = _run_query(bundle, capsys, op="neighbors", node="张三")
+        assert code == 0
+        titles = {n["title"] for n in payload["neighbors"]}
+        assert "项目Alpha" in titles
+
+    def test_neighbors_requires_node(self, tmp_path, capsys):
+        bundle = _prepare_saved_graph(tmp_path)
+        code, payload = _run_query(bundle, capsys, op="neighbors")
+        assert code == 1
+        assert "node" in payload["error"]
+
+    def test_related(self, tmp_path, capsys):
+        bundle = _prepare_saved_graph(tmp_path)
+        code, payload = _run_query(bundle, capsys, op="related", node="张三")
+        assert code == 0
+        assert isinstance(payload["related"], dict)
+
+    def test_path_found(self, tmp_path, capsys):
+        bundle = _prepare_saved_graph(tmp_path)
+        code, payload = _run_query(bundle, capsys, op="path", node="张三", to="搜索")
+        assert code == 0
+        assert payload["found"] is True
+        assert payload["hops"] >= 1
+
+    def test_path_requires_to(self, tmp_path, capsys):
+        bundle = _prepare_saved_graph(tmp_path)
+        code, payload = _run_query(bundle, capsys, op="path", node="张三")
+        assert code == 1
+
+    def test_orphans(self, tmp_path, capsys):
+        bundle = _prepare_saved_graph(tmp_path)
+        code, payload = _run_query(bundle, capsys, op="orphans")
+        assert code == 0
+        assert "count" in payload
+        assert isinstance(payload["orphans"], list)
+
+    def test_bridges(self, tmp_path, capsys):
+        bundle = _prepare_saved_graph(tmp_path)
+        code, payload = _run_query(bundle, capsys, op="bridges", min_degree=2)
+        assert code == 0
+        assert "bridges" in payload
+
+    def test_density(self, tmp_path, capsys):
+        bundle = _prepare_saved_graph(tmp_path)
+        code, payload = _run_query(bundle, capsys, op="density")
+        assert code == 0
+        assert payload["density"]["nodes"] == 4
+
+    def test_unknown_op(self, tmp_path, capsys):
+        bundle = _prepare_saved_graph(tmp_path)
+        code, payload = _run_query(bundle, capsys, op="")
+        assert code == 1
+        assert "error" in payload
+
+    def test_pretty_mode_smoke(self, tmp_path, capsys):
+        bundle = _prepare_saved_graph(tmp_path)
+        args = SimpleNamespace(op="density", node="", to="", hops=1, min_degree=3,
+                               pretty=True, command="graph-query")
+        code = handle_graph_query(args, bundle, None)
+        out = capsys.readouterr().out
+        assert code == 0
+        assert "知识图谱密度报告" in out

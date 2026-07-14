@@ -1,0 +1,20 @@
+{
+  "_comment": "LLM 价格表：用于 usage-stats --cost 与 daily-start 成本估算。复制为 llm_pricing.json（gitignored）后按实际单价填写。单价单位为「每 1000 token 的费用」，货币由 _currency 指定。provider 名称需与 llm.json 中 provider 字段一致（小写）。",
+  "_currency": "CNY",
+  "_budget": {
+    "monthly_token_limit": 5000000
+  },
+  "deepseek": {
+    "deepseek-chat": { "input_per_1k": 0.001, "output_per_1k": 0.002 },
+    "deepseek-reasoner": { "input_per_1k": 0.004, "output_per_1k": 0.016 }
+  },
+  "bailian": {
+    "qwen-max": { "input_per_1k": 0.02, "output_per_1k": 0.06 },
+    "qwen-plus": { "input_per_1k": 0.0008, "output_per_1k": 0.002 },
+    "qwen-vl-max": { "input_per_1k": 0.02, "output_per_1k": 0.02 }
+  },
+  "_default": {
+    "input_per_1k": 0.0,
+    "output_per_1k": 0.0
+  }
+}

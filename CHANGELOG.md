@@ -4,6 +4,52 @@
 
 ---
 
+## v3.14.0 (2026-07-15)
+
+四方向全面优化：测试覆盖补齐 + 用量统计深化 + 图谱查询命令 + VIDEO 多模态。
+
+### 新功能
+
+**LLM 成本估算与预算预警（llm/usage_tracker.py）：**
+- 新增价格表 `config/llm_pricing.json`（gitignored，`.example` 版本控制）：按 provider/model 配置每 1000 token 单价 + 货币 + 可选月度预算
+- `load_pricing()` / `lookup_price()`：加载价格表并按 (provider, model) 匹配单价，支持 `_default` 兜底，缺失静默返回空表
+- `UsageTracker.stats_with_cost()`：在 `stats()` 基础上按段估算成本，返回 `{rows(含 cost), unpriced_models, currency}`；部分定价时只计已定价模型成本，未定价模型单列
+- `usage-stats --cost`：pretty 模式增列「估算费用」+ 货币 + 未定价模型提示；JSON 模式 rows 内含 `cost`
+- `daily-start` 集成用量概要：payload 新增 `usage_summary`（今日/本周/本月调用与 token）+ 超预算时 `budget_warning`，纯本地读取零 LLM 调用
+
+**知识图谱查询命令 `graph-query`：**
+- `iris graph-query --op <neighbors|related|path|orphans|bridges|density>`，复用 `WikiGraph` 全部查询 API，零图谱逻辑改动
+- 参数：`--node`（目标节点）/`--to`（path 终点）/`--hops`（邻居跳数）/`--min-degree`（桥接阈值）
+- pretty 模式为每种 op 提供可读输出：邻居按类型分组、路径渲染为 `A →[关系]→ B`、密度报告表格、桥接节点跨类型标注
+- 图谱未构建时提示先运行 `build-graph`
+
+**VIDEO 多模态支持（complex_input/video_adapter.py）：**
+- 新增 `VideoAdapter`：ffmpeg 均匀抽取关键帧（base64 → EncodedImage）+ ffmpeg 抽音轨 → Whisper 转写
+- 优雅降级：ffmpeg 缺失抛 `VideoAdapterError`（上层降级为"暂不支持"）；whisper 缺失/无音轨时仅丢转写、保留帧分析
+- `pipeline._stage2_video`：转写文字 + 帧图片组装为多模态 content 送 adv_model；既无帧也无转写时明确跳过
+- 三阶段流水线 Stage 2 现覆盖 图片/PDF/DOCX/VIDEO 四类，移除 VIDEO "暂不支持" 占位路径
+
+### 测试
+
+- 554 → **687**（+133）：
+  - 新增 `test_analysis_helpers.py`（analysis 纯函数）/`test_mindmap.py`/`test_scanner.py`/`test_trello_models.py`/`test_trello_formatter.py`/`test_trello_service.py`/`test_video_adapter.py`
+  - 扩展 `test_deep_eval.py`（AccuracyVerifier）/`test_usage_tracker.py`（价格表+成本）/`test_graph.py`（graph-query handler）/`test_complex_input_pipeline.py`（VIDEO 路由与集成）
+  - VIDEO 抽帧经真实 ffmpeg 端到端验证
+
+### 版本
+
+- 产品版本 3.13.0 → **3.14.0**
+- 协议版本 3.8 → **3.9**（新增 `graph-query` 命令，命令集变化）
+
+### 项目指标
+
+- 源文件：105 → **106**（+1：video_adapter.py）
+- 测试文件：40 → **46**（+6）
+- 单元测试：554 → **687**（+133）
+- CLI 命令：47 → **48**（+graph-query）
+
+---
+
 ## v3.13.0 (2026-07-14)
 
 ### 新功能
