@@ -250,7 +250,7 @@ ROUTE: <目录名>
 REASON: <一句话理由>
 FILENAME: <文件名>"""
 
-        text = self._llm.generate(prompt, route_context={"input_type": "text"}, temperature=0, max_tokens=300).text
+        text = self._llm.generate(prompt, route_context={"input_type": "text"}, temperature=0).text
         return self._parse_route_response(text)
 
     @staticmethod

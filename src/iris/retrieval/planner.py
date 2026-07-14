@@ -151,7 +151,7 @@ class LLMQueryPlanner:
             prompt=prompt,
             route_context={"input_type": "text", "task_type": "query_enhancement", "use_case": "retrieval"},
         )
-        response = self._llm.generate(request, temperature=0.0, max_tokens=256)
+        response = self._llm.generate(request, temperature=0.0)
         if not response or not response.text:
             return None
 

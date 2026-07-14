@@ -477,7 +477,6 @@ class AccuracyVerifier:
                     "complexity": "simple",
                 },
                 temperature=0.1,
-                max_tokens=100,
             ).text.strip().split("\n")[0]
         except LLMProviderError as e:
             return AccuracyVerdict(
@@ -541,7 +540,6 @@ class AccuracyVerifier:
                     "complexity": "simple",
                 },
                 temperature=0.1,
-                max_tokens=120,
             ).text.strip().split("\n")[0]
         except LLMProviderError as e:
             return AccuracyVerdict(
@@ -642,7 +640,6 @@ class ComprehensivenessVerifier:
                         "complexity": "simple",
                     },
                     temperature=0.1,
-                    max_tokens=120,
                 ).text.strip().split("\n")[0]
             except LLMProviderError:
                 continue

@@ -130,6 +130,8 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
             api_key = model_cfg.get("api_key", "")
             model_name = model_cfg["model"]
             provider_name = str(model_cfg["provider"]).lower()
+            if max_tokens is None:
+                max_tokens = model_cfg.get("max_tokens")
             text = self._dispatch_provider_call(
                 api_base, api_key, model_name, request_data.prompt, provider_name, model_cfg,
                 temperature=temperature, max_tokens=max_tokens, max_retries=max_retries,
@@ -141,6 +143,15 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
             )
 
         decision = self._router.route(request_data.route_context)
+
+        if max_tokens is None:
+            try:
+                default_cfg = self._model_manager.get_active_model_config(
+                    decision.selected_role, sensitive=False
+                )
+                max_tokens = default_cfg.get("max_tokens")
+            except ModelManagerError:
+                pass
 
         def _try_call(api_base: str, api_key: str, model_name: str, cfg: Dict[str, Any]) -> str:
             """文本 API 调用闭包，捕获 prompt / temperature / max_tokens。"""
