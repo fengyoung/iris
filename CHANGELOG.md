@@ -49,6 +49,13 @@
 - 532 测试（+71）：`test_pdf_adapter.py`（13 用例）、`test_docx_adapter.py`（9 用例）、`test_backlink.py`（12 用例）、`test_graph.py`（18 用例）、`test_complex_input_pipeline.py`（+19 用例 PDF/DOCX/路由）
 - 测试覆盖所有新模块的：正常路径、异常路径、边界条件、持久化巡回
 
+### 重构优化
+
+**max_tokens 去硬编码（配置兜底）：**
+- `config/llm.json` 每个模型新增 `max_tokens` 字段（deepseek 8192~16384 / qwen 8192），作为输出上限兜底值（数据版本 3.4→**3.5**）
+- `provider.py` 中调用方不传 max_tokens 时，自动从模型配置读取
+- 移除 5 处分散硬编码（planner 256 / deep_eval 100/120×2 / transcribe_route 300），消除 DeepSeek reasoning 吃掉 token 预算导致的输出截断问题
+
 ### 项目指标
 
 - 源文件：99 → **104**（+5：pdf_adapter / docx_adapter / backlink / graph / shared）

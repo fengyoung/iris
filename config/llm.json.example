@@ -1,5 +1,5 @@
 {
-  "version": "3.4",
+  "version": "3.5",
   "default_strategy": {
     "default_model_role": "base_model",
     "fallback_model_role": "adv_model",
