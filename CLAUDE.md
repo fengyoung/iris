@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~24,000 行 / 122 文件 / 21 模块 · CLI 51 命令 · 单元测试 1223（72 文件）· 覆盖率 53% · 7 个项目级 Skill · Wiki 91 页 · 知识图谱节点 91 / 关系边 ~200（NetworkX 引擎） · 数据源 691 文档 / 3,956 Chunk · 向量索引 6,789 条 · LLM 响应缓存（LRU 驱逐）· Wiki 引用校验 · 结构化日志 · async/await · 多工作空间 · 文件监听。
+~24,000 行 / 122 文件 / 21 模块 · CLI 51 命令 · 单元测试 1223（72 文件）· 覆盖率 53% · 7 个项目级 Skill · Wiki 192 页 · 知识图谱节点 192 / 关系边 778（NetworkX 引擎） · 数据源 703 文档 / 4,096 Chunk · 向量索引 7,035 条 · LLM 响应缓存（LRU 驱逐）· Wiki 引用校验 · 结构化日志 · async/await · 多工作空间 · 文件监听。
 
 ### 关键路径
 
@@ -40,10 +40,10 @@ Obsidian 仓库：.../WORKSPACE/
 
 | 类型 | 目录 | 前缀 | 当前数量 |
 |------|------|------|:---:|
-| 领域 (domain) | `01-领域/` | `领域-` | 6 |
-| 概念 (concept) | `02-概念/` | `概念-` | 7 |
-| 项目 (project) | `03-项目/` | `项目-` | 8 |
-| 人物 (person) | `04-人物/` | `人物-` | 70 |
+| 领域 (domain) | `01-领域/` | `领域-` | 14 |
+| 概念 (concept) | `02-概念/` | `概念-` | 11 |
+| 项目 (project) | `03-项目/` | `项目-` | 21 |
+| 人物 (person) | `04-人物/` | `人物-` | 436 |
 
 Wiki 命令：`discover-wiki`（发现候选，4 类型分层排序）· `build-wiki`（生成页面，单页/批量/审核）· `build-wiki-nav`（维护 index.md）· `wiki-pipeline`（发现→审核→生成）· `wiki-lint [--fix]`（6 维健康检查/修复）· `wiki-update`（增量更新，daily-start 集成）· `enrich-persons`（飞书通讯录补充人物部门/邮箱）· `deep-eval`（深度评估：引用准确性+全面性）· `build-asr-prompt`（三段 Pipeline：热词→误识别→策略 Prompt）。
 
@@ -154,7 +154,7 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.17.0 (2026-07-15)** — 代码质量全面优化（P0-P3）：① 全局线程池 `atexit` 清理 + `_plaintext_keys_warned` 加锁（P0 资源安全）② `wiki/graph.py` 异常捕获拆分（P0）③ `feishu/` 5 处宽泛异常精细化 + logger（P1）④ `utils/template_loader.py` 统一模板加载（P1）⑤ ThreadPool 超时标准化（3 模块，P2）⑥ `llm/cache.py` LRU 驱逐（max_entries=2000，P2）⑦ `analysis/service.py` 1232→805 行 + `evaluation/deep_eval.py` 拆分（P2）⑧ `wiki/graph.py` LLM 调用接入缓存层（P3）。测试 912→1223（+311），覆盖率阈值 50%→53%。
+**当前 v3.17.1 (2026-07-15)** — SOURCE 新增「工作简报」栏目 + 全维度评估与修复（本次）。① SOURCE 新增 `09-工作简报/` 栏目及简报归档。② `--incremental` argparse 冲突修复。③ 全维度评估：Wiki lint 6 维健康度 + deep-eval 引用准确性 + 知识图谱密度/连通性 + 索引覆盖率。④ 自动修复：wiki-lint --fix（frontmatter 修复）· 重建 chunk/向量索引（+31 条）· 项目Alpha草稿发布 · 智能问答服务等 3 页重新生成 · 图谱孤立节点 16→4（-75%）· wikilink 边 461→476（+15）。测试 1223 通过不变。
 
 > 覆盖范围：仅统计 Iris 自身经 provider 发出的 LLM 调用（CLI + 调用 CLI 的 Skill），不含 Claude Code 本体 / Whisper 转写 / 飞书接口。
 
