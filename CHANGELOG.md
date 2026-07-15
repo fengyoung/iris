@@ -4,6 +4,60 @@
 
 ---
 
+## v3.18.0 (2026-07-15)
+
+开源脱敏全面清理（方案B深度清理）—— 为开源发布做准备的系统性安全加固。
+
+### 源码脱敏
+
+- `src/iris/evaluation/deep_eval.py`：两处硬编码内部服务名称替换为通用描述
+- `src/iris/llm/provider.py`：内部算法平台代号 `zz-algo-plat` → `custom-algo-platform`
+- `src/iris/wiki/discovery_rules.py`：`HIGH_VALUE_TOPIC_HINTS` 业务方向特征泛化，`STOPWORDS` 移除残留学号/内部词
+- `src/iris/wiki/graph.py` / `backlink.py`：文档字符串示例中的内部项目名替换为通用占位符
+- `templates/prompt/biweekly_stage3_direction.md`：错误示范中的内部业务术语替换
+- `templates/wiki/generate_person.txt` / `generate_generic.txt`：示例中的内部项目名替换
+
+### 测试脱敏（15 个文件）
+
+- 内部部门名 → 通用占位符（`数据智能部` → `技术研发部`）
+- 内部项目名 → 通用占位符（`搜推体验` → `项目Alpha`）
+- 公司名称 → 通用占位符（`转转` → `ExampleOrg`）
+- 个人姓名 → 通用占位符（`冯扬` → `张三`）
+- 内部品牌词 → 通用词（`质检智能化` → `质检自动化`）
+
+### 文档脱敏
+
+- **CHANGELOG.md** 全量审查（983 行）：移除所有版本记录中反向泄露的真实姓名、内部项目代号、企业邮箱域名
+- **CLAUDE.md**：Obsidian vault 路径变量化（`WORK_ZZ` / `IRIS-3` → 通用变量）
+- **pyproject.toml** / **LICENSE**：作者名匿名化
+
+### Git 历史全面重写
+
+- 使用 `git filter-repo` 全文替换全部 92 个提交中的敏感信息
+- 创建备份分支后执行，完成后验证并删除
+
+### 新增文件
+
+- `CONTRIBUTING.md`：贡献指南（提交规范/开发环境/安全注意事项）
+- `SECURITY.md`：安全政策（漏洞报告流程/安全实践/支持版本）
+
+### .gitignore 强化
+
+- 新增 `.claude/settings.local.json` 规则
+- 新增 `.git-filter-replacements.txt` 规则
+
+### 版本
+
+- 产品版本 3.17.1 → **3.18.0**
+- 协议版本不变（3.10）
+- 数据版本不变
+
+### 测试
+
+- 单元测试 1,223 通过不变
+
+---
+
 ## v3.17.1 (2026-07-15)
 
 SOURCE 结构优化：新增「工作简报」栏目 + bug 修复。

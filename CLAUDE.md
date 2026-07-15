@@ -1,4 +1,4 @@
-# Iris 3.17.1 — 项目执行说明
+# Iris 3.18.0 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -113,7 +113,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.17.1 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.18.0 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.10 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -154,7 +154,7 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.17.1 (2026-07-15)** — SOURCE 新增「工作简报」栏目 + 全维度评估与修复（本次）。① SOURCE 新增 `09-工作简报/` 栏目及简报归档。② `--incremental` argparse 冲突修复。③ 全维度评估：Wiki lint 6 维健康度 + deep-eval 引用准确性 + 知识图谱密度/连通性 + 索引覆盖率。④ 自动修复：wiki-lint --fix（frontmatter 修复）· 重建 chunk/向量索引（+31 条）· 项目Alpha草稿发布 · 智能问答服务等 3 页重新生成 · 图谱孤立节点 16→4（-75%）· wikilink 边 461→476（+15）。测试 1223 通过不变。
+**当前 v3.18.0 (2026-07-15)** — 开源脱敏全面清理（方案B）。① 源码脱敏：移除 deep_eval/provider/discovery_rules/biweekly 模板中的内部术语和项目名。② 测试脱敏：部门名/项目名/公司名替换为通用占位符。③ CHANGELOG.md 全量审查脱敏（983行）。④ CLAUDE.md 路径变量化 + LICENSE/pyproject.toml 作者匿名化。⑤ Git 历史全文重写（git filter-repo，92 commits）。⑥ 新增 CONTRIBUTING.md + SECURITY.md。⑦ .gitignore 补全。测试 1223 通过不变。
 
 > 覆盖范围：仅统计 Iris 自身经 provider 发出的 LLM 调用（CLI + 调用 CLI 的 Skill），不含 Claude Code 本体 / Whisper 转写 / 飞书接口。
 
