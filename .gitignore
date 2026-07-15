@@ -68,3 +68,4 @@ PjMMbaKyroI3X4xMHJ4c0hIln3g
 .pytest_cache/
 .coverage
 htmlcov/
+.git-filter-replacements.txt
