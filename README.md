@@ -111,7 +111,7 @@ cp config/*.json.example config/  # 然后编辑各 .json 填入实际值
 ```
 iris3/
 ├── src/iris/           # 20 模块（见下）
-│   ├── app/cli/        # CLI 入口 + 48 命令处理器（4 子模块）
+│   ├── app/cli/        # CLI 入口 + 46 命令处理器（4 子模块）
 │   ├── analysis/       # 分析服务（报告/思维导图/双周报）
 │   ├── complex_input/  # 多模态三阶段（图片/PDF/DOCX/VIDEO）
 │   ├── config/         # 配置加载 + Pydantic 校验

@@ -211,7 +211,7 @@ SOURCE 结构优化：新增「工作简报」栏目 + bug 修复。
 
 ### 测试
 
-- 754 → **893**（+139）：
+- 754 → **912**（+158）：
   - 新增 `test_qa_helpers.py`（`infer_evidence_type`/`intent_title`/`group_title`/`is_memory_only_instruction`/`infer_question_type`/`block_bonus`，41 用例）
   - 新增 `test_wiki_pure.py`（`_slugify_title`/`normalize_title`/`extract_terms`/`extract_persons`/`_extract_wiki_content`/`_validate_update_output`/`check_reference_quality`，41 用例）
   - 新增 `test_llm_cache.py`（`LLMResponseCache` put/get/stats/clear/TTL/目录结构，15 用例）

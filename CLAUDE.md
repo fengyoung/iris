@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~24,000 行 / 122 文件 / 21 模块 · CLI 51 命令 · 单元测试 1223（72 文件）· 覆盖率 53% · 7 个项目级 Skill · Wiki 192 页 · 知识图谱节点 192 / 关系边 778（NetworkX 引擎） · 数据源 703 文档 / 4,096 Chunk · 向量索引 7,035 条 · LLM 响应缓存（LRU 驱逐）· Wiki 引用校验 · 结构化日志 · async/await · 多工作空间 · 文件监听。
+~24,000 行 / 120 文件 / 20 模块 · CLI 46 命令 · 单元测试 1223（70 文件）· 覆盖率 53% · 7 个项目级 Skill · Wiki 192 页 · 知识图谱节点 192 / 关系边 778（NetworkX 引擎） · 数据源 703 文档 / 4,096 Chunk · 向量索引 7,035 条 · LLM 响应缓存（LRU 驱逐）· Wiki 引用校验 · 结构化日志 · async/await · 多工作空间 · 文件监听。
 
 ### 关键路径
 
@@ -134,7 +134,7 @@ iris3/
 ├── src/iris/          # 20 模块（见下）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
-├── tests/             # 687 用例，46 文件
+├── tests/             # 1223 用例，70 文件
 ├── config/            # *.json gitignored，*.example 版本控制
 ├── data/              # 运行时数据（全 gitignore）
 ├── .claude/skills/    # 项目级 Skill（7 个）
@@ -142,7 +142,7 @@ iris3/
 └── pyproject.toml · README · CLAUDE · CHANGELOG.md
 ```
 
-**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配）· `memory`（记忆 5 子模块）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF）· `qa`（检索问答+图谱注入）· `wiki`（Wiki 体系 + backlink/graph，最大模块）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估）· `complex_input`（多模态三阶段：图片/PDF/DOCX/VIDEO）· `output`（格式化+DOCX）· `app/cli`（48 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py / shared.py）· `trello`（看板）。
+**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配）· `memory`（记忆 5 子模块）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF）· `qa`（检索问答+图谱注入）· `wiki`（Wiki 体系 + backlink/graph，最大模块）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估）· `complex_input`（多模态三阶段：图片/PDF/DOCX/VIDEO）· `output`（格式化+DOCX）· `app/cli`（46 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py / shared.py）· `trello`（看板）。
 
 ---
 
