@@ -1,4 +1,4 @@
-# Iris 3.15.0 — 项目执行说明
+# Iris 3.16.0 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -153,7 +153,7 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.15.0 (2026-07-15)** — 全栈优化 P0-P3：① 结构化日志（`IrisLogger` JSON 控制台输出 + `MetricsExporter` 周级导出）② async/await（`async_http.py` + `LLMService.generate_async()` + `update_all_pages_async`）③ 多工作空间（`config/workspace.py` + `--workspace` 参数）④ 文件监听（`SourceWatcher` 轮询 + `watch` 命令自动增量构建）⑤ Prompt 外部化 ⑥ Wiki 引用校验 ⑦ LLM 缓存 ⑧ 增量 Chunk ⑨ NetworkX 图谱 ⑩ Config 迁移。测试 754→912（+158），覆盖率 49%→50.37%，CLI 48→51 命令。
+**当前 v3.16.0 (2026-07-15)** — 全栈优化 P0-P3：① 结构化日志（`IrisLogger` JSON 控制台输出 + `MetricsExporter` 周级导出）② async/await（`async_http.py` + `LLMService.generate_async()` + `update_all_pages_async`）③ 多工作空间（`config/workspace.py` + `--workspace` 参数）④ 文件监听（`SourceWatcher` 轮询 + `watch` 命令自动增量构建）⑤ Prompt 外部化 ⑥ Wiki 引用校验 ⑦ LLM 缓存 ⑧ 增量 Chunk ⑨ NetworkX 图谱 ⑩ Config 迁移。测试 754→912（+158），覆盖率 49%→50.37%，CLI 48→51 命令。
 
 > 覆盖范围：仅统计 Iris 自身经 provider 发出的 LLM 调用（CLI + 调用 CLI 的 Skill），不含 Claude Code 本体 / Whisper 转写 / 飞书接口。
 
