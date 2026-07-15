@@ -280,6 +280,13 @@ class WikiGenerator:
         """LLM 不可用时的降级生成。"""
         now = datetime.now().strftime("%Y-%m-%d")
         type_name = TYPE_NAMES.get(page_type, page_type)
+        template = self._load_template("wiki/fallback_markdown.txt")
+        if template:
+            return template.format(
+                title=title, page_type=page_type, now=now,
+                type_name=type_name, evidence=evidence[:500], related=related,
+            )
+        # 降级：内联
         return f"""---
 title: {title}
 type: {page_type}
@@ -360,6 +367,15 @@ sources:
             return None
 
     def _build_generic_update_prompt(self, existing_content, type_name, last_updated, evidence, related, today):
+        template = self._load_template("wiki/update_generic.txt")
+        last_updated_str = last_updated or '未知'
+        if template:
+            return template.format(
+                type_name=type_name, existing_content=existing_content,
+                last_updated=last_updated_str, evidence=evidence,
+                related=related, today=today,
+            )
+        # 降级：内联 prompt
         return f"""你是一个知识库编辑助手。请对一篇现有的 {type_name} 类型 Wiki 页面做增量更新。
 
 ## 现有页面内容
@@ -368,7 +384,7 @@ sources:
 ```
 
 ## 页面上次更新时间
-{last_updated or '未知'}
+{last_updated_str}
 
 ## 最新的参考证据（来自更新的原始文档）
 {evidence}
@@ -387,6 +403,14 @@ sources:
 6. **输出纯 Markdown，以 --- 开头，不要任何对话前缀或代码块包裹**"""
 
     def _build_person_update_prompt(self, existing_content, last_updated, evidence, related, today):
+        template = self._load_template("wiki/update_person.txt")
+        last_updated_str = last_updated or '未知'
+        if template:
+            return template.format(
+                existing_content=existing_content, last_updated=last_updated_str,
+                evidence=evidence, related=related, today=today,
+            )
+        # 降级：内联 prompt
         return f"""你是一个知识库编辑助手。请对团队成员 Wiki 页面做增量更新。
 
 ## 现有页面内容
@@ -395,7 +419,7 @@ sources:
 ```
 
 ## 页面上次更新时间
-{last_updated or '未知'}
+{last_updated_str}
 
 ## 最新的参考证据（来自周报、会议纪要、项目文档）
 {evidence}

@@ -362,7 +362,17 @@ def extract_page_title(content: str, filename: str) -> str:
 # 准确性校验
 # ──────────────────────────────────────────────
 
-ACCURACY_PROMPT_TEMPLATE = """你正在审核 Wiki 内容是否与原始工作文档一致。
+def _load_prompt_template(name: str) -> Optional[str]:
+    """从 templates/prompt/ 加载评估用 Prompt 模板，不存在返回 None。"""
+    templates_dir = Path(__file__).resolve().parent.parent.parent.parent / "templates" / "prompt"
+    tmpl_path = templates_dir / name
+    if tmpl_path.exists():
+        return tmpl_path.read_text(encoding="utf-8")
+    return None
+
+
+# 内联 fallback 模板（保留以保证模板文件缺失时仍可工作）
+_ACCURACY_PROMPT_FALLBACK = """你正在审核 Wiki 内容是否与原始工作文档一致。
 
 【源文档片段】
 {source_content}
@@ -380,7 +390,7 @@ ACCURACY_PROMPT_TEMPLATE = """你正在审核 Wiki 内容是否与原始工作�
 示例：inconsistent|源文档中该比例为 48.14%，Wiki 写作 45%
 示例：unverifiable|源文档未涉及此描述的相关信息"""
 
-PAGE_ACCURACY_PROMPT_TEMPLATE = """你正在审核 Wiki 页面内容是否与原始工作文档一致。
+_PAGE_ACCURACY_FALLBACK = """你正在审核 Wiki 页面内容是否与原始工作文档一致。
 
 【源文档片段】
 {source_content}
@@ -400,6 +410,16 @@ PAGE_ACCURACY_PROMPT_TEMPLATE = """你正在审核 Wiki 页面内容是否与原
 示例：consistent|Wiki 描述与源文档一致
 示例：inconsistent|源文档中提到的准确率是 95.2%，Wiki 写成了 92.5%
 示例：unverifiable|源文档内容与 Wiki 主题不直接相关"""
+
+
+def _get_accuracy_prompt() -> str:
+    """获取准确性校验 Prompt（优先模板文件，fallback 内联）。"""
+    return _load_prompt_template("accuracy_check.md") or _ACCURACY_PROMPT_FALLBACK
+
+
+def _get_page_accuracy_prompt() -> str:
+    """获取页面级准确性校验 Prompt（优先模板文件，fallback 内联）。"""
+    return _load_prompt_template("page_accuracy_check.md") or _PAGE_ACCURACY_FALLBACK
 
 
 class AccuracyVerifier:
@@ -463,7 +483,7 @@ class AccuracyVerifier:
             )
 
         # 调用 LLM
-        prompt = ACCURACY_PROMPT_TEMPLATE.format(
+        prompt = _get_accuracy_prompt().format(
             source_content=source_content.strip(),
             wiki_description=entry.description.strip(),
         )
@@ -525,7 +545,7 @@ class AccuracyVerifier:
         # 取 Wiki 页面中和该引用相关的部分（前 600 字）
         wiki_snippet = wiki_content[:600].strip()
 
-        prompt = PAGE_ACCURACY_PROMPT_TEMPLATE.format(
+        prompt = _get_page_accuracy_prompt().format(
             source_content=source_content.strip()[:800],
             wiki_title=wiki_title,
             wiki_content_snippet=wiki_snippet,
@@ -575,7 +595,7 @@ class AccuracyVerifier:
 # 全面性校验
 # ──────────────────────────────────────────────
 
-COMPREHENSIVENESS_PROMPT_TEMPLATE = """你正在审核 Wiki 页面是否遗漏了源文档中的关键信息。
+_COMPREHENSIVENESS_FALLBACK = """你正在审核 Wiki 页面是否遗漏了源文档中的关键信息。
 
 【Wiki 页面标题】
 {wiki_title}
@@ -593,6 +613,11 @@ COMPREHENSIVENESS_PROMPT_TEMPLATE = """你正在审核 Wiki 页面是否遗漏�
 仅输出一行，格式：判定结果|简要说明遗漏了什么
 示例：no_gap|已覆盖
 示例：has_gap|提到了 XXX 的具体时间节点和责任人，Wiki 未收录"""
+
+
+def _get_comprehensiveness_prompt() -> str:
+    """获取全面性校验 Prompt（优先模板文件，fallback 内联）。"""
+    return _load_prompt_template("comprehensiveness_check.md") or _COMPREHENSIVENESS_FALLBACK
 
 
 class ComprehensivenessVerifier:
@@ -625,7 +650,7 @@ class ComprehensivenessVerifier:
 
             wiki_snippet = wiki_content[:600]
 
-            prompt = COMPREHENSIVENESS_PROMPT_TEMPLATE.format(
+            prompt = _get_comprehensiveness_prompt().format(
                 wiki_title=wiki_title,
                 wiki_content_snippet=wiki_snippet.strip(),
                 candidate_source=content[:800].strip(),

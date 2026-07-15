@@ -1,0 +1,22 @@
+---
+title: {title}
+type: {page_type}
+status: draft
+created: {now}
+updated: {now}
+sources:
+  - SOURCE/...
+
+---
+
+## 摘要
+关于{title}的{type_name}知识页。
+
+## 正文
+{evidence}
+
+## 关联页面
+{related}
+
+## 参考来源
+- 待补充

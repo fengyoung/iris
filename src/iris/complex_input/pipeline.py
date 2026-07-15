@@ -59,7 +59,24 @@ class PipelineResult:
 
 # ── Stage 1 prompt 模板 ────────────────────────────────────────────
 
-_STAGE1_TEMPLATE = """用户问题：{{query}}
+def _load_pipeline_template(name: str) -> Optional[str]:
+    """从 templates/prompt/ 加载流水线 Prompt 模板，不存在返回 None。"""
+    templates_dir = Path(__file__).resolve().parent.parent.parent.parent / "templates" / "prompt"
+    tmpl_path = templates_dir / name
+    if tmpl_path.exists():
+        return tmpl_path.read_text(encoding="utf-8")
+    return None
+
+
+def _get_stage1_template() -> str:
+    return _load_pipeline_template("stage1_instruction.md") or _STAGE1_FALLBACK
+
+
+def _get_stage3_template() -> str:
+    return _load_pipeline_template("stage3_integrate.md") or _STAGE3_FALLBACK
+
+
+_STAGE1_FALLBACK = """用户问题：{{query}}
 
 输入文件类型：{{file_type}}
 
@@ -73,7 +90,7 @@ _STAGE1_TEMPLATE = """用户问题：{{query}}
 
 # ── Stage 3 prompt 模板 ────────────────────────────────────────────
 
-_STAGE3_TEMPLATE = """用户问题：{{query}}
+_STAGE3_FALLBACK = """用户问题：{{query}}
 
 输入文件类型：{{file_type}}
 
@@ -197,7 +214,7 @@ class ComplexInputPipeline:
         self, query: str, file_type: str
     ) -> Tuple[str, Optional[str]]:
         """调用 base_model 生成 adv_model 的分析指令。"""
-        prompt = _safe_format(_STAGE1_TEMPLATE, query=query, file_type=file_type)
+        prompt = _safe_format(_get_stage1_template(), query=query, file_type=file_type)
         try:
             result = self._llm.generate(
                 prompt,
@@ -519,7 +536,7 @@ class ComplexInputPipeline:
                 f"多模态分析不可用。请根据已有信息尽可能回答用户。"
             )
         else:
-            prompt = _safe_format(_STAGE3_TEMPLATE,
+            prompt = _safe_format(_get_stage3_template(),
                 query=query, file_type=file_type, stage2_output=stage2_output
             )
 

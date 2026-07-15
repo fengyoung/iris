@@ -38,6 +38,14 @@ from .context_loader import WikiContextLoader, WikiPageInfo
 
 logger = logging.getLogger(__name__)
 
+# ── NetworkX 可选导入 ──────────────────────────────────────────
+try:
+    import networkx as nx
+    _HAS_NETWORKX = True
+except ImportError:
+    nx = None  # type: ignore[assignment]
+    _HAS_NETWORKX = False
+
 # LLM 关系提取默认每批页面数（仅用于分片，目前顺序处理）
 _DEFAULT_CHUNK_SIZE = 10
 
@@ -67,6 +75,185 @@ class GraphEdge:
     source_type: str = "wikilink"   # "wikilink" | "llm"
     confidence: float = 1.0         # wikilink=1.0, llm=0.0~1.0
     evidence_page: str = ""         # 关系来源的 Wiki 页面标题
+
+
+# ── 图引擎抽象（NetworkX / 纯 Python fallback）───────────────────
+
+
+class _GraphEngine:
+    """图计算引擎，优先使用 NetworkX，不可用时回退纯 Python。
+
+    封装所有图算法操作，WikiGraph 无需感知底层实现。
+    """
+
+    def __init__(self):
+        self._nx: Any = None  # networkx.DiGraph (if available)
+        self._adjacency: Dict[str, List[str]] = {}
+        self._out_edges: Dict[str, List[GraphEdge]] = {}
+
+    def build(self, edges: List[GraphEdge]) -> None:
+        """从边列表构建图结构。"""
+        if _HAS_NETWORKX:
+            self._nx = nx.DiGraph()
+            for edge in edges:
+                self._nx.add_edge(edge.source, edge.target,
+                                  relation=edge.relation,
+                                  source_type=edge.source_type,
+                                  confidence=edge.confidence)
+                # wikilink 边反向也加入
+                if edge.source_type == "wikilink":
+                    self._nx.add_edge(edge.target, edge.source,
+                                      relation="linked_to",
+                                      source_type="wikilink",
+                                      confidence=1.0)
+        else:
+            self._adjacency.clear()
+            self._out_edges.clear()
+            for edge in edges:
+                self._adjacency.setdefault(edge.source, []).append(edge.target)
+                self._adjacency.setdefault(edge.target, []).append(edge.source)
+                self._out_edges.setdefault(edge.source, []).append(edge)
+                if edge.source_type == "wikilink":
+                    self._out_edges.setdefault(edge.target, []).append(edge)
+
+    def neighbors(self, node_id: str, hops: int = 1) -> Set[str]:
+        """获取指定节点 hops 跳内的邻居。"""
+        if self._nx is not None:
+            result: Set[str] = set()
+            frontier = {node_id}
+            for _ in range(hops):
+                next_frontier: Set[str] = set()
+                for n in frontier:
+                    for _, neighbor in self._nx.edges(n):
+                        if neighbor not in result and neighbor != node_id:
+                            next_frontier.add(neighbor)
+                result.update(next_frontier)
+                frontier = next_frontier
+                if not frontier:
+                    break
+            return result
+        else:
+            visited: Set[str] = {node_id}
+            current_level: Set[str] = {node_id}
+            for _ in range(hops):
+                next_level: Set[str] = set()
+                for nid in current_level:
+                    for neighbor in self._adjacency.get(nid, []):
+                        if neighbor not in visited:
+                            visited.add(neighbor)
+                            next_level.add(neighbor)
+                current_level = next_level
+                if not current_level:
+                    break
+            visited.discard(node_id)
+            return visited
+
+    def find_path(self, from_id: str, to_id: str, max_hops: int = 4) -> Optional[List[GraphEdge]]:
+        """查找两个节点间的最短路径（边列表）。"""
+        if self._nx is not None:
+            try:
+                path_nodes = nx.shortest_path(self._nx, from_id, to_id)
+                if len(path_nodes) - 1 > max_hops:
+                    return None
+                edges: List[GraphEdge] = []
+                for i in range(len(path_nodes) - 1):
+                    edge_data = self._nx.get_edge_data(path_nodes[i], path_nodes[i + 1])
+                    if edge_data:
+                        edges.append(GraphEdge(
+                            source=path_nodes[i], target=path_nodes[i + 1],
+                            relation=edge_data.get("relation", "linked_to"),
+                            source_type=edge_data.get("source_type", "wikilink"),
+                            confidence=edge_data.get("confidence", 1.0),
+                        ))
+                return edges if edges else None
+            except (nx.NetworkXNoPath, nx.NodeNotFound):
+                return None
+        else:
+            # 纯 Python BFS
+            queue = deque([(from_id, [])])
+            visited = {from_id}
+            while queue:
+                current, path = queue.popleft()
+                if len(path) >= max_hops:
+                    continue
+                for edge in self._out_edges.get(current, []):
+                    next_id = edge.target if edge.source == current else edge.source
+                    if next_id in visited:
+                        continue
+                    new_path = path + [edge]
+                    if next_id == to_id:
+                        return new_path
+                    visited.add(next_id)
+                    queue.append((next_id, new_path))
+            return None
+
+    def orphans(self, all_node_ids: Set[str]) -> List[str]:
+        """查找零入链的孤立节点。"""
+        if self._nx is not None:
+            in_degrees = dict(self._nx.in_degree())
+            return sorted([n for n in all_node_ids if n in in_degrees and in_degrees[n] == 0])
+        else:
+            referenced: Set[str] = set()
+            for targets in self._adjacency.values():
+                referenced.update(targets)
+            return sorted([n for n in all_node_ids if n not in referenced])
+
+    def bridges(self, nodes: Dict[str, Any], min_degree: int = 3) -> List[Dict[str, Any]]:
+        """查找桥接节点。"""
+        if self._nx is not None:
+            bridges_list: List[Dict[str, Any]] = []
+            for node_id, node in nodes.items():
+                if node_id not in self._nx:
+                    continue
+                degree = self._nx.degree(node_id)
+                if degree < min_degree:
+                    continue
+                neighbor_types: Set[str] = set()
+                for neighbor in self._nx.neighbors(node_id):
+                    if neighbor in nodes:
+                        neighbor_types.add(nodes[neighbor].page_type)
+                if len(neighbor_types) >= 2:
+                    bridges_list.append({
+                        "node_id": node_id, "title": node.title,
+                        "page_type": node.page_type,
+                        "connected_types": sorted(neighbor_types),
+                        "degree": degree,
+                    })
+            bridges_list.sort(key=lambda b: b["degree"], reverse=True)
+            return bridges_list
+        else:
+            # 纯 Python
+            bridges_list: List[Dict[str, Any]] = []
+            for node_id, node in nodes.items():
+                neighbor_ids = set(self._adjacency.get(node_id, []))
+                if len(neighbor_ids) < min_degree:
+                    continue
+                neighbor_types: Set[str] = set()
+                for nid in neighbor_ids:
+                    if nid in nodes:
+                        neighbor_types.add(nodes[nid].page_type)
+                if len(neighbor_types) >= 2:
+                    bridges_list.append({
+                        "node_id": node_id, "title": node.title,
+                        "page_type": node.page_type,
+                        "connected_types": sorted(neighbor_types),
+                        "degree": len(neighbor_ids),
+                    })
+            bridges_list.sort(key=lambda b: b["degree"], reverse=True)
+            return bridges_list
+
+    def degree_stats(self, node_ids: Set[str]) -> Dict[str, Any]:
+        """计算度分布统计。"""
+        if self._nx is not None and node_ids:
+            degrees = {n: self._nx.degree(n) for n in node_ids if n in self._nx}
+        else:
+            degrees = {nid: len(self._adjacency.get(nid, [])) for nid in node_ids}
+        if degrees:
+            avg = sum(degrees.values()) / len(degrees)
+            max_node = max(degrees, key=degrees.get)
+            return {"avg_degree": round(avg, 2), "max_degree": degrees[max_node],
+                    "max_degree_node": max_node}
+        return {"avg_degree": 0, "max_degree": 0, "max_degree_node": ""}
 
 
 # ── 关系提取 Prompt 模板 ──────────────────────────────────────
@@ -120,8 +307,7 @@ class WikiGraph:
         # 运行时状态
         self._nodes: Dict[str, GraphNode] = {}              # id → GraphNode
         self._edges: List[GraphEdge] = []                   # 全部边
-        self._adjacency: Dict[str, List[str]] = {}          # id → [neighbor_ids]（无向）
-        self._out_edges: Dict[str, List[GraphEdge]] = {}    # id → outbound edges（有向，find_path 用）
+        self._engine = _GraphEngine()                       # 图计算引擎（NetworkX / 纯 Python）
 
     # ══════════════════════════════════════════════════════════
     # 第一层：节点构建
@@ -331,26 +517,10 @@ class WikiGraph:
             邻居节点列表
         """
         node_id = self._resolve_node_id(title)
-        if node_id is None or node_id not in self._adjacency:
+        if node_id is None:
             return []
-
-        # BFS 按层展开，hops 层后停止
-        visited: Set[str] = {node_id}
-        current_level: Set[str] = {node_id}
-
-        for level in range(hops):
-            next_level: Set[str] = set()
-            for nid in current_level:
-                for neighbor in self._adjacency.get(nid, []):
-                    if neighbor not in visited:
-                        visited.add(neighbor)
-                        next_level.add(neighbor)
-            current_level = next_level
-            if not current_level:
-                break
-
-        visited.discard(node_id)
-        return [self._nodes[nid] for nid in visited if nid in self._nodes]
+        neighbor_ids = self._engine.neighbors(node_id, hops=hops)
+        return [self._nodes[nid] for nid in neighbor_ids if nid in self._nodes]
 
     def related_entities(self, title: str) -> Dict[str, List[Dict[str, Any]]]:
         """查询与指定节点相关的实体，按类型分组。
@@ -390,39 +560,14 @@ class WikiGraph:
     def find_path(
         self, from_title: str, to_title: str, *, max_hops: int = 4
     ) -> Optional[List[GraphEdge]]:
-        """BFS 查找两个节点之间的最短路径（边列表）。
-
-        使用 _out_edges 持久索引，避免每次调用重建 O(E) 的临时 dict。
-        """
+        """BFS 查找两个节点之间的最短路径（边列表）。"""
         from_id = self._resolve_node_id(from_title)
         to_id = self._resolve_node_id(to_title)
         if from_id is None or to_id is None:
             return None
-
         if from_id == to_id:
             return []
-
-        queue = deque([(from_id, [])])
-        visited = {from_id}
-
-        while queue:
-            current, path = queue.popleft()
-            if len(path) >= max_hops:
-                continue
-
-            for edge in self._out_edges.get(current, []):
-                next_id = edge.target if edge.source == current else edge.source
-                if next_id in visited:
-                    continue
-
-                new_path = path + [edge]
-                if next_id == to_id:
-                    return new_path
-
-                visited.add(next_id)
-                queue.append((next_id, new_path))
-
-        return None
+        return self._engine.find_path(from_id, to_id, max_hops=max_hops)
 
     # ══════════════════════════════════════════════════════════
     # 分析方法
@@ -430,13 +575,7 @@ class WikiGraph:
 
     def find_orphans(self) -> List[str]:
         """查找零入链的孤立节点。"""
-        referenced: Set[str] = set()
-        for edge in self._edges:
-            referenced.add(edge.target)
-        return sorted([
-            node_id for node_id in self._nodes
-            if node_id not in referenced
-        ])
+        return self._engine.orphans(set(self._nodes.keys()))
 
     def find_bridges(self, *, min_degree: int = 3) -> List[Dict[str, Any]]:
         """查找桥接节点——连接不同领域类型的关键节点。
@@ -447,45 +586,15 @@ class WikiGraph:
         Returns:
             [{"node_id": ..., "title": ..., "connected_types": set(), "degree": n}, ...]
         """
-        bridges: List[Dict[str, Any]] = []
-        for node_id, node in self._nodes.items():
-            neighbor_ids = set(self._adjacency.get(node_id, []))
-            if len(neighbor_ids) < min_degree:
-                continue
-
-            # 统计邻居的类型分布
-            neighbor_types: Set[str] = set()
-            for nid in neighbor_ids:
-                if nid in self._nodes:
-                    neighbor_types.add(self._nodes[nid].page_type)
-
-            if len(neighbor_types) >= 2:  # 跨越至少 2 种类型
-                bridges.append({
-                    "node_id": node_id,
-                    "title": node.title,
-                    "page_type": node.page_type,
-                    "connected_types": sorted(neighbor_types),
-                    "degree": len(neighbor_ids),
-                })
-
-        bridges.sort(key=lambda b: b["degree"], reverse=True)
-        return bridges
+        return self._engine.bridges(self._nodes, min_degree=min_degree)
 
     def density_report(self) -> Dict[str, Any]:
         """生成图谱密度报告。"""
         n_nodes = len(self._nodes)
         n_edges = len(self._edges)
 
-        # 度分布
-        degrees = {nid: len(self._adjacency.get(nid, [])) for nid in self._nodes}
-        if degrees:
-            avg_degree = sum(degrees.values()) / len(degrees)
-            max_degree_node = max(degrees, key=degrees.get)
-            max_degree = degrees[max_degree_node]
-        else:
-            avg_degree = 0
-            max_degree_node = ""
-            max_degree = 0
+        # 度分布（委托给引擎）
+        stats = self._engine.degree_stats(set(self._nodes.keys()))
 
         # 按类型统计
         by_type: Dict[str, int] = {}
@@ -507,9 +616,9 @@ class WikiGraph:
             "edges_wikilink": wikilink_count,
             "edges_llm": llm_count,
             "density": round(density, 6),
-            "avg_degree": round(avg_degree, 2),
-            "max_degree": max_degree,
-            "max_degree_node": max_degree_node,
+            "avg_degree": stats["avg_degree"],
+            "max_degree": stats["max_degree"],
+            "max_degree_node": stats["max_degree_node"],
             "by_type": by_type,
             "orphans": len(orphans),
             "bridges": len(bridges),
@@ -701,23 +810,11 @@ class WikiGraph:
         return "\n".join(lines)
 
     def _rebuild_adjacency(self) -> None:
-        """从边列表重建邻接表和有向出边索引。
+        """委托 _GraphEngine 从边列表重建图结构。
 
-        neighbors()/find_orphans()/find_bridges() 使用无向邻接表（_adjacency）。
-        find_path() 使用有向出边索引（_out_edges）以避免重复构建。
-        所有边（wikilink 和 LLM）在无向邻接表中均双向展开。
+        NetworkX 可用时使用 DiGraph，否则回退纯 Python dict。
         """
-        self._adjacency.clear()
-        self._out_edges.clear()
-        for edge in self._edges:
-            # 无向邻接（两端都可到达对方，用于 neighbors / orphan 分析）
-            self._adjacency.setdefault(edge.source, []).append(edge.target)
-            self._adjacency.setdefault(edge.target, []).append(edge.source)
-            # 有向出边（保持语义方向，用于 find_path）
-            self._out_edges.setdefault(edge.source, []).append(edge)
-            # wikilink 边在路径搜索中允许反向遍历
-            if edge.source_type == "wikilink":
-                self._out_edges.setdefault(edge.target, []).append(edge)
+        self._engine.build(self._edges)
 
     def _find_changed_pages(
         self, *, _pages: Optional[List[WikiPageInfo]] = None

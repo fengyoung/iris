@@ -1,10 +1,10 @@
-# Iris 3.14.1
+# Iris 3.15.0
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
 
-**v3.14.1** — 代码质量全面优化：CLI handlers 拆分（1480→80+4 子模块）+ analysis 高复杂度函数重构 + 测试 687→754（+67）+ pytest-cov 覆盖率 49% + except Exception 审查 + 文档完善。
+**v3.15.0** — 四方向优化：Prompt 模板外部化（9 个内联 Prompt → templates/）+ LLM 响应缓存（温度=0 自动缓存）+ 增量 Chunk 构建（`--incremental`）+ 知识图谱引擎升级（NetworkX 可选）。测试 754→868（+114），覆盖率 49%→50.10%。
 
 ## 开发路线
 
@@ -137,6 +137,7 @@ iris3/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.15.0** | 2026-07-15 | 四方向优化：Prompt 模板外部化 + LLM 响应缓存 + 增量 Chunk + 知识图谱 NetworkX 引擎；测试 754→868（+114），覆盖率 49%→50% |
 | **v3.14.1** | 2026-07-15 | 代码质量全面优化：CLI handlers 拆分（1480→80+4 子模块）+ analysis 重构 + 测试 687→754 + pytest-cov 49% + except Exception 审查 + 文档完善 |
 | **v3.14.0** | 2026-07-15 | 全面优化：测试 554→687 + 用量成本估算（usage-stats --cost + 价格表 + daily-start 概要/预算预警）+ 图谱查询命令 graph-query + VIDEO 多模态（ffmpeg 抽帧 + Whisper 转写）|
 | **v3.13.0** | 2026-07-14 | LLM 用量统计（SQLite 记录调用/token，分模型 + 汇总，日/周/月/年聚合）+ usage-stats 命令；554 测试 |

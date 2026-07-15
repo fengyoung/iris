@@ -1,4 +1,4 @@
-# Iris 3.14.1 — 项目执行说明
+# Iris 3.15.0 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~21,800 行 / 110 文件 / 20 模块 · CLI 48 命令（44 handler + 4 委托脚本，按功能域 4 子模块）· 单元测试 754（50 文件）· 覆盖率 49% · 7 个项目级 Skill · Wiki 91 页 · 知识图谱节点 91 / 关系边 ~200 · 数据源 691 文档 / 3,956 Chunk · 向量索引 6,789 条。
+~22,500 行 / 112 文件 / 20 模块 · CLI 48 命令（44 handler + 4 委托脚本，按功能域 4 子模块）· 单元测试 868（54 文件）· 覆盖率 50% · 7 个项目级 Skill · Wiki 91 页 · 知识图谱节点 91 / 关系边 ~200（NetworkX 引擎） · 数据源 691 文档 / 3,956 Chunk · 向量索引 6,789 条 · LLM 响应缓存（磁盘 TTL）。
 
 ### 关键路径
 
@@ -153,7 +153,7 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.14.1 (2026-07-15)** — 代码质量全面优化：① CLI handlers 按功能域拆分为 4 子模块（1480→80 行聚合层）② `_stage3_synthesize_directions()` 高复杂度函数重构（提取 5 个子函数）③ 测试补齐 687→754（+67，新增 validation/embedder/llm_service/navigation 4 测试文件）④ pytest-cov 覆盖率基础设施（49%）⑤ 49 处 `except Exception` 审查 + ruff BLE001 项目级豁免 ⑥ README 补充开发环境搭建 + 项目结构图。
+**当前 v3.15.0 (2026-07-15)** — 四方向优化：① Prompt 模板外部化（9 个内联 Prompt → templates/ 文件，代码去重 ~200 行）② LLM 响应缓存（`llm/cache.py`，温度=0 时自动缓存，TTL 可配置）③ 增量 Chunk 构建（`--incremental` 扫描 + 删除文件清理 + 未变更复用）④ 知识图谱引擎升级（`_GraphEngine`：NetworkX 优先 + 纯 Python fallback）。测试 754→868（+114），覆盖率 49%→50.10%，qa/helpers.py 达 100%。
 
 > 覆盖范围：仅统计 Iris 自身经 provider 发出的 LLM 调用（CLI + 调用 CLI 的 Skill），不含 Claude Code 本体 / Whisper 转写 / 飞书接口。
 

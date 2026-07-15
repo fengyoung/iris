@@ -52,6 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source", default="", help="scan-source / build-chunks 指定数据源名称")
     parser.add_argument("--summary-only", action="store_true", help="仅输出摘要")
     parser.add_argument("--write-summary", action="store_true", help="写入摘要到 data/metadata")
+    parser.add_argument("--incremental", action="store_true", help="增量扫描/构建（仅处理变更文件）")
     # 记忆系统
     parser.add_argument("--memory-type", default="all", choices=["all", "profile", "corrections"], help="memory-list 类型")
     parser.add_argument("--concept", default="", help="memory-delete 概念名")

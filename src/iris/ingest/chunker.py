@@ -97,25 +97,40 @@ class MarkdownChunker:
         self._max_preview_chars = safe_int(ingestion.get("max_preview_chars", 180), 180)
         self._metadata_dir = config.root / "data" / "metadata"
 
-    def build_default_source_chunks(self) -> ChunkSummary:
-        return self._build_chunks_from_scan(self._scanner.scan_default_source())
+    def build_default_source_chunks(self, *, incremental: bool = False) -> ChunkSummary:
+        return self._build_chunks_from_scan(
+            self._scanner.scan_default_source() if not incremental
+            else self._scanner.scan_source_by_name(
+                self._config.data_source["default_source"], incremental=True,
+            )
+        )
 
-    def build_source_chunks(self, source_name: str) -> ChunkSummary:
-        return self._build_chunks_from_scan(self._scanner.scan_source_by_name(source_name))
+    def build_source_chunks(self, source_name: str, *, incremental: bool = False) -> ChunkSummary:
+        return self._build_chunks_from_scan(
+            self._scanner.scan_source_by_name(source_name, incremental=incremental)
+        )
 
-    def build_all_enabled_sources_chunks(self) -> List[ChunkSummary]:
+    def build_all_enabled_sources_chunks(self, *, incremental: bool = False) -> List[ChunkSummary]:
         summaries: List[ChunkSummary] = []
         for source_name, cfg in self._config.data_source["sources"].items():
             if cfg.get("enabled", True):
-                summaries.append(self.build_source_chunks(source_name))
+                summaries.append(self.build_source_chunks(source_name, incremental=incremental))
         return summaries
 
     def _build_chunks_from_scan(self, scan_summary: ScanSummary) -> ChunkSummary:
         previous = self._load_previous_chunks_for_source(scan_summary.source_name)
         reused_documents = 0
         rebuilt_documents = 0
+        cleaned_documents = 0
         rebuilt_paths: List[str] = []
         all_chunks: List[ChunkRecord] = []
+
+        # 处理已删除文件（增量扫描时检测到的）
+        deleted_paths = getattr(scan_summary, "_deleted_paths", [])
+        if deleted_paths:
+            cleaned_documents = len(deleted_paths)
+            for rp in deleted_paths:
+                previous.pop(rp, None)
 
         for document in scan_summary.documents:
             cached_chunks = previous.get(document.relative_path)
@@ -128,11 +143,19 @@ class MarkdownChunker:
             rebuilt_documents += 1
             rebuilt_paths.append(document.relative_path)
 
+        # 增量模式下保留未变更文件的旧 chunk
+        if deleted_paths or reused_documents > 0:
+            changed_paths = {doc.relative_path for doc in scan_summary.documents}
+            for rp, cached_chunks in previous.items():
+                if rp not in changed_paths:
+                    all_chunks.extend(cached_chunks)
+
         all_chunks.sort(key=lambda item: (item.relative_path, item.line_start, item.segment_index))
         return ChunkSummary(source_name=scan_summary.source_name, scanned_at=scan_summary.scanned_at,
                             document_count=scan_summary.document_count, chunk_count=len(all_chunks),
                             chunks=all_chunks, build_stats={"reused_documents": reused_documents,
                                                             "rebuilt_documents": rebuilt_documents,
+                                                            "cleaned_documents": cleaned_documents,
                                                             "rebuilt_paths": rebuilt_paths})
 
     def write_summary(self, summary: ChunkSummary) -> Path:

@@ -4,6 +4,71 @@
 
 ---
 
+## v3.15.0 (2026-07-15)
+
+四方向优化：Prompt 模板外部化 + LLM 响应缓存 + 增量 Chunk 构建 + 知识图谱引擎升级 + 测试补齐。
+
+### 新功能
+
+**LLM 响应缓存（llm/cache.py）：**
+- `LLMResponseCache`：基于 prompt hash 的磁盘缓存，两级目录结构（`data/cache/llm_responses/{prefix}/{hash}.json`）
+- 仅缓存 temperature=0 的确定性调用，temperature>0 自动跳过
+- 可配置 TTL（默认 3600s），过期自动清理
+- 集成到 `LLMService.generate()`：命中缓存直接返回，未命中写入缓存
+- `LLMService.get_cache_stats()` / `clear_cache()`：监控命中率和手动清空
+
+**增量 Chunk 构建（ingest/scanner.py + chunker.py）：**
+- `MarkdownScanner.scan_source_by_name(incremental=True)`：增量扫描，比较当前文件与上次扫描摘要（mtime + hash），仅返回新增/修改文件
+- 同步检测已删除文件（`_deleted_paths`），chunker 自动清理旧 chunk
+- 未变更文件保留已有 chunk，避免不必要的重新分块
+- CLI：`iris build-chunks --incremental`（`_cli_main.py` 新增 `--incremental` 参数）
+
+**知识图谱引擎升级（wiki/graph.py）：**
+- 新增 `_GraphEngine` 抽象层：优先使用 NetworkX（`networkx>=3.0`），不可用时自动回退纯 Python
+- NetworkX 模式下使用 `nx.DiGraph` 存储，`shortest_path` / `degree` / `in_degree` 等图算法开箱即用
+- 重构 `neighbors()` / `find_path()` / `find_orphans()` / `find_bridges()` / `density_report()` 委托给引擎
+- `pyproject.toml` 新增 `[project.optional-dependencies] graph = ["networkx>=3.0"]`
+
+### 代码重构
+
+**Prompt 模板外部化（P1-2）：**
+- `generator.py`：`_build_generic_update_prompt` / `_build_person_update_prompt` / `_fallback_markdown` 优先加载外部模板（`templates/wiki/update_generic.txt` 等），保留内联 fallback
+- `deep_eval.py`：`ACCURACY_PROMPT_TEMPLATE` / `PAGE_ACCURACY_PROMPT_TEMPLATE` / `COMPREHENSIVENESS_PROMPT_TEMPLATE` → `_get_accuracy_prompt()` 等函数，从 `templates/prompt/*.md` 加载
+- `pipeline.py`：`_STAGE1_TEMPLATE` / `_STAGE3_TEMPLATE` → `_get_stage1_template()` / `_get_stage3_template()`
+- `term_extractor.py`：`_build_misreadings_prompt` 新增 `_load_misreadings_template()` 外部加载
+- 新增 9 个模板文件：`templates/wiki/update_generic.txt` / `update_person.txt` / `fallback_markdown.txt` + `templates/prompt/accuracy_check.md` / `page_accuracy_check.md` / `comprehensiveness_check.md` / `stage1_instruction.md` / `stage3_integrate.md` / `misreadings.md`
+
+### 测试
+
+- 754 → **868**（+114）：
+  - 新增 `test_qa_helpers.py`（`infer_evidence_type`/`intent_title`/`group_title`/`is_memory_only_instruction`/`infer_question_type`/`block_bonus`，41 用例）
+  - 新增 `test_wiki_pure.py`（`_slugify_title`/`normalize_title`/`extract_terms`/`extract_persons`/`_extract_wiki_content`/`_validate_update_output`，30 用例）
+  - 新增 `test_llm_cache.py`（`LLMResponseCache` put/get/stats/clear/TTL/目录结构，15 用例）
+  - 新增 `test_wiki_discovery.py`（`should_merge`/`merge_candidates`/`prefer_candidate_title`/`build_candidates`/`suppress_path_concentrated_noise`，24 用例）
+  - `qa/helpers.py` 测试覆盖率 **100%**，`llm/cache.py` **76%**，`wiki/discovery_utils.py` 43%→**65%**
+
+### 工程基础设施
+
+- 覆盖率阈值 **49% → 50%**（`fail_under = 50`）
+- `networkx>=3.0` 可选依赖
+
+### 版本
+
+- 产品版本 3.14.1 → **3.15.0**
+- 协议版本保持 **3.9**（无新 CLI 命令，仅新增 `--incremental` 参数）
+- 数据版本不变
+
+### 项目指标
+
+- 源文件：110 → **112**（+2：`llm/cache.py` + `wiki/_graph_engine` 内置）
+- 模板文件：16 → **25**（+9：外部化 Prompt 模板）
+- 测试文件：50 → **54**（+4）
+- 单元测试：754 → **868**（+114）
+- CLI 命令：48（不变）
+- 覆盖率：49% → **50.10%**
+
+---
+
 ## v3.14.1 (2026-07-15)
 
 代码质量全面优化：CLI 模块拆分 + 高复杂度函数重构 + 测试补齐 + 覆盖率基础设施 + 异常审查 + 文档完善。

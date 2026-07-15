@@ -446,10 +446,19 @@ class TermExtractor:
             ctx = f"（{_clean_markup(t.context[:40])}）" if t.context else ""
             term_items.append(f"- [{type_label}] {t.term} {ctx}".strip())
 
+        ctx = domain_context or "这是一个专业团队的知识库。"
+        term_items_text = chr(10).join(term_items)
+
+        # 尝试从外部模板加载
+        template = self._load_misreadings_template()
+        if template:
+            return template.replace("{{domain_context}}", ctx).replace("{{term_items}}", term_items_text)
+
+        # 降级：内联 prompt
         return f"""你是语音识别（ASR）误识别专家。你精通 paraformer 等中文 ASR 模型的常见错误模式。
 
 ## 领域背景
-{domain_context or "这是一个专业团队的知识库。"}
+{ctx}
 
 ## 任务
 为以下术语列表的每个条目，列出 paraformer 语音转写中最可能出现的 3-5 个误识别。
@@ -475,7 +484,7 @@ class TermExtractor:
 - 直接输出纯 JSON 数组，不要 Markdown 代码块包裹，不要任何解释
 
 ## 术语列表
-{chr(10).join(term_items)}
+{term_items_text}
 
 ## 输出格式
 [
@@ -487,6 +496,15 @@ class TermExtractor:
 ]
 
 注意：category 必须严格使用 person / concept / project / domain_term 四种之一。"""
+
+    @staticmethod
+    def _load_misreadings_template() -> Optional[str]:
+        """从 templates/prompt/misreadings.md 加载 ASR 误识别 Prompt 模板。"""
+        templates_dir = Path(__file__).resolve().parent.parent.parent.parent / "templates" / "prompt"
+        tmpl_path = templates_dir / "misreadings.md"
+        if tmpl_path.exists():
+            return tmpl_path.read_text(encoding="utf-8")
+        return None
 
     @staticmethod
     def _parse_misreadings_response(response_text: str, terms: List[AsrTerm]) -> None:
