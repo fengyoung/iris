@@ -6,7 +6,7 @@
 
 ## v3.15.0 (2026-07-15)
 
-六方向优化：Prompt 模板外部化 + Wiki 引用描述校验 + LLM 响应缓存 + 增量 Chunk 构建 + 知识图谱引擎升级 + ConfigBundle 渐进迁移 + 测试补齐。
+全栈优化（P0-P3）：结构化日志 + async/await + 多工作空间 + 文件监听 + Prompt 外部化 + Wiki 引用校验 + LLM 缓存 + 增量 Chunk + 图谱引擎升级 + Config 迁移 + 指标导出 + 测试补齐。
 
 ### 新功能
 
@@ -56,27 +56,28 @@
   - 新增 `test_wiki_discovery.py`（`should_merge`/`merge_candidates`/`prefer_candidate_title`/`build_candidates`/`suppress_path_concentrated_noise`，24 用例）
   - 新增 `test_qa_context.py`（`PromptContextPacker.pack`/`_compress_text`，12 用例）
   - 新增 `test_memory_working.py`（`WorkingContextStore` save/load/update/render_for_prompt，10 用例）
-  - `qa/helpers.py` **100%**，`memory/working.py` **94%**，`qa/context.py` **87%**，`llm/cache.py` **76%**，`wiki/discovery_utils.py` 43%→**65%**
+  - 新增 `test_p3_features.py`（`MetricsExporter`/`WorkspaceConfig`/`SourceWatcher`，19 用例）
+  - `qa/helpers.py` **100%**，`memory/working.py` **94%**，`qa/context.py` **87%**，`llm/cache.py` **76%**，`wiki/discovery_utils.py` **65%**
 
 ### 工程基础设施
 
 - 覆盖率阈值 **49% → 50%**（`fail_under = 50`）
-- `networkx>=3.0` 可选依赖
+- 可选依赖：`networkx>=3.0`（graph）、`httpx>=0.27`（async）
 
 ### 版本
 
 - 产品版本 3.14.1 → **3.15.0**
-- 协议版本保持 **3.9**（无新 CLI 命令，仅新增 `--incremental` 参数）
+- 协议版本 3.9 → **3.10**（新增 `metrics-export` / `watch` / `workspace` 命令）
 - 数据版本不变
 
 ### 项目指标
 
-- 源文件：110 → **112**（+2：`llm/cache.py` + `wiki/_graph_engine` 内置）
+- 源文件：110 → **117**（+7：cache / async_http / metrics / workspace / watcher / logging 重写 / graph engine 内置）
 - 模板文件：16 → **25**（+9：外部化 Prompt 模板）
-- 测试文件：50 → **56**（+6）
-- 单元测试：754 → **893**（+139）
-- CLI 命令：48（不变）
-- 覆盖率：49% → **50.72%**
+- 测试文件：50 → **57**（+7）
+- 单元测试：754 → **912**（+158）
+- CLI 命令：48 → **51**（+metrics-export / watch / workspace）
+- 覆盖率：49% → **50.37%**
 
 ---
 

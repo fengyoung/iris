@@ -29,6 +29,8 @@ COMMANDS = [
     "build-graph",
     "graph-query",
     "usage-stats",
+    "metrics-export",
+    "watch",
     # ── 委托命令 ──
     "trello", "extract-weekly-reports", "extract-didi-travel",
     "sync-memory", "feishu-doc-convert", "chat-digest",
@@ -46,6 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Iris 命令行入口")
     parser.add_argument("command", choices=COMMANDS, help="执行的命令")
     parser.add_argument("--project-root", default=".", help="Iris 项目根目录")
+    parser.add_argument("--workspace", default="", help="工作空间名称（覆盖 config/workspaces.json 中的路径配置）")
     parser.add_argument("--context", default="{}", help="route-model 使用的 JSON 上下文")
     parser.add_argument("--pretty", action="store_true", help="人类可读输出")
     # 数据源层
@@ -138,6 +141,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", default="", help="usage-stats 过滤模型名称")
     parser.add_argument("--since", default="", help="usage-stats 起始日期 YYYY-MM-DD")
     parser.add_argument("--cost", action="store_true", help="usage-stats 按价格表估算费用（需 config/llm_pricing.json）")
+    # 指标导出
+    parser.add_argument("--trend", action="store_true", help="metrics-export 输出最近 N 周趋势（配合 --weeks）")
+    parser.add_argument("--weeks", type=int, default=4, help="metrics-export 趋势周数（默认 4）")
+    # 文件监听
+    parser.add_argument("--poll-interval", type=int, default=30, help="watch 轮询间隔秒数（默认 30）")
+    parser.add_argument("--run-once", action="store_true", help="watch 单次检测后退出")
     # 聊天提炼
     parser.add_argument("--group", default="", help="chat-digest 群聊名称")
     parser.add_argument("--user", default="", help="chat-digest 用户名称（单聊）")
@@ -153,7 +162,20 @@ def main() -> int:
 
     parser = build_parser()
     args = parser.parse_args()
-    bundle = load_config_bundle(Path(args.project_root))
+
+    # workspace 命令：不需要加载完整配置
+    if args.command == "workspace":
+        return _handle_workspace_cmd(args)
+
+    project_root = Path(args.project_root)
+    bundle = load_config_bundle(project_root)
+
+    # 应用工作空间配置
+    if getattr(args, "workspace", ""):
+        from iris.config.workspace import WorkspaceManager
+        mgr = WorkspaceManager(project_root)
+        bundle = mgr.apply(bundle, workspace_name=args.workspace)
+
     logger = IrisLogger(bundle)
 
     _show_banner(args.command)
@@ -173,6 +195,27 @@ def main() -> int:
         if args.pretty:
             traceback.print_exc(file=sys.stderr)
         return 1
+
+
+def _handle_workspace_cmd(args) -> int:
+    """处理 workspace 命令（list / current）。"""
+    from iris.config.workspace import WorkspaceManager
+    mgr = WorkspaceManager(Path(args.project_root))
+    ws_name = getattr(args, "workspace", "") or mgr.config.default_workspace
+
+    if getattr(args, "list_workspaces", False):
+        workspaces = mgr.list_workspaces()
+        for ws in workspaces:
+            print(f"  {ws.name:20s}  source={ws.source_root or '(默认)'}  wiki={ws.wiki_root or '(默认)'}")
+        return 0
+
+    # current
+    ws = mgr.resolve(ws_name)
+    print(f"当前工作空间: {ws.name}")
+    print(f"  数据源路径:   {ws.source_root or '(使用 data_source.json 默认值)'}")
+    print(f"  Wiki 根目录:  {ws.wiki_root or '(使用 wiki.json 默认值)'}")
+    print(f"  数据目录:     {ws.data_dir or '(默认)'}")
+    return 0
 
 
 if __name__ == "__main__":

@@ -613,6 +613,80 @@ sources:
             "details": results,
         }
 
+    async def update_all_pages_async(self, *, top_k: int = 8, max_concurrency: int = 12) -> Dict[str, Any]:
+        """asyncio 批量更新所有 Wiki 页面（并发 LLM 调用）。
+
+        与 update_all_pages() 功能相同，但使用 asyncio 实现更高的并发度。
+        httpx 不可用时自动回退到 ThreadPoolExecutor。
+
+        Args:
+            top_k: 每次检索返回的 chunk 数
+            max_concurrency: 最大并发 LLM 调用数
+
+        Returns:
+            {"total", "updated", "unchanged", "not_found", "errors", "details"}
+        """
+        import asyncio
+
+        if not self._wiki_root.exists():
+            return {"status": "error", "reason": "Wiki 目录不存在"}
+
+        from .context_loader import WikiContextLoader
+        loader = WikiContextLoader(self._wiki_root)
+
+        # 构建索引
+        page_index: Dict[str, Tuple[Path, str, str]] = {}
+        for page_info in loader.load_pages():
+            if not page_info.title:
+                continue
+            try:
+                content = page_info.path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            page_index[page_info.title] = (page_info.path, page_info.page_type, content)
+
+        items = [(t, p, pt, c) for t, (p, pt, c) in page_index.items()]
+        if not items:
+            return {"total": 0, "updated": 0, "unchanged": 0, "not_found": 0, "errors": 0, "details": []}
+
+        # 使用信号量控制并发
+        semaphore = asyncio.Semaphore(max_concurrency)
+
+        async def _update_one_async(title: str, path: Path, page_type: str, content: str) -> Dict[str, Any]:
+            async with semaphore:
+                loop = asyncio.get_running_loop()
+                return await loop.run_in_executor(
+                    None,
+                    lambda: self._update_page_with_content(
+                        title=title, page_type=page_type, path=path,
+                        existing_content=content, top_k=top_k,
+                    ),
+                )
+
+        tasks = [_update_one_async(t, p, pt, c) for t, p, pt, c in items]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 处理异常
+        processed: List[Dict[str, Any]] = []
+        for i, r in enumerate(results):
+            if isinstance(r, Exception):
+                processed.append({"status": "error", "title": items[i][0], "reason": str(r)})
+            else:
+                processed.append(r)
+
+        updated = [r for r in processed if r.get("status") == "updated"]
+        unchanged = [r for r in processed if r.get("status") == "no_changes"]
+        not_found = [r for r in processed if r.get("status") == "not_found"]
+        errors = [r for r in processed if r.get("status") == "error"]
+        return {
+            "total": len(processed),
+            "updated": len(updated),
+            "unchanged": len(unchanged),
+            "not_found": len(not_found),
+            "errors": len(errors),
+            "details": processed,
+        }
+
     def _update_page_with_content(
         self, *, title: str, page_type: str, path: Path,
         existing_content: str, top_k: int,

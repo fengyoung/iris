@@ -31,6 +31,7 @@ from iris.app.cli._handlers._data import (
     handle_build_vector_index,
     handle_build_graph,
     handle_graph_query,
+    handle_watch,
     _print_graph_query_pretty,
 )
 from iris.app.cli._handlers._content import (
@@ -70,6 +71,7 @@ from iris.app.cli._handlers._system import (
     handle_secrets_list,
     handle_secrets_delete,
     handle_usage_stats,
+    handle_metrics_export,
 )
 
 # 聚合所有命令处理器（向后兼容：_cli_main.py 直接 import COMMAND_HANDLERS）

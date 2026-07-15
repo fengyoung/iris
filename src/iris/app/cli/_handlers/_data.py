@@ -307,6 +307,29 @@ def _print_graph_query_pretty(op: str, payload: Dict[str, Any], id_to_title: Dic
             print("  类型分布: " + "  ".join(f"{k}={v}" for k, v in sorted(d["by_type"].items())))
 
 
+# ── 文件监听 ─────────────────────────────────────────
+
+
+def handle_watch(args, bundle, logger) -> int:
+    from iris.ingest.watcher import SourceWatcher, build_incremental_on_change
+    watcher = SourceWatcher(bundle)
+    poll_interval = getattr(args, "poll_interval", 30)
+    run_once = getattr(args, "run_once", False)
+
+    if run_once:
+        events = watcher.poll()
+        print(f"检测到 {len(events)} 个文件变更")
+        for evt in events:
+            print(f"  [{evt.event_type}] {evt.relative_path}")
+        if events:
+            build_incremental_on_change(bundle)(events)
+        return 0
+
+    on_change = build_incremental_on_change(bundle)
+    watcher.start(on_change, poll_interval=poll_interval, run_once=run_once)
+    return 0
+
+
 # ── 命令映射 ─────────────────────────────────────────────
 
 DATA_HANDLERS = {
@@ -319,4 +342,5 @@ DATA_HANDLERS = {
     "ask": handle_ask,
     "build-graph": handle_build_graph,
     "graph-query": handle_graph_query,
+    "watch": handle_watch,
 }

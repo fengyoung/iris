@@ -455,6 +455,22 @@ def handle_usage_stats(args, bundle, logger) -> int:
     return 0
 
 
+# ── 指标导出 ─────────────────────────────────────────
+
+
+def handle_metrics_export(args, bundle, logger) -> int:
+    from iris.utils.metrics import MetricsExporter
+    exporter = MetricsExporter(bundle)
+    if getattr(args, "trend", False):
+        result = exporter.trend(weeks=getattr(args, "weeks", 4))
+        _emit_output("metrics-export", result, pretty=args.pretty)
+        return 0
+    snapshot = exporter.snapshot()
+    output_path = exporter.export(snapshot)
+    _emit_output("metrics-export", {"path": str(output_path), "snapshot": snapshot}, pretty=args.pretty)
+    return 0
+
+
 # ── 命令映射 ─────────────────────────────────────────────
 
 SYSTEM_HANDLERS = {
@@ -475,4 +491,5 @@ SYSTEM_HANDLERS = {
     "secrets-list": handle_secrets_list,
     "secrets-delete": handle_secrets_delete,
     "usage-stats": handle_usage_stats,
+    "metrics-export": handle_metrics_export,
 }

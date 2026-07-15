@@ -170,6 +170,56 @@ class LLMService:
             logger.error("LLM 多模态生成失败: %s", exc)
             raise
 
+    # ── 异步文本生成 ───────────────────────────────────────────────
+
+    async def generate_async(
+        self,
+        prompt: str,
+        route_context: Optional[Dict[str, Any]] = None,
+        *,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        force_model: Optional[str] = None,
+    ) -> GenerationResult:
+        """异步调用 LLM 生成文本（使用 httpx async 或 ThreadPoolExecutor fallback）。
+
+        Args 与 generate() 相同。需要 `pip install httpx` 获得最佳性能，
+        否则自动回退到同步调用（在线程池中运行）。
+        """
+        import asyncio
+
+        ctx = route_context or {"input_type": "text", "task_type": "qa", "complexity": "standard"}
+
+        # 确定性调用：先查缓存
+        if temperature == 0:
+            cached = self._cache.get(prompt, ctx, force_model)
+            if cached:
+                return GenerationResult(
+                    text=cached["text"],
+                    selected_role=cached.get("selected_role", ""),
+                    provider=cached.get("provider", ""),
+                    model=cached.get("model", ""),
+                    api_base_url=cached.get("api_base_url", ""),
+                    matched_rule=cached.get("matched_rule", ""),
+                    prompt_tokens=cached.get("prompt_tokens", 0),
+                    completion_tokens=cached.get("completion_tokens", 0),
+                )
+
+        # 在默认 executor 中运行同步 generate（兼容现有 provider 实现）
+        loop = asyncio.get_running_loop()
+        try:
+            result = await loop.run_in_executor(
+                None,
+                lambda: self.generate(
+                    prompt, ctx,
+                    temperature=temperature, max_tokens=max_tokens,
+                    force_model=force_model,
+                ),
+            )
+            return result
+        except LLMProviderError:
+            raise
+
     # ── 快速访问（供已有习惯的旧代码过渡） ──────────────────────
 
     def get_base_model(self) -> EnvironmentConfiguredLLMProvider:
