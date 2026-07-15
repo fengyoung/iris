@@ -35,7 +35,7 @@ TERM_PATTERNS = [
 STOPWORDS = frozenset(
     "项目 方案 机制 讨论 过程 内容 目标 背景 当前 总结 计划 工作 部门 周报 "
     "日期 序号 负责人 参会人员 截止时间 关键数据 辅助整理 基础模型 审核员 "
-    "nbsp liubei 本周工作 本周总结 下周计划 会议内容 会议议程 会议记录 "
+    "nbsp 本周工作 本周总结 下周计划 会议内容 会议议程 会议记录 "
     "the and for with from this that are have been".split()
 )
 

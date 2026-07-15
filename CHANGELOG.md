@@ -815,7 +815,7 @@ SOURCE 结构优化：新增「工作简报」栏目 + bug 修复。
 - `TranscribeMeetingPipeline` 新增 `model` 参数，可指定纪要生成模型
 - `scripts/refresh_meeting_minutes.py` — 独立翻新脚本，支持 dry-run/resume/verify
 - 使用 deepseek-v4-pro 重新提取全部 111 份历史转录文件纪要
-- 人物歧义处理：6 人手动排歧 + 杜鹏→杜朋飞书信息统一
+- 人物歧义处理：6 人手动排歧，飞书信息统一修正
 
 ---
 

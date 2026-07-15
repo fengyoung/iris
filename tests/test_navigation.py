@@ -46,7 +46,7 @@ class TestCharSequenceMatch:
         assert _char_sequence_match("something", "") is False
 
     def test_chinese_chars(self):
-        assert _char_sequence_match("数据智能", "ExampleOrg技术研发部") is True
+        assert _char_sequence_match("技术研发", "ExampleOrg技术研发部") is True
         assert _char_sequence_match("测试", "人工智能") is False
 
 
