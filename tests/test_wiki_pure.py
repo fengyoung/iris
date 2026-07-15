@@ -186,6 +186,83 @@ def test_normalized_key_strips_special():
     assert "helloworld" in normalized_key("Hello World") or "helloworld" == normalized_key("Hello World")
 
 
+# ── WikiGenerator.check_reference_quality ──────────────────
+
+
+def test_ref_quality_good():
+    content = """---
+title: 测试
+---
+
+## 参考来源
+[source.md:10] 该文档提到准确率从 48% 提升至 55%，验证了本次优化的效果
+[source2.md:5] 记录了张三负责项目Alpha项目的里程碑规划与时间节点
+"""
+    result = WikiGenerator.check_reference_quality(content)
+    assert result["quality"] == "good"
+    assert result["total_refs"] == 2
+    assert result["described_refs"] == 2
+    assert result["bare_path_refs"] == 0
+
+
+def test_ref_quality_bare_path():
+    content = """---
+title: 测试
+---
+
+## 参考来源
+[source.md:10]
+[source2.md:5]
+"""
+    result = WikiGenerator.check_reference_quality(content)
+    assert result["quality"] == "poor"
+    assert result["bare_path_refs"] == 2
+
+
+def test_ref_quality_mixed():
+    content = """---
+title: 测试
+---
+
+## 参考来源
+[source.md:10] 该文档提到准确率从 48% 提升至 55%，效果显著超出预期目标
+[source2.md:5]
+"""
+    result = WikiGenerator.check_reference_quality(content)
+    assert result["quality"] == "fair"
+    assert result["total_refs"] == 2
+    assert result["described_refs"] == 1
+    assert result["bare_path_refs"] == 1
+
+
+def test_ref_quality_no_refs():
+    content = """---
+title: 测试
+---
+
+## 正文
+没有参考来源章节
+"""
+    result = WikiGenerator.check_reference_quality(content)
+    assert result["quality"] == "no_refs"
+    assert result["total_refs"] == 0
+
+
+def test_ref_quality_numbered_format():
+    content = """---
+title: 测试
+---
+
+## 参考来源
+1. [source.md:10] 该文档详细说明了算法的实现方案及性能对比数据
+2. [meeting.md:3] 会议纪要中确认了下季度的研发优先级和资源分配
+"""
+    result = WikiGenerator.check_reference_quality(content)
+    assert result["quality"] == "good"
+    assert result["total_refs"] == 2
+    assert result["described_refs"] == 2
+
+
 # ── WikiGenerator._extract_wiki_content ────────────────────
 
 

@@ -105,11 +105,21 @@ class EnhancedRetriever:
     _CACHE_MAXSIZE = 32
     _CACHE_TTL = 60
 
-    def __init__(self, config: ConfigBundle):
+    def __init__(self, config: ConfigBundle):  # 渐进迁移到 ConfigBundleV2：Pydantic .app.retrieval 属性访问
         self._config = config
         self._local = LocalRetriever(config)
         self._planner = QueryPlanner()
-        extra_synonyms = (config.app or {}).get("retrieval", {}).get("synonym_extensions")
+        # 兼容新旧两种访问方式：优先 Pydantic 属性，fallback dict 访问
+        retrieval_cfg: dict = {}
+        try:
+            from iris.config.models import ConfigBundleV2
+            if isinstance(config, ConfigBundleV2) and config.app:
+                retrieval_cfg = config.app.app.get("retrieval", {})
+        except Exception:
+            pass
+        if not retrieval_cfg:
+            retrieval_cfg = (config.app or {}).get("retrieval", {}) if isinstance(config.app, dict) else {}
+        extra_synonyms = retrieval_cfg.get("synonym_extensions")
         self._rewriter = QueryRewriter(extra_synonyms=extra_synonyms)
         self._llm = LLMService(config)
         self._wiki_searcher = WikiSearcher(config) if config.wiki else None

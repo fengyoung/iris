@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~22,500 行 / 112 文件 / 20 模块 · CLI 48 命令（44 handler + 4 委托脚本，按功能域 4 子模块）· 单元测试 868（54 文件）· 覆盖率 50% · 7 个项目级 Skill · Wiki 91 页 · 知识图谱节点 91 / 关系边 ~200（NetworkX 引擎） · 数据源 691 文档 / 3,956 Chunk · 向量索引 6,789 条 · LLM 响应缓存（磁盘 TTL）。
+~22,500 行 / 112 文件 / 20 模块 · CLI 48 命令（44 handler + 4 委托脚本，按功能域 4 子模块）· 单元测试 893（56 文件）· 覆盖率 50.72% · 7 个项目级 Skill · Wiki 91 页 · 知识图谱节点 91 / 关系边 ~200（NetworkX 引擎） · 数据源 691 文档 / 3,956 Chunk · 向量索引 6,789 条 · LLM 响应缓存（磁盘 TTL） · Wiki 引用描述校验（内置质量评级）。
 
 ### 关键路径
 
@@ -153,7 +153,7 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.15.0 (2026-07-15)** — 四方向优化：① Prompt 模板外部化（9 个内联 Prompt → templates/ 文件，代码去重 ~200 行）② LLM 响应缓存（`llm/cache.py`，温度=0 时自动缓存，TTL 可配置）③ 增量 Chunk 构建（`--incremental` 扫描 + 删除文件清理 + 未变更复用）④ 知识图谱引擎升级（`_GraphEngine`：NetworkX 优先 + 纯 Python fallback）。测试 754→868（+114），覆盖率 49%→50.10%，qa/helpers.py 达 100%。
+**当前 v3.15.0 (2026-07-15)** — 六方向优化：① Prompt 模板外部化（9 个内联 Prompt → templates/）② Wiki 引用描述校验（`check_reference_quality()` 内置评级，4 个模板强制事实断言描述）③ LLM 响应缓存（`llm/cache.py`，温度=0 时自动缓存）④ 增量 Chunk 构建（`--incremental` 扫描 + 删除清理）⑤ 知识图谱引擎升级（`_GraphEngine`：NetworkX 优先 + 纯 Python fallback）⑥ ConfigBundle 渐进迁移试点。测试 754→893（+139），覆盖率 49%→50.72%，qa/helpers.py 100%，memory/working.py 94%，qa/context.py 87%。
 
 > 覆盖范围：仅统计 Iris 自身经 provider 发出的 LLM 调用（CLI + 调用 CLI 的 Skill），不含 Claude Code 本体 / Whisper 转写 / 飞书接口。
 

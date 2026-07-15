@@ -6,6 +6,7 @@ from collections import defaultdict
 from typing import Any, Dict, List
 
 from iris.config.loader import ConfigBundle
+from iris.config.models import ConfigBundleV2  # noqa: F401 — 渐进迁移到 Pydantic 类型安全
 from iris.llm import LLMProviderError, LLMService
 from iris.memory import CorrectionMemoryStore, SessionMemoryStore, UserProfileMemoryStore, WorkingContextStore
 from iris.retrieval import EnhancedRetriever, RetrievalHit
@@ -19,7 +20,7 @@ from .models import AnswerBlock, Citation, QAResponse
 
 
 class QAService:
-    def __init__(self, config: ConfigBundle):
+    def __init__(self, config: ConfigBundle):  # ConfigBundle 可通过 ConfigBundleV2.from_config_bundle() 升级
         self._config = config
         self._retriever = EnhancedRetriever(config)
         self._llm = LLMService(config)

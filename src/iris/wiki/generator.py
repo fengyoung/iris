@@ -88,8 +88,20 @@ class WikiGenerator:
 
         draft = WikiPageDraft(page_type=page_type, title=title, slug=slug,
                               output_path=str(output_path), markdown=markdown)
-        self._logger.log("wiki_build_page", {"query": query, "page_type": page_type,
-                                              "title": title, "output_path": draft.output_path})
+        ref_quality = self.check_reference_quality(markdown)
+        log_payload = {"query": query, "page_type": page_type,
+                       "title": title, "output_path": draft.output_path,
+                       "ref_quality": ref_quality}
+        self._logger.log("wiki_build_page", log_payload)
+        if ref_quality.get("quality") in ("poor", "fair"):
+            import logging as _logging
+            _logging.getLogger("iris.wiki.generator").warning(
+                "引用质量偏低 [%s] %s: %d/%d 条引用有描述",
+                ref_quality.get("quality", "?"),
+                title,
+                ref_quality.get("described_refs", 0),
+                ref_quality.get("total_refs", 0),
+            )
         return draft
 
     def build_pages(self, items: Iterable[BatchWikiItem], *, top_k: int = 5,
@@ -180,7 +192,7 @@ class WikiGenerator:
         if template:
             return template.format(type_name=type_name, page_type=page_type, title=title,
                                    query=query, evidence=evidence, related=related, now=now)
-        # 降级：内联 prompt
+        # 降级：内联 prompt（与外部模板保持同步）
         return f"""你是一个知识库编辑助手。请生成一份 {type_name} 类型的 Wiki 页面。
 
 ## 页面信息
@@ -198,6 +210,7 @@ class WikiGenerator:
 3. 使用 [[Wiki-链接]] 格式做交叉引用
 4. 保持客观、事实驱动
 5. 关联页面：{related}
+6. 参考来源格式：每条引用使用 [path.md:行号] 事实断言描述的格式，描述 10-30 字说明关键信息。禁止仅罗列文件路径。
 
 请输出完整的 Markdown。"""
 
@@ -206,7 +219,7 @@ class WikiGenerator:
         if template:
             return template.format(title=title, query=query, evidence=evidence,
                                    related=related, now=now)
-        # 降级：内联 prompt
+        # 降级：内联 prompt（与外部模板保持同步）
         return f"""你是一个知识库编辑助手。请为团队成员 **{title}** 生成一份人物 Wiki 页面。
 
 ## 参考证据（来自周报、会议纪要、项目文档）
@@ -226,6 +239,7 @@ class WikiGenerator:
 3. 保持客观，仅从证据中提取事实，不编造
 4. 使用 [[Wiki-链接]] 格式做交叉引用
 5. email 字段提取证据中的邮箱信息
+6. 参考来源格式：每条引用使用 [path.md:行号] 事实断言描述的格式，描述 10-30 字说明关键信息。禁止仅罗列文件路径。
 
 请输出完整的 Markdown。"""
 
@@ -399,7 +413,7 @@ sources:
 2. 保留原有内容结构和 wording，不要删改已有的有效信息
 3. 更新 YAML frontmatter 中的 updated 字段为 {today}
 4. 保持 [[Wiki-链接]] 交叉引用格式
-5. 在「参考来源」中补充新证据的来源
+5. 在「参考来源」中补充新证据的来源，每条引用附 10-30 字事实断言描述
 6. **输出纯 Markdown，以 --- 开头，不要任何对话前缀或代码块包裹**"""
 
     def _build_person_update_prompt(self, existing_content, last_updated, evidence, related, today):
@@ -437,7 +451,7 @@ sources:
 2. 保留原有内容结构和 wording
 3. 更新 YAML frontmatter 中的 updated 字段为 {today}
 4. 保持 [[Wiki-链接]] 交叉引用格式
-5. 在「参考来源」中补充新来源
+5. 在「参考来源」中补充新来源，每条引用附 10-30 字事实断言描述
 6. **输出纯 Markdown，以 --- 开头，不要任何对话前缀或代码块包裹**"""
 
     @staticmethod
@@ -482,6 +496,58 @@ sources:
             new_content = new_content[:-3].strip()
 
         return new_content
+
+    @staticmethod
+    def check_reference_quality(content: str) -> Dict[str, Any]:
+        """检查 Wiki 内容中参考来源的引用质量。
+
+        评估维度：
+          - total_refs：引用总数
+          - described_refs：带有事实断言描述（≥10 字）的引用数
+          - bare_path_refs：仅文件路径无描述的引用数
+          - quality：good（全部有描述）/ fair（≥50% 有描述）/ poor（<50% 或有裸路径）
+
+        用于在 wiki 生成后做质量追踪，不阻塞生成流程。
+        """
+        import re as _re
+        ref_section = _re.search(r"## 参考来源\n(.*?)(?=\n## |\Z)", content, _re.DOTALL)
+        if not ref_section:
+            return {"total_refs": 0, "described_refs": 0, "bare_path_refs": 0, "quality": "no_refs"}
+
+        ref_lines = [l.strip() for l in ref_section.group(1).split("\n") if l.strip()]
+        # 过滤掉非引用行（如空行、注释行）
+        ref_entries = [l for l in ref_lines if _re.match(r"^(?:\d+\.\s*)?\[?.*\.md", l)]
+
+        total = len(ref_entries)
+        if total == 0:
+            return {"total_refs": 0, "described_refs": 0, "bare_path_refs": 0, "quality": "no_refs"}
+
+        bare_path_count = 0
+        for entry in ref_entries:
+            # 移除文件路径部分，检查剩余描述
+            desc = _re.sub(r"^(?:\d+\.\s*)?\[?[^\]]+\.md(?::\d+(?:-\d+)?)?\]?\s*", "", entry).strip()
+            # 检查描述长度（中文算实际字数）
+            desc_chars = len(desc.replace(" ", ""))
+            if desc_chars < 10:
+                bare_path_count += 1
+
+        described = total - bare_path_count
+        ratio = described / total if total > 0 else 0
+
+        if ratio >= 0.9:
+            quality = "good"
+        elif ratio >= 0.5:
+            quality = "fair"
+        else:
+            quality = "poor"
+
+        return {
+            "total_refs": total,
+            "described_refs": described,
+            "bare_path_refs": bare_path_count,
+            "quality": quality,
+            "quality_ratio": round(ratio, 2),
+        }
 
     def update_page(self, *, title: str, page_type: Optional[str] = None, top_k: int = 8) -> Dict[str, Any]:
         """增量更新单个 Wiki 页面。"""
@@ -580,14 +646,17 @@ sources:
                               output_path=str(path), markdown=new_content)
         write_result = self.write_page(draft, overwrite=True, backup=True)
 
+        ref_quality = WikiGenerator.check_reference_quality(new_content)
         self._logger.log("wiki_update_page", {"title": title, "path": str(path),
-                                                "action": write_result.action})
+                                                "action": write_result.action,
+                                                "ref_quality": ref_quality})
         return {
             "status": "updated",
             "title": title,
             "path": str(path),
             "action": write_result.action,
             "backup_path": write_result.backup_path,
+            "ref_quality": ref_quality,
         }
 
 

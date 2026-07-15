@@ -6,7 +6,7 @@
 
 ## v3.15.0 (2026-07-15)
 
-四方向优化：Prompt 模板外部化 + LLM 响应缓存 + 增量 Chunk 构建 + 知识图谱引擎升级 + 测试补齐。
+六方向优化：Prompt 模板外部化 + Wiki 引用描述校验 + LLM 响应缓存 + 增量 Chunk 构建 + 知识图谱引擎升级 + ConfigBundle 渐进迁移 + 测试补齐。
 
 ### 新功能
 
@@ -38,14 +38,25 @@
 - `term_extractor.py`：`_build_misreadings_prompt` 新增 `_load_misreadings_template()` 外部加载
 - 新增 9 个模板文件：`templates/wiki/update_generic.txt` / `update_person.txt` / `fallback_markdown.txt` + `templates/prompt/accuracy_check.md` / `page_accuracy_check.md` / `comprehensiveness_check.md` / `stage1_instruction.md` / `stage3_integrate.md` / `misreadings.md`
 
+**Wiki 生成内置引用描述校验（P0-2）：**
+- 所有 4 个 Wiki 生成/更新 Prompt 模板增加强制引用格式要求：每条引用附 10-30 字事实断言描述
+- `WikiGenerator.check_reference_quality()`：解析 `## 参考来源` 章节，按描述完整性评级（good/fair/poor/no_refs）
+- `build_page()` / `_update_page_with_content` 集成质量记录：生成/更新后自动检查引用质量，poor/fair 时日志警告
+
+**ConfigBundle 渐进迁移试点（P1-3）：**
+- `qa/service.py` 文档化 Pydantic 迁移路径
+- `retrieval/enhanced.py` 兼容新旧两种配置访问方式（优先 ConfigBundleV2 属性访问，fallback dict）
+
 ### 测试
 
-- 754 → **868**（+114）：
+- 754 → **893**（+139）：
   - 新增 `test_qa_helpers.py`（`infer_evidence_type`/`intent_title`/`group_title`/`is_memory_only_instruction`/`infer_question_type`/`block_bonus`，41 用例）
-  - 新增 `test_wiki_pure.py`（`_slugify_title`/`normalize_title`/`extract_terms`/`extract_persons`/`_extract_wiki_content`/`_validate_update_output`，30 用例）
+  - 新增 `test_wiki_pure.py`（`_slugify_title`/`normalize_title`/`extract_terms`/`extract_persons`/`_extract_wiki_content`/`_validate_update_output`/`check_reference_quality`，41 用例）
   - 新增 `test_llm_cache.py`（`LLMResponseCache` put/get/stats/clear/TTL/目录结构，15 用例）
   - 新增 `test_wiki_discovery.py`（`should_merge`/`merge_candidates`/`prefer_candidate_title`/`build_candidates`/`suppress_path_concentrated_noise`，24 用例）
-  - `qa/helpers.py` 测试覆盖率 **100%**，`llm/cache.py` **76%**，`wiki/discovery_utils.py` 43%→**65%**
+  - 新增 `test_qa_context.py`（`PromptContextPacker.pack`/`_compress_text`，12 用例）
+  - 新增 `test_memory_working.py`（`WorkingContextStore` save/load/update/render_for_prompt，10 用例）
+  - `qa/helpers.py` **100%**，`memory/working.py` **94%**，`qa/context.py` **87%**，`llm/cache.py` **76%**，`wiki/discovery_utils.py` 43%→**65%**
 
 ### 工程基础设施
 
@@ -62,10 +73,10 @@
 
 - 源文件：110 → **112**（+2：`llm/cache.py` + `wiki/_graph_engine` 内置）
 - 模板文件：16 → **25**（+9：外部化 Prompt 模板）
-- 测试文件：50 → **54**（+4）
-- 单元测试：754 → **868**（+114）
+- 测试文件：50 → **56**（+6）
+- 单元测试：754 → **893**（+139）
 - CLI 命令：48（不变）
-- 覆盖率：49% → **50.10%**
+- 覆盖率：49% → **50.72%**
 
 ---
 
