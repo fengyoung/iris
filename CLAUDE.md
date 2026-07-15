@@ -1,4 +1,4 @@
-# Iris 3.16.0 — 项目执行说明
+# Iris 3.17.0 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~23,500 行 / 117 文件 / 21 模块 · CLI 51 命令 · 单元测试 912（57 文件）· 覆盖率 50.37% · 7 个项目级 Skill · Wiki 91 页 · 知识图谱节点 91 / 关系边 ~200（NetworkX 引擎） · 数据源 691 文档 / 3,956 Chunk · 向量索引 6,789 条 · LLM 响应缓存 · Wiki 引用校验 · 结构化日志 · async/await · 多工作空间 · 文件监听。
+~24,000 行 / 122 文件 / 21 模块 · CLI 51 命令 · 单元测试 1223（72 文件）· 覆盖率 53% · 7 个项目级 Skill · Wiki 91 页 · 知识图谱节点 91 / 关系边 ~200（NetworkX 引擎） · 数据源 691 文档 / 3,956 Chunk · 向量索引 6,789 条 · LLM 响应缓存（LRU 驱逐）· Wiki 引用校验 · 结构化日志 · async/await · 多工作空间 · 文件监听。
 
 ### 关键路径
 
@@ -112,7 +112,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.16.0 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.17.0 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.10 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -153,7 +153,7 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.16.0 (2026-07-15)** — 全栈优化 P0-P3：① 结构化日志（`IrisLogger` JSON 控制台输出 + `MetricsExporter` 周级导出）② async/await（`async_http.py` + `LLMService.generate_async()` + `update_all_pages_async`）③ 多工作空间（`config/workspace.py` + `--workspace` 参数）④ 文件监听（`SourceWatcher` 轮询 + `watch` 命令自动增量构建）⑤ Prompt 外部化 ⑥ Wiki 引用校验 ⑦ LLM 缓存 ⑧ 增量 Chunk ⑨ NetworkX 图谱 ⑩ Config 迁移。测试 754→912（+158），覆盖率 49%→50.37%，CLI 48→51 命令。
+**当前 v3.17.0 (2026-07-15)** — 代码质量全面优化（P0-P3）：① 全局线程池 `atexit` 清理 + `_plaintext_keys_warned` 加锁（P0 资源安全）② `wiki/graph.py` 异常捕获拆分（P0）③ `feishu/` 5 处宽泛异常精细化 + logger（P1）④ `utils/template_loader.py` 统一模板加载（P1）⑤ ThreadPool 超时标准化（3 模块，P2）⑥ `llm/cache.py` LRU 驱逐（max_entries=2000，P2）⑦ `analysis/service.py` 1232→805 行 + `evaluation/deep_eval.py` 拆分（P2）⑧ `wiki/graph.py` LLM 调用接入缓存层（P3）。测试 912→1223（+311），覆盖率阈值 50%→53%。
 
 > 覆盖范围：仅统计 Iris 自身经 provider 发出的 LLM 调用（CLI + 调用 CLI 的 Skill），不含 Claude Code 本体 / Whisper 转写 / 飞书接口。
 

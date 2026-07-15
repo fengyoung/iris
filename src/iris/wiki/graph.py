@@ -456,9 +456,8 @@ class WikiGraph:
             logger.info("无页面需要关系提取")
             return []
 
-        # 获取 LLM provider
+        # 使用 LLMService（而非直接 provider，以利用响应缓存）
         llm_service = LLMService(self._config)
-        provider = llm_service.get_provider()
 
         # 构建实体列表（供 LLM prompt 使用）
         entity_list = self._format_entity_list()
@@ -481,7 +480,7 @@ class WikiGraph:
                     continue
 
                 edges = self._extract_page_relations(
-                    provider, node, page_info.body, entity_list
+                    llm_service, node, page_info.body, entity_list
                 )
                 # 去重：跳过已存在的 (source, target, relation, source_type)
                 for edge in edges:
@@ -857,7 +856,7 @@ class WikiGraph:
 
     def _extract_page_relations(
         self,
-        provider,
+        llm_service,
         node: GraphNode,
         body: str,
         entity_list: str,
@@ -866,25 +865,26 @@ class WikiGraph:
         prompt = _RELATION_EXTRACT_PROMPT.replace("{{entity_list}}", entity_list)
         prompt = prompt.replace("{{page_title}}", node.id)
         prompt = prompt.replace("{{page_type}}", get_display_name(node.page_type))
-        # 截断过长内容
         body_trimmed = body[:4000] if len(body) > 4000 else body
         prompt = prompt.replace("{{page_content}}", body_trimmed)
 
         edges: List[GraphEdge] = []
         try:
-            from iris.llm import LLMRequest
-            response = provider.generate(
-                LLMRequest(prompt=prompt, route_context={
+            result = llm_service.generate(
+                prompt,
+                route_context={
                     "input_type": "text",
                     "task_type": "wiki_generate",
                     "complexity": "standard",
-                }),
-                temperature=0.1,
+                },
+                temperature=0,  # 确定性调用，命中缓存时免 API 调用
                 max_tokens=2000,
             )
-            edges = self._parse_triples(response.text, node.id)
-        except (LLMProviderError, Exception) as exc:
-            logger.warning("关系提取失败 [%s]: %s", node.title, exc)
+            edges = self._parse_triples(result.text, node.id)
+        except LLMProviderError as exc:
+            logger.warning("关系提取失败（LLM 错误）[%s]: %s", node.title, exc)
+        except Exception as exc:
+            logger.error("关系提取意外失败 [%s]: %s", node.title, exc, exc_info=True)
 
         return edges
 

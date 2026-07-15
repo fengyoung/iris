@@ -106,7 +106,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch-file", default="", help="build-wiki 批量模式输入 JSONL")
     parser.add_argument("--review-file", default="", help="build-wiki 审核模式输入 JSONL")
     parser.add_argument("--limit", type=int, default=20, help="discover-wiki 候选上限")
-    parser.add_argument("--incremental", action="store_true", help="discover-wiki 增量模式")
     parser.add_argument("--export-jsonl", default="", help="discover-wiki 导出候选 JSONL")
     parser.add_argument("--export-review", default="", help="discover-wiki 导出审核 JSONL")
     parser.add_argument("--export-review-md", default="", help="discover-wiki 导出审核 Markdown")

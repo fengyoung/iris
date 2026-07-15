@@ -21,6 +21,7 @@ from iris.complex_input.detector import (
 from iris.config.loader import ConfigBundle
 from iris.llm import LLMProviderError
 from iris.llm.service import LLMService
+from iris.utils.template_loader import load_template as _load_template_file
 
 logger = logging.getLogger(__name__)
 
@@ -59,21 +60,12 @@ class PipelineResult:
 
 # ── Stage 1 prompt 模板 ────────────────────────────────────────────
 
-def _load_pipeline_template(name: str) -> Optional[str]:
-    """从 templates/prompt/ 加载流水线 Prompt 模板，不存在返回 None。"""
-    templates_dir = Path(__file__).resolve().parent.parent.parent.parent / "templates" / "prompt"
-    tmpl_path = templates_dir / name
-    if tmpl_path.exists():
-        return tmpl_path.read_text(encoding="utf-8")
-    return None
-
-
 def _get_stage1_template() -> str:
-    return _load_pipeline_template("stage1_instruction.md") or _STAGE1_FALLBACK
+    return _load_template_file("prompt/stage1_instruction.md") or _STAGE1_FALLBACK
 
 
 def _get_stage3_template() -> str:
-    return _load_pipeline_template("stage3_integrate.md") or _STAGE3_FALLBACK
+    return _load_template_file("prompt/stage3_integrate.md") or _STAGE3_FALLBACK
 
 
 _STAGE1_FALLBACK = """用户问题：{{query}}

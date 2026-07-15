@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +13,7 @@ from iris.config.loader import ConfigBundle
 from iris.llm import LLMProviderError, LLMService
 from iris.retrieval.searcher import LocalRetriever
 from iris.utils.logging import IrisLogger
+from iris.utils.template_loader import load_template as _load_template_file
 
 from .searcher import WikiSearcher, FRONTMATTER_RE
 from ._constants import (
@@ -246,11 +247,7 @@ class WikiGenerator:
     @staticmethod
     def _load_template(name: str) -> Optional[str]:
         """从项目根目录的 templates/ 加载 Prompt 模板，不存在返回 None。"""
-        templates_dir = Path(__file__).resolve().parent.parent.parent.parent / "templates"
-        tmpl_path = templates_dir / name
-        if tmpl_path.exists():
-            return tmpl_path.read_text(encoding="utf-8")
-        return None
+        return _load_template_file(name)
 
     @staticmethod
     def _extract_wiki_content(text: str) -> str:
@@ -591,14 +588,19 @@ sources:
                 existing_content=content, top_k=top_k,
             )
 
+        _timeout = max(300, len(items) * 60)
         with ThreadPoolExecutor(max_workers=min(len(items), 6)) as executor:
             futures = {executor.submit(_update_one, item): item[0] for item in items}
-            for future in as_completed(futures):
-                title = futures[future]
-                try:
-                    results.append(future.result())
-                except Exception as exc:
-                    results.append({"status": "error", "title": title, "reason": str(exc)})
+            try:
+                for future in as_completed(futures, timeout=_timeout):
+                    title = futures[future]
+                    try:
+                        results.append(future.result())
+                    except Exception as exc:
+                        results.append({"status": "error", "title": title, "reason": str(exc)})
+            except FuturesTimeoutError:
+                remaining = [t for f, t in futures.items() if not f.done()]
+                logger.error("批量更新超时（%ds），%d 页未完成: %s", _timeout, len(remaining), remaining)
 
         updated = [r for r in results if r.get("status") == "updated"]
         unchanged = [r for r in results if r.get("status") == "no_changes"]

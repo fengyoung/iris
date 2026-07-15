@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from iris.config.loader import ConfigBundle
 from iris.feishu.client import FeishuClient, FeishuClientError
+
+logger = logging.getLogger(__name__)
 from iris.feishu._shared import (
     resolve_pic_dir, resolve_source_sub_dir, resolve_source_root,
     resolve_dedup_path, load_dedup_index, save_dedup_index,
@@ -211,14 +215,15 @@ class FeishuDocConverter:
             try:
                 if not pic_path.resolve().is_relative_to(img_dir.resolve()):
                     return m.group(0)
-            except Exception:
+            except (OSError, ValueError):
                 return m.group(0)
 
             try:
                 self._download_image_to(ref, str(pic_path))
                 downloaded.append(str(pic_path))
                 return f"![[{img_subdir}/{local_name}]]"
-            except Exception:
+            except (OSError, URLError, FeishuClientError) as exc:
+                logger.debug("图片下载跳过 [%s]: %s", ref, exc)
                 return m.group(0)  # 下载失败不阻塞
 
         result = _IMAGE_PATTERN.sub(_replacer, md)

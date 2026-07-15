@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -14,8 +15,10 @@ from iris.feishu._shared import (
     load_dedup_index, save_dedup_index, upsert_dedup_item,
     sanitize_title, extract_date, now_iso,
 )
-from iris.llm import LLMService
+from iris.llm import LLMService, LLMProviderError
 from iris.core.write_guard import safe_write_text
+
+logger = logging.getLogger(__name__)
 
 # ── 常量 ────────────────────────────────────────────────────
 
@@ -122,9 +125,11 @@ class ChatDigester:
             wiki_context = self._load_wiki_context()
             extracted = self._call_llm(conversation, wiki_context, target_name,
                                         message_count=len(raw_messages))
+        except LLMProviderError as e:
+            logger.warning("AI 提炼 LLM 调用失败 [%s]: %s", target_name, e)
+            return {"status": "error", "error": f"AI 提炼失败: {e}"}
         except Exception as e:
-            if isinstance(e, (KeyboardInterrupt, SystemExit)):
-                raise
+            logger.error("AI 提炼意外失败 [%s]: %s", target_name, e, exc_info=True)
             return {"status": "error", "error": f"AI 提炼失败: {e}"}
 
         # 8. 生成输出
@@ -158,7 +163,8 @@ class ChatDigester:
         try:
             safe_write_text(output_path, output_md, self._bundle,
                             allow_existing_outside=True)
-        except Exception as e:
+        except OSError as e:
+            logger.error("写入文件失败 [%s]: %s", output_path, e)
             return {"status": "error", "error": f"写入失败: {e}"}
 
         # 11. 更新排重（含 fingerprint）

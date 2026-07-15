@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import atexit
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, Optional
@@ -33,7 +34,15 @@ def _get_sync_pool() -> ThreadPoolExecutor:
     global _sync_pool
     if _sync_pool is None:
         _sync_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="iris-sync-http")
+        atexit.register(_shutdown_sync_pool)
     return _sync_pool
+
+
+def _shutdown_sync_pool() -> None:
+    global _sync_pool
+    if _sync_pool is not None:
+        _sync_pool.shutdown(wait=False)
+        _sync_pool = None
 
 
 async def async_post_json(

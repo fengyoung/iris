@@ -21,9 +21,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
+
+logger = logging.getLogger(__name__)
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,6 +35,7 @@ from typing import Dict, List, Optional, TYPE_CHECKING
 from ._constants import get_all_types, get_wiki_prefix
 from .context_loader import WikiPageInfo
 from .discovery_utils import extract_terms, is_high_value_term, normalized_key
+from iris.utils.template_loader import load_template as _load_template_file
 
 if TYPE_CHECKING:
     from iris.llm.provider import EnvironmentConfiguredLLMProvider
@@ -424,8 +428,12 @@ class TermExtractor:
                     file=sys.stderr,
                 )
 
+        _timeout = min(len(batches), 8) * 90
         with ThreadPoolExecutor(max_workers=min(len(batches), 8)) as executor:
-            list(executor.map(_run_batch, enumerate(batches)))
+            try:
+                list(executor.map(_run_batch, enumerate(batches), timeout=_timeout))
+            except FuturesTimeoutError:
+                logger.warning("ASR 误识别生成超时（%ds），已处理完成的批次保留", _timeout)
 
         return terms
 
@@ -500,11 +508,7 @@ class TermExtractor:
     @staticmethod
     def _load_misreadings_template() -> Optional[str]:
         """从 templates/prompt/misreadings.md 加载 ASR 误识别 Prompt 模板。"""
-        templates_dir = Path(__file__).resolve().parent.parent.parent.parent / "templates" / "prompt"
-        tmpl_path = templates_dir / "misreadings.md"
-        if tmpl_path.exists():
-            return tmpl_path.read_text(encoding="utf-8")
-        return None
+        return _load_template_file("prompt/misreadings.md")
 
     @staticmethod
     def _parse_misreadings_response(response_text: str, terms: List[AsrTerm]) -> None:

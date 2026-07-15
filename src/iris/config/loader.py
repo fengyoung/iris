@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import threading
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
@@ -253,6 +254,7 @@ def load_config_bundle(
 
 
 _plaintext_keys_warned = False
+_plaintext_keys_lock = threading.Lock()
 
 
 def _check_plaintext_keys(env_path: Optional[Path]) -> None:
@@ -275,7 +277,10 @@ def _check_plaintext_keys(env_path: Optional[Path]) -> None:
                 continue
             key_count += 1
     if key_count:
-        _plaintext_keys_warned = True
+        with _plaintext_keys_lock:
+            if _plaintext_keys_warned:
+                return
+            _plaintext_keys_warned = True
         msg = (
             f"⚠️  安全提醒：.env 文件中检测到 {key_count} 个明文 API Key/Token。"
             "建议迁移到 macOS Keychain（`iris secrets-set --key <NAME>`），"

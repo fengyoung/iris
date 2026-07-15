@@ -5,10 +5,11 @@
   - 仅缓存 temperature=0（确定性调用）的响应，temperature>0 不缓存
   - 磁盘存储：data/cache/llm_responses/{hash[:2]}/{hash}.json
   - TTL 可配置，默认 3600 秒（1 小时）
+  - max_entries 可配置，超限按 LRU（cached_at 最旧优先）驱逐，默认 2000 条
   - 提供 stats 方法用于监控命中率
 
 用法:
-    cache = LLMResponseCache(data_dir, ttl_seconds=3600)
+    cache = LLMResponseCache(data_dir, ttl_seconds=3600, max_entries=2000)
     cached = cache.get(prompt, route_context, force_model)
     if cached:
         return cached
@@ -27,8 +28,9 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-# 弃用旧条目前的宽限期（秒）— 默认 0（不禁用，仅 TTL 过期时弃用）
 _DEFAULT_TTL = 3600
+_DEFAULT_MAX_ENTRIES = 2000
+_EVICT_CHECK_INTERVAL = 50  # 每写入 N 次检查一次是否需要驱逐
 
 
 def _make_cache_key(
@@ -50,11 +52,19 @@ class LLMResponseCache:
     仅缓存 temperature=0 的确定性 LLM 调用。
     """
 
-    def __init__(self, data_dir: Path, ttl_seconds: int = _DEFAULT_TTL):
+    def __init__(
+        self,
+        data_dir: Path,
+        ttl_seconds: int = _DEFAULT_TTL,
+        max_entries: int = _DEFAULT_MAX_ENTRIES,
+    ):
         self._cache_dir = data_dir / "cache" / "llm_responses"
         self._ttl = ttl_seconds
+        self._max_entries = max_entries
         self._hits = 0
         self._misses = 0
+        self._write_count = 0
+        self._evictions = 0
         self._available = self._init_dir()
 
     def _init_dir(self) -> bool:
@@ -148,11 +158,43 @@ class LLMResponseCache:
         try:
             entry_path.parent.mkdir(parents=True, exist_ok=True)
             entry_path.write_text(json.dumps(entry, ensure_ascii=False), encoding="utf-8")
+            self._write_count += 1
+            if self._max_entries > 0 and self._write_count % _EVICT_CHECK_INTERVAL == 0:
+                self._evict_lru()
         except OSError as exc:
             logger.debug("LLMResponseCache 写入失败: %s", exc)
 
+    def _evict_lru(self) -> None:
+        """扫描缓存目录，按 cached_at 最旧优先驱逐，保留最新 max_entries 条。"""
+        entries = []
+        for subdir in self._cache_dir.iterdir():
+            if not subdir.is_dir():
+                continue
+            for entry_path in subdir.iterdir():
+                if entry_path.suffix != ".json":
+                    continue
+                try:
+                    data = json.loads(entry_path.read_text(encoding="utf-8"))
+                    entries.append((data.get("cached_at", 0), entry_path))
+                except (json.JSONDecodeError, OSError):
+                    entries.append((0, entry_path))
+
+        if len(entries) <= self._max_entries:
+            return
+
+        entries.sort(key=lambda x: x[0])  # 最旧在前
+        to_remove = entries[: len(entries) - self._max_entries]
+        for _, path in to_remove:
+            try:
+                path.unlink()
+                self._evictions += 1
+            except OSError:
+                pass
+        logger.debug("LLMResponseCache LRU 驱逐 %d 条（保留 %d/%d）",
+                     len(to_remove), self._max_entries, len(entries))
+
     def stats(self) -> Dict[str, Any]:
-        """返回缓存统计信息（命中/未命中/命中率）。"""
+        """返回缓存统计信息（命中/未命中/命中率/驱逐数）。"""
         total = self._hits + self._misses
         return {
             "hits": self._hits,
@@ -160,6 +202,8 @@ class LLMResponseCache:
             "total": total,
             "hit_rate": round(self._hits / total, 3) if total > 0 else 0.0,
             "ttl_seconds": self._ttl,
+            "max_entries": self._max_entries,
+            "evictions": self._evictions,
         }
 
     def clear(self) -> int:

@@ -4,6 +4,70 @@
 
 ---
 
+## v3.17.0 (2026-07-15)
+
+代码质量全面优化（P0-P3）：全局变量安全加固 + 异常处理精细化 + 模板加载统一 + ThreadPool 超时 + LRU 缓存驱逐 + 大文件拆分 + 测试大幅扩充。
+
+### 工程质量
+
+**P0 — 资源安全**
+- `core/async_http.py`：全局 `ThreadPoolExecutor` 注册 `atexit` 清理，消除进程退出时线程池泄漏
+- `config/loader.py`：`_plaintext_keys_warned` 全局标志用 `threading.Lock` 双重检查锁保护，消除多线程竞速
+
+**P0 — 异常捕获精确化**
+- `wiki/graph.py`：`except (LLMProviderError, Exception)` 拆分为两条分支（LLM 错误 warning，意外错误 error+exc_info），消除最危险的静默失败点
+
+**P1 — feishu 模块诊断性提升**
+- `feishu/chat_digest.py`：新增 logger，LLM 调用失败拆分为 `LLMProviderError`/`Exception`，写入失败改为 `OSError`
+- `feishu/doc_convert.py`：新增 logger + `URLError` import，路径安全检查改为 `OSError/ValueError`，下载失败改为 `OSError/URLError/FeishuClientError`
+
+**P1 — 模板加载统一**
+- 新增 `utils/template_loader.py`：`load_template(relative_path)` 统一从 `templates/` 加载
+- 消除 4 处重复实现（`wiki/generator.py`、`complex_input/pipeline.py`、`wiki/term_extractor.py`、`evaluation/deep_eval.py`）
+
+**P2 — ThreadPool 超时标准化**
+- `wiki/term_extractor.py`：`executor.map` 添加 `timeout=批次数*90`，捕获 `FuturesTimeoutError`
+- `wiki/generator.py`：`as_completed` 添加 `timeout=max(300, 页数*60)`，超时时记录未完成页列表
+- `analysis/service.py`：Stage 1/2/3 三处均添加超时（30/60/60 秒/项），消除线程泄漏风险
+
+**P2 — LRU 缓存驱逐**
+- `llm/cache.py`：`LLMResponseCache` 新增 `max_entries`（默认 2000）参数
+- 每写入 50 次触发 `_evict_lru()`，按 `cached_at` 删除最旧条目，防止磁盘无界增长
+- `stats()` 新增 `max_entries`、`evictions` 字段
+
+**P2 — 超大文件拆分**
+- `analysis/service.py` 1232→**805** 行（-35%）：模块级辅助函数提取为 `analysis/_biweekly_helpers.py`（464 行）
+- `evaluation/deep_eval.py` 1100→**883** 行（-20%）：数据类提取为 `evaluation/_types.py`，`SourceLocator` 提取为 `evaluation/_source_locator.py`
+
+**P3 — LLM 调用接入缓存层**
+- `wiki/graph.py` `_extract_page_relations`：从 `provider.generate()` 改为 `llm_service.generate(temperature=0)`，重复提取同一页面命中缓存免 API 调用
+
+### 测试
+
+- 912 → **1223**（+311）：新增 13 个测试文件
+  - `test_biweekly_helpers.py`（60 用例）、`test_source_locator.py`（24）、`test_context_loader.py`（14）
+  - `test_llm_cache_lru.py`（13）、`test_retrieval_searcher_pure.py`（19）、`test_metrics_and_types.py`（19）
+  - `test_memory_long_term.py`（18）、`test_memory_manager.py`（12）、`test_deep_eval_pure.py`（20）
+  - `test_wiki_searcher_pure.py`（26）、`test_tokenization.py`（19）、`test_chunker_pure.py`（26）
+  - `test_wiki_discovery_utils_extended.py`（46）
+
+### 版本
+
+- 产品版本 3.16.0 → **3.17.0**
+- 协议版本不变（3.10，无新 CLI 命令）
+- 数据版本不变
+
+### 项目指标
+
+- 源文件：117 → **122**（+5：`_biweekly_helpers` / `_types` / `_source_locator` / `template_loader` / `analysis/_biweekly_helpers`）
+- 测试文件：59 → **72**（+13）
+- 单元测试：912 → **1223**（+311）
+- 覆盖率阈值：50% → **53%**
+- `analysis/service.py`：1232 → **805** 行
+- `evaluation/deep_eval.py`：1100 → **883** 行
+
+---
+
 ## v3.16.0 (2026-07-15)
 
 全栈优化（P0-P3）：结构化日志 + async/await + 多工作空间 + 文件监听 + Prompt 外部化 + Wiki 引用校验 + LLM 缓存 + 增量 Chunk + 图谱引擎升级 + Config 迁移 + 指标导出 + 测试补齐。
