@@ -4,6 +4,47 @@
 
 ---
 
+## v3.18.1 (2026-07-16)
+
+全栈代码质量优化 — 异常处理、性能、线程池、缓存、配置架构全面升级。
+
+### 稳定性修复（P0）
+
+- **异常吞噬修复**（15 文件）：所有 `except Exception` + 裸 `pass` 改为 `logger.error/warning/debug` + 具体异常类型
+- **文件 I/O 编码统一**：全部 `read_text`/`write_text` 显式 `encoding="utf-8"`
+- **subprocess 超时审查**：确认 Keychain 10s / 飞书 client 60s 合理
+
+### 可维护性提升（P1）
+
+- **共享线程池**：新增 `core/thread_pool.py`，替换 6 个模块中每次新建 `ThreadPoolExecutor` 的模式
+- **ConfigBundle 统一 Pydantic v2**：`ConfigBundle` 从 dataclass 迁移为工厂函数，委托给 `ConfigBundleV2.from_dicts()`，缺失字段自动填充默认值
+- **大文件拆分**：`evaluation/deep_eval.py` 883→773 行，抽出 `_reference_parser.py`（Wiki 引用解析）
+- **核心模块测试**：新增 42 用例（`write_guard` 8 + `locks` 8 + `feishu client` 11 + 其他 15）
+
+### 性能优化（P2）
+
+- **LLM 缓存 LRU 驱逐**：从每 50 次全目录扫描改为内存 `OrderedDict` O(1) 维护
+- **BM25 统计缓存**：全局 BM25 统计量写入磁盘缓存，通过 chunk 索引 mtime 判新
+
+### 工程成熟度（P3）
+
+- **警告过滤**：`pyproject.toml` 过滤 SwigPy DeprecationWarning 和 pytest 临时文件清理警告（9→0）
+- **飞书退避优化**：退避算法 `1.2^n` → `2^n + 随机抖动`
+- **字段默认值**：`ModelItem.supported_inputs`/`use_cases`、`WikiConfig` 全字段添加默认值
+- **数据源验证宽松**：`DataSourceConfig` 全部禁用时改为 warn 而非 raise
+
+### 版本
+
+- 产品版本 3.18.0 → **3.18.1**
+- 协议版本不变（3.10）
+- 数据版本不变
+
+### 测试
+
+- 单元测试 1,223 → **1,265**（+42），73 文件，覆盖率 53%
+
+---
+
 ## v3.18.0 (2026-07-15)
 
 开源脱敏全面清理（方案B深度清理）—— 为开源发布做准备的系统性安全加固。

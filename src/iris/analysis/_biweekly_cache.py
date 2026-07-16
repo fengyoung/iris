@@ -48,7 +48,7 @@ class BiweeklyCache:
         if not path.exists():
             return None
         try:
-            cached = json.loads(path.read_text("utf-8"))
+            cached = json.loads(path.read_text(encoding="utf-8"))
             if cached.get("content_hash") == content_hash:
                 directions = cached.get("directions", [])
                 if directions:
@@ -74,7 +74,7 @@ class BiweeklyCache:
         if not path.exists():
             return None
         try:
-            cached = json.loads(path.read_text("utf-8"))
+            cached = json.loads(path.read_text(encoding="utf-8"))
             if cached.get("inv_hash") == inv_hash and cached.get("dir_hash") == dir_hash:
                 logger.info("  Stage 1 命中缓存 (%d 个方向)", len(cached.get("dir_file_map", {})))
                 return cached["dir_file_map"]
@@ -99,7 +99,7 @@ class BiweeklyCache:
         if not path.exists():
             return None
         try:
-            return json.loads(path.read_text("utf-8"))
+            return json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return None
 
@@ -119,7 +119,7 @@ class BiweeklyCache:
         """加载 brief 索引 {label: hash}。"""
         index_path = self.briefs_dir / "index.json"
         try:
-            return json.loads(index_path.read_text("utf-8"))
+            return json.loads(index_path.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError):
             return {}
 
@@ -132,7 +132,7 @@ class BiweeklyCache:
         if not path.exists():
             return None
         try:
-            return json.loads(path.read_text("utf-8"))
+            return json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return None
 

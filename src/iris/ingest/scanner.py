@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Sequence
 
 from iris.config.loader import ConfigBundle
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -284,6 +287,7 @@ def _extract_pdf_title(path: Path) -> str:
         finally:
             doc.close()
     except Exception:
+        logger.debug("PyMuPDF 标题提取失败，使用文件名: %s", path.name)
         pass
     return path.stem
 

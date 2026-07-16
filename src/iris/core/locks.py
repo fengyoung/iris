@@ -108,4 +108,4 @@ class FileLock:
             try:
                 self._lock_path.unlink(missing_ok=True)
             except OSError:
-                pass
+                logger.debug("清理锁文件失败: %s", self._lock_path)

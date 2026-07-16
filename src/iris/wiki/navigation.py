@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -9,6 +10,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from iris.config.loader import ConfigBundle
+
+logger = logging.getLogger(__name__)
 
 from .searcher import WikiSearcher, _read_wiki_page, _infer_title_from_filename, FRONTMATTER_RE
 from ._constants import (
@@ -561,7 +564,8 @@ def _compute_content_quality(page_titles: dict, wiki_root: Path) -> Dict[str, An
                 body_text = body_text.split("---", 2)[-1]
             tokens = set(re.findall(r"[\w一-鿿]{3,}", body_text.lower()))
             tokenized[p["title"]] = tokens
-        except Exception:
+        except Exception as exc:
+            logger.debug("Wiki 页面分词失败 [%s]: %s", p.get("title", "?"), exc)
             continue
 
     titles = list(tokenized.keys())

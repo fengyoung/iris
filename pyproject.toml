@@ -1,6 +1,6 @@
 [project]
 name = "iris"
-version = "3.18.0"
+version = "3.18.1"
 description = "工作知识助手 — 个人知识库与飞书团队知识库集成"
 requires-python = ">=3.9"
 license = {text = "MIT"}
@@ -35,6 +35,12 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+filterwarnings = [
+    "ignore:builtin type swigvarlink has no __module__:DeprecationWarning",
+    "ignore:builtin type SwigPyPacked has no __module__:DeprecationWarning",
+    "ignore:builtin type SwigPyObject has no __module__:DeprecationWarning",
+    "ignore:Exception ignored in.*_TemporaryFileCloser.*:pytest.PytestUnraisableExceptionWarning",
+]
 
 [tool.coverage.run]
 source = ["src/iris"]

@@ -1,4 +1,4 @@
-# Iris 3.18.0 — 项目执行说明
+# Iris 3.18.1 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~24,000 行 / 120 文件 / 20 模块 · CLI 46 命令 · 单元测试 1223（70 文件）· 覆盖率 53% · 7 个项目级 Skill · Wiki 192 页 · 知识图谱节点 192 / 关系边 778（NetworkX 引擎） · 数据源 703 文档 / 4,096 Chunk · 向量索引 7,035 条 · LLM 响应缓存（LRU 驱逐）· Wiki 引用校验 · 结构化日志 · async/await · 多工作空间 · 文件监听。
+~24,000 行 / 122 文件 / 20 模块 · CLI 46 命令 · 单元测试 1,265（73 文件）· 覆盖率 53% · 7 个项目级 Skill · Wiki 192 页 · 知识图谱节点 192 / 关系边 778（NetworkX 引擎） · 数据源 703 文档 / 4,096 Chunk · 向量索引 7,035 条 · LLM 响应缓存（内存 LRU 驱逐）· Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听。
 
 ### 关键路径
 
@@ -113,7 +113,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.18.0 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.18.1 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.10 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -134,7 +134,7 @@ iris3/
 ├── src/iris/          # 20 模块（见下）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
-├── tests/             # 1223 用例，70 文件
+├── tests/             # 1,265 用例，73 文件
 ├── config/            # *.json gitignored，*.example 版本控制
 ├── data/              # 运行时数据（全 gitignore）
 ├── .claude/skills/    # 项目级 Skill（7 个）
@@ -142,7 +142,7 @@ iris3/
 └── pyproject.toml · README · CLAUDE · CHANGELOG.md
 ```
 
-**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配）· `memory`（记忆 5 子模块）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF）· `qa`（检索问答+图谱注入）· `wiki`（Wiki 体系 + backlink/graph，最大模块）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估）· `complex_input`（多模态三阶段：图片/PDF/DOCX/VIDEO）· `output`（格式化+DOCX）· `app/cli`（46 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py / shared.py）· `trello`（看板）。
+**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配/共享线程池）· `memory`（记忆 5 子模块）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF+BM25缓存）· `qa`（检索问答+图谱注入）· `wiki`（Wiki 体系 + backlink/graph，最大模块）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估 + 引用解析）· `complex_input`（多模态三阶段：图片/PDF/DOCX/VIDEO）· `output`（格式化+DOCX）· `app/cli`（46 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py / shared.py）· `trello`（看板）。
 
 ---
 
@@ -154,7 +154,7 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.18.0 (2026-07-15)** — 开源脱敏全面清理（方案B）。① 源码脱敏：移除 deep_eval/provider/discovery_rules/biweekly 模板中的内部术语和项目名。② 测试脱敏：部门名/项目名/公司名替换为通用占位符。③ CHANGELOG.md 全量审查脱敏（983行）。④ CLAUDE.md 路径变量化 + LICENSE/pyproject.toml 作者匿名化。⑤ Git 历史全文重写（git filter-repo，92 commits）。⑥ 新增 CONTRIBUTING.md + SECURITY.md。⑦ .gitignore 补全。测试 1223 通过不变。
+**当前 v3.18.1 (2026-07-16)** — 全栈代码质量优化。① 异常处理：消除所有裸 pass 吞异常（15 文件）。② 性能：共享线程池 + 内存 LRU 缓存 + BM25 统计缓存。③ 架构：ConfigBundle 统一 Pydantic v2 + deep_eval 拆分 + 核心模块测试 +42。④ 工程：飞书退避 2^n+抖动、警告过滤、字段默认值完善。测试 1,265 通过。
 
 > 覆盖范围：仅统计 Iris 自身经 provider 发出的 LLM 调用（CLI + 调用 CLI 的 Skill），不含 Claude Code 本体 / Whisper 转写 / 飞书接口。
 

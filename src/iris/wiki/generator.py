@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
+from concurrent.futures import as_completed, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -589,7 +589,8 @@ sources:
             )
 
         _timeout = max(300, len(items) * 60)
-        with ThreadPoolExecutor(max_workers=min(len(items), 6)) as executor:
+        from iris.core.thread_pool import shared_pool
+        with shared_pool.executor(max_workers=min(len(items), 6)) as executor:
             futures = {executor.submit(_update_one, item): item[0] for item in items}
             try:
                 for future in as_completed(futures, timeout=_timeout):
@@ -597,6 +598,7 @@ sources:
                     try:
                         results.append(future.result())
                     except Exception as exc:
+                        logger.warning("Wiki 批量更新页面失败 [%s]: %s", title, exc)
                         results.append({"status": "error", "title": title, "reason": str(exc)})
             except FuturesTimeoutError:
                 remaining = [t for f, t in futures.items() if not f.done()]

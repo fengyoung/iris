@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -253,7 +256,8 @@ class ClaudeCodeAdapter(AgentAdapter):
         try:
             result = self._run_cli(["status"])
             return "error" not in str(result).lower()
-        except Exception:
+        except Exception as exc:
+            logger.warning("Agent 健康检查失败: %s", exc)
             return False
 
     def _build_command(self, command: str, params: Dict[str, Any]) -> List[str]:

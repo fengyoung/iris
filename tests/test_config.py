@@ -90,12 +90,13 @@ class TestConfigBundle:
             load_config_bundle(temp_project)
 
     def test_app_validation_missing_field(self, temp_project):
+        """v3.19: from_dicts() 为空配置填充默认值，缺失字段不抛异常。"""
         config_dir = temp_project / "config"
-        # config_dir 已由 temp_project fixture 创建
         for name in ("app", "llm", "data_source"):
             (config_dir / f"{name}.json").write_text('{}', encoding="utf-8")
-        with pytest.raises(ConfigError):
-            load_config_bundle(temp_project)
+        # 默认值填充后加载成功
+        bundle = load_config_bundle(temp_project)
+        assert bundle is not None
 
     def test_env_var_resolution(self, config_bundle):
         """确认 ${VAR} 在配置加载时被解析。"""

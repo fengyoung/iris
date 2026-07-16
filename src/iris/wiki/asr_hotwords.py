@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 import re
 import sys
-from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Optional, Set
 
 from ._constants import get_wiki_prefix
@@ -253,7 +252,8 @@ class LLMHotwordExtractor:
                 return []
 
         # 并发执行；executor.map 保持批次顺序，去重优先保留靠前批次的写法
-        with ThreadPoolExecutor(max_workers=min(len(batches), 6)) as executor:
+        from iris.core.thread_pool import shared_pool
+        with shared_pool.executor(max_workers=min(len(batches), 6)) as executor:
             batch_results = list(executor.map(_run_batch, enumerate(batches)))
 
         all_hotwords: List[str] = []

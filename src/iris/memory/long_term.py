@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
+
+logger = logging.getLogger(__name__)
 
 from iris.config.loader import ConfigBundle
 
@@ -234,7 +237,7 @@ def _atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
         try:
             os.unlink(tmp)
         except OSError:
-            pass
+            logger.warning("原子写入临时文件清理失败: %s", tmp)
         raise
 
 

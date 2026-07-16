@@ -129,9 +129,33 @@ class LocalRetriever:
 
         使用 chunk.content（全文）而非 content_preview（截断预览），
         确保 TF/IDF/doc_len 统计基于完整内容而非 ~180 字符截断。
+        统计结果缓存到磁盘，通过 chunk 索引的 mtime 判新。
         """
         if self._corpus_stats_computed or not self._chunks:
             return
+
+        # 尝试从缓存加载
+        metadata_root = self._config.root / "data" / "metadata"
+        chunk_index_path = metadata_root / "chunk_hash_index.json"
+        stats_cache_path = self._config.root / "data" / "cache" / "bm25_stats.json"
+
+        if chunk_index_path.exists() and stats_cache_path.exists():
+            try:
+                index_mtime = chunk_index_path.stat().st_mtime
+                cached = json.loads(stats_cache_path.read_text(encoding="utf-8"))
+                if abs(cached.get("index_mtime", 0) - index_mtime) < 0.01:
+                    self._total_docs = cached["total_docs"]
+                    self._avg_doc_len = cached["avg_doc_len"]
+                    self._df = cached["df"]
+                    self._corpus_stats_computed = True
+                    logger.info(
+                        "BM25 统计从缓存加载: %d 文档, %d 词项",
+                        self._total_docs, len(self._df),
+                    )
+                    return
+            except (json.JSONDecodeError, KeyError, OSError) as exc:
+                logger.debug("BM25 缓存加载失败，重新计算: %s", exc)
+
         total_len = 0
         df: Dict[str, set] = defaultdict(set)
         for i, chunk in enumerate(self._chunks):
@@ -146,6 +170,19 @@ class LocalRetriever:
         self._avg_doc_len = total_len / max(self._total_docs, 1)
         self._df = {t: len(docs) for t, docs in df.items()}
         self._corpus_stats_computed = True
+
+        # 写入缓存
+        if chunk_index_path.exists():
+            try:
+                stats_cache_path.parent.mkdir(parents=True, exist_ok=True)
+                stats_cache_path.write_text(json.dumps({
+                    "index_mtime": chunk_index_path.stat().st_mtime,
+                    "total_docs": self._total_docs,
+                    "avg_doc_len": self._avg_doc_len,
+                    "df": self._df,
+                }, ensure_ascii=False), encoding="utf-8")
+            except OSError as exc:
+                logger.debug("BM25 缓存写入失败: %s", exc)
 
     def _try_load_sqlite(self) -> bool:
         """尝试从 SQLite ChunkStore 加载（FTS5 全文搜索加速）。"""

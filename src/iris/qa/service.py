@@ -188,7 +188,8 @@ class QAService:
                 from iris.wiki.graph import WikiGraph
                 g = WikiGraph(self._config)
                 self._graph_cache = g if g.load() else False
-            except Exception:
+            except Exception as exc:
+                logger.warning("WikiGraph 加载失败（图谱增强不可用）: %s", exc)
                 self._graph_cache = False
         return self._graph_cache if self._graph_cache is not False else None
 
@@ -214,7 +215,8 @@ class QAService:
                     lines.append(f"  {ptype}: {', '.join(item_strs)}")
                 related_parts.append("\n".join(lines))
             return "\n".join(related_parts) if related_parts else "无"
-        except Exception:
+        except Exception as exc:
+            logger.debug("图谱上下文渲染失败: %s", exc)
             return "无"
 
     def _render_session_context(self, session_state):

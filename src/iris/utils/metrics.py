@@ -114,7 +114,8 @@ class MetricsExporter:
             try:
                 if is_wiki_stale(p.path):
                     stale_count += 1
-            except Exception:
+            except Exception as exc:
+                logger.warning("Wiki 过期检查失败: %s (%s)", p.path, exc)
                 pass
 
         return {
@@ -131,7 +132,8 @@ class MetricsExporter:
                 return {"nodes": 0, "edges": 0, "loaded": False}
             report = graph.density_report()
             return {"loaded": True, **report}
-        except Exception:
+        except Exception as exc:
+            logger.warning("图谱指标收集失败: %s", exc)
             return {"nodes": 0, "edges": 0, "loaded": False}
 
     def _source_metrics(self) -> Dict[str, Any]:
@@ -168,5 +170,6 @@ class MetricsExporter:
                 "total_tokens": total_tokens,
                 "monthly_stats": stats,
             }
-        except Exception:
+        except Exception as exc:
+            logger.warning("LLM 用量统计收集失败: %s", exc)
             return {"total_calls": 0, "total_tokens": 0}

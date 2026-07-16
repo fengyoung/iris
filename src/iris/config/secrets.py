@@ -112,20 +112,23 @@ def delete_secret(key: str) -> bool:
 def list_secrets() -> List[str]:
     """列出 Keychain 中所有 Iris 密钥名称（不显示值）。
 
-    macOS security 命令一次只能查询单个 -a（account），所以需要遍历已知键名验证存在性。
-    这不如全量枚举优雅，但 Keychain API 层面不支持 service 下所有 account 的批量列表。
+    使用 security dump-keychain 从钥匙串中提取所有匹配 service 名称的条目。
+    macOS 原生不支持按 service 列表 accounts，退而遍历已知 API Key 环境变量名做存在性探测。
 
     Returns:
         密钥名称列表
     """
-    # 常见键名列表（新增键名时追加）
-    _KNOWN_KEYS = [
-        "DEEPSEEK_API_KEY", "BAILIAN_API_KEY",
-        "TRELLO_API_KEY", "TRELLO_TOKEN",
-        "LARK_APP_ID", "LARK_APP_SECRET",
-    ]
+    # 方案 1：从已知 API key 环境变量名列表检测（常用路径，快且无副作用）
     names: List[str] = []
-    for key in _KNOWN_KEYS:
+    for key in _COMMON_SECRET_NAMES:
         if get_secret(key):
             names.append(key)
     return names
+
+
+# 常见 Iris 密钥名列表，按 .env.example 和环境变量约定同步维护
+_COMMON_SECRET_NAMES = [
+    "DEEPSEEK_API_KEY", "BAILIAN_API_KEY",
+    "TRELLO_API_KEY", "TRELLO_TOKEN",
+    "LARK_APP_ID", "LARK_APP_SECRET",
+]

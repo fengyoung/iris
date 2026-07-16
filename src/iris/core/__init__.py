@@ -2,6 +2,7 @@
 
 from .llm_types import LLMRequest, LLMResponse  # 从 protocols 迁移，消除 Any 类型标注
 from .locks import FileLock, FileLockError
+from .thread_pool import shared_pool
 from .write_guard import (
     WriteGuardError,
     resolve_allowed_paths,
@@ -27,4 +28,5 @@ __all__ = [
     "validate_write_path",
     "ChunkStore",
     "StorageError",
+    "shared_pool",
 ]

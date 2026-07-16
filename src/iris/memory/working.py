@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
 from iris.config.loader import ConfigBundle
+
+logger = logging.getLogger(__name__)
 
 
 class WorkingContextStore:
@@ -48,7 +51,7 @@ class WorkingContextStore:
             try:
                 os.unlink(tmp)
             except OSError:
-                pass
+                logger.warning("工作上下文临时文件清理失败: %s", tmp)
             raise
         return payload
 

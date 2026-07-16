@@ -314,7 +314,8 @@ FILENAME: <文件名>"""
         try:
             import torch
             device = "mps" if torch.backends.mps.is_available() else "cpu"
-        except Exception:
+        except ImportError:
+            logger.debug("torch 未安装，使用 CPU 设备")
             device = "cpu"
         model = whisper.load_model(model_name, device=device)
         result = model.transcribe(str(audio), language="zh")

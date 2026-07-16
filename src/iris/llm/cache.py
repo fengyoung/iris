@@ -5,7 +5,7 @@
   - 仅缓存 temperature=0（确定性调用）的响应，temperature>0 不缓存
   - 磁盘存储：data/cache/llm_responses/{hash[:2]}/{hash}.json
   - TTL 可配置，默认 3600 秒（1 小时）
-  - max_entries 可配置，超限按 LRU（cached_at 最旧优先）驱逐，默认 2000 条
+  - max_entries 可配置，超限按 LRU（OrderedDict 内存维护）驱逐，默认 2000 条
   - 提供 stats 方法用于监控命中率
 
 用法:
@@ -23,6 +23,7 @@ import hashlib
 import json
 import logging
 import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -30,7 +31,6 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_TTL = 3600
 _DEFAULT_MAX_ENTRIES = 2000
-_EVICT_CHECK_INTERVAL = 50  # 每写入 N 次检查一次是否需要驱逐
 
 
 def _make_cache_key(
@@ -47,7 +47,7 @@ def _make_cache_key(
 
 
 class LLMResponseCache:
-    """基于 prompt hash 的磁盘缓存。
+    """基于 prompt hash 的磁盘缓存，LRU 驱逐使用内存 OrderedDict 维护。
 
     仅缓存 temperature=0 的确定性 LLM 调用。
     """
@@ -63,8 +63,10 @@ class LLMResponseCache:
         self._max_entries = max_entries
         self._hits = 0
         self._misses = 0
-        self._write_count = 0
         self._evictions = 0
+        # 内存 LRU: OrderedDict[cache_key → cached_at_ts]
+        # 最近访问的在末尾，最旧的在开头
+        self._lru: OrderedDict[str, float] = OrderedDict()
         self._available = self._init_dir()
 
     def _init_dir(self) -> bool:
@@ -103,17 +105,23 @@ class LLMResponseCache:
             data = json.loads(entry_path.read_text(encoding="utf-8"))
             cached_at = data.get("cached_at", 0)
             if time.time() - cached_at > self._ttl:
-                # TTL 过期，删除旧条目
+                # TTL 过期，删除旧条目并从 LRU 移除
                 try:
                     entry_path.unlink()
                 except OSError:
-                    pass
+                    logger.debug("TTL 过期缓存删除失败: %s", entry_path)
+                self._lru.pop(key, None)
                 self._misses += 1
                 return None
+
+            # 命中：移到 LRU 末尾（最近使用）
+            self._lru.pop(key, None)
+            self._lru[key] = cached_at
             self._hits += 1
             return data
         except (json.JSONDecodeError, OSError) as exc:
             logger.debug("LLMResponseCache 读取失败: %s", exc)
+            self._lru.pop(key, None)
             self._misses += 1
             return None
 
@@ -124,7 +132,7 @@ class LLMResponseCache:
         force_model: Optional[str],
         response: Any,
     ) -> None:
-        """写入缓存条目。
+        """写入缓存条目。超限时通过内存 LRU 驱逐最旧条目。
 
         response 可以是 LLMResponse（provider 返回）或 GenerationResult（service 返回）。
         """
@@ -142,6 +150,7 @@ class LLMResponseCache:
         completion_tokens = getattr(response, "completion_tokens", 0)
         selected_role = getattr(response, "selected_role", "")
         matched_rule = getattr(response, "matched_rule", "")
+        now = time.time()
 
         entry = {
             "text": text,
@@ -151,50 +160,31 @@ class LLMResponseCache:
             "completion_tokens": completion_tokens,
             "selected_role": selected_role,
             "matched_rule": matched_rule,
-            "cached_at": time.time(),
+            "cached_at": now,
             "cache_key": key,
         }
 
         try:
             entry_path.parent.mkdir(parents=True, exist_ok=True)
             entry_path.write_text(json.dumps(entry, ensure_ascii=False), encoding="utf-8")
-            self._write_count += 1
-            if self._max_entries > 0 and self._write_count % _EVICT_CHECK_INTERVAL == 0:
-                self._evict_lru()
+
+            # 更新 LRU（如果 key 已存在，移到最后；否则插入）
+            self._lru.pop(key, None)
+            self._lru[key] = now
+
+            # 超过限制时驱逐最旧条目
+            if self._max_entries > 0 and len(self._lru) > self._max_entries:
+                oldest_key, _ = self._lru.popitem(last=False)
+                try:
+                    self._entry_path(oldest_key).unlink(missing_ok=True)
+                    self._evictions += 1
+                except OSError:
+                    logger.debug("LRU 驱逐删除失败: %s", oldest_key)
         except OSError as exc:
             logger.debug("LLMResponseCache 写入失败: %s", exc)
 
-    def _evict_lru(self) -> None:
-        """扫描缓存目录，按 cached_at 最旧优先驱逐，保留最新 max_entries 条。"""
-        entries = []
-        for subdir in self._cache_dir.iterdir():
-            if not subdir.is_dir():
-                continue
-            for entry_path in subdir.iterdir():
-                if entry_path.suffix != ".json":
-                    continue
-                try:
-                    data = json.loads(entry_path.read_text(encoding="utf-8"))
-                    entries.append((data.get("cached_at", 0), entry_path))
-                except (json.JSONDecodeError, OSError):
-                    entries.append((0, entry_path))
-
-        if len(entries) <= self._max_entries:
-            return
-
-        entries.sort(key=lambda x: x[0])  # 最旧在前
-        to_remove = entries[: len(entries) - self._max_entries]
-        for _, path in to_remove:
-            try:
-                path.unlink()
-                self._evictions += 1
-            except OSError:
-                pass
-        logger.debug("LLMResponseCache LRU 驱逐 %d 条（保留 %d/%d）",
-                     len(to_remove), self._max_entries, len(entries))
-
     def stats(self) -> Dict[str, Any]:
-        """返回缓存统计信息（命中/未命中/命中率/驱逐数）。"""
+        """返回缓存统计信息（命中/未命中/命中率/驱逐数/当前条目数）。"""
         total = self._hits + self._misses
         return {
             "hits": self._hits,
@@ -203,6 +193,7 @@ class LLMResponseCache:
             "hit_rate": round(self._hits / total, 3) if total > 0 else 0.0,
             "ttl_seconds": self._ttl,
             "max_entries": self._max_entries,
+            "entries": len(self._lru),
             "evictions": self._evictions,
         }
 
@@ -218,11 +209,13 @@ class LLMResponseCache:
                         entry.unlink()
                         removed += 1
                     except OSError:
-                        pass
+                        logger.debug("清空缓存删除失败: %s", entry)
                 try:
                     subdir.rmdir()
                 except OSError:
-                    pass
+                    logger.debug("清空缓存目录删除失败: %s", subdir)
+        self._lru.clear()
         self._hits = 0
         self._misses = 0
+        self._evictions = 0
         return removed

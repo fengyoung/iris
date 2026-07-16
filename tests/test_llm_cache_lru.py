@@ -1,4 +1,4 @@
-"""LLMResponseCache LRU 驱逐策略专项测试。"""
+"""LLMResponseCache LRU 驱逐策略专项测试（v2: 内存 OrderedDict 驱逐）。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-import iris.llm.cache as cache_module
 from iris.llm.cache import LLMResponseCache
 
 
@@ -31,7 +30,7 @@ def _make_resp(**kw):
     return FakeResponse(**kw)
 
 
-# ── stats() 含新字段 ──────────────────────────────────────────
+# ── stats() 字段 ──────────────────────────────────────────────
 
 
 class TestStatsFields:
@@ -47,6 +46,13 @@ class TestStatsFields:
         assert "evictions" in stats
         assert stats["evictions"] == 0
 
+    def test_stats_contains_entries(self, tmp_path):
+        """v2 新增：entries 字段显示当前 LRU 条目数。"""
+        cache = LLMResponseCache(tmp_path, max_entries=100)
+        stats = cache.stats()
+        assert "entries" in stats
+        assert stats["entries"] == 0
+
     def test_stats_initial_zeros(self, tmp_path):
         cache = LLMResponseCache(tmp_path, max_entries=100)
         stats = cache.stats()
@@ -56,28 +62,24 @@ class TestStatsFields:
         assert stats["max_entries"] == 100
 
 
-# ── _evict_lru() 直接调用 ─────────────────────────────────────
+# ── 写入即驱逐（不再需要手动 _evict_lru）───────────────────────
 
 
-class TestEvictLruDirect:
+class TestImmediateLRUEviction:
     def test_no_eviction_when_below_limit(self, tmp_path):
         cache = LLMResponseCache(tmp_path, max_entries=100)
-        # 写入 2 条
         cache.put("q1", {}, None, _make_resp(text="a1"))
         cache.put("q2", {}, None, _make_resp(text="a2"))
-        cache._evict_lru()
         assert cache._evictions == 0
+        assert cache.stats()["entries"] == 2
 
     def test_evicts_oldest_when_over_limit(self, tmp_path):
         cache = LLMResponseCache(tmp_path, max_entries=1)
         cache.put("q1", {}, None, _make_resp(text="oldest"))
-        # 强制 cached_at 差异
         time.sleep(0.01)
         cache.put("q2", {}, None, _make_resp(text="newest"))
-        # 手动触发驱逐
-        cache._evict_lru()
+        # 写入 q2 时 max_entries=1 触发立即驱逐 q1
         assert cache._evictions >= 1
-        # 最旧的 q1 应已被删除
         assert cache.get("q1", {}, None) is None
 
     def test_evict_keeps_newest(self, tmp_path):
@@ -85,76 +87,90 @@ class TestEvictLruDirect:
         cache.put("q1", {}, None, _make_resp(text="oldest"))
         time.sleep(0.01)
         cache.put("q2", {}, None, _make_resp(text="newest"))
-        cache._evict_lru()
         # q2 应保留
         result = cache.get("q2", {}, None)
         assert result is not None
         assert result["text"] == "newest"
 
+    def test_multiple_eviction(self, tmp_path):
+        """写入超出 max_entries 多条时逐条驱逐。"""
+        cache = LLMResponseCache(tmp_path, max_entries=2)
+        cache.put("a", {}, None, _make_resp(text="a"))
+        cache.put("b", {}, None, _make_resp(text="b"))
+        cache.put("c", {}, None, _make_resp(text="c"))  # 驱逐 a
+        cache.put("d", {}, None, _make_resp(text="d"))  # 驱逐 b
+        assert cache._evictions == 2
+        assert cache.get("a", {}, None) is None
+        assert cache.get("b", {}, None) is None
+        assert cache.get("c", {}, None) is not None
+        assert cache.get("d", {}, None) is not None
 
-# ── 写入触发驱逐 ──────────────────────────────────────────────
+
+# ── 写入触发驱逐：磁盘文件数 ────────────────────────────────────
 
 
-class TestEvictTriggeredByWrites:
-    def test_eviction_triggered_after_interval(self, tmp_path):
-        """每写入 _EVICT_CHECK_INTERVAL 次触发一次驱逐检查。"""
-        original_interval = cache_module._EVICT_CHECK_INTERVAL
-        try:
-            cache_module._EVICT_CHECK_INTERVAL = 2
-            cache = LLMResponseCache(tmp_path, max_entries=1)
-
-            # 写入 2 条，第 2 次写入应触发驱逐检查
-            cache.put("q1", {}, None, _make_resp(text="first"))
-            time.sleep(0.01)
-            cache.put("q2", {}, None, _make_resp(text="second"))
-
-            # 写入计数到达 interval，驱逐被触发（max_entries=1）
-            assert cache._evictions >= 1
-        finally:
-            cache_module._EVICT_CHECK_INTERVAL = original_interval
-
+class TestDiskFileCountAfterEviction:
     def test_disk_file_count_after_eviction(self, tmp_path):
         """驱逐后磁盘文件数不超过 max_entries。"""
-        original_interval = cache_module._EVICT_CHECK_INTERVAL
-        try:
-            cache_module._EVICT_CHECK_INTERVAL = 2
-            cache = LLMResponseCache(tmp_path, max_entries=1)
+        cache = LLMResponseCache(tmp_path, max_entries=1)
 
-            cache.put("q1", {}, None, _make_resp(text="first"))
-            time.sleep(0.01)
-            cache.put("q2", {}, None, _make_resp(text="second"))
+        cache.put("q1", {}, None, _make_resp(text="first"))
+        time.sleep(0.01)
+        cache.put("q2", {}, None, _make_resp(text="second"))
 
-            # 统计磁盘上的 JSON 文件数
-            cache_dir = tmp_path / "cache" / "llm_responses"
-            json_files = list(cache_dir.rglob("*.json"))
-            assert len(json_files) <= 1
-        finally:
-            cache_module._EVICT_CHECK_INTERVAL = original_interval
+        cache_dir = tmp_path / "cache" / "llm_responses"
+        json_files = list(cache_dir.rglob("*.json"))
+        assert len(json_files) <= 1
+
+    def test_disk_files_match_lru_entries(self, tmp_path):
+        """磁盘文件数应与 LRU 条目数一致。"""
+        cache = LLMResponseCache(tmp_path, max_entries=5)
+        for i in range(8):
+            cache.put(f"q{i}", {}, None, _make_resp(text=f"item{i}"))
+
+        cache_dir = tmp_path / "cache" / "llm_responses"
+        json_files = list(cache_dir.rglob("*.json"))
+        assert len(json_files) <= 5
+        assert cache.stats()["entries"] == len(json_files)
 
 
-# ── clear() 后 evictions 不重置 ───────────────────────────────
+# ── LRU 命中提升 ──────────────────────────────────────────────
 
 
-class TestClearDoesNotResetEvictions:
-    def test_evictions_count_preserved_after_clear(self, tmp_path):
-        original_interval = cache_module._EVICT_CHECK_INTERVAL
-        try:
-            cache_module._EVICT_CHECK_INTERVAL = 2
-            cache = LLMResponseCache(tmp_path, max_entries=1)
+class TestLRUAccessPromotion:
+    def test_get_promotes_to_recent(self, tmp_path):
+        """get() 命中后将条目提升到最近使用。"""
+        cache = LLMResponseCache(tmp_path, max_entries=2)
+        cache.put("a", {}, None, _make_resp(text="a"))
+        cache.put("b", {}, None, _make_resp(text="b"))
+        # 访问 a，将其提升为最近使用
+        cache.get("a", {}, None)
+        # b 变成最旧，写入 c 驱逐 b
+        cache.put("c", {}, None, _make_resp(text="c"))
+        assert cache.get("a", {}, None) is not None  # a 被保护
+        assert cache.get("b", {}, None) is None       # b 被驱逐
 
-            cache.put("q1", {}, None, _make_resp())
-            time.sleep(0.01)
-            cache.put("q2", {}, None, _make_resp())
-            evictions_before = cache._evictions
 
-            cache.clear()
+# ── clear() 行为 ──────────────────────────────────────────────
 
-            # clear() 重置 hits/misses，但 evictions 是历史计数不应被重置
-            # 注意：若实现中 clear() 不重置 evictions，此断言成立
-            # 若实现重置了，则 evictions_before 应为 0 时也通过
-            assert cache._evictions >= 0  # 至少不为负值
-        finally:
-            cache_module._EVICT_CHECK_INTERVAL = original_interval
+
+class TestClearBehavior:
+    def test_clear_resets_lru(self, tmp_path):
+        """clear() 清空 LRU 内存状态。"""
+        cache = LLMResponseCache(tmp_path, max_entries=10)
+        cache.put("a", {}, None, _make_resp())
+        cache.put("b", {}, None, _make_resp())
+        cache.clear()
+        assert cache.stats()["entries"] == 0
+
+    def test_clear_resets_evictions(self, tmp_path):
+        """clear() 重置驱逐计数（全新开始）。"""
+        cache = LLMResponseCache(tmp_path, max_entries=1)
+        cache.put("a", {}, None, _make_resp())
+        cache.put("b", {}, None, _make_resp())
+        assert cache._evictions >= 1
+        cache.clear()
+        assert cache._evictions == 0
 
     def test_clear_resets_hits_and_misses(self, tmp_path):
         cache = LLMResponseCache(tmp_path)

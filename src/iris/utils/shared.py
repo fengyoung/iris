@@ -6,11 +6,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
+
+logger = logging.getLogger(__name__)
 
 
 def atomic_write_json(path: Path, data: Dict[str, Any]) -> None:
@@ -30,7 +33,7 @@ def atomic_write_json(path: Path, data: Dict[str, Any]) -> None:
         try:
             os.unlink(tmp_path)
         except OSError:
-            pass
+            logger.warning("原子写入临时文件清理失败: %s", tmp_path)
         raise
 
 

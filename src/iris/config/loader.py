@@ -1,8 +1,7 @@
 """加载和校验 Iris JSON 配置，支持 .env 变量注入与路径占位符。
 
-v3.11: load_config_bundle() 返回 ConfigBundleV2（Pydantic v2 类型安全），
-       删除手工校验函数（_validate_* → Pydantic 自动校验）。
-       ConfigBundle dataclass 保留为类型别名（兼容旧代码的类型标注）。
+v3.19: ConfigBundle 统一为 ConfigBundleV2 (Pydantic v2)，旧 ConfigBundle dataclass 已删除。
+       load_config_bundle() 返回类型为 ConfigBundleV2，同时向后兼容 dict 访问。
 """
 
 from __future__ import annotations
@@ -13,7 +12,6 @@ import os
 import re
 import threading
 from pathlib import Path
-from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from iris.config.models import ConfigBundleV2
@@ -25,34 +23,30 @@ class ConfigError(ValueError):
     """配置文件不合法时抛出。"""
 
 
-@dataclass(frozen=True)
-class ConfigBundle:
-    """过渡性配置容器（dataclass, Dict 访问）。
+def ConfigBundle(
+    root: Path,
+    app: Dict[str, Any],
+    data_source: Dict[str, Any],
+    llm: Dict[str, Any],
+    wiki: Dict[str, Any] | None = None,
+    meeting_routes: Dict[str, Any] | None = None,
+    feishu_ingest: Dict[str, Any] | None = None,
+) -> ConfigBundleV2:
+    """向后兼容的配置构造函数。
 
-    v3.11: load_config_bundle() 返回 ConfigBundleV2（Pydantic v2），
-    但保留此 dataclass 供测试和旧代码的类型标注使用。
-    渐进迁移完成后可删除。
+    v3.19: 旧 ConfigBundle dataclass 已删除，此工厂函数保持与旧签名的兼容。
+    内部委托给 ConfigBundleV2.from_dicts()，缺失字段自动填充默认值。
+    生产代码请使用 load_config_bundle() 获取完整校验的配置。
     """
-
-    root: Path
-    app: Dict[str, Any]
-    data_source: Dict[str, Any]
-    llm: Dict[str, Any]
-    wiki: Dict[str, Any] | None = None
-    meeting_routes: Dict[str, Any] | None = None
-    feishu_ingest: Dict[str, Any] | None = None
-
-    def to_v2(self) -> ConfigBundleV2:
-        """转换为类型安全版本。"""
-        return ConfigBundleV2.from_dicts(
-            root=self.root,
-            app_dict=self.app,
-            data_source_dict=self.data_source,
-            llm_dict=self.llm,
-            wiki_dict=self.wiki or {},
-            meeting_routes=self.meeting_routes,
-            feishu_ingest_dict=self.feishu_ingest or {},
-        )
+    return ConfigBundleV2.from_dicts(
+        root=root,
+        app_dict=app,
+        data_source_dict=data_source,
+        llm_dict=llm,
+        wiki_dict=wiki or {},
+        meeting_routes=meeting_routes,
+        feishu_ingest_dict=feishu_ingest or {},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -119,8 +113,8 @@ def resolve_env_vars(
                     val = get_secret(var_name)
                     if val is not None:
                         return val
-                except Exception:
-                    pass
+                except (ImportError, OSError) as exc:
+                    logger.debug("Keychain 查找 %s 失败: %s", var_name, exc)
                 # 未找到，保留占位符
                 return m.group(0)
             return _ENV_PATTERN.sub(_replace, data)
@@ -178,8 +172,10 @@ def load_config_bundle(
     project_root: Path | str,
     *,
     env_file: Optional[Path] = None,
-) -> ConfigBundle:
+) -> ConfigBundleV2:
     """从项目根目录加载全部配置，支持 .env 变量注入。
+
+    返回 ConfigBundleV2（Pydantic v2），类型安全且向后兼容 dict 访问。
 
     加载流程：
       1. 加载 .env 文件（若存在）

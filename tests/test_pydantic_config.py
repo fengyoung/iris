@@ -120,12 +120,14 @@ class TestConfigBundleV2:
 
 
 class TestDataSourceValidation:
-    def test_rejects_no_enabled_sources(self):
-        with pytest.raises(ValueError, match="至少需要启用一个数据源"):
-            DataSourceConfig(
-                version="3.2",
-                default_source="test",
-                sources={
-                    "test": DataSourceItem(enabled=False, path="/tmp/test"),
-                },
-            )
+    def test_accepts_all_disabled_sources(self):
+        """v3.19: 全部禁用数据源不再抛异常，改为告警（允许维护期临时关闭）。"""
+        ds = DataSourceConfig(
+            version="3.2",
+            default_source="test",
+            sources={
+                "test": DataSourceItem(enabled=False, path="/tmp/test"),
+            },
+        )
+        assert ds.default_source == "test"
+        assert not ds.sources["test"].enabled

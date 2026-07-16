@@ -24,7 +24,7 @@ import json
 import logging
 import re
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
+from concurrent.futures import as_completed, TimeoutError as FuturesTimeoutError
 
 logger = logging.getLogger(__name__)
 from dataclasses import dataclass, field
@@ -429,7 +429,8 @@ class TermExtractor:
                 )
 
         _timeout = min(len(batches), 8) * 90
-        with ThreadPoolExecutor(max_workers=min(len(batches), 8)) as executor:
+        from iris.core.thread_pool import shared_pool
+        with shared_pool.executor(max_workers=min(len(batches), 8)) as executor:
             try:
                 list(executor.map(_run_batch, enumerate(batches), timeout=_timeout))
             except FuturesTimeoutError:

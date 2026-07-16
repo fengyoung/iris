@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import logging
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
+from concurrent.futures import as_completed, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from iris.config.loader import ConfigBundle
+from iris.core.thread_pool import shared_pool
 from iris.llm import LLMProviderError
 from iris.llm.service import LLMService
 from iris.qa import QAService
@@ -346,7 +347,7 @@ class AnalysisReportService:
 
     def _read_style_cache(self, cache_path: Path) -> dict:
         try:
-            return json.loads(cache_path.read_text("utf-8"))
+            return json.loads(cache_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return dict(self._DEFAULT_STYLE_GUIDE)
 
@@ -409,7 +410,7 @@ class AnalysisReportService:
 
         dir_file_map: dict = {}
         _s1_timeout = max(120, len(directions) * 30)
-        with ThreadPoolExecutor(max_workers=min(len(directions), 6)) as executor:
+        with shared_pool.executor(max_workers=min(len(directions), 6)) as executor:
             futures = {executor.submit(_filter_one, d): d for d in directions}
             try:
                 for future in as_completed(futures, timeout=_s1_timeout):
@@ -478,7 +479,7 @@ class AnalysisReportService:
             return briefs
 
         _s2_timeout = max(300, len(to_summarize) * 60)
-        with ThreadPoolExecutor(max_workers=min(len(to_summarize), 8)) as executor:
+        with shared_pool.executor(max_workers=min(len(to_summarize), 8)) as executor:
             futures = {executor.submit(self._summarize_one_file, f, directions): f["label"]
                        for f in to_summarize}
             try:
@@ -541,7 +542,7 @@ class AnalysisReportService:
     @staticmethod
     def _load_brief_index(index_path: Path) -> dict:
         try:
-            return json.loads(index_path.read_text("utf-8"))
+            return json.loads(index_path.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError):
             return {}
 
@@ -582,7 +583,7 @@ class AnalysisReportService:
         # 并行合成每个方向的章节
         sections: dict = {}
         _s3_timeout = max(240, len(directions) * 60)
-        with ThreadPoolExecutor(max_workers=min(len(directions), 4)) as executor:
+        with shared_pool.executor(max_workers=min(len(directions), 4)) as executor:
             futures = {
                 executor.submit(
                     self._s3_synthesize_direction_section,

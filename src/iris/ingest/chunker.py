@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -12,6 +13,8 @@ from iris.config.loader import ConfigBundle
 from iris.ingest.scanner import DocumentRecord, MarkdownScanner, ScanSummary
 from iris.utils.tokenization import TOKEN_RE
 from iris.utils.validation import safe_int
+
+logger = logging.getLogger(__name__)
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 FIELD_KEYWORDS = {
@@ -171,7 +174,8 @@ class MarkdownChunker:
         if existing_path.exists():
             try:
                 index = json.loads(existing_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, KeyError):
+            except (json.JSONDecodeError, KeyError) as exc:
+                logger.warning("数据解析失败: %s", exc)
                 pass
         scan_modified: Dict[str, str] = {}
         scan_path = self._metadata_dir / f"{summary.source_name}_scan_summary.json"
@@ -180,7 +184,8 @@ class MarkdownChunker:
                 scan_data = json.loads(scan_path.read_text(encoding="utf-8"))
                 for doc in scan_data.get("documents", []):
                     scan_modified[doc["relative_path"]] = doc.get("modified_at", "")
-            except (json.JSONDecodeError, KeyError):
+            except (json.JSONDecodeError, KeyError) as exc:
+                logger.warning("数据解析失败: %s", exc)
                 pass
         for chunk in summary.chunks:
             rp = chunk.relative_path
