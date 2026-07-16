@@ -197,9 +197,9 @@ class MarkdownScanner:
                               scanned_at=_utc_now_iso(), document_count=len(changed),
                               documents=changed, latest_mtime=latest_mtime)
 
-        # 将 deleted_paths 附加到 summary 的 dict 表示中（供 chunker 清理旧 chunk）
-        # 通过动态属性存储（ScanSummary.to_dict() 之外）
-        summary._deleted_paths = deleted_paths  # type: ignore[attr-defined]
+        # 将 deleted_paths 附加到 summary（供 chunker 清理旧 chunk）
+        # 使用 object.__setattr__ 绕过 frozen dataclass 限制
+        object.__setattr__(summary, "_deleted_paths", deleted_paths)
 
         return summary
 

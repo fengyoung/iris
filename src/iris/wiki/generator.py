@@ -20,6 +20,7 @@ from ._constants import (
     get_display_name, get_wiki_dir, get_wiki_prefix,
     get_dir_map, get_prefix_map, get_display_name_map,
 )
+from ._wiki_io import slugify_title as _slugify_title
 
 # 向下兼容别名（推荐直接使用 get_* 访问器）
 TYPE_NAMES = get_display_name_map()
@@ -736,8 +737,3 @@ sources:
             "backup_path": write_result.backup_path,
             "ref_quality": ref_quality,
         }
-
-
-def _slugify_title(title: str) -> str:
-    import re
-    return re.sub(r'[^\w一-鿿\-]', '', title)[:60]

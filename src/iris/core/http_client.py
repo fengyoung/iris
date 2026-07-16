@@ -21,7 +21,7 @@ def http_post_json(
     *,
     timeout: int = 60,
     max_retries: int = 0,
-    error_factory: Callable[[str], E] = lambda msg: RuntimeError(msg),  # type: ignore[assignment]
+    error_factory: Callable[[str], Exception] = lambda msg: RuntimeError(msg),
 ) -> Dict[str, Any]:
     """以 JSON POST 请求并解析响应，含指数退避重试。
 

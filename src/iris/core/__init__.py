@@ -14,8 +14,11 @@ from .write_guard import (
 try:
     from .storage import ChunkStore, StorageError
 except ImportError:
-    ChunkStore = None  # type: ignore
-    StorageError = RuntimeError  # type: ignore
+    from typing import Any as _AnyType
+    ChunkStore: _AnyType = None
+    class StorageError(RuntimeError):
+        """SQLite 存储不可用时的占位异常类型。"""
+        pass
 
 __all__ = [
     "LLMRequest",

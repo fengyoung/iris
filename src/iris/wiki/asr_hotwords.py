@@ -15,9 +15,9 @@ from .context_loader import WikiPageInfo
 from .term_extractor import (
     AsrTerm,
     _BOLD_RE,
-    _clean_markup,
+    clean_markup as _clean_markup,
     _HEADING_RE,
-    _is_noise_term,
+    is_noise_term as _is_noise_term,
     _SKIP_HEADINGS,
     _WIKI_LINK_RE,
 )

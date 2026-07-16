@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 
 try:
     import httpx
-
     _HAS_HTTPX = True
 except ImportError:
     httpx = None  # type: ignore[assignment]
@@ -104,7 +103,9 @@ async def _httpx_post(
                 continue
             raise
 
-    raise last_error  # type: ignore[misc]
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("async_post_json: 全部重试耗尽但无错误记录")
 
 
 async def _sync_fallback_post(
