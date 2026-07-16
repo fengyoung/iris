@@ -560,7 +560,7 @@ class AnalysisReportService:
                     if f.stat().st_mtime < cutoff:
                         f.unlink()
                 except OSError:
-                    pass
+                    logger.debug("过期 brief 清理失败: %s", f)
 
     # ── Stage 3: 单方向章节合成 ───────────────────────────────
 

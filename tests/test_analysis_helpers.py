@@ -209,3 +209,96 @@ class TestLoadReportSections:
     def test_falls_back_when_custom_invalid(self):
         cfg = {"report": {"sections": [{"title": "", "group": ""}]}}
         assert svc._load_report_sections(cfg) == svc.DEFAULT_REPORT_SECTIONS
+
+
+# ── AnalysisReportService 静态方法 ──────────────────────────
+
+
+class TestSanitizeLogPayload:
+    def test_truncates_long_markdown(self):
+        payload = {"markdown": "x" * 300}
+        result = svc.AnalysisReportService._sanitize_log_payload(payload)
+        assert len(result["markdown"]) <= 201  # 200 + "…"
+        assert result["markdown"].endswith("…")
+
+    def test_short_markdown_unchanged(self):
+        payload = {"markdown": "short"}
+        result = svc.AnalysisReportService._sanitize_log_payload(payload)
+        assert result["markdown"] == "short"
+
+    def test_strips_block_content(self):
+        payload = {
+            "blocks": [
+                {"title": "Block1", "relative_path": "a.md", "score": 0.9, "summary": "long text", "content": "secret"},
+                {"relative_path": "b.md", "score": 0.5, "content": "also secret"},
+            ]
+        }
+        result = svc.AnalysisReportService._sanitize_log_payload(payload)
+        assert len(result["blocks"]) == 2
+        assert "summary" not in result["blocks"][0]
+        assert "content" not in result["blocks"][0]
+        assert result["blocks"][0]["relative_path"] == "a.md"
+        assert result["blocks"][0]["score"] == 0.9
+
+    def test_no_blocks_no_crash(self):
+        result = svc.AnalysisReportService._sanitize_log_payload({"other": "data"})
+        assert result["other"] == "data"
+
+
+class TestLoadSaveBriefIndex:
+    def test_load_nonexistent(self, tmp_path):
+        path = tmp_path / "nonexistent.json"
+        result = svc.AnalysisReportService._load_brief_index(path)
+        assert result == {}
+
+    def test_load_valid_json(self, tmp_path):
+        path = tmp_path / "index.json"
+        path.write_text('{"a": "hash1", "b": "hash2"}', encoding="utf-8")
+        result = svc.AnalysisReportService._load_brief_index(path)
+        assert result == {"a": "hash1", "b": "hash2"}
+
+    def test_load_invalid_json_returns_empty(self, tmp_path):
+        path = tmp_path / "broken.json"
+        path.write_text("not json", encoding="utf-8")
+        result = svc.AnalysisReportService._load_brief_index(path)
+        assert result == {}
+
+    def test_save_and_cleanup_old(self, tmp_path):
+        path = tmp_path / "index.json"
+        briefs_dir = tmp_path / "briefs"
+        briefs_dir.mkdir(parents=True)
+
+        # Create a stale brief file (old timestamp)
+        old_brief = briefs_dir / "old_hash.json"
+        old_brief.write_text("{}", encoding="utf-8")
+        import os, time
+        old_mtime = time.time() - 31 * 86400  # 31 days ago
+        os.utime(str(old_brief), (old_mtime, old_mtime))
+
+        svc.AnalysisReportService._save_brief_index(
+            path, {"current": "new_hash"}, briefs_dir)
+        assert path.exists()
+        # old brief should be cleaned up (not in index, older than 30 days)
+        assert not old_brief.exists()
+
+
+# ── ReportResponse 数据类 ────────────────────────────────────
+
+
+class TestReportResponse:
+    def test_construct_minimal(self):
+        r = svc.ReportResponse(query="test", mode="llm", markdown="", blocks=[])
+        assert r.query == "test"
+        assert r.mode == "llm"
+
+    def test_to_dict(self):
+        r = svc.ReportResponse(query="q", mode="local", markdown="# R", blocks=[],
+                               structured={"key": "val"}, llm={"model": "m"})
+        d = r.to_dict()
+        assert d["query"] == "q"
+        assert d["structured"]["key"] == "val"
+
+    def test_revised_flag(self):
+        r = svc.ReportResponse(query="q", mode="llm", markdown="m", blocks=[], revised=True)
+        assert r.revised is True
+        assert r.to_dict()["revised"] is True
