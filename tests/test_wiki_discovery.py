@@ -197,3 +197,82 @@ def test_suppress_removes_low_value_concept():
                         paths=["08-参考资料/noise.md"])]
     result = suppress_path_concentrated_noise(items)
     assert isinstance(result, list)
+
+
+# ── CandidateDiscovery export 方法 ──────────────────────────
+
+
+class TestCandidateDiscoveryExport:
+    def test_export_jsonl(self, tmp_path):
+        from iris.wiki.discovery_types import CandidateItem
+        from iris.wiki.discovery import CandidateDiscovery
+        from iris.config.models import ConfigBundleV2
+
+        bundle = ConfigBundleV2.from_dicts(
+            root=tmp_path, app_dict={"version": "3.0"},
+            data_source_dict={"version": "1.0", "default_source": "t",
+                "sources": {"t": {"path": str(tmp_path)}}},
+            llm_dict={},
+        )
+        discovery = CandidateDiscovery(bundle)
+        items = [
+            CandidateItem(title="测试概念", page_type="concept", query="测试概念",
+                          score=10, evidence_count=3, sample_paths=["a.md", "b.md"],
+                          rationale="测试", has_wiki=False, wiki_stale=False),
+        ]
+        path = tmp_path / "out" / "candidates.jsonl"
+        result = discovery.export_jsonl(items, path)
+        assert result.exists()
+        content = result.read_text(encoding="utf-8")
+        assert "测试概念" in content
+
+    def test_export_review_markdown(self, tmp_path):
+        from iris.wiki.discovery_types import CandidateItem
+        from iris.wiki.discovery import CandidateDiscovery
+        from iris.config.models import ConfigBundleV2
+
+        bundle = ConfigBundleV2.from_dicts(
+            root=tmp_path, app_dict={"version": "3.0"},
+            data_source_dict={"version": "1.0", "default_source": "t",
+                "sources": {"t": {"path": str(tmp_path)}}},
+            llm_dict={},
+        )
+        discovery = CandidateDiscovery(bundle)
+        items = [
+            CandidateItem(title="搜索推荐", page_type="domain", query="搜索推荐",
+                          score=20, evidence_count=5, sample_paths=["a.md"],
+                          rationale="高频", has_wiki=False, wiki_stale=False),
+            CandidateItem(title="排序算法", page_type="concept", query="排序算法",
+                          score=15, evidence_count=3, sample_paths=["b.md"],
+                          rationale="核心概念", has_wiki=True, wiki_stale=True),
+        ]
+        path = tmp_path / "out" / "review.md"
+        result = discovery.export_review_markdown(items, path)
+        assert result.exists()
+        content = result.read_text(encoding="utf-8")
+        assert "搜索推荐" in content
+        assert "排序算法" in content
+
+    def test_export_review_jsonl(self, tmp_path):
+        from iris.wiki.discovery_types import CandidateItem
+        from iris.wiki.discovery import CandidateDiscovery
+        from iris.config.models import ConfigBundleV2
+
+        bundle = ConfigBundleV2.from_dicts(
+            root=tmp_path, app_dict={"version": "3.0"},
+            data_source_dict={"version": "1.0", "default_source": "t",
+                "sources": {"t": {"path": str(tmp_path)}}},
+            llm_dict={},
+        )
+        discovery = CandidateDiscovery(bundle)
+        items = [
+            CandidateItem(title="项目Alpha", page_type="project", query="项目Alpha",
+                          score=18, evidence_count=4, sample_paths=["c.md"],
+                          rationale="重点项目", has_wiki=False, wiki_stale=False),
+        ]
+        path = tmp_path / "out" / "review.jsonl"
+        result = discovery.export_review_jsonl(items, path)
+        assert result.exists()
+        content = result.read_text(encoding="utf-8")
+        assert "项目Alpha" in content
+        assert '"selected"' in content

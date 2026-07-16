@@ -107,3 +107,91 @@ class TestIsWikiBrokenLink:
         titles = {}
         result = _is_wiki_broken_link("---", titles)
         assert result is None
+
+
+class TestContentQuality:
+    def test_compute_content_quality(self, tmp_path):
+        from iris.wiki.navigation import _compute_content_quality
+
+        wiki_root = tmp_path / "LLM-WIKI"
+        for d in ["01-领域", "02-概念"]:
+            (wiki_root / d).mkdir(parents=True)
+
+        (wiki_root / "01-领域" / "领域-搜索.md").write_text(
+            "---\ntitle: 搜索\ntype: domain\nstatus: stable\n---\n## 摘要\n搜索领域。[[排序]]", encoding="utf-8")
+        (wiki_root / "02-概念" / "概念-排序.md").write_text(
+            "---\ntitle: 排序\ntype: concept\nstatus: stable\n---\n## 摘要\n排序算法。[[搜索]]", encoding="utf-8")
+
+        titles = {
+            "领域-搜索": wiki_root / "01-领域" / "领域-搜索.md",
+            "概念-排序": wiki_root / "02-概念" / "概念-排序.md",
+        }
+        result = _compute_content_quality(titles, wiki_root)
+        assert "info_density" in result
+        assert "duplicates" in result
+
+
+class TestCleanNoiseLinks:
+    def test_removes_noise_patterns(self):
+        from iris.wiki.navigation import _clean_noise_links
+
+        content = "参考 [[---]] 和 [[...]] 以及 [[正常链接]]"
+        cleaned = _clean_noise_links(content)
+        assert "正常链接" in cleaned
+
+    def test_preserves_valid_links(self):
+        from iris.wiki.navigation import _clean_noise_links
+
+        content = "见 [[项目Alpha]] 和 [[概念-排序]]"
+        cleaned = _clean_noise_links(content)
+        assert "项目Alpha" in cleaned
+        assert "概念-排序" in cleaned
+
+
+class TestWikiNavigationBuilder:
+    def test_build_on_empty_dir(self, tmp_path):
+        from iris.wiki.navigation import WikiNavigationBuilder
+        from iris.config.models import ConfigBundleV2
+
+        wiki_root = tmp_path / "LLM-WIKI"
+        wiki_root.mkdir()
+
+        bundle = ConfigBundleV2.from_dicts(
+            root=tmp_path, app_dict={"version": "3.0"},
+            data_source_dict={"version": "1.0", "default_source": "t", "sources": {"t": {"path": str(tmp_path)}}},
+            llm_dict={},
+            wiki_dict={"wiki_root": str(wiki_root)},
+        )
+        builder = WikiNavigationBuilder(bundle)
+        result = builder.build()
+        assert result.pages_written == 0
+        assert result.nav_path
+
+    def test_build_creates_index(self, tmp_path):
+        from iris.wiki.navigation import WikiNavigationBuilder
+        from iris.config.models import ConfigBundleV2
+
+        wiki_root = tmp_path / "LLM-WIKI"
+        for d in ["01-领域", "02-概念"]:
+            (wiki_root / d).mkdir(parents=True)
+
+        (wiki_root / "01-领域" / "领域-搜索.md").write_text(
+            "---\ntitle: 搜索\ntype: domain\nstatus: stable\n---\n## 摘要\n搜索领域概述。", encoding="utf-8")
+        (wiki_root / "02-概念" / "概念-排序.md").write_text(
+            "---\ntitle: 排序\ntype: concept\nstatus: stable\n---\n## 摘要\n排序算法。", encoding="utf-8")
+
+        bundle = ConfigBundleV2.from_dicts(
+            root=tmp_path, app_dict={"version": "3.0"},
+            data_source_dict={"version": "1.0", "default_source": "t", "sources": {"t": {"path": str(tmp_path)}}},
+            llm_dict={},
+            wiki_dict={"wiki_root": str(wiki_root)},
+        )
+        builder = WikiNavigationBuilder(bundle)
+        result = builder.build(write=True)
+        assert result.pages_written == 2
+
+        index_path = wiki_root / "index.md"
+        assert index_path.exists()
+        content = index_path.read_text(encoding="utf-8")
+        assert "搜索" in content
+        assert "排序" in content
