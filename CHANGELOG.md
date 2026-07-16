@@ -32,6 +32,7 @@
 - **飞书退避优化**：退避算法 `1.2^n` → `2^n + 随机抖动`
 - **字段默认值**：`ModelItem.supported_inputs`/`use_cases`、`WikiConfig` 全字段添加默认值
 - **数据源验证宽松**：`DataSourceConfig` 全部禁用时改为 warn 而非 raise
+- **文件监听去抖修复**：`ingest/watcher.py` 中 `_debounce` 的首次事件因 `time.monotonic()` 起始值过小被误过滤，改为 `key not in self._recent_events` 首次放行
 
 ### 版本
 
@@ -41,7 +42,8 @@
 
 ### 测试
 
-- 单元测试 1,223 → **1,265**（+42），73 文件，覆盖率 53%
+- 新增测试模块：`config/secrets`（12 用例）、`ingest/watcher`（5 用例）、`output/formatter` 扩展（+12 用例）
+- 单元测试 1,223 → **1,291**（+68），73 文件，覆盖率 53%→**54%**
 
 ---
 

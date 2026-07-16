@@ -148,8 +148,11 @@ class SourceWatcher:
         filtered: List[FileEvent] = []
         for evt in events:
             key = f"{evt.relative_path}:{evt.event_type}"
-            last_time = self._recent_events.get(key, 0)
-            if now - last_time >= self._debounce_window:
+            if key not in self._recent_events:
+                # 首次出现，放行
+                filtered.append(evt)
+                self._recent_events[key] = now
+            elif now - self._recent_events[key] >= self._debounce_window:
                 filtered.append(evt)
                 self._recent_events[key] = now
         return filtered
