@@ -4,6 +4,32 @@
 
 ---
 
+## v3.18.3 (2026-07-17)
+
+全面测试补充 + 覆盖率里程碑 — 纯函数测试、CLI 集成测试、核心模块覆盖。
+
+### 测试补充（+216 用例）
+
+- **纯函数模块**（5 新文件）：`feishu/_shared` (23)、`retrieval/vector_index` (15)、`ingest/pdf_extractor` (7)、`complex_input/detector` (15)、`wiki/asr_hotwords` (21)、`trello/llm+models` (13)
+- **CLI 集成测试**（1 新文件）：`test_cli_handlers` (21) — check_config/route_model/scan/search/status/diagnose/memory/wiki_lint/graph/usage
+- **扩展已有测试**：`analysis_helpers` (+13)、`cli_helpers` (+13)、`navigation` (+9)、`wiki_discovery` (+3)
+- **数据类测试**（2 新文件）：`person_enricher` (8)、`trello_pure` (13)
+
+### 覆盖率里程碑
+
+- 53% → **60%**（+7%）
+- 1,223 → **1,439**（+216）
+- 73 → **83** 测试文件（+10）
+- 警告 9 → **0**
+
+### 版本
+
+- 产品版本 3.18.2 → **3.18.3**
+- 协议版本不变（3.10）
+- 数据版本不变
+
+---
+
 ## v3.18.2 (2026-07-16)
 
 文档版本号同步 + 测试补充 + 去抖 bug 修复。
