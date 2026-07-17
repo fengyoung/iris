@@ -89,6 +89,11 @@ class SharedThreadPool:
                     logger.debug("关闭线程池异常 workers=%d: %s", workers, exc)
             self._pools.clear()
 
+    def get_executor(self, max_workers: Optional[int] = None) -> ThreadPoolExecutor:
+        """直接返回线程池实例（用于需要显式传入 executor 的场景，如 run_in_executor）。"""
+        workers = max(max_workers or _DEFAULT_WORKERS, _MIN_WORKERS)
+        return self._get_or_create(workers)
+
     def stats(self) -> Dict[str, int]:
         """返回线程池统计信息。"""
         with self._lock:

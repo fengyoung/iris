@@ -11,10 +11,10 @@
 from __future__ import annotations
 
 import asyncio
-import atexit
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, Optional
+
+from iris.core.thread_pool import shared_pool
 
 logger = logging.getLogger(__name__)
 
@@ -24,24 +24,6 @@ try:
 except ImportError:
     httpx = None  # type: ignore[assignment]
     _HAS_HTTPX = False
-
-# 共享线程池（用于 httpx 不可用时的 fallback）
-_sync_pool: Optional[ThreadPoolExecutor] = None
-
-
-def _get_sync_pool() -> ThreadPoolExecutor:
-    global _sync_pool
-    if _sync_pool is None:
-        _sync_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="iris-sync-http")
-        atexit.register(_shutdown_sync_pool)
-    return _sync_pool
-
-
-def _shutdown_sync_pool() -> None:
-    global _sync_pool
-    if _sync_pool is not None:
-        _sync_pool.shutdown(wait=False)
-        _sync_pool = None
 
 
 async def async_post_json(
@@ -121,7 +103,7 @@ async def _sync_fallback_post(
 
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(
-        _get_sync_pool(),
+        shared_pool.get_executor(max_workers=8),
         lambda: http_post_json(url, payload, headers or {}, timeout=timeout, max_retries=max_retries),
     )
 

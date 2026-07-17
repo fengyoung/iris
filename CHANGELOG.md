@@ -4,6 +4,44 @@
 
 ---
 
+## v3.18.4 (2026-07-17)
+
+代码质量优化 — 正确性修复、技术债清理、模块拆分、测试补充。
+
+### 正确性修复（P0）
+
+- **`retrieval/enhanced.py` 裸 except 修复**：`EnhancedRetriever.__init__` 中 ConfigBundleV2 读取的 `except Exception: pass` 改为 `logger.debug`，异常不再静默丢失
+- **`_rrf_fuse` 向量命中条件修复**：纯向量命中补充条件从 `len(hit_by_id) < top_k`（常量，逻辑错误）改为 `len(result) < top_k`（正确判断当前结果数）
+
+### 技术债清理（P1）
+
+- **`retrieval/enhanced.py` rrf 配置统一**：`retrieval_cfg` 存为 `self._retrieval_cfg`，`search()` 中 rrf 配置直接复用，消除 `__init__` 和 `search()` 双轨访问不一致
+- **`core/async_http.py` 接入 `shared_pool`**：移除独立 `_sync_pool` 全局变量，改用 `shared_pool.get_executor(8)`；`thread_pool.py` 新增 `get_executor()` 公共方法
+
+### 模块拆分（P2）
+
+- **`wiki/graph.py` 关系提取层独立**：LLM 关系提取逻辑（`_extract_page_relations`、`_parse_triples`、`_triple_obj_to_edge`、`_save_page_relations`、`_find_changed_pages`、`_format_entity_list`、`_RELATION_EXTRACT_PROMPT`、`_safe_filename`）迁移至新文件 `wiki/_relation_extractor.py`
+  - `graph.py`：973 → **747 行**（−226 行）
+  - `WikiGraph.extract_relations()` 变为薄委托层，调用 `RelationExtractor.extract()`
+  - 向下兼容：`_safe_filename` 在 `graph.py` 重导出，已有测试不变
+
+### 测试补充（P3）
+
+- **DeprecationWarning 修复**：`test_memory_lifecycle.py` `datetime.utcnow()` → `datetime.now(timezone.utc).replace(tzinfo=None)`，消除最后一个 DeprecationWarning
+- **`llm/service.py` mock 测试**（+14）：缓存命中/未命中/写入、`LLMProviderError` 传播、`get_cache_stats`/`clear_cache`、`generate_multimodal`、`generate_async` 缓存命中和同步路径
+- **`memory/session.py` 测试**（新文件，+23）：`SessionMemoryStore` 全路径（load/save/disabled/dedup/wiki_topics）+ 纯函数（`_build_topics`、`_update_topic_threads`、`_build_recent_summary`）
+- **`test_graph.py` 迁移**：`TestParseTriples` 从 `WikiGraph._parse_triples()` 迁移为直接测试 `RelationExtractor._parse_triples()`
+
+### 版本
+
+- 产品版本 3.18.3 → **3.18.4**
+- 协议版本不变（3.10）
+- 数据版本不变
+- 测试：1,439 → **1,467**（+28），测试文件 83 → **85**
+- `llm/service.py` 覆盖率：68% → **97%**；`memory/session.py`：85% → **100%**
+
+---
+
 ## v3.18.3 (2026-07-17)
 
 全面测试补充 + 覆盖率里程碑 — 纯函数测试、CLI 集成测试、核心模块覆盖。
