@@ -1,4 +1,4 @@
-# Iris 3.18.7 — 项目执行说明
+# Iris 3.18.8 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -113,7 +113,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.18.7 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.18.8 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.10 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -158,8 +158,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.18.7 (2026-07-17)** — CI/CD 基础设施（Makefile/CI/pre-commit/Dockerfile）+ 测试分层重组（unit/integration，1,467→1,513，覆盖率 60.42%）+ Wiki 模块重构（graph.py 751→215 行、_graph_engine.py 独立、ASR 子包 `wiki/asr/` 物理隔离 + `_types.py` 消除循环导入）。
+**当前 v3.18.8 (2026-07-17)** — PersonEnricher 飞书 API 频率限制修复：预先过滤已丰富页面 + 自适应批间延迟 + 批次大小调低。
 
+> v3.18.7：CI/CD 基础设施（Makefile/CI/pre-commit/Dockerfile）+ 测试分层重组（unit/integration，1,467→1,513，覆盖率 60.42%）+ Wiki 模块重构（graph.py 751→215 行、_graph_engine.py 独立、ASR 子包 `wiki/asr/` 物理隔离 + `_types.py` 消除循环导入）。
 > v3.18.6：开源脱敏补充清理。
 > v3.18.5：新增 `iris-daily-start` Skill + 更新 adv_model 降级链。
 > v3.18.4：代码质量优化 — 从 graph.py 提取 _relation_extractor.py，消除 P0-P3 警告。

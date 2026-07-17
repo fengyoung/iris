@@ -21,7 +21,9 @@ from .searcher import parse_frontmatter, FRONTMATTER_RE
 logger = logging.getLogger(__name__)
 
 # 批量查询每批最多 names 数（lark-cli --queries 无硬性限制，保守分批）
-_BATCH_SIZE = 20
+_BATCH_SIZE = 10
+# 批间基础延迟（秒），自适应增长
+_BASE_BATCH_DELAY = 3.0
 
 
 @dataclass
@@ -80,26 +82,47 @@ class PersonEnricher:
         summary = EnrichSummary(total=len(pages))
         logger.info("扫描到 %d 个人物页面", len(pages))
 
-        # 分批搜索飞书通讯录
+        # 第一步：预扫描 frontmatter，只对缺少部门/邮箱的人名发起 API 查询
         name_to_page = {name: path for name, path in pages}
-        all_names = list(name_to_page.keys())
-        feishu_map: Dict[str, List[dict]] = {}  # name -> matched users
+        names_need_enrich = []
+        for name, path in name_to_page.items():
+            if self._needs_enrichment(path):
+                names_need_enrich.append(name)
+            else:
+                summary.details.append(EnrichResult(
+                    name=name, status="no_change"))
+                summary.no_change += 1
 
-        for i in range(0, len(all_names), _BATCH_SIZE):
-            batch = all_names[i:i + _BATCH_SIZE]
+        if names_need_enrich:
+            logger.info("需要飞书查询: %d 人（已跳过 %d 人）",
+                        len(names_need_enrich), len(pages) - len(names_need_enrich))
+        else:
+            logger.info("所有人均无需更新，跳过飞书 API 查询")
+            return summary
+
+        # 第二步：分批搜索飞书通讯录（仅针对需要丰富的人）
+        feishu_map: Dict[str, List[dict]] = {}  # name -> matched users
+        batch_delay = _BASE_BATCH_DELAY  # 自适应批间延迟
+
+        for i in range(0, len(names_need_enrich), _BATCH_SIZE):
+            batch = names_need_enrich[i:i + _BATCH_SIZE]
             logger.info("搜索飞书通讯录第 %d 批（%d/%d）",
-                        i // _BATCH_SIZE + 1, i + len(batch), len(all_names))
-            # 批间延迟，避免触发 API 频率限制
+                        i // _BATCH_SIZE + 1, i + len(batch), len(names_need_enrich))
+            # 自适应批间延迟
             if i > 0:
-                _time.sleep(3.0)
+                _time.sleep(batch_delay)
             try:
                 users = self._batch_search(batch)
+                # 成功 → 逐步恢复延迟（最多恢复到基础值）
+                batch_delay = max(_BASE_BATCH_DELAY, batch_delay - 1.0)
             except FeishuClientError as e:
                 logger.error("飞书搜索失败: %s", e)
                 for name in batch:
                     summary.details.append(EnrichResult(
                         name=name, status="error", message=str(e)))
                     summary.errors += 1
+                # 失败 → 增大后续批间延迟
+                batch_delay = min(batch_delay * 2, 30.0)
                 continue
 
             for name in batch:
@@ -118,7 +141,7 @@ class PersonEnricher:
                             name=name, status="not_found"))
                         summary.not_found += 1
 
-        # 逐页更新
+        # 第三步：逐页写入（只处理有飞书匹配结果的）
         for name, page_path in name_to_page.items():
             if name not in feishu_map:
                 continue
@@ -142,7 +165,7 @@ class PersonEnricher:
                 summary.not_found += 1
                 continue
 
-            # 检查是否需要更新
+            # 检查是否需要更新（飞书数据可能与本地一致）
             if self._has_fields(page_path, department, email):
                 summary.details.append(EnrichResult(
                     name=name, status="no_change"))
@@ -207,6 +230,22 @@ class PersonEnricher:
         if stem.startswith("人物-"):
             return stem[len("人物-"):]
         return stem
+
+    @staticmethod
+    def _needs_enrichment(path: Path) -> bool:
+        """判断人物页面是否需要从飞书补充部门/邮箱。
+
+        只检查 frontmatter 是否有非空的 department 和 email 字段，
+        有则跳过飞书 API 查询（已丰富完成）。
+        """
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return True  # 读不到就当需要
+        fm, _ = parse_frontmatter(text)
+        has_dept = bool(fm.get("department", ""))
+        has_email = bool(fm.get("email", ""))
+        return not (has_dept and has_email)
 
     def _batch_search(self, names: List[str], retries: int = 4) -> List[dict]:
         """批量搜索飞书通讯录，带退避重试。
