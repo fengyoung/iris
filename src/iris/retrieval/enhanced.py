@@ -115,10 +115,11 @@ class EnhancedRetriever:
             from iris.config.models import ConfigBundleV2
             if isinstance(config, ConfigBundleV2) and config.app:
                 retrieval_cfg = config.app.app.get("retrieval", {})
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("ConfigBundleV2 retrieval 配置读取失败，回退 dict 路径: %s", exc)
         if not retrieval_cfg:
             retrieval_cfg = (config.app or {}).get("retrieval", {}) if isinstance(config.app, dict) else {}
+        self._retrieval_cfg = retrieval_cfg  # 统一在 __init__ 解析，search() 复用
         extra_synonyms = retrieval_cfg.get("synonym_extensions")
         self._rewriter = QueryRewriter(extra_synonyms=extra_synonyms)
         self._llm = LLMService(config)
@@ -177,7 +178,7 @@ class EnhancedRetriever:
                         if score > vector_candidates.get(cid, -1):
                             vector_candidates[cid] = score
                 if vector_candidates:
-                    rrf_cfg = (self._config.app or {}).get("retrieval", {}).get("rrf", {})
+                    rrf_cfg = self._retrieval_cfg.get("rrf", {})
                     hits = _rrf_fuse(
                         hits, vector_candidates, top_k=max(top_k * 4, _MIN_LOCAL_CANDIDATES),
                         k=rrf_cfg.get("k", 60),
@@ -313,8 +314,8 @@ def _rrf_fuse(lexical_hits, vector_scores, *, top_k: int, k: int = 60,
             blended = combined[cid] + normalized_bm25
             result.append(orig.with_score(blended)._with_explanation(
                 orig.explanation + " [vector-fused]"))
-        # 包含纯向量命中
-        elif len(hit_by_id) < top_k:
+        # 包含纯向量命中（lexical 不足 top_k 时补充）
+        elif len(result) < top_k:
             result.append(RetrievalHit(
                 chunk_id=cid, score=combined[cid], title="",
                 relative_path="", section_path=[], content_preview="",

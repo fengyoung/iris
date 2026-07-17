@@ -10,6 +10,7 @@ import pytest
 
 from iris.wiki.backlink import BacklinkBuilder, BacklinkIndex
 from iris.wiki.graph import GraphEdge, GraphNode, WikiGraph, _safe_filename
+from iris.wiki._relation_extractor import RelationExtractor
 from iris.utils.shared import now_iso
 
 
@@ -366,58 +367,59 @@ class TestGraphRefresh:
 
 
 class TestParseTriples:
-    """_parse_triples 兼容逐行 JSON 和 JSON 数组两种 LLM 输出格式。"""
+    """RelationExtractor._parse_triples 兼容逐行 JSON 和 JSON 数组两种 LLM 输出格式。"""
 
-    def _make_graph_with_nodes(self, tmp_path) -> "WikiGraph":
+    def _make_extractor(self, tmp_path) -> RelationExtractor:
         wiki_root = _make_wiki_root(tmp_path)
         bundle = _make_config_bundle(tmp_path, wiki_root)
         g = WikiGraph(bundle)
         g.build_nodes()
-        return g
+        relations_dir = tmp_path / "data" / "graph" / "relations"
+        return RelationExtractor(bundle, g._nodes, wiki_root, relations_dir)
 
     def test_parse_line_by_line(self, tmp_path):
-        g = self._make_graph_with_nodes(tmp_path)
+        ex = self._make_extractor(tmp_path)
         text = (
             '{"source": "项目-项目Alpha", "target": "人物-张三", "relation": "负责", "confidence": 0.9}\n'
             '{"source": "项目-项目Alpha", "target": "概念-排序", "relation": "使用", "confidence": 0.8}\n'
         )
-        edges = g._parse_triples(text, "项目-项目Alpha")
+        edges = ex._parse_triples(text, "项目-项目Alpha")
         assert len(edges) == 2
         relations = {e.relation for e in edges}
         assert "负责" in relations and "使用" in relations
 
     def test_parse_json_array(self, tmp_path):
-        g = self._make_graph_with_nodes(tmp_path)
+        ex = self._make_extractor(tmp_path)
         text = '[{"source": "项目-项目Alpha", "target": "人物-张三", "relation": "负责", "confidence": 0.9}, {"source": "项目-项目Alpha", "target": "概念-排序", "relation": "使用", "confidence": 0.8}]'
-        edges = g._parse_triples(text, "项目-项目Alpha")
+        edges = ex._parse_triples(text, "项目-项目Alpha")
         assert len(edges) == 2
 
     def test_parse_json_array_multiline(self, tmp_path):
-        g = self._make_graph_with_nodes(tmp_path)
+        ex = self._make_extractor(tmp_path)
         text = (
             '[\n'
             '  {"source": "项目-项目Alpha", "target": "人物-张三", "relation": "负责", "confidence": 0.9},\n'
             '  {"source": "项目-项目Alpha", "target": "概念-排序", "relation": "使用", "confidence": 0.8}\n'
             ']'
         )
-        edges = g._parse_triples(text, "项目-项目Alpha")
+        edges = ex._parse_triples(text, "项目-项目Alpha")
         assert len(edges) == 2
 
     def test_parse_empty_array(self, tmp_path):
-        g = self._make_graph_with_nodes(tmp_path)
-        edges = g._parse_triples("[]", "项目-项目Alpha")
+        ex = self._make_extractor(tmp_path)
+        edges = ex._parse_triples("[]", "项目-项目Alpha")
         assert edges == []
 
     def test_parse_unknown_target_skipped(self, tmp_path):
-        g = self._make_graph_with_nodes(tmp_path)
+        ex = self._make_extractor(tmp_path)
         text = '[{"source": "项目-项目Alpha", "target": "人物-不存在", "relation": "负责", "confidence": 0.9}]'
-        edges = g._parse_triples(text, "项目-项目Alpha")
+        edges = ex._parse_triples(text, "项目-项目Alpha")
         assert edges == []
 
     def test_confidence_clamped(self, tmp_path):
-        g = self._make_graph_with_nodes(tmp_path)
+        ex = self._make_extractor(tmp_path)
         text = '[{"source": "项目-项目Alpha", "target": "人物-张三", "relation": "负责", "confidence": 5.0}]'
-        edges = g._parse_triples(text, "项目-项目Alpha")
+        edges = ex._parse_triples(text, "项目-项目Alpha")
         assert len(edges) == 1
         assert edges[0].confidence == 1.0
 

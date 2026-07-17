@@ -98,7 +98,7 @@ def test_is_item_stale_invalid_date():
 def test_is_item_stale_naive_datetime():
     """无时区的 datetime 应被视为 UTC 处理。"""
     cutoff = datetime.now(timezone.utc) - timedelta(days=90)
-    naive_old = (datetime.utcnow() - timedelta(days=120)).isoformat()
+    naive_old = (datetime.now(timezone.utc) - timedelta(days=120)).replace(tzinfo=None).isoformat()
     item = {"updated_at": naive_old}
     assert MemoryLifecycle._is_item_stale(item, cutoff) is True
 
