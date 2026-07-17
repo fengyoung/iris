@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~24,000 行 / 133 文件 / 20 模块 · CLI 46 命令 · 单元测试 1,513（93 文件）· 覆盖率 60.42% · 8 个项目级 Skill · Wiki 198 页 · 知识图谱节点 192 / 关系边 786（NetworkX 引擎） · 数据源 706 文档 / 4,124 Chunk · 向量索引 7,035 条 · LLM 响应缓存（内存 LRU 驱逐）· Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听 · CI/CD（Makefile / pre-commit / GitHub Actions）。
+~24,000 行 / 133 文件 / 20 模块 · CLI 46 命令 · 单元测试 1,513（93 文件）· 覆盖率 60.42% · 8 个项目级 Skill · Wiki 201 页 · 知识图谱节点 198 / 关系边 821（NetworkX 引擎） · 数据源 716 文档 / 4,271 Chunk · 向量索引 7,210 条 · LLM 响应缓存（内存 LRU 驱逐）· Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听 · CI/CD（Makefile / pre-commit / GitHub Actions）。
 
 ### 关键路径
 
@@ -113,7 +113,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.18.8 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.18.9 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.10 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
