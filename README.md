@@ -4,7 +4,7 @@
 
 ## 版本
 
-**v3.18.5** — 新增 `iris-daily-start` Skill：每日启动维护一键触发（记忆同步、扫描切块、向量索引、Wiki 自动更新、知识图谱刷新、LLM 用量概要）。
+**v3.18.5** — 新增 `iris-daily-start` Skill + 更新 adv_model 降级链（默认 qwen3.7-plus，6 级降级链）。
 
 ## 开发路线
 

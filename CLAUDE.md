@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~24,000 行 / 123 文件 / 20 模块 · CLI 46 命令 · 单元测试 1,467（85 文件）· 覆盖率 60% · 8 个项目级 Skill · Wiki 192 页 · 知识图谱节点 192 / 关系边 778（NetworkX 引擎） · 数据源 703 文档 / 4,096 Chunk · 向量索引 7,035 条 · LLM 响应缓存（内存 LRU 驱逐）· Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听。
+~24,000 行 / 125 文件 / 20 模块 · CLI 46 命令 · 单元测试 1,467（85 文件）· 覆盖率 60% · 8 个项目级 Skill · Wiki 198 页 · 知识图谱节点 192 / 关系边 786（NetworkX 引擎） · 数据源 706 文档 / 4,124 Chunk · 向量索引 7,035 条 · LLM 响应缓存（内存 LRU 驱逐）· Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听。
 
 ### 关键路径
 
@@ -137,7 +137,7 @@ iris3/
 ├── tests/             # 1,467 用例，85 文件
 ├── config/            # *.json gitignored，*.example 版本控制
 ├── data/              # 运行时数据（全 gitignore）
-├── .claude/skills/    # 项目级 Skill（7 个）
+├── .claude/skills/    # 项目级 Skill（8 个）
 ├── memory/            # Claude 工作记忆
 └── pyproject.toml · README · CLAUDE · CHANGELOG.md
 ```
@@ -154,7 +154,10 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.18.5 (2026-07-17)** — 新增 `iris-daily-start` Skill：每日启动维护一键触发（记忆同步 → 扫描切块 → 向量索引 → Wiki 自动更新 → 知识图谱刷新 → LLM 用量概要）。
+**当前 v3.18.5 (2026-07-17)** — 新增 `iris-daily-start` Skill + 更新 adv_model 降级链。
+
+> v3.18.4：代码质量优化 — 从 graph.py 提取 _relation_extractor.py，消除 P0-P3 警告。
+> v3.18.5a：更新 adv_model 默认模型为 qwen3.7-plus，重构 6 级降级链。
 
 > 覆盖范围：仅统计 Iris 自身经 provider 发出的 LLM 调用（CLI + 调用 CLI 的 Skill），不含 Claude Code 本体 / Whisper 转写 / 飞书接口。
 
