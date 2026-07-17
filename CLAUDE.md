@@ -1,4 +1,4 @@
-# Iris 3.18.4 — 项目执行说明
+# Iris 3.18.5 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~24,000 行 / 123 文件 / 20 模块 · CLI 46 命令 · 单元测试 1,467（85 文件）· 覆盖率 60% · 7 个项目级 Skill · Wiki 192 页 · 知识图谱节点 192 / 关系边 778（NetworkX 引擎） · 数据源 703 文档 / 4,096 Chunk · 向量索引 7,035 条 · LLM 响应缓存（内存 LRU 驱逐）· Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听。
+~24,000 行 / 123 文件 / 20 模块 · CLI 46 命令 · 单元测试 1,467（85 文件）· 覆盖率 60% · 8 个项目级 Skill · Wiki 192 页 · 知识图谱节点 192 / 关系边 778（NetworkX 引擎） · 数据源 703 文档 / 4,096 Chunk · 向量索引 7,035 条 · LLM 响应缓存（内存 LRU 驱逐）· Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听。
 
 ### 关键路径
 
@@ -113,7 +113,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.18.4 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.18.5 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.10 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -148,13 +148,13 @@ iris3/
 
 ## Claude Code Skill（7 个项目级）
 
-`iris-wiki`（发现→审核→生成）· `iris-feishu-import`（飞书文档/聊天导入）· `iris-meeting`（转写→纪要→归档）· `iris-ask`（问答）· `iris-process`（富媒体处理：图片/PDF/DOCX/视频）· `iris-report`（分析报告/思维导图/双周报）· `iris-health`（质量巡检）。
+`iris-daily-start`（每日启动维护）· `iris-wiki`（发现→审核→生成）· `iris-feishu-import`（飞书文档/聊天导入）· `iris-meeting`（转写→纪要→归档）· `iris-ask`（问答）· `iris-process`（富媒体处理：图片/PDF/DOCX/视频）· `iris-report`（分析报告/思维导图/双周报）· `iris-health`（质量巡检）。
 
 ---
 
 ## 近期变更
 
-**当前 v3.18.4 (2026-07-17)** — 代码质量优化。① P0 正确性修复（enhanced.py 裸 except + `_rrf_fuse` 向量命中条件）。② P1 技术债（rrf 配置统一 + async_http 接入 shared_pool）。③ P2 graph.py 关系提取拆分为 `_relation_extractor.py`（973→747 行）。④ P3 测试 1,439→1,467（+28），85 文件；`llm/service.py` 97%，`memory/session.py` 100%。DeprecationWarning 消除。
+**当前 v3.18.5 (2026-07-17)** — 新增 `iris-daily-start` Skill：每日启动维护一键触发（记忆同步 → 扫描切块 → 向量索引 → Wiki 自动更新 → 知识图谱刷新 → LLM 用量概要）。
 
 > 覆盖范围：仅统计 Iris 自身经 provider 发出的 LLM 调用（CLI + 调用 CLI 的 Skill），不含 Claude Code 本体 / Whisper 转写 / 飞书接口。
 
