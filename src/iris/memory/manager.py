@@ -8,7 +8,7 @@ from typing import Any, Dict
 
 from iris.config.loader import ConfigBundle
 
-from .long_term import CorrectionMemoryStore, UserProfileMemoryStore
+from .long_term import CorrectionMemoryStore, UserProfileMemoryStore, _atomic_write_json
 
 
 class LongTermMemoryManager:
@@ -45,8 +45,7 @@ class LongTermMemoryManager:
             "profile": self._profile.load(),
             "corrections": self._corrections.load(),
         }
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        _atomic_write_json(output_path, payload)
         return output_path
 
     def import_from_file(self, input_path: Path, *, replace: bool = False) -> Dict[str, Any]:

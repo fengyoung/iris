@@ -4,6 +4,31 @@
 
 ---
 
+## v3.18.9 (2026-07-17)
+
+代码质量加固 — 并发安全、可观测性、成本控制、配置化。
+
+### 并发安全（P1）
+
+- **内存系统 FileLock**：`CorrectionMemoryStore` / `UserProfileMemoryStore` 的读-改-写操作（`apply_text_update` / `delete` / `save`）改用 `FileLock` 包裹，防止多进程并发时后写者覆盖前写者修改；`manager.export_to_file()` 改用原子写入（`_atomic_write_json`）替换直接 `write_text`
+
+### 可观测性（P2）
+
+- **向量索引模型追踪**：`meta.json` 新增 `embedder_model` 字段，切换嵌入模型后加载时发出 `WARNING` 提示重建索引；`TextEmbedder` 暴露 `model` 属性
+- **`.env` 行尾注释剥离**：`load_env_file()` 对非引号值剥离行尾 ` # comment`，避免注释内容污染变量值
+- **未解析占位符警告**：配置加载后若仍含 `${VAR}` 占位符（变量缺失），以 `WARNING` 日志输出字段路径，提升配置问题诊断效率
+
+### 成本控制（P2）
+
+- **Stage2 多模态 `max_tokens`**：`generate_multimodal()` 在 Provider / LLMService / pipeline 三层新增 `max_tokens` 参数；Stage2（adv_model 分析）默认 `max_tokens=4096`，防止大型 PDF/视频输出失控
+
+### 健壮性与可配置性（P3）
+
+- **lark-cli 不可用立即 fallback**：`_run()` 检测 `FileNotFoundError` 后直接抛出 `FeishuClientError`（提示安装命令），不再做 3 次无效退避重试
+- **Wiki 证据阈值配置化**：`CANDIDATE_EVIDENCE_THRESHOLDS` 移至 `wiki.json` 的 `discovery.evidence_thresholds` 节点，`build_candidates()` 优先读取外部配置，代码常量保留为回退默认值
+
+---
+
 ## v3.18.8 (2026-07-17)
 
 性能优化 — PersonEnricher 飞书 API 频率限制修复。

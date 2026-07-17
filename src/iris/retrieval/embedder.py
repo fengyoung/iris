@@ -18,6 +18,10 @@ class TextEmbedder:
         self._timeout = timeout
         self._max_retries = max_retries
 
+    @property
+    def model(self) -> str:
+        return self._model
+
     def embed(self, texts: List[str]) -> List[List[float]]:
         if not texts:
             return []

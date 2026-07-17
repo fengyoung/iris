@@ -77,6 +77,11 @@ def load_env_file(env_path: Optional[Path] = None) -> Dict[str, str]:
             # 去除可选引号
             if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
                 value = value[1:-1]
+            else:
+                # 剥离行尾注释（仅对非引号值：KEY=value # comment → value）
+                comment_pos = value.find(" #")
+                if comment_pos != -1:
+                    value = value[:comment_pos].rstrip()
             if key:
                 env[key] = value
     return env
@@ -213,6 +218,9 @@ def load_config_bundle(
     for name in loaded:
         loaded[name] = resolve_env_vars(loaded[name], env)
 
+    # 警告仍含 ${...} 的关键字段（意味着变量未找到）
+    _warn_unresolved_placeholders(loaded)
+
     # 项目路径占位符解析
     for name in loaded:
         loaded[name] = resolve_path_vars(loaded[name], root)
@@ -247,6 +255,27 @@ def load_config_bundle(
             )
             raise ConfigError(f"配置校验失败: {errors}") from exc
         raise ConfigError(f"配置加载异常: {exc}") from exc
+
+
+def _warn_unresolved_placeholders(loaded: Dict[str, Any]) -> None:
+    """扫描已解析配置，对仍含 ${...} 的字段发出警告（变量缺失时的诊断提示）。"""
+    def _scan(data: Any, path: str) -> None:
+        if isinstance(data, str):
+            matches = _ENV_PATTERN.findall(data)
+            for var in matches:
+                logger.warning(
+                    "配置字段 %s 含未解析占位符 ${%s}，请检查 .env 或环境变量是否正确设置。",
+                    path, var,
+                )
+        elif isinstance(data, dict):
+            for k, v in data.items():
+                _scan(v, f"{path}.{k}" if path else k)
+        elif isinstance(data, list):
+            for i, item in enumerate(data):
+                _scan(item, f"{path}[{i}]")
+
+    for config_name, config_data in loaded.items():
+        _scan(config_data, config_name)
 
 
 _plaintext_keys_warned = False

@@ -1,4 +1,4 @@
-# Iris 3.18.8 — 项目执行说明
+# Iris 3.18.9 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -158,12 +158,12 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.18.8 (2026-07-17)** — PersonEnricher 飞书 API 频率限制修复：预先过滤已丰富页面 + 自适应批间延迟 + 批次大小调低。
+**当前 v3.18.9 (2026-07-17)** — 代码质量加固：内存系统 FileLock（并发安全）+ 向量索引模型追踪 + `.env` 行尾注释剥离 + Stage2 `max_tokens` 控制 + lark-cli fallback + Wiki 证据阈值配置化。
 
+> v3.18.8：PersonEnricher 飞书 API 频率限制修复：预先过滤已丰富页面 + 自适应批间延迟 + 批次大小调低。
 > v3.18.7：CI/CD 基础设施（Makefile/CI/pre-commit/Dockerfile）+ 测试分层重组（unit/integration，1,467→1,513，覆盖率 60.42%）+ Wiki 模块重构（graph.py 751→215 行、_graph_engine.py 独立、ASR 子包 `wiki/asr/` 物理隔离 + `_types.py` 消除循环导入）。
 > v3.18.6：开源脱敏补充清理。
 > v3.18.5：新增 `iris-daily-start` Skill + 更新 adv_model 降级链。
-> v3.18.4：代码质量优化 — 从 graph.py 提取 _relation_extractor.py，消除 P0-P3 警告。
 
 > 覆盖范围：仅统计 Iris 自身经 provider 发出的 LLM 调用（CLI + 调用 CLI 的 Skill），不含 Claude Code 本体 / Whisper 转写 / 飞书接口。
 

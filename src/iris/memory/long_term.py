@@ -12,6 +12,7 @@ from typing import Any, Dict, List
 logger = logging.getLogger(__name__)
 
 from iris.config.loader import ConfigBundle
+from iris.core.locks import FileLock
 
 SPLIT_RE = re.compile(r"[。\n；;]+")
 CORRECTION_PATTERNS = [
@@ -37,50 +38,51 @@ class UserProfileMemoryStore:
         return json.loads(self._path.read_text(encoding="utf-8"))
 
     def apply_text_update(self, text: str) -> List[str]:
-        state = self.load()
-        persona = state.setdefault("iris_persona", {})
-        prefs = state.setdefault("user_preferences", {"likes": [], "dislikes": [], "style_preferences": [], "notes": []})
-        updates: List[str] = []
+        with FileLock(self._path):
+            state = self.load()
+            persona = state.setdefault("iris_persona", {})
+            prefs = state.setdefault("user_preferences", {"likes": [], "dislikes": [], "style_preferences": [], "notes": []})
+            updates: List[str] = []
 
-        for sentence in _split_sentences(text):
-            if not sentence:
-                continue
+            for sentence in _split_sentences(text):
+                if not sentence:
+                    continue
 
-            if ("Iris" in sentence or "你" in sentence) and any(keyword in sentence for keyword in ("人设", "角色", "定位")):
-                desc = _extract_after(sentence, ("改为", "改成", "是", "为"))
-                if desc:
-                    persona["description"] = desc
-                    updates.append(f"Iris 人设已更新：{desc}")
-                continue
+                if ("Iris" in sentence or "你" in sentence) and any(keyword in sentence for keyword in ("人设", "角色", "定位")):
+                    desc = _extract_after(sentence, ("改为", "改成", "是", "为"))
+                    if desc:
+                        persona["description"] = desc
+                        updates.append(f"Iris 人设已更新：{desc}")
+                    continue
 
-            if "我喜欢" in sentence or "我偏好" in sentence:
-                value = _extract_after(sentence, ("我喜欢", "我偏好"))
-                if value:
-                    _append_unique(prefs.setdefault("likes", []), value)
-                    updates.append(f"已记录你的偏好：喜欢 {value}")
-                continue
+                if "我喜欢" in sentence or "我偏好" in sentence:
+                    value = _extract_after(sentence, ("我喜欢", "我偏好"))
+                    if value:
+                        _append_unique(prefs.setdefault("likes", []), value)
+                        updates.append(f"已记录你的偏好：喜欢 {value}")
+                    continue
 
-            if "我不喜欢" in sentence or "我不希望" in sentence or "我不要" in sentence:
-                value = _extract_after(sentence, ("我不喜欢", "我不希望", "我不要"))
-                if value:
-                    _append_unique(prefs.setdefault("dislikes", []), value)
-                    updates.append(f"已记录你的偏好：避免 {value}")
-                continue
+                if "我不喜欢" in sentence or "我不希望" in sentence or "我不要" in sentence:
+                    value = _extract_after(sentence, ("我不喜欢", "我不希望", "我不要"))
+                    if value:
+                        _append_unique(prefs.setdefault("dislikes", []), value)
+                        updates.append(f"已记录你的偏好：避免 {value}")
+                    continue
 
-            if "回答" in sentence and any(keyword in sentence for keyword in ("请", "要", "希望")):
-                _append_unique(prefs.setdefault("style_preferences", []), sentence)
-                updates.append("已记录回答风格偏好")
-                continue
+                if "回答" in sentence and any(keyword in sentence for keyword in ("请", "要", "希望")):
+                    _append_unique(prefs.setdefault("style_preferences", []), sentence)
+                    updates.append("已记录回答风格偏好")
+                    continue
 
-            if "记住" in sentence:
-                note = _extract_after(sentence, ("记住",))
-                if note:
-                    _append_unique(prefs.setdefault("notes", []), note)
-                    updates.append(f"已记录说明：{note}")
+                if "记住" in sentence:
+                    note = _extract_after(sentence, ("记住",))
+                    if note:
+                        _append_unique(prefs.setdefault("notes", []), note)
+                        updates.append(f"已记录说明：{note}")
 
-        if updates:
-            state["updated_at"] = _now_iso()
-            self._save(state)
+            if updates:
+                state["updated_at"] = _now_iso()
+                self._save(state)
         return updates
 
     def render_for_prompt(self) -> str:
@@ -108,7 +110,8 @@ class UserProfileMemoryStore:
         payload.setdefault("iris_persona", {})
         payload.setdefault("user_preferences", {"likes": [], "dislikes": [], "style_preferences": [], "notes": []})
         payload["updated_at"] = payload.get("updated_at") or _now_iso()
-        self._save(payload)
+        with FileLock(self._path):
+            self._save(payload)
 
     def _save(self, payload: Dict[str, Any]) -> None:
         _atomic_write_json(self._path, payload)
@@ -126,32 +129,33 @@ class CorrectionMemoryStore:
         return json.loads(self._path.read_text(encoding="utf-8"))
 
     def apply_text_update(self, text: str) -> List[str]:
-        state = self.load()
-        items = state.setdefault("items", {})
-        updates: List[str] = []
+        with FileLock(self._path):
+            state = self.load()
+            items = state.setdefault("items", {})
+            updates: List[str] = []
 
-        for sentence in _split_sentences(text):
-            normalized_sentence = re.sub(r"^\s*纠正[:：]\s*", "", sentence).strip()
-            for pattern in CORRECTION_PATTERNS:
-                match = pattern.search(normalized_sentence)
-                if not match:
-                    continue
-                concept = _clean_term(match.group("concept"))
-                value = _clean_term(match.group("value"))
-                if not concept or not value:
-                    continue
-                entry = items.get(concept, {"preferred": "", "update_count": 0, "last_source": ""})
-                entry["preferred"] = value
-                entry["update_count"] = int(entry.get("update_count", 0)) + 1
-                entry["updated_at"] = _now_iso()
-                entry["last_source"] = sentence.strip()
-                items[concept] = entry
-                updates.append(f"纠正规则已更新：{concept} => {value}")
-                break
+            for sentence in _split_sentences(text):
+                normalized_sentence = re.sub(r"^\s*纠正[:：]\s*", "", sentence).strip()
+                for pattern in CORRECTION_PATTERNS:
+                    match = pattern.search(normalized_sentence)
+                    if not match:
+                        continue
+                    concept = _clean_term(match.group("concept"))
+                    value = _clean_term(match.group("value"))
+                    if not concept or not value:
+                        continue
+                    entry = items.get(concept, {"preferred": "", "update_count": 0, "last_source": ""})
+                    entry["preferred"] = value
+                    entry["update_count"] = int(entry.get("update_count", 0)) + 1
+                    entry["updated_at"] = _now_iso()
+                    entry["last_source"] = sentence.strip()
+                    items[concept] = entry
+                    updates.append(f"纠正规则已更新：{concept} => {value}")
+                    break
 
-        if updates:
-            state["updated_at"] = _now_iso()
-            self._save(state)
+            if updates:
+                state["updated_at"] = _now_iso()
+                self._save(state)
         return updates
 
     def get_relevant(self, query: str, *, top_k: int = 5) -> List[Dict[str, str]]:
@@ -205,19 +209,21 @@ class CorrectionMemoryStore:
         concept = _clean_term(concept)
         if not concept:
             return False
-        state = self.load()
-        items = state.setdefault("items", {})
-        if concept not in items:
-            return False
-        items.pop(concept, None)
-        state["updated_at"] = _now_iso()
-        self._save(state)
+        with FileLock(self._path):
+            state = self.load()
+            items = state.setdefault("items", {})
+            if concept not in items:
+                return False
+            items.pop(concept, None)
+            state["updated_at"] = _now_iso()
+            self._save(state)
         return True
 
     def save(self, payload: Dict[str, Any]) -> None:
         payload.setdefault("items", {})
         payload["updated_at"] = payload.get("updated_at") or _now_iso()
-        self._save(payload)
+        with FileLock(self._path):
+            self._save(payload)
 
     def _save(self, payload: Dict[str, Any]) -> None:
         _atomic_write_json(self._path, payload)

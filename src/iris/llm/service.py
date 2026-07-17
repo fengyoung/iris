@@ -141,6 +141,7 @@ class LLMService:
         route_context: Optional[Dict[str, Any]] = None,
         *,
         temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
         max_retries: Optional[int] = None,
     ) -> str:
         """调用多模态 LLM 生成文本。
@@ -149,6 +150,7 @@ class LLMService:
             content_parts: 多模态内容列表（text / image_url 等）
             route_context: 路由上下文（默认 multimodal 路由）
             temperature: 温度参数
+            max_tokens: 最大输出 token（None 时从模型配置读取默认值）
             max_retries: 重试次数
 
         Returns:
@@ -164,6 +166,7 @@ class LLMService:
                 content_parts,
                 ctx,
                 temperature=temperature,
+                max_tokens=max_tokens,
                 max_retries=max_retries,
             )
         except LLMProviderError as exc:

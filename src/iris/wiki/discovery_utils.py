@@ -139,9 +139,10 @@ def path_weight(relative_path: str) -> int:
 
 
 def build_candidates(counter: Counter[str], evidence_counter: Counter[str],
-                     sample_paths: Dict[str, List[str]], page_type: str) -> list:
+                     sample_paths: Dict[str, List[str]], page_type: str,
+                     evidence_thresholds: Optional[Dict[str, int]] = None) -> list:
     items: list = []
-    min_evidence = CANDIDATE_EVIDENCE_THRESHOLDS.get(page_type, 3)
+    min_evidence = (evidence_thresholds or CANDIDATE_EVIDENCE_THRESHOLDS).get(page_type, 3)
     for title, score in counter.items():
         evidence_count = evidence_counter[title]
         if evidence_count < min_evidence:

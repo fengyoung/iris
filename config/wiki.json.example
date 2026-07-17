@@ -34,5 +34,13 @@
   "changelog": {
     "auto_update": true,
     "filename": "changelog.md"
+  },
+  "discovery": {
+    "evidence_thresholds": {
+      "project": 2,
+      "domain": 3,
+      "concept": 4,
+      "person": 1
+    }
   }
 }

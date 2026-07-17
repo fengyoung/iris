@@ -81,12 +81,17 @@ class CandidateDiscovery:
                     evidence_counter[person] += 1
                     append_sample(sample_paths.setdefault(person, []), chunk.relative_path)
 
-        # 构建各类型候选
+        # 构建各类型候选（优先使用 wiki.json 中的 discovery.evidence_thresholds 配置）
+        evidence_thresholds: Optional[Dict[str, int]] = None
+        if self._config.wiki:
+            evidence_thresholds = (
+                self._config.wiki.get("discovery", {}).get("evidence_thresholds")
+            ) or None
         candidates: list[CandidateItem] = []
-        candidates.extend(build_candidates(project_counter, evidence_counter, sample_paths, "project"))
-        candidates.extend(build_candidates(domain_counter, evidence_counter, sample_paths, "domain"))
-        candidates.extend(build_candidates(concept_counter, evidence_counter, sample_paths, "concept"))
-        candidates.extend(build_candidates(person_counter, evidence_counter, sample_paths, "person"))
+        candidates.extend(build_candidates(project_counter, evidence_counter, sample_paths, "project", evidence_thresholds))
+        candidates.extend(build_candidates(domain_counter, evidence_counter, sample_paths, "domain", evidence_thresholds))
+        candidates.extend(build_candidates(concept_counter, evidence_counter, sample_paths, "concept", evidence_thresholds))
+        candidates.extend(build_candidates(person_counter, evidence_counter, sample_paths, "person", evidence_thresholds))
 
         candidates = suppress_path_concentrated_noise(candidates)
         candidates = cluster_and_resolve(candidates)

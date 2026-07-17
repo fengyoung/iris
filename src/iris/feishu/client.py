@@ -88,6 +88,11 @@ class FeishuClient:
                 return data
             except FeishuClientError:
                 raise
+            except FileNotFoundError:
+                raise FeishuClientError(
+                    f"lark-cli 未安装或不在 PATH 中（命令: {self.LARK_CLI}），"
+                    f"请运行 `pip install lark-cli` 后重试"
+                ) from None
             except subprocess.TimeoutExpired as e:
                 last_error = e
                 if attempt < retries - 1:

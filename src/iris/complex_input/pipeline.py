@@ -289,6 +289,7 @@ class ComplexInputPipeline:
                     "task_type": "image_understanding",
                     "complexity": "complex",
                 },
+                max_tokens=4096,
             )
             model_info = self._llm.get_provider().get_active_model_config("adv_model")
             return text.strip(), model_info.get("model", "adv_model")
@@ -370,6 +371,7 @@ class ComplexInputPipeline:
                     "task_type": "image_understanding",
                     "complexity": "complex",
                 },
+                max_tokens=4096,
             )
             model_info = self._llm.get_provider().get_active_model_config("adv_model")
             return text.strip(), model_info.get("model", "adv_model")
@@ -506,6 +508,7 @@ class ComplexInputPipeline:
                     "task_type": "image_understanding",
                     "complexity": "complex",
                 },
+                max_tokens=4096,
             )
             model_info = self._llm.get_provider().get_active_model_config("adv_model")
             return text.strip(), model_info.get("model", "adv_model")

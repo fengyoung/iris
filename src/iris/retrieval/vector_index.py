@@ -23,6 +23,8 @@ class VectorIndex:
         self._path = index_path
         self._data: Dict[str, Dict] = {}
         self._loaded = False
+        self._embedder_model: str = ""
+        self._loaded_embedder_model: str = ""
         # 缓存矩阵（避免每次 search 重建）
         self._matrix_cache: np.ndarray | None = None
         self._matrix_ids: List[str] = []
@@ -58,6 +60,13 @@ class VectorIndex:
             for idx, cid in enumerate(chunk_ids):
                 vec = vectors[idx].tolist() if idx < len(vectors) else []
                 self._data[cid] = {"vector": vec, "text": texts[idx] if idx < len(texts) else ""}
+            meta_path = bin_dir / _META_JSON
+            if meta_path.exists():
+                try:
+                    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                    self._loaded_embedder_model = meta.get("embedder_model", "")
+                except (json.JSONDecodeError, OSError):
+                    pass
             self._loaded = True
             return True
         except (OSError, ValueError, json.JSONDecodeError, KeyError):
@@ -92,7 +101,7 @@ class VectorIndex:
             texts.append(self._data[cid].get("text", ""))
         np.save(str(bin_dir / _VECTORS_NPY), matrix)
         (bin_dir / _IDS_JSON).write_text(json.dumps({"chunk_ids": chunk_ids, "texts": texts}, ensure_ascii=False), encoding="utf-8")
-        (bin_dir / _META_JSON).write_text(json.dumps({"dim": dim, "count": len(chunk_ids), "updated_at": datetime.now(timezone.utc).isoformat()}, ensure_ascii=False, indent=2), encoding="utf-8")
+        (bin_dir / _META_JSON).write_text(json.dumps({"dim": dim, "count": len(chunk_ids), "embedder_model": self._embedder_model, "updated_at": datetime.now(timezone.utc).isoformat()}, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def upsert(self, chunk_id: str, vector: List[float], text: str = "") -> None:
         self._data[chunk_id] = {"vector": vector, "text": text}
@@ -170,12 +179,25 @@ class VectorIndex:
     def is_loaded(self) -> bool:
         return self._loaded
 
+    def set_embedder_model(self, model: str) -> None:
+        self._embedder_model = model
+
 
 def build_vector_index(source_name: str, chunks: list, embedder, index_path: Path,
                        *, existing_index: Optional[VectorIndex] = None) -> VectorIndex:
     index = existing_index or VectorIndex(index_path)
     if not index.is_loaded():
         index.load()
+    current_model = getattr(embedder, "model", "")
+    if current_model:
+        loaded_model = index._loaded_embedder_model
+        if loaded_model and loaded_model != current_model:
+            logger.warning(
+                "向量索引 embedder 模型已变更（%s → %s），旧向量将继续使用，"
+                "建议执行 build-vector-index --force-rebuild 完整重建。",
+                loaded_model, current_model,
+            )
+        index.set_embedder_model(current_model)
     to_embed: List[Tuple[str, str]] = []
     for chunk in chunks:
         chunk_id = chunk.chunk_id

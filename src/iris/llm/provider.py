@@ -287,6 +287,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         route_context: Dict[str, Any],
         *,
         temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
         max_retries: Optional[int] = None,
     ) -> str:
         decision = self._router.route(route_context)
@@ -298,9 +299,11 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
                 raise LLMProviderError(f"多模态暂不支持 provider: {provider_name}")
             timeout = cfg.get("timeout_seconds", 60)
             effective_retries = max_retries if max_retries is not None else cfg.get("max_retries", 0)
+            effective_max_tokens = max_tokens if max_tokens is not None else cfg.get("max_tokens")
             return self._call_openai_compatible_multimodal(
                 api_base, api_key, model_name, content_parts,
-                temperature=temperature, timeout=timeout, max_retries=effective_retries,
+                temperature=temperature, timeout=timeout,
+                max_retries=effective_retries, max_tokens=effective_max_tokens,
             )
 
         text, _role, _provider, _model, _api_base, pt, ct = self._fallback_loop(
@@ -384,12 +387,14 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         self, api_base_url: str, api_key: str, model: str, content_parts: list[dict],
         *,
         temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
         timeout: int = 60,
         max_retries: int = 0,
     ) -> Tuple[str, int, int]:
         return self._call_openai_chat(
             api_base_url, api_key, model, content_parts,
-            temperature=temperature, timeout=timeout, max_retries=max_retries,
+            temperature=temperature, max_tokens=max_tokens,
+            timeout=timeout, max_retries=max_retries,
         )
 
     def _call_anthropic(self, api_base_url: str, api_key: str, model: str, prompt: str,
