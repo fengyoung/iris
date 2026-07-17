@@ -1,4 +1,4 @@
-# Iris 3.18.6 — 项目执行说明
+# Iris 3.18.7 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~24,000 行 / 125 文件 / 20 模块 · CLI 46 命令 · 单元测试 1,467（85 文件）· 覆盖率 60% · 8 个项目级 Skill · Wiki 198 页 · 知识图谱节点 192 / 关系边 786（NetworkX 引擎） · 数据源 706 文档 / 4,124 Chunk · 向量索引 7,035 条 · LLM 响应缓存（内存 LRU 驱逐）· Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听。
+~24,000 行 / 133 文件 / 20 模块 · CLI 46 命令 · 单元测试 1,513（93 文件）· 覆盖率 60.42% · 8 个项目级 Skill · Wiki 198 页 · 知识图谱节点 192 / 关系边 786（NetworkX 引擎） · 数据源 706 文档 / 4,124 Chunk · 向量索引 7,035 条 · LLM 响应缓存（内存 LRU 驱逐）· Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听 · CI/CD（Makefile / pre-commit / GitHub Actions）。
 
 ### 关键路径
 
@@ -113,7 +113,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.18.6 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.18.7 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.10 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -134,15 +134,19 @@ iris3/
 ├── src/iris/          # 20 模块（见下）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
-├── tests/             # 1,467 用例，85 文件
+├── tests/             # 1,513 用例，93 文件
+│   ├── unit/          #   纯逻辑单元测试（199 用例，0.5s）
+│   └── integration/   #   集成测试（1,314 用例）
 ├── config/            # *.json gitignored，*.example 版本控制
 ├── data/              # 运行时数据（全 gitignore）
 ├── .claude/skills/    # 项目级 Skill（8 个）
+├── .github/workflows/ # CI 流水线（Python 3.9-3.12）
 ├── memory/            # Claude 工作记忆
+├── Makefile           # 常用开发命令
 └── pyproject.toml · README · CLAUDE · CHANGELOG.md
 ```
 
-**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配/共享线程池）· `memory`（记忆 5 子模块）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF+BM25缓存）· `qa`（检索问答+图谱注入）· `wiki`（Wiki 体系 + backlink/graph，最大模块）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估 + 引用解析）· `complex_input`（多模态三阶段：图片/PDF/DOCX/VIDEO）· `output`（格式化+DOCX）· `app/cli`（46 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py / shared.py）· `trello`（看板）。
+**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配/共享线程池）· `memory`（记忆 5 子模块）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF+BM25缓存）· `qa`（检索问答+图谱注入）· `wiki`（Wiki 体系 + backlink/graph，最大模块；`wiki/asr/` 为 ASR 提示词子系统）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估 + 引用解析）· `complex_input`（多模态三阶段：图片/PDF/DOCX/VIDEO）· `output`（格式化+DOCX）· `app/cli`（46 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py / shared.py）· `trello`（看板）。
 
 ---
 
@@ -154,8 +158,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.18.6 (2026-07-17)** — 开源脱敏补充清理：内部标识符通用化 + 第三方服务引用脱敏。
+**当前 v3.18.7 (2026-07-17)** — CI/CD 基础设施（Makefile/CI/pre-commit/Dockerfile）+ 测试分层重组（unit/integration，1,467→1,513，覆盖率 60.42%）+ Wiki 模块重构（graph.py 751→215 行、_graph_engine.py 独立、ASR 子包 `wiki/asr/` 物理隔离 + `_types.py` 消除循环导入）。
 
+> v3.18.6：开源脱敏补充清理。
 > v3.18.5：新增 `iris-daily-start` Skill + 更新 adv_model 降级链。
 > v3.18.4：代码质量优化 — 从 graph.py 提取 _relation_extractor.py，消除 P0-P3 警告。
 

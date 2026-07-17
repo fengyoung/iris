@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 
 def format_trello_payload(command: str, payload: Dict[str, Any]) -> str:

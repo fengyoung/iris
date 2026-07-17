@@ -68,7 +68,7 @@ class TrelloLLM:
         except (OSError, ValueError, KeyError):
             prompt = _DISCOVER_PROMPT.format(context=conversation_text, now=now)
         if existing_titles:
-            prompt += f"\n\n以下为 Trello 看板中已有的待办事项，请勿重复输出语义相同的项：\n" + "\n".join(f"- {t}" for t in existing_titles)
+            prompt += "\n\n以下为 Trello 看板中已有的待办事项，请勿重复输出语义相同的项：\n" + "\n".join(f"- {t}" for t in existing_titles)
         response = self._call_llm(prompt, input_type="text")
         try:
             result = json.loads(_extract_json_block(response))

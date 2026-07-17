@@ -455,7 +455,7 @@ def fix_wiki(wiki_root: Path) -> Dict[str, Any]:
         # 修复缺少结束 --- 的 frontmatter
         if text.startswith("---"):
             first_close = text.find("\n---\n", 1)
-            second_close = text.find("\n---\n", first_close + 1) if first_close != -1 else -1
+            text.find("\n---\n", first_close + 1) if first_close != -1 else -1
             if first_close == -1:
                 lines = text.split("\n")
                 for i, line in enumerate(lines):

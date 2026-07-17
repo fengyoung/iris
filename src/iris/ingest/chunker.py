@@ -384,9 +384,9 @@ def _build_structural_tags(relative_path: str, section_path: List[str], content:
         for marker, tag in PATH_TAGS.items():
             if marker in part and tag not in tags:
                 tags.append(tag)
-    for field, values in FIELD_KEYWORDS.items():
-        if any(keyword in content for keyword in values) and field not in tags:
-            tags.append(field)
+    for tag_name, values in FIELD_KEYWORDS.items():
+        if any(keyword in content for keyword in values) and tag_name not in tags:
+            tags.append(tag_name)
     return tags
 
 
@@ -413,8 +413,8 @@ def _extract_fields(text: str) -> Dict[str, List[str]]:
         return {}
     sentences = [item.strip() for item in re.split(r"[\n。；;]+", text) if item.strip()]
     extracted: Dict[str, List[str]] = {}
-    for field, keywords in FIELD_KEYWORDS.items():
+    for tag_name, keywords in FIELD_KEYWORDS.items():
         matched = [sentence for sentence in sentences if any(keyword in sentence for keyword in keywords)]
         if matched:
-            extracted[field] = matched[:2]
+            extracted[tag_name] = matched[:2]
     return extracted

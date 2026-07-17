@@ -213,17 +213,16 @@ def load_index_summaries(wiki_root: Path) -> Dict[str, str]:
     if not index_path.exists():
         return {}
     summaries: Dict[str, str] = {}
-    current_section = ""
     for line in index_path.read_text(encoding="utf-8").splitlines():
         if line.startswith("## "):
-            current_section = line[3:].strip()
+            line[3:].strip()
         elif line.startswith("- [") and "](" in line:
             # - [标题](path) — 摘要
             bracket_end = line.index("](")
             title = line[3:bracket_end]
             rest = line[bracket_end + 2:]
             paren_end = rest.index(")")
-            path_str = rest[:paren_end]
+            rest[:paren_end]
             summary = rest[paren_end + 2:].strip() if len(rest) > paren_end + 2 else ""
             if title and not title.startswith("http"):
                 summaries[title] = summary

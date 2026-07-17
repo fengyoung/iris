@@ -153,7 +153,7 @@ class TrelloService:
     def complete_card(self, card_id: str) -> TrelloCard:
         if self._board is None:
             self.ensure_board()
-        card = self.get_card(card_id)
+        self.get_card(card_id)
         self._client.set_due_complete(card_id)
         now = datetime.now(timezone.utc)
         pattern = self._config.get("done_list_pattern", "DONE-{year}{month:02d}")

@@ -13,6 +13,17 @@ from iris.config.loader import ConfigBundle, load_config_bundle
 from iris.config.secrets import KeychainError
 
 
+def pytest_collection_modifyitems(items):
+    """按目录自动标记测试：tests/unit/ → unit，其余 → integration。"""
+    for item in items:
+        if not any(marker.name in ("unit", "integration") for marker in item.iter_markers()):
+            test_path = str(item.fspath)
+            if "/unit/" in test_path:
+                item.add_marker(pytest.mark.unit)
+            else:
+                item.add_marker(pytest.mark.integration)
+
+
 @pytest.fixture
 def temp_project() -> Path:
     """创建临时项目目录。"""

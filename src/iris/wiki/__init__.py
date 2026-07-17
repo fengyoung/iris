@@ -7,15 +7,10 @@ from .graph import GraphEdge, GraphNode, WikiGraph
 from .navigation import WikiNavigationBuilder, append_changelog, fix_wiki, lint_wiki
 from .person_enricher import EnrichResult, EnrichSummary, PersonEnricher
 from .searcher import WikiHit, WikiSearcher
-from .term_extractor import (
-    AsrPromptVersion,
-    AsrTerm,
-    TermExtractor,
-    determine_new_version,
-    load_version,
-    render_asr_prompt,
-    save_version,
-)
+from .asr.extractor import TermExtractor
+from .asr._types import AsrPromptVersion, AsrTerm
+from .asr.formatter import render_asr_prompt
+from .asr.version import determine_new_version, load_version, save_version
 
 __all__ = [
     "BacklinkBuilder",

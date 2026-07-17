@@ -4,6 +4,38 @@
 
 ---
 
+## v3.18.7 (2026-07-17)
+
+工程优化 — CI/CD 基础设施、测试分层重组、Wiki 模块重构。
+
+### CI/CD 基础设施
+
+- 新建 `Makefile`：`test`、`test-unit`、`test-integration`、`lint`、`lint-fix`、`format`、`clean` 目标
+- 新建 `.pre-commit-config.yaml`：ruff check + format hooks
+- 新建 `.github/workflows/ci.yml`：Python 3.9-3.12 矩阵，lint → unit → integration → coverage
+- 新建 `Dockerfile`：Python 3.9 开发环境
+
+### 测试分层重组
+
+- 新建 `tests/unit/`（199 用例，0.5s 快速反馈）和 `tests/integration/`（1,314 用例）
+- 通过 `pytest_collection_modifyitems` 自动按路径标记，`make test-unit` / `make test-integration` 可独立运行
+- 新增 46 个核心基础设施测试：`FakeLLMProvider`、`SharedThreadPool`、`script_loader`、`atomic_write_json`、常量校验等
+- 测试总数 1,467 → 1,513，覆盖率 59.86% → 60.42%
+
+### Wiki 模块重构
+
+- 从 `graph.py`（751→215 行）提取 `_graph_engine.py`（174 行）：`_GraphEngine` + `GraphNode` + `GraphEdge` 独立，消除与 `_relation_extractor.py` 的循环导入隐患
+- ASR 子系统物理重组：5 文件移入 `wiki/asr/` 子包，提取 `_types.py`（`AsrTerm`/`AsrPromptVersion`）零依赖叶子节点，切断五文件循环导入
+- 原路径保留 shim 文件，所有外部调用方向后兼容
+
+### 代码质量
+
+- 修复 8 个 F821（未定义名称）：补充 `logger`、`Optional` 导入、`TYPE_CHECKING` 守卫
+- 修复 4 个 E741（模糊变量名）+ 2 个 F402（循环变量遮蔽导入）
+- ruff 对 F821/E741/F402 零错误
+
+---
+
 ## v3.18.6 (2026-07-17)
 
 开源脱敏补充清理 — 上一轮安全审查遗漏项修复。

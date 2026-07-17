@@ -24,6 +24,7 @@ __all__ = [
     "AccuracyVerdict",
     "CoverageGap",
     "ReferenceEntry",
+    "SourceLocator",
     "deep_eval_result_to_json",
     "print_deep_eval_pretty",
 ]

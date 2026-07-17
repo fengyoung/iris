@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from typing import Any, Dict, List
 
@@ -17,6 +18,8 @@ from .context import PromptContextPacker
 from .helpers import infer_evidence_type, intent_title, group_title, infer_question_type, block_bonus, is_memory_only_instruction
 from .memory_updater import MemoryUpdater
 from .models import AnswerBlock, Citation, QAResponse
+
+logger = logging.getLogger(__name__)
 
 
 class QAService:

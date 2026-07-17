@@ -78,7 +78,7 @@ def _print_config_summary(bundle) -> None:
     print(f"- 默认数据源: {default_source_name}")
     print(f"- 数据源路径: {default_source['path']}")
     print(f"- 数据源只读: {default_source['read_only']}")
-    print(f"- 全部数据源:")
+    print("- 全部数据源:")
     for name, cfg in data_source["sources"].items():
         enabled = cfg.get("enabled", True)
         status = "启用" if enabled else "禁用"

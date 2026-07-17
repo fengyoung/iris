@@ -142,7 +142,7 @@ class InputDetector:
             )
 
         final_type = _merge_detected_types(detected_types, encoded)
-        type_msg = f"图片" if encoded else final_type
+        type_msg = "图片" if encoded else final_type
         return ComplexityResult(
             is_complex=True,
             file_type=final_type,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import sys
 import time
@@ -10,6 +11,8 @@ from typing import Any, Dict, List, Optional
 
 from iris.config.loader import ConfigBundle
 from iris.llm import LLMService, LLMProviderError
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = "你是一个专业的会议纪要提取专家，擅长从语音转写文本中提取结构化会议纪要。你会仔细校正 ASR 误识别，准确提取信息。注意：直接输出会议纪要正文，不要输出任何前缀说明、开场白或打招呼内容。"
 
@@ -56,7 +59,7 @@ class TranscribeMeetingPipeline:
             source_type = "text"
 
         date_part = stem[:8] if len(stem) >= 8 and stem[:8].isdigit() else ""
-        date = date_part if date_part else time.strftime("%Y%m%d")
+        date_part if date_part else time.strftime("%Y%m%d")
         meeting_type, meeting_topic = self._parse_filename(stem, date_part)
         print(f"[0/3] 识别会议类型={meeting_type}, 主题={meeting_topic}", file=sys.stderr)
 
@@ -79,7 +82,7 @@ class TranscribeMeetingPipeline:
             print(f"[1/3] 跳过 Whisper，直接使用转写文本（{word_count} 字）", file=sys.stderr)
 
         # Step 2: Wiki 上下文（适配新结构）
-        print(f"[2/3] 检索 Wiki 上下文...", file=sys.stderr)
+        print("[2/3] 检索 Wiki 上下文...", file=sys.stderr)
         wiki_context, page_count = self._load_wiki_context()
         print(f"     完成：加载 {page_count} 个 Wiki 页面", file=sys.stderr)
 
@@ -88,7 +91,7 @@ class TranscribeMeetingPipeline:
         duration = self._calc_duration(raw_transcript)
 
         # Step 3: LLM 生成会议纪要
-        print(f"[3/3] base_model 生成会议纪要...", file=sys.stderr)
+        print("[3/3] base_model 生成会议纪要...", file=sys.stderr)
         source_filename = source.name  # 来源文件，供输出标识和未来排重
         minutes = self._call_llm(raw_transcript, wiki_context, meeting_type, meeting_topic,
                                  source_filename=source_filename,

@@ -13,7 +13,6 @@ CLI 命令：
 
 from __future__ import annotations
 
-import re
 import subprocess
 from typing import List, Optional
 

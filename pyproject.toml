@@ -1,6 +1,6 @@
 [project]
 name = "iris"
-version = "3.18.6"
+version = "3.18.7"
 description = "工作知识助手 — 个人知识库与飞书团队知识库集成"
 requires-python = ">=3.9"
 license = {text = "MIT"}
@@ -35,6 +35,10 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+markers = [
+    "unit: 纯逻辑测试，无 I/O，无 mock，快速反馈",
+    "integration: 需要文件系统、mock 外部服务或真实 I/O",
+]
 filterwarnings = [
     "ignore:builtin type swigvarlink has no __module__:DeprecationWarning",
     "ignore:builtin type SwigPyPacked has no __module__:DeprecationWarning",
@@ -63,3 +67,13 @@ ignore = ["BLE001"]
 # BLE001: Do not catch blind exception — 项目架构大量依赖外部服务
 # (LLM API / 飞书 API / 文件 I/O)，宽泛捕获是有意的容错策略。
 "src/iris/**/*.py" = ["BLE001"]
+# E402: 有意延迟导入以避免循环依赖（wiki 内部模块 / feishu / llm provider）
+"src/iris/app/cli/_handlers/_wiki.py" = ["E402"]
+"src/iris/feishu/doc_convert.py" = ["E402"]
+"src/iris/llm/provider.py" = ["E402"]
+"src/iris/memory/long_term.py" = ["E402"]
+"src/iris/retrieval/planner.py" = ["E402"]
+"src/iris/retrieval/vector_index.py" = ["E402"]
+"src/iris/wiki/_relation_extractor.py" = ["E402"]
+"src/iris/wiki/navigation.py" = ["E402"]
+"src/iris/wiki/term_extractor.py" = ["E402"]

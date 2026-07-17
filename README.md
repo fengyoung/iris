@@ -1,10 +1,10 @@
-# Iris 3.18.6
+# Iris 3.18.7
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
 
-**v3.18.6** — 开源脱敏补充清理：内部标识符通用化 + 第三方服务引用脱敏 + CHANGELOG 反向泄露修复。
+**v3.18.7** — 工程优化：CI/CD 基础设施、测试分层重组、Wiki 模块重构；测试 1,513 通过，覆盖率 60.42%。
 
 ## 开发路线
 
@@ -89,7 +89,7 @@ SOURCE/                     LLM-WIKI/
 - macOS Keychain（可选密钥存储）
 - PyMuPDF / python-docx（PDF/DOCX 处理）
 - ffmpeg（视频抽帧/抽音轨，视频处理必需）+ openai-whisper（音轨转写，可选）
-- 1,467 个单元测试（85 个测试文件），覆盖率 60%（仅统计 Iris 自身 LLM 调用）
+- 1,513 个单元测试（93 个测试文件），覆盖率 60.42%（仅统计 Iris 自身 LLM 调用）
 
 ## 开发环境
 
@@ -98,9 +98,23 @@ SOURCE/                     LLM-WIKI/
 git clone <repo-url> && cd iris3
 pip install -e ".[dev]"
 
-# 运行测试（含覆盖率报告）
+# 快速命令（Makefile）
+make test            # 运行全部测试
+make test-unit       # 纯逻辑单元测试（199 用例，0.5s）
+make test-integration # 集成测试（1,314 用例）
+make test-cov        # 运行测试 + 覆盖率报告
+make lint            # Ruff 代码检查
+make lint-fix        # Ruff 自动修复
+make format          # 代码格式化
+make clean           # 清理缓存
+
+# 或直接使用 pytest
 python -m pytest tests/ -q
 python -m pytest tests/ -q --cov=iris --cov-report=term
+
+# 提交前检查（pre-commit）
+pre-commit install   # 安装 Git hooks
+pre-commit run --all-files  # 手动全量检查
 
 # 配置（参考快速开始章节）
 cp config/*.json.example config/  # 然后编辑各 .json 填入实际值
@@ -127,10 +141,16 @@ iris3/
 │   ├── trello/         # Trello 看板
 │   ├── utils/          # 工具函数
 │   └── wiki/           # Wiki 体系（最大模块，含图谱/ASR/反向引用）
+│       └── asr/         #   ASR 提示词子系统（术语提取/热词/Prompt优化/版本管理）
 ├── scripts/            # CLI 入口 + 委托脚本
 ├── templates/          # Prompt / Wiki 模板
-├── tests/              # 1,467 单元测试（85 文件）
+├── tests/              # 1,513 用例（93 文件）
+│   ├── unit/           #   纯逻辑单元测试（199 用例）
+│   └── integration/    #   集成测试（1,314 用例）
 ├── config/             # *.json gitignored，*.example 版本控制
+├── .github/workflows/  # CI 流水线（Python 3.9-3.12 矩阵）
+├── Makefile            # 常用开发命令
+├── Dockerfile          # 开发容器
 └── pyproject.toml      # 项目配置 + pytest/coverage/ruff 设置
 ```
 
@@ -138,6 +158,7 @@ iris3/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.18.7** | 2026-07-17 | 工程优化：CI/CD 基础设施（Makefile/CI/pre-commit/Dockerfile）+ 测试分层重组（unit/integration，1,467→1,513，覆盖率 60.42%）+ Wiki 模块重构（graph.py 751→215 行、ASR 子包物理隔离）；ruff F821/E741/F402 零错误 |
 | **v3.18.6** | 2026-07-17 | 开源脱敏补充清理：内部标识符通用化 + 第三方服务引用脱敏 + CHANGELOG 反向泄露修复；测试 1,467 通过 |
 | **v3.18.5** | 2026-07-17 | 新增 `iris-daily-start` Skill（每日启动维护一键触发）；Skill 8 个 |
 | **v3.18.4** | 2026-07-17 | 代码质量优化：正确性修复（`_rrf_fuse` + 裸 except）+ 技术债清理 + graph.py 拆分（973→747 行）+ 测试 1,439→1,467（llm/service 97%，session 100%） |

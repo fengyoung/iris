@@ -7,14 +7,12 @@
 
 from __future__ import annotations
 
-import json
 import re
-from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List, Optional
 
-from iris.config.loader import ConfigBundle, load_config_bundle
+from iris.config.loader import ConfigBundle
 from iris.llm import LLMService
 from iris.llm.provider import LLMProviderError
 from iris.utils.template_loader import load_template as _load_template_file
@@ -538,7 +536,7 @@ class DeepEvaluator:
                 inconsistent_pages.append((pr, inc_issues))
 
         if inconsistent_pages:
-            pages_list = "\n".join(
+            "\n".join(
                 f"    - {pr.title}（{len(issues)} 条）"
                 for pr, issues in inconsistent_pages
             )
@@ -723,19 +721,19 @@ def print_deep_eval_pretty(result: DeepEvalResult) -> None:
     acc_str = f"{acc:.1%}" if acc is not None else "N/A"
 
     print(f"\n{'='*55}")
-    print(f"  深度评估结果")
+    print("  深度评估结果")
     print(f"{'='*55}")
     print(f"  评估页面: {result.total_pages}")
     print(f"  总引用数: {result.total_references}")
     print()
-    print(f"  ▌ 内容准确性")
+    print("  ▌ 内容准确性")
     print(f"    一致(consistent):   {result.consistent_count}")
     print(f"    不一致(inconsistent): {result.inconsistent_count}")
     print(f"    无法验证:          {result.unverifiable_count}")
     print(f"    源文件缺失:        {result.source_missing_count}")
     print(f"    准确率:            {acc_str}")
     print()
-    print(f"  ▌ 内容全面性")
+    print("  ▌ 内容全面性")
     print(f"    {result.overall_comprehensiveness_note}")
     print()
 
@@ -755,13 +753,13 @@ def print_deep_eval_pretty(result: DeepEvalResult) -> None:
         issues_found = True
 
     if not issues_found:
-        print(f"  ✅ 所有页面均无问题")
+        print("  ✅ 所有页面均无问题")
     print()
 
     # ── 打印修复方案 ──
     if result.recommendations:
         print(f"{'='*55}")
-        print(f"  修复方案")
+        print("  修复方案")
         print(f"{'='*55}")
         for r in result.recommendations:
             icon = {"P0": "🔴", "P1": "🟡", "P2": "🟢"}.get(r["priority"], "⚪")

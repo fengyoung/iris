@@ -46,10 +46,21 @@
 # 安装开发依赖
 pip install -e ".[dev]"
 
-# 运行测试
-python -m pytest tests/ -q
+# 安装 pre-commit hooks（可选，推荐）
+pre-commit install
 
-# 带覆盖率
+# 快速命令（Makefile）
+make test            # 运行全部测试（199 unit + 1,314 integration）
+make test-unit       # 纯逻辑单元测试（0.5s 快速反馈）
+make test-integration # 集成测试
+make test-cov        # 运行测试 + 覆盖率报告
+make lint            # Ruff 代码检查
+make lint-fix        # Ruff 自动修复
+make format          # 代码格式化
+make clean           # 清理缓存
+
+# 或直接使用 pytest
+python -m pytest tests/ -q
 python -m pytest tests/ -q --cov=iris --cov-report=term
 ```
 

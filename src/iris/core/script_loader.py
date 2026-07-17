@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Optional
+from typing import Optional
 
 
 def load_script_module(script_name: str, project_root: Path) -> ModuleType:

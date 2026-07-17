@@ -30,7 +30,7 @@ def _build_boundaries_text(dir_name: str, bounds: dict) -> str:
     parts = []
     own = bounds.get("own", [])
     if own:
-        parts.append(f"**本方向自有概念/项目**（以下内容归属本方向）：")
+        parts.append("**本方向自有概念/项目**（以下内容归属本方向）：")
         parts.append("、".join(own[:12]))
     others = bounds.get("others", {})
     if others:
@@ -195,7 +195,6 @@ def _s3_load_historical_context(collector, directions: list) -> tuple[dict, dict
         - multi_dedup: {dir_name: dedup_text} — 多期去重参考
         - prev_by_dir: {dir_name: content} — 最近一期按方向章节（兼容）
     """
-    from datetime import datetime
     recent_reports = collector.load_recent_biweeklies(since_days=35)
     today = datetime.now().strftime("%Y%m%d")
     history_reports = [r for r in recent_reports
@@ -247,8 +246,8 @@ def _group_briefs_by_subarea(briefs: list, direction: dict) -> dict:
     每份 brief 只归入匹配度最高的一个组。
     """
     sub_areas = direction.get("sub_areas", [])
-    d_name = direction.get("name", "")
-    d_id = direction.get("id", 0)
+    direction.get("name", "")
+    direction.get("id", 0)
 
     # 从子领域提取关键词
     groups: dict = {}
@@ -337,7 +336,6 @@ def _build_file_manifest(files: list[dict]) -> str:
     MAX_CHARS = 2000
     lines = []
     # 按目录分组
-    from collections import OrderedDict
     groups = OrderedDict()
     for f in files:
         groups.setdefault(f["dir"], []).append(f)

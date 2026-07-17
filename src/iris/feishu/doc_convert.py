@@ -183,8 +183,8 @@ class FeishuDocConverter:
             "## 文档信息",
             f"- 来源链接：{source_url}",
             f"- 提取时间：{now_iso()}",
-            f"- 来源类型：飞书文档",
-            f"- 提取工具：feishu-doc-convert",
+            "- 来源类型：飞书文档",
+            "- 提取工具：feishu-doc-convert",
         ]
         if author:
             meta_lines.insert(1, f"- 作者：{author}")

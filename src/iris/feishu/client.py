@@ -151,7 +151,8 @@ class FeishuClient:
         注意：需要先创建节点，再通过 docs API 写入内容。
         如果内容 > 10KB，使用 --file 参数。
         """
-        import tempfile, os
+        import tempfile
+        import os
 
         # Step 1: 创建空节点
         args = [
@@ -184,7 +185,8 @@ class FeishuClient:
 
     def update_page(self, token: str, title: str, content: str) -> dict:
         """更新已有文档节点的内容。"""
-        import tempfile, os
+        import tempfile
+        import os
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False,
                                         encoding="utf-8") as tf:

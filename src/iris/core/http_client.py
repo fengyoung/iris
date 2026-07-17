@@ -6,7 +6,7 @@ import json
 import random
 import socket
 import time
-from typing import Any, Callable, Dict, Optional, Type, TypeVar
+from typing import Any, Callable, Dict, Optional, TypeVar
 from urllib import error, request
 
 _MAX_BACKOFF_SECONDS = 60
@@ -63,7 +63,7 @@ def http_post_json(
         except error.URLError as exc:
             last_exc = error_factory(f"网络请求失败: {exc}")
             continue
-        except socket.timeout as exc:
+        except socket.timeout:
             last_exc = error_factory("请求超时")
             continue
 

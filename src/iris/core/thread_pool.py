@@ -19,7 +19,7 @@ from __future__ import annotations
 import atexit
 import logging
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import Dict, Optional
 

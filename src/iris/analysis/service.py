@@ -395,7 +395,7 @@ class AnalysisReportService:
                 logger.warning("  Stage 1 过滤 %s 失败，所有文件归入 low", d_name)
                 return {"direction_name": d_name,
                         "high": [], "medium": [],
-                        "low": [{"label": l} for l in all_labels], "none": []}
+                        "low": [{"label": label} for label in all_labels], "none": []}
 
             for level in ("high", "medium", "low", "none"):
                 items = parsed.get(level, [])
@@ -424,7 +424,7 @@ class AnalysisReportService:
                         dir_file_map[d_name] = {
                             "direction_name": d_name,
                             "high": [], "medium": [],
-                            "low": [{"label": l} for l in all_labels], "none": [],
+                            "low": [{"label": label} for label in all_labels], "none": [],
                         }
             except FuturesTimeoutError:
                 logger.error("Stage 1 过滤超时（%ds）", _s1_timeout)

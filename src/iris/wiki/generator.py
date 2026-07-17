@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from concurrent.futures import as_completed, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
@@ -21,6 +22,8 @@ from ._constants import (
     get_dir_map, get_prefix_map, get_display_name_map,
 )
 from ._wiki_io import slugify_title as _slugify_title
+
+logger = logging.getLogger(__name__)
 
 # 向下兼容别名（推荐直接使用 get_* 访问器）
 TYPE_NAMES = get_display_name_map()
@@ -185,7 +188,7 @@ class WikiGenerator:
                                        "complexity": "standard", "use_case": "wiki_generate"}
             ).text
             return self._extract_wiki_content(text)
-        except LLMProviderError as exc:
+        except LLMProviderError:
             return self._fallback_markdown(page_type=page_type, title=title, query=query,
                                            evidence=evidence, related=related)
 
@@ -512,9 +515,9 @@ sources:
         if not ref_section:
             return {"total_refs": 0, "described_refs": 0, "bare_path_refs": 0, "quality": "no_refs"}
 
-        ref_lines = [l.strip() for l in ref_section.group(1).split("\n") if l.strip()]
+        ref_lines = [line.strip() for line in ref_section.group(1).split("\n") if line.strip()]
         # 过滤掉非引用行（如空行、注释行）
-        ref_entries = [l for l in ref_lines if _re.match(r"^(?:\d+\.\s*)?\[?.*\.md", l)]
+        ref_entries = [line for line in ref_lines if _re.match(r"^(?:\d+\.\s*)?\[?.*\.md", line)]
 
         total = len(ref_entries)
         if total == 0:
