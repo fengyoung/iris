@@ -4,6 +4,25 @@
 
 ---
 
+## v3.18.5 (2026-07-17)
+
+新增项目级 Skill — `iris-daily-start` 每日启动维护。
+
+### Skill 化
+
+- **新增 `iris-daily-start` Skill**（`.claude/skills/iris-daily-start/SKILL.md`）：将 CLI 命令 `daily-start` 封装为 Claude Code 项目级 Skill，用户可通过自然语言「daily start」「每日启动维护」一键触发全自动管道
+  - 5 步管道：记忆同步与维护 → 扫描切块 + 向量索引 → Wiki 自动维护 + 人员丰富 + 图谱刷新 → 导航索引 → LLM 用量概要
+  - 与 `iris-wiki` Skill 互补：daily-start 是全自动日常维护，iris-wiki 是交互式知识策展
+- CLAUDE.md 更新：Skill 数量 7→8，技能列表新增 `iris-daily-start`
+
+### 版本
+
+- 产品版本 3.18.4 → **3.18.5**
+- 协议版本不变（3.10）
+- 数据版本不变
+
+---
+
 ## v3.18.4 (2026-07-17)
 
 代码质量优化 — 正确性修复、技术债清理、模块拆分、测试补充。
