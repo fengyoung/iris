@@ -1,10 +1,10 @@
-# Iris 3.18.5
+# Iris 3.18.6
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
 
-**v3.18.5** — 新增 `iris-daily-start` Skill + 更新 adv_model 降级链（默认 qwen3.7-plus，6 级降级链）。
+**v3.18.6** — 开源脱敏补充清理：内部标识符通用化 + 第三方服务引用脱敏 + CHANGELOG 反向泄露修复。
 
 ## 开发路线
 
@@ -52,7 +52,7 @@ python scripts/run_cli.py daily-start
 | 飞书 | `feishu-doc-convert`, `chat-digest` | 文档转换 / 聊天记录提炼 |
 | 记忆 | `memory-*`, `working-set`, `sync-memory` | 记忆管理 / 工作上下文 |
 | 人物 | `enrich-persons` | 飞书通讯录自动补充人物 Wiki 的部门/邮箱信息 |
-| 工具 | `process`, `trello`, `extract-weekly-reports` | 富媒体处理（图片/PDF/DOCX/视频）/ 看板 / 周报提取 |
+| 工具 | `process`, `trello`, `extract-weekly-reports`, `extract-travel-invoice` | 富媒体处理（图片/PDF/DOCX/视频）/ 看板 / 周报提取 / 行程单报销 |
 | 用量 | `usage-stats [--by day/week/month/year] [--cost]` | LLM 调用/token 消耗统计（分模型 + 汇总，多粒度聚合，可选成本估算） |
 | 系统 | `daily-start`, `check-config`, `status`, `diagnose` | 日常维护（含图谱增量刷新）/ 配置检查 |
 
@@ -76,7 +76,7 @@ SOURCE/                     LLM-WIKI/
 | 角色 | 默认模型 | 提供商 | 能力 | 降级链 |
 |------|---------|--------|------|--------|
 | `base_model` | deepseek-v4-flash | DeepSeek | 纯文本 | → deepseek-v4-pro |
-| `adv_model` | qwen3.7-plus | 百炼 | 文本 + 图片 | → qwen3.6-plus → qwen3.5-plus |
+| `adv_model` | qwen3.7-plus | 百炼 | 文本 + 图片 | → qwen3.7-plus-0526 → qwen3.6-plus → qwen3.6-flash → qwen3.6-27b → qwen3.5-plus（6 级） |
 
 路由规则（8 条）：用户显式指定 → 多模态输入 → Prompt 生成 → 复杂分析 → Wiki 重建 → 问答 → 文本兜底。
 
@@ -138,6 +138,7 @@ iris3/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.18.6** | 2026-07-17 | 开源脱敏补充清理：内部标识符通用化 + 第三方服务引用脱敏 + CHANGELOG 反向泄露修复；测试 1,467 通过 |
 | **v3.18.5** | 2026-07-17 | 新增 `iris-daily-start` Skill（每日启动维护一键触发）；Skill 8 个 |
 | **v3.18.4** | 2026-07-17 | 代码质量优化：正确性修复（`_rrf_fuse` + 裸 except）+ 技术债清理 + graph.py 拆分（973→747 行）+ 测试 1,439→1,467（llm/service 97%，session 100%） |
 | **v3.18.3** | 2026-07-17 | 全面测试补充：+216 用例（CLI 集成/纯函数/数据类），覆盖率 53%→60%；1,439 通过 |
@@ -157,8 +158,8 @@ iris3/
 | **v3.11.15** | 2026-07-10 | Trello Python 3.13 SSL 兼容修复 + env 变量解析；持续集成 397 测试 |
 | **v3.11.14** | 2026-07-10 | 新增 iris-process Skill（富媒体路由+三阶段流水线）；Stage 3 模板 bug 修复；iris-ask 职责边界清晰化，397 测试 |
 | **v3.11.13** | 2026-07-10 | 开源脱敏清理：源码/测试/模板内部信息移除，`_SUB_AREA_KEYWORDS` 用户自定义，`.gitignore` 补全，397 测试 |
-| **v3.11.12** | 2026-07-09 | extract-didi-travel PDF 文字直接提取 + 转置表格输出；wiki-lint --fix 噪音链接正则修复（避免误删 frontmatter），397 测试 |
-| **v3.11.11** | 2026-07-09 | extract-didi-travel 代码审查 8 项修复，397 测试 |
+| **v3.11.12** | 2026-07-09 | extract-travel-invoice PDF 文字直接提取 + 转置表格输出；wiki-lint --fix 噪音链接正则修复（避免误删 frontmatter），397 测试 |
+| **v3.11.11** | 2026-07-09 | extract-travel-invoice 代码审查 8 项修复，397 测试 |
 | **v3.11.10** | 2026-07-09 | extract-weekly-reports 扫描漏人修复：folder list → 跨全文件夹 search + 白名单预筛 + 撤回/重复去重，命中 3→10 人，384→397 测试 |
 | **v3.11.9** | 2026-07-08 | 安全加固（开源准备）+ 工程质量 6 项 + 测试补全，315→384 测试 |
 | **v3.11.8** | 2026-07-08 | build-asr-prompt 性能与质量优化：Phase 1/2 并发化 + Phase 3 校正策略强化，315 测试 |

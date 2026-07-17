@@ -134,7 +134,7 @@ def _daily_vector_index(bundle) -> dict:
         if not embedder:
             return {"status": "skipped", "reason": "embedder_not_configured"}
         from iris.retrieval.vector_index import VectorIndex, build_vector_index
-        ds_name = (bundle.data_source or {}).get("default_source", "work_docs_main")
+        ds_name = (bundle.data_source or {}).get("default_source", "main_source")
         summary_path = bundle.root / "data" / "metadata" / f"{ds_name}_chunk_summary.json"
         if not summary_path.exists():
             return {"status": "skipped", "reason": "no_chunk_summary"}

@@ -394,7 +394,7 @@ class DeepEvaluator:
         # 初始化源定位器（iris3: 主数据源 chunk 摘要）
         data_root = Path(config.root) / "data" / "metadata"
         chunk_summary_paths = [
-            str(data_root / "work_docs_main_chunk_summary.json"),
+            str(data_root / "main_source_chunk_summary.json"),
         ]
         self._locator = SourceLocator(chunk_summary_paths)
 
@@ -586,7 +586,7 @@ class DeepEvaluator:
                     if any(v.verdict == "source_missing" for v in pr.accuracy_verdicts)
                 ][:10],
                 "suggestion": "可能原因：(1) 文件已被删除/重命名；(2) chunk 索引需要重建。"
-                             "运行 `build-chunks` 重建索引：python scripts/run_cli.py build-chunks --source work_docs_main。"
+                             "运行 `build-chunks` 重建索引：python scripts/run_cli.py build-chunks --source main_source。"
                              "若重建后仍缺失，检查源文件是否已被移至 obsidian 的其他目录。",
                 "estimated_effort": "重建索引约 5 分钟",
                 "automation": "可自动化",

@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple
 class SourceLocator:
     """从 chunk 摘要索引中定位源文档片段。
 
-    支持多个 chunk 摘要（work_docs_main + xiaolongxia_shared）。
+    支持多个 chunk 摘要（主数据源 + 共享数据源）。
     """
 
     def __init__(self, chunk_summary_paths: List[str]):

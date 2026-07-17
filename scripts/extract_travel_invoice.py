@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""滴滴行程单差旅报销信息提取工具。
+"""网约车行程单差旅报销信息提取工具。
 
 双阶段流水线：
   Stage1: 优先直接提取 PDF 文字（文字型 PDF），降级为 adv_model 多模态理解图片（扫描件）
   Stage2: base_model (Deepseek) 合并/排序/区分差旅 → 输出报销汇总
 
 用法：
-  python scripts/extract_didi_travel.py <文件路径1> [文件路径2 ...]
-  python scripts/extract_didi_travel.py --output 输出路径.md <文件路径1> [...]
+  python scripts/extract_travel_invoice.py <文件路径1> [文件路径2 ...]
+  python scripts/extract_travel_invoice.py --output 输出路径.md <文件路径1> [...]
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from iris.llm import EnvironmentConfiguredLLMProvider, LLMProviderError, LLMRequ
 
 # ── Prompt ─────────────────────────────────────────────────────
 
-STAGE1_TEXT_PROMPT = """你是一个专业的票据解析助手。以下是从滴滴行程单 PDF 中直接提取的文字内容，请解析所有行程信息。
+STAGE1_TEXT_PROMPT = """你是一个专业的票据解析助手。以下是从网约车行程单 PDF 中直接提取的文字内容，请解析所有行程信息。
 
 注意：文字可能因 PDF 排版而跨行断开，请根据上下文合并还原完整字段。
 行程单头部会标注年份（如"行程起止日期：2026-05-24 至 2026-06-30"），请用该年份补全所有日期。
@@ -444,7 +444,7 @@ def stage2_consolidate(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="滴滴行程单差旅报销信息提取")
+    parser = argparse.ArgumentParser(description="网约车行程单差旅报销信息提取")
     parser.add_argument("files", nargs="+", help="行程单文件路径（PDF/图片）")
     parser.add_argument("--output", "-o", help="输出文件路径（可选）")
     args = parser.parse_args()
@@ -455,7 +455,7 @@ def main():
 
     # 解析输入文件（文字型 PDF 直接提取文字，扫描件/图片转内存图像）
     print("=" * 50, file=sys.stderr)
-    print("滴滴行程单差旅报销提取", file=sys.stderr)
+    print("网约车行程单差旅报销提取", file=sys.stderr)
     print("=" * 50, file=sys.stderr)
     text_inputs, page_images = resolve_inputs(args.files)
     if not text_inputs and not page_images:

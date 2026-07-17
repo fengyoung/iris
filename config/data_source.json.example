@@ -1,8 +1,8 @@
 {
   "version": "3.2",
-  "default_source": "work_docs_main",
+  "default_source": "main_source",
   "sources": {
-    "work_docs_main": {
+    "main_source": {
       "enabled": true,
       "name": "工作文档主数据源",
       "path": "${IRIS_WORK_DOCS_DIR}",

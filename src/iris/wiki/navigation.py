@@ -349,9 +349,9 @@ def lint_wiki(wiki_root: Path, data_root: Optional[Path] = None) -> Dict[str, An
     index_info: Dict[str, Any] = {}
     if data_root:
         metadata_dir = data_root / "metadata"
-        scan_path = metadata_dir / "work_docs_main_scan_summary.json"
-        chunk_path = metadata_dir / "work_docs_main_chunk_summary.json"
-        vector_dir = metadata_dir / "work_docs_main_vector_index"
+        scan_path = metadata_dir / "main_source_scan_summary.json"
+        chunk_path = metadata_dir / "main_source_chunk_summary.json"
+        vector_dir = metadata_dir / "main_source_vector_index"
 
         # 扫描信息
         if scan_path.exists():

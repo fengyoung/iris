@@ -32,14 +32,14 @@ COMMANDS = [
     "metrics-export",
     "watch",
     # ── 委托命令 ──
-    "trello", "extract-weekly-reports", "extract-didi-travel",
+    "trello", "extract-weekly-reports", "extract-travel-invoice",
     "sync-memory", "feishu-doc-convert", "chat-digest",
 ]
 
 _DELEGATED_SCRIPTS = {
     "trello": "trello.py",
     "extract-weekly-reports": "extract_weekly_reports.py",
-    "extract-didi-travel": "extract_didi_travel.py",
+    "extract-travel-invoice": "extract_travel_invoice.py",
     "sync-memory": "sync_memory.py",
 }
 
