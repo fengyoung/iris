@@ -27,8 +27,20 @@ class BiweeklyCollector:
 
     # ── OP 文档 ────────────────────────────────────────────────
 
+    # 个人/团队 OKR 文件名特征：`-团队名-人名-OKR` 子串，用于排除
+    _TEAM_OKR_PATTERN = re.compile(
+        r'-(?:智能引擎组|质检研发|图验算法|搜索推荐部|价格策略|'
+        r'大模型算法组|推荐算法|搜索算法|搜推工程|硬件专项|软硬一体)'
+        r'-[一-鿿]{2,4}-OKR',
+    )
+
     def load_op_document(self) -> str:
-        """加载 SOURCE/01-目标管理/ 中最新的 OP 规划文档（内存缓存）。"""
+        """加载 SOURCE/01-目标管理/ 中最新的部门级 OP/OKR 规划文档（内存缓存）。
+
+        按文件名中嵌入的 YYYYMMDD 日期降序排列，优先级：
+        1. 含「数据智能部」且非个人/团队 OKR 的文件（部门级 OP/OKR）
+        2. 目录中第一个可用文件（兜底）
+        """
         if self._op_text_cache is not None:
             return self._op_text_cache
         sources = self._config.data_source.get("sources", {})
@@ -37,17 +49,44 @@ class BiweeklyCollector:
             if not src_path.exists():
                 continue
             op_dir = src_path / "01-目标管理"
-            if op_dir.exists():
-                for f in sorted(op_dir.glob("*.md"), reverse=True):
-                    try:
-                        text = f.read_text(encoding="utf-8")
-                    except (OSError, UnicodeDecodeError):
-                        continue
-                    if text.startswith("---"):
-                        parts = text.split("---", 2)
-                        text = parts[2].strip() if len(parts) >= 3 else text
-                    self._op_text_cache = text
-                    return self._op_text_cache
+            if not op_dir.exists():
+                continue
+
+            # 收集部门级文件（含「数据智能部」且非个人/团队 OKR）
+            candidates: list[Path] = []
+            for f in op_dir.glob("*.md"):
+                fname = f.name
+                if "数据智能部" not in fname:
+                    continue
+                if self._TEAM_OKR_PATTERN.search(fname):
+                    continue
+                candidates.append(f)
+
+            if not candidates:
+                # 兜底：取目录中第一个可用文件
+                candidates = sorted(op_dir.glob("*.md"), reverse=True)
+
+            # 按嵌入日期降序
+            candidates.sort(
+                key=lambda p: (
+                    int(self._extract_date_from_path(p.name).strftime("%Y%m%d"))
+                    if self._extract_date_from_path(p.name) else 0
+                ),
+                reverse=True,
+            )
+
+            for f in candidates:
+                try:
+                    text = f.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    continue
+                if text.startswith("---"):
+                    parts = text.split("---", 2)
+                    text = parts[2].strip() if len(parts) >= 3 else text
+                self._op_text_cache = text
+                logger.info("  加载 OP 文档: %s", f.name)
+                return self._op_text_cache
+
         self._op_text_cache = ""
         logger.warning("未找到 OP 规划文档（01-目标管理/*.md），Stage 0a 将返回空方向")
         return ""

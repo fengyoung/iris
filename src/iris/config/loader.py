@@ -218,12 +218,13 @@ def load_config_bundle(
     for name in loaded:
         loaded[name] = resolve_env_vars(loaded[name], env)
 
-    # 警告仍含 ${...} 的关键字段（意味着变量未找到）
-    _warn_unresolved_placeholders(loaded)
-
     # 项目路径占位符解析
     for name in loaded:
         loaded[name] = resolve_path_vars(loaded[name], root)
+
+    # 警告仍含 ${...} 的关键字段（意味着变量未找到）
+    # 放在 resolve_path_vars 之后，避免 IRIS_XXX_DIR 等路径占位符误报
+    _warn_unresolved_placeholders(loaded)
 
     # ── 可选配置 ──────────────────────────────────────────────
     wiki_config = _load_optional_config(config_root, "wiki.json", env, root)
