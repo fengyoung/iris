@@ -19,8 +19,6 @@ import ctypes
 import ctypes.util
 import json
 import os
-import re
-import subprocess
 import sys
 import threading
 import time
@@ -30,6 +28,13 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from ._types import AsrCorrection
+from ._clipboard_io import (  # noqa: F401 — re-exported for backwards compatibility
+    _paste,
+    _read_clipboard,
+    _replace_text_in_place,
+    _write_clipboard,
+)
+from ._text_detector import _CODE_PATTERNS, _count_chinese, _is_asr_text  # noqa: F401
 
 # ═══════════════════════════════════════════════════════════════════
 # 常量
@@ -37,11 +42,6 @@ from ._types import AsrCorrection
 
 _DEFAULT_VOCO_DIR = os.path.expanduser("~/Library/Application Support/VocoType")
 VOCO_DIR = os.environ.get("IRIS_VOCOTYPE_DIR", _DEFAULT_VOCO_DIR)
-
-# ASR 文本特征阈值
-_MIN_ASR_LENGTH = 5
-_MAX_ASR_LENGTH = 500
-_MIN_CHINESE_RATIO = 0.3
 
 # 监听窗口（热键按下后等待剪贴板变化的秒数）
 _LISTEN_WINDOW_SEC = 2.0
@@ -51,87 +51,6 @@ _POLL_INTERVAL = 0.2
 
 # LLM 超时
 _LLM_TIMEOUT_MS = 4000
-
-
-# ═══════════════════════════════════════════════════════════════════
-# 剪贴板工具
-# ═══════════════════════════════════════════════════════════════════
-
-def _read_clipboard() -> str:
-    """读取剪贴板文本内容。"""
-    try:
-        return subprocess.check_output(["pbpaste"], text=True)
-    except Exception:
-        return ""
-
-
-def _write_clipboard(text: str) -> None:
-    """写入文本到剪贴板。"""
-    try:
-        subprocess.run(["pbcopy"], input=text, text=True)
-    except Exception:
-        pass
-
-
-def _paste() -> None:
-    """模拟 Cmd+V 粘贴。"""
-    try:
-        subprocess.run([
-            "osascript", "-e",
-            'tell application "System Events" to keystroke "v" using command down',
-        ], timeout=3)
-    except Exception:
-        pass
-
-
-def _replace_text_in_place(corrected: str, raw_length: int) -> None:
-    """用校正文本替换 vocotype 刚粘贴的原始文本。
-
-    策略：
-    1. 写入校正文本到剪贴板（覆盖 vocotype 写入的原文）
-    2. 基线等待 vocotype 的 Cmd+V 贴入完成（最小 0.15s）
-    3. 轮询剪贴板确认稳定（最长额外 1.0s）
-    4. 按 raw_length 次 Delete 键删除原始文本，粘贴校正文本
-    """
-    _write_clipboard(corrected)
-
-    # 基线等待：vocotype 的 Cmd+V 至少需要 0.15s 完成
-    _BASELINE_WAIT = 0.15
-    time.sleep(_BASELINE_WAIT)
-
-    # 轮询确认剪贴板稳定（无其他写入方），最长再等 1.0s
-    _POLL_MAX_EXTRA = 1.0
-    _POLL_STABLE_CYCLES = 3
-    stable_count = 0
-    last_clip = _read_clipboard()
-    t_deadline = time.monotonic() + _POLL_MAX_EXTRA
-
-    while time.monotonic() < t_deadline:
-        time.sleep(0.05)
-        current = _read_clipboard()
-        if current == last_clip:
-            stable_count += 1
-            if stable_count >= _POLL_STABLE_CYCLES:
-                break
-        else:
-            stable_count = 0
-            last_clip = current
-
-    try:
-        subprocess.run([
-            "osascript", "-e",
-            f'''
-            tell application "System Events"
-                repeat {raw_length} times
-                    key code 51  -- Delete / Backspace
-                end repeat
-                delay 0.05
-                keystroke "v" using command down
-            end tell
-            ''',
-        ], timeout=5)
-    except Exception:
-        pass
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -342,47 +261,6 @@ class _AhoCorasick:
                 i += 1
 
         return "".join(result_chars), applied
-
-
-# ═══════════════════════════════════════════════════════════════════
-# ASR 文本特征检测
-# ═══════════════════════════════════════════════════════════════════
-
-# 非 ASR 文本特征（代码、URL、Markdown 等）
-_CODE_PATTERNS = re.compile(
-    r"[{};]|def\s|import\s|class\s|function\s|http[s]?://|"
-    r"```|^#{1,6}\s|^\*\s|^\d+\.\s|^\-\s"
-)
-
-
-def _count_chinese(text: str) -> int:
-    """统计中文字符数。"""
-    return sum(1 for ch in text if "一" <= ch <= "鿿")
-
-
-def _is_asr_text(text: str) -> bool:
-    """判断文本是否像是 vocotype ASR 输出。
-
-    检测维度：
-    - 中文为主（>30%）
-    - 长度在 5-500 之间
-    - 无代码/URL/Markdown 特征
-    """
-    if not text:
-        return False
-
-    length = len(text)
-    if length < _MIN_ASR_LENGTH or length > _MAX_ASR_LENGTH:
-        return False
-
-    chinese_count = _count_chinese(text)
-    if chinese_count / max(length, 1) < _MIN_CHINESE_RATIO:
-        return False
-
-    if _CODE_PATTERNS.search(text):
-        return False
-
-    return True
 
 
 # ═══════════════════════════════════════════════════════════════════

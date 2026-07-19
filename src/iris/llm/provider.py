@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -15,6 +17,42 @@ from iris.config.loader import ConfigBundle
 from iris.core.llm_types import LLMRequest, LLMResponse  # 从 core/ 迁移（消除循环依赖）
 from iris.llm.model_manager import ModelManager, ModelManagerError
 from iris.llm.router import ModelRouter, RoutingDecision
+
+
+class _CircuitBreaker:
+    """模型级熔断器：连续失败超过阈值后暂停重试，60s 后自动半开重试。"""
+
+    def __init__(self, threshold: int = 5, reset_after: float = 60.0):
+        self._failures: Dict[str, int] = {}
+        self._opened_at: Dict[str, float] = {}
+        self._threshold = threshold
+        self._reset_after = reset_after
+        self._lock = threading.Lock()
+
+    def record_failure(self, key: str) -> None:
+        with self._lock:
+            self._failures[key] = self._failures.get(key, 0) + 1
+            if self._failures[key] >= self._threshold and key not in self._opened_at:
+                self._opened_at[key] = time.monotonic()
+
+    def record_success(self, key: str) -> None:
+        with self._lock:
+            self._failures.pop(key, None)
+            self._opened_at.pop(key, None)
+
+    def is_open(self, key: str) -> bool:
+        with self._lock:
+            if key not in self._opened_at:
+                return False
+            elapsed = time.monotonic() - self._opened_at[key]
+            if elapsed >= self._reset_after:
+                self._failures.pop(key, None)
+                self._opened_at.pop(key, None)
+                return False
+            return True
+
+
+_circuit_breaker = _CircuitBreaker()
 
 
 class LLMProviderError(RuntimeError):
@@ -262,8 +300,16 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
                 continue
 
             api_base_url = model_config["api_base_url"]
+
+            if _circuit_breaker.is_open(model_key):
+                logger.warning("熔断器开路，跳过 %s（短期内连续失败次数过多）", model_key)
+                last_error = LLMProviderError(f"熔断器开路: {model_key}")
+                continue
+
             try:
                 text, pt, ct = call_fn(api_base_url, api_key, model_config["model"], model_config)
+
+                _circuit_breaker.record_success(model_key)
 
                 if role != decision.selected_role or model_id != self._model_manager.get_active_model_id(role):
                     logger.warning("模型降级: %s/%s → %s/%s",
@@ -274,9 +320,11 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
                 return text, role, str(model_config["provider"]).lower(), model_config["model"], api_base_url, pt, ct
 
             except LLMProviderError as exc:
+                _circuit_breaker.record_failure(model_key)
                 last_error = exc
                 continue
             except Exception as exc:
+                _circuit_breaker.record_failure(model_key)
                 last_error = LLMProviderError(f"模型 {model_key} 调用异常: {exc}")
                 continue
 

@@ -277,8 +277,8 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
                     _profile_max = _profile_cfg.get("max_mappings")
                     if _profile_max is not None:
                         max_mappings = int(_profile_max)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("加载 asr_profiles.json 中 max_mappings 失败，使用默认值: %s", e)
             replace_path = f"asr-replace-dict-{today}.json"
             if args.output_file and mode == "replace-dict":
                 replace_path = args.output_file
@@ -370,8 +370,8 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
                                 added += 1
                         if added:
                             deployed.append(f"手动热词 +{added}")
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning("合并手动热词失败 (%s): %s", manual_path, e)
                 (voco_path / "hotwords.txt").write_text(
                     "\n".join(merged) + "\n", encoding="utf-8"
                 )
@@ -389,8 +389,8 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
                         encoding="utf-8",
                     )
                     deployed.append("ai_settings.json (LLM 优化已关闭)")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("写入 ai_settings.json 失败: %s", e)
 
             # 写入 postprocess.json：清空 replace_map
             pp_path = voco_path / "postprocess.json"
@@ -403,8 +403,8 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
                         encoding="utf-8",
                     )
                     deployed.append("postprocess.json (替换词典已清空)")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("写入 postprocess.json 失败: %s", e)
 
             # 部署到 Iris data/
             data_dir = Path("data")
@@ -624,8 +624,8 @@ def handle_asr_corrector(args, bundle, logger) -> int:
             with open(profile_path) as f:
                 profiles = _json.load(f)
             profile_config = profiles.get(profile_name, profiles.get("default", {}))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("加载 asr_profiles.json 失败，使用空 profile: %s", e)
 
     # 加载替换词典
     dict_path = profile_config.get(
