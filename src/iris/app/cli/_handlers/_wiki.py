@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Dict, List
@@ -200,6 +201,7 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
         _emit_output(args.command, {"error": "Wiki 目录为空，无页面可提取"}, pretty=args.pretty)
         return 1
 
+    _t0 = time.monotonic()  # 全流程计时起点
     mode = getattr(args, "asr_mode", "all") or "all"
     today = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     data_dir = bundle.root / "data"
@@ -215,11 +217,14 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
     hotwords: List[str] = []
     hotwords_file = ""
     if mode in ("all", "hotwords", "prompt"):
-        print("[asr] Phase 1: LLM 热词提取...", file=sys.stderr)
+        print("[asr] Phase 1/3: LLM 热词提取...", file=sys.stderr)
+        _t1 = time.monotonic()
         hotword_extractor = LLMHotwordExtractor(pages)
         max_hotwords = getattr(args, "max_hotwords", 490) or 490
         hotwords = hotword_extractor.extract(provider, max_hotwords=max_hotwords,
                                              domain_context=domain_context)
+        print(f"[asr]   ... Phase 1 完成 ({time.monotonic() - _t1:.1f}s): "
+              f"{len(hotwords)} 热词", file=sys.stderr)
 
         # 仅在需要热词文件的模式写盘；prompt 模式只将热词喂给优化器
         if mode in ("all", "hotwords"):
@@ -248,10 +253,14 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
 
         if mode in ("all", "replace-dict"):
             # LLM 生成误识别映射
-            print(f"[asr] Phase 2: 术语 {len(terms)} 个 → LLM 误识别生成...",
+            print(f"[asr] Phase 2/3: LLM 误识别生成（{len(terms)} 术语）...",
                   file=sys.stderr)
+            _t2 = time.monotonic()
             terms = extractor.generate_misreadings(terms, provider,
                                                    domain_context=domain_context)
+            total_mappings = sum(len(t.mis_asr) for t in terms)
+            print(f"[asr]   ... Phase 2 完成 ({time.monotonic() - _t2:.1f}s): "
+                  f"{total_mappings} 映射", file=sys.stderr)
 
             max_mappings = getattr(args, "max_mappings", 990) or 990
             max_chars = getattr(args, "max_chars", 20) or 20
@@ -268,7 +277,8 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
     output_path = ""
     if mode in ("all", "prompt"):
         # terms 与 new_version 已在 Phase 2 填充（"all"/"prompt" 均经过 Phase 2）
-        print("[asr] Phase 3: LLM Prompt 优化压缩...", file=sys.stderr)
+        print("[asr] Phase 3/3: 校正提示词渲染...", file=sys.stderr)
+        _t3 = time.monotonic()
         new_version.term_count = len(terms)
         new_version.wiki_page_count = len(pages)
 
@@ -298,6 +308,9 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
         # 持久化版本
         new_version.prompt_text = prompt
         save_version(data_dir, new_version)
+
+        print(f"[asr]   ... Phase 3 完成 ({time.monotonic() - _t3:.1f}s): "
+              f"{len(prompt)} 字符", file=sys.stderr)
 
     # ── 部署到 vocotype（--deploy） ───────────────────────
     deployed: List[str] = []
@@ -368,6 +381,16 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
                 deployed.append(f"data/asr_prompt.md")
         else:
             deployed.append(f"⚠ vocotype 目录不存在: {VOCO_DIR}")
+
+    # ── 总耗时汇总 ─────────────────────────────────────
+    _elapsed = time.monotonic() - _t0
+    _summary_parts = [f"总耗时 {_elapsed:.1f}s"]
+    if hotwords:
+        _summary_parts.append(f"热词 {len(hotwords)}")
+    if terms:
+        _summary_parts.append(f"术语 {len(terms)}")
+    print(f"[asr] {' | '.join(_summary_parts)}", file=sys.stderr)
+    print(file=sys.stderr)
 
     # ── 输出报告 ─────────────────────────────────────────
     payload: Dict[str, Any] = {}

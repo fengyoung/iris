@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 from .._constants import get_wiki_prefix
 from ..context_loader import WikiPageInfo
 from ._types import AsrTerm
+from ._progress import ProgressTracker
 from .._term_cleaners import (
     _BOLD_RE,
     clean_markup,
@@ -214,6 +215,7 @@ class LLMHotwordExtractor:
         from iris.llm import LLMRequest
 
         batches = _build_page_batches(self._pages)
+        tracker = ProgressTracker(total=len(batches), label="热词提取")
 
         print(f"[asr] 热词提取：{len(batches)} 批并发，共 {len(self._pages)} 页",
               file=sys.stderr)
@@ -247,14 +249,12 @@ class LLMHotwordExtractor:
                     if not _is_valid_hotword(cleaned):
                         continue
                     clean_batch.append(cleaned)
-                print(f"  [asr] 第 {idx+1} 批 → {len(batch_terms)} 个候选（过滤后 {len(clean_batch)}）",
-                      file=sys.stderr)
+                tracker.increment(detail=f"第{idx+1}批 {len(clean_batch)}词 (候选{len(batch_terms)})")
                 return clean_batch
             except Exception as exc:
                 if isinstance(exc, (KeyboardInterrupt, SystemExit)):
                     raise
-                print(f"  [warn] 第 {idx+1} 批热词提取失败: {exc}",
-                      file=sys.stderr)
+                tracker.increment_error(detail=f"第{idx+1}批失败: {exc}")
                 return []
 
         # 并发执行；executor.map 保持批次顺序，去重优先保留靠前批次的写法
@@ -278,6 +278,9 @@ class LLMHotwordExtractor:
                     break
 
         final.sort(key=lambda x: (len(x), x))
+
+        print(f"[asr]   ... 热词提取完成 ({tracker.elapsed():.1f}s): {len(final)} 热词",
+              file=sys.stderr)
         return final
 
 

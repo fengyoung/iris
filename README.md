@@ -1,10 +1,10 @@
-# Iris 3.19.2
+# Iris 3.19.3
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
 
-**v3.19.2** — ASR Phase 1 基础设施：`list_patterns()` API、`extract_llm_discoveries()` 函数、daily-start 集成 asr-audit、`[LLM]` 前缀解析修复。测试 1,565 通过，覆盖率 60.42%。
+**v3.19.3** — 交互体验：`build-asr-prompt` 三阶段实时进度输出（`_progress.py` 线程安全追踪器 + Phase 2 逐批进度补齐 + Phase 级耗时）。测试 1,565 通过，覆盖率 60.42%。
 
 ## 开发路线
 
@@ -159,6 +159,7 @@ iris3/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.19.3** | 2026-07-19 | 交互体验：build-asr-prompt 实时进度输出（ProgressTracker + Phase 2 逐批进度 + 耗时汇总） |
 | \*\*v3.19.2\*\* | 2026-07-19 | ASR Phase 1 基础设施：反馈解析修复、模式枚举 API、daily-start ASR 审计 |\
 | \*\*v3.19.1\*\* | 2026-07-19 | ASR 代码质量加固：JSONL 反馈格式统一、热词去重修正、死代码清理、剪贴板等待策略改进、常量复用 |\
 | \*\*v3.19.0\*\* | 2026-07-19 | ASR 实时校正引擎：iris-asr-corrector 常驻守护进程，剪贴板监听 vocotype ASR 输出双重校正，一键部署，自动反馈闭环 |\

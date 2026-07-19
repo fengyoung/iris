@@ -37,6 +37,7 @@ from ..discovery_utils import extract_terms, is_high_value_term, normalized_key
 from iris.utils.template_loader import load_template as _load_template_file
 
 from ._types import AsrTerm, AsrPromptVersion
+from ._progress import ProgressTracker
 
 logger = logging.getLogger(__name__)
 
@@ -305,6 +306,10 @@ class TermExtractor:
             for start in range(0, len(terms), self._BATCH_SIZE)
         ]
 
+        tracker = ProgressTracker(total=len(batches), label="误识别生成")
+        print(f"[asr] 误识别生成：{len(batches)} 批并发，共 {len(terms)} 术语",
+              file=sys.stderr)
+
         def _run_batch(idx_batch):
             idx, batch = idx_batch
             prompt = self._build_misreadings_prompt(batch, domain_context)
@@ -321,13 +326,12 @@ class TermExtractor:
                     max_tokens=8192,
                 )
                 self._parse_misreadings_response(response.text, batch)
+                filled = sum(1 for t in batch if t.mis_asr)
+                tracker.increment(detail=f"第{idx+1}批 {filled}/{len(batch)} 术语已映射")
             except Exception as exc:
                 if isinstance(exc, (KeyboardInterrupt, SystemExit)):
                     raise
-                print(
-                    f"[warn] 第 {idx + 1} 批 ASR 误识别生成失败: {exc}",
-                    file=sys.stderr,
-                )
+                tracker.increment_error(detail=f"第{idx+1}批失败: {exc}")
 
         _timeout = min(len(batches), 8) * 90
         from iris.core.thread_pool import shared_pool
@@ -337,6 +341,9 @@ class TermExtractor:
             except FuturesTimeoutError:
                 logger.warning("ASR 误识别生成超时（%ds），已处理完成的批次保留", _timeout)
 
+        total_mappings = sum(len(t.mis_asr) for t in terms)
+        print(f"[asr]   ... 误识别生成完成 ({tracker.elapsed():.1f}s): {total_mappings} 映射",
+              file=sys.stderr)
         return terms
 
     def _build_misreadings_prompt(self, terms: List[AsrTerm], domain_context: str = "") -> str:
