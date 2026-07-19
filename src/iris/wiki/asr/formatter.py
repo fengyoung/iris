@@ -47,7 +47,7 @@ def format_hotwords_file(hotwords: List[str], output_path: str) -> str:
 def format_replace_dict(
     terms: List[AsrTerm],
     output_path: str,
-    max_mappings: int = 990,
+    max_mappings: int = 2000,
     max_chars: int = 20,
 ) -> str:
     """将术语+误识别映射输出为替换词典 JSON。
@@ -61,7 +61,7 @@ def format_replace_dict(
     Args:
         terms: 已填充 mis_asr 的术语列表
         output_path: 输出文件路径
-        max_mappings: 最多映射条数（上限 990）
+        max_mappings: 最多映射条数（默认 2000，可通过 profile 配置覆盖）
         max_chars: 误识别和正确词的最大字符数
 
     Returns:

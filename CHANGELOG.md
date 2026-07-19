@@ -4,6 +4,22 @@
 
 ---
 
+## v3.19.6 (2026-07-19)
+
+ASR 校正引擎加固 — max_mappings 配置化、替换词典热加载、手动热词合并机制。
+
+### 改进
+
+- **`max_mappings` 上限扩展与配置化**：替换词典上限 990→2000，移至 `config/asr_profiles.json` profile 配置，优先级链「CLI 参数 > profile > 默认值 2000」，后续调整零代码改动
+- **替换词典热加载**：新增 `set_dict_path()` + `_check_dict_reload()`，每 5 秒检测 `data/asr_replace_dict.json` mtime，变化时自动重建 Aho-Corasick 自动机，`build-asr-prompt --deploy` 后无需重启进程
+- **手动热词合并机制**：新增 `data/asr_manual_hotwords.txt`，用户手动添加的热词在 `--deploy` 时自动与 LLM 生成热词合并去重后写入 vocotype，手动热词永久保留不被覆盖
+
+### 文档
+
+- 配置示例 `asr_profiles.json.example` 同步更新，三个 profile 新增 `max_mappings` 字段
+
+---
+
 ## v3.19.5 (2026-07-19)
 
 全面质量加固 — 双周报流水线优化、ASR 子系统健壮性提升、测试覆盖补全。

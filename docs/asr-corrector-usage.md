@@ -1,6 +1,6 @@
 # ASR 实时校正引擎 — 使用指南
 
-> Iris 3.19.5 · 将 vocotype 语音转写接入 Iris，实现实时纠错 + 润色 + 反馈闭环。
+> Iris 3.19.6 · 将 vocotype 语音转写接入 Iris，实现实时纠错 + 润色 + 反馈闭环。
 
 ## 快速开始
 
@@ -38,6 +38,7 @@ iris3 asr-corrector --correct-mode full
 {
   "default": {
     "mode": "full",
+    "max_mappings": 2000,
     "llm": {
       "provider": "deepseek",
       "model": "deepseek-v4-flash",
@@ -46,6 +47,8 @@ iris3 asr-corrector --correct-mode full
   }
 }
 ```
+
+`max_mappings` 控制替换词典生成的映射条数上限（默认 2000），可通过 profile 按需调整。
 
 ## 工作链路
 
@@ -57,10 +60,13 @@ iris3 asr-corrector --correct-mode full
 
 | 文件 | 用途 |
 |------|------|
-| `data/asr_replace_dict.json` | 替换词典（990 条），每次校正的第一步 |
-| `data/asr_prompt.md` | LLM 校正 Prompt（~930 字），编辑助手角色 |
+| `data/asr_replace_dict.json` | 替换词典（约 990 条），Aho-Corasick 自动匹配，支持热加载 |
+| `data/asr_prompt.md` | LLM 校正 Prompt（~970 字），编辑助手角色，支持热加载 |
 | `data/asr_feedback.jsonl` | 校正记录（自动积累），Phase 1 反向优化用 |
-| `config/asr_profiles.json` | LLM 使用参数（provider/model/timeout） |
+| `data/asr_manual_hotwords.txt` | 手动热词表（用户添加），`--deploy` 时自动与 LLM 热词合并去重 |
+| `config/asr_profiles.json` | LLM 使用参数 + max_mappings 上限配置 |
+
+> **热加载**：替换词典和 LLM Prompt 均支持运行时热加载（每 5 秒检测文件变化），修改后无需重启 `asr-corrector` 进程。
 
 ## 常见问题
 

@@ -262,8 +262,23 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
             print(f"[asr]   ... Phase 2 完成 ({time.monotonic() - _t2:.1f}s): "
                   f"{total_mappings} 映射", file=sys.stderr)
 
-            max_mappings = getattr(args, "max_mappings", 990) or 990
+            max_mappings = getattr(args, "max_mappings", 2000) or 2000
             max_chars = getattr(args, "max_chars", 20) or 20
+            # 从 profile 配置读取 max_mappings 覆盖（优先级：CLI 参数 > profile > 默认值）
+            import json as _profile_json
+            from pathlib import Path as _ProfilePath
+            profile_path = _ProfilePath("config/asr_profiles.json")
+            if profile_path.exists() and getattr(args, "max_mappings", None) is None:
+                try:
+                    with open(profile_path) as _pf:
+                        _profiles = _profile_json.load(_pf)
+                    _profile_name = getattr(args, "profile", "default") or "default"
+                    _profile_cfg = _profiles.get(_profile_name, _profiles.get("default", {}))
+                    _profile_max = _profile_cfg.get("max_mappings")
+                    if _profile_max is not None:
+                        max_mappings = int(_profile_max)
+                except Exception:
+                    pass
             replace_path = f"asr-replace-dict-{today}.json"
             if args.output_file and mode == "replace-dict":
                 replace_path = args.output_file
@@ -334,12 +349,33 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
                     shutil.copy2(str(src), str(backup_dir / fname))
             deployed.append(f"备份: {backup_dir}")
 
-            # 部署热词
+            # 部署热词（合并手动热词）
             if hotwords_file and hotwords:
+                merged = list(hotwords)
+                manual_path = Path("data/asr_manual_hotwords.txt")
+                if manual_path.exists():
+                    try:
+                        manual_words = [
+                            line.strip() for line in
+                            manual_path.read_text(encoding="utf-8").splitlines()
+                            if line.strip() and not line.strip().startswith("#")
+                        ]
+                        # 去重：保留手动词（可能不在 LLM 生成的列表中）
+                        existing = set(merged)
+                        added = 0
+                        for w in manual_words:
+                            if w not in existing:
+                                merged.append(w)
+                                existing.add(w)
+                                added += 1
+                        if added:
+                            deployed.append(f"手动热词 +{added}")
+                    except Exception:
+                        pass
                 (voco_path / "hotwords.txt").write_text(
-                    "\n".join(hotwords) + "\n", encoding="utf-8"
+                    "\n".join(merged) + "\n", encoding="utf-8"
                 )
-                deployed.append(f"hotwords.txt ({len(hotwords)} 词)")
+                deployed.append(f"hotwords.txt ({len(merged)} 词)")
 
             # 写入 vocotype ai_settings.json：关闭 LLM 优化 + 清空替换词典
             ai_settings_path = voco_path / "ai_settings.json"
@@ -645,6 +681,8 @@ def handle_asr_corrector(args, bundle, logger) -> int:
 
     if prompt_path:
         corrector.set_prompt_path(str(_Path(prompt_path)))
+    if dict_path:
+        corrector.set_dict_path(str(_Path(dict_path)))
 
     corrector.run_forever()
     return 0

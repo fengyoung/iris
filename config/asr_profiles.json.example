@@ -4,6 +4,7 @@
     "replace_dict": "data/asr_replace_dict.json",
     "llm_prompt": "data/asr_prompt.md",
     "mode": "full",
+    "max_mappings": 2000,
     "llm": {
       "provider": "deepseek",
       "model": "deepseek-v4-flash",
@@ -16,6 +17,7 @@
     "replace_dict": "data/asr_replace_dict.json",
     "llm_prompt": "data/asr_prompt_meeting.md",
     "mode": "full",
+    "max_mappings": 2000,
     "llm": {
       "provider": "deepseek",
       "model": "deepseek-v4-flash",
@@ -28,6 +30,7 @@
     "replace_dict": "data/asr_replace_dict.json",
     "llm_prompt": null,
     "mode": "fast",
+    "max_mappings": 2000,
     "llm": null
   }
 }

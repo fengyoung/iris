@@ -1,4 +1,4 @@
-# Iris 3.19.5 — 项目执行说明
+# Iris 3.19.6 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~25,000 行 / 140 文件 / 21 模块 · CLI 49 命令 · 单元测试 1,565（96 文件）· 覆盖率 60.42% · 8 个项目级 Skill · Wiki 201 页 · 知识图谱节点 198 / 关系边 821（NetworkX 引擎） · 数据源 716 文档 / 4,271 Chunk · 向量索引 7,210 条 · LLM 响应缓存（内存 LRU 驱逐）· ASR 实时校正引擎（剪贴板监听 + Aho-Corasick + LLM 编辑助手）· Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听 · CI/CD（Makefile / pre-commit / GitHub Actions）· ASR Pipeline 交互式进度输出。
+~25,000 行 / 140 文件 / 21 模块 · CLI 49 命令 · 单元测试 1,565（96 文件）· 覆盖率 60.42% · 8 个项目级 Skill · Wiki 201 页 · 知识图谱节点 201 / 关系边 928（NetworkX 引擎） · 数据源 731 文档 / 4,350 Chunk · 向量索引 7,289 条 · LLM 响应缓存（内存 LRU 驱逐）· ASR 实时校正引擎（剪贴板监听 + Aho-Corasick + LLM 编辑助手，替换词典热加载 + 手动热词合并）· Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听 · CI/CD（Makefile / pre-commit / GitHub Actions）· ASR Pipeline 交互式进度输出。
 
 ### 关键路径
 
@@ -113,7 +113,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.19.5 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.19.6 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.11 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -158,7 +158,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.19.5 (2026-07-19)** — 全面质量加固：双周报 Stage 4 拆分（4a 纯组装 + 4b LLM 审查）、`_TEAM_OKR_PATTERN` 配置化（`dept_op_keyword` + `team_okr_patterns`）、Stage 3 子方向顺序后置校验、ASR 音近推断示例动态化、`generate_misreadings` 超时修复、新增 30 个测试用例（407 通过）。
+**当前 v3.19.6 (2026-07-19)** — ASR 校正引擎加固：`max_mappings` 上限扩展 990→2000 并配置化至 `asr_profiles.json`、替换词典热加载（`_check_dict_reload`，无需重启进程）、手动热词合并机制（`data/asr_manual_hotwords.txt`）
+
+> v3.19.5 (2026-07-19)：全面质量加固：双周报 Stage 4 拆分（4a 纯组装 + 4b LLM 审查）、`_TEAM_OKR_PATTERN` 配置化（`dept_op_keyword` + `team_okr_patterns`）、Stage 3 子方向顺序后置校验、ASR 音近推断示例动态化、`generate_misreadings` 超时修复、新增 30 个测试用例（407 通过）。
 
 > v3.19.4 (2026-07-19)：双周报生成逻辑优化：修复 `load_op_document()` 误取个人 OKR、Stage 0a 支持 `### KR1：` 格式、Stage 3 Prompt 重写（方向标题精简化 / ≤4条 / 来源按时间最新 / 严格 KR 顺序）、`_warn_unresolved_placeholders` 误报修复。
 

@@ -459,6 +459,10 @@ class AsrCorrector:
         self._reload_interval = 5  # 每 N 秒检查一次 Prompt 文件
         self._last_reload_check = 0.0
 
+        # 替换词典热加载
+        self._dict_path = ""  # 由 CLI handler 设置
+        self._dict_mtime: float = 0.0
+
         # LLM provider（延迟初始化）
         self._provider = None
 
@@ -470,6 +474,11 @@ class AsrCorrector:
         """设置 Prompt 文件路径，启用热加载。"""
         self._prompt_path = path
         self._prompt_mtime = os.path.getmtime(path) if os.path.exists(path) else 0.0
+
+    def set_dict_path(self, path: str) -> None:
+        """设置替换词典文件路径，启用热加载。"""
+        self._dict_path = path
+        self._dict_mtime = os.path.getmtime(path) if os.path.exists(path) else 0.0
 
     def _check_prompt_reload(self) -> None:
         """检查 Prompt 文件是否更新，自动热加载。"""
@@ -486,6 +495,27 @@ class AsrCorrector:
                     self._prompt = f.read()
                 self._prompt_mtime = mtime
                 print(f"[Iris] 🔄 Prompt 已热加载 ({len(self._prompt)} 字)",
+                      file=sys.stderr)
+        except Exception:
+            pass
+
+    def _check_dict_reload(self) -> None:
+        """检查替换词典文件是否更新，自动热加载重建 Aho-Corasick 自动机。"""
+        if not self._dict_path:
+            return
+        now = time.monotonic()
+        if now - self._last_reload_check < self._reload_interval:
+            return
+        self._last_reload_check = now
+        try:
+            mtime = os.path.getmtime(self._dict_path)
+            if mtime != self._dict_mtime:
+                with open(self._dict_path, encoding="utf-8") as f:
+                    data = json.load(f)
+                replace_map = data.get("replace_map", {})
+                self._automaton = _AhoCorasick(replace_map)
+                self._dict_mtime = mtime
+                print(f"[Iris] 🔄 替换词典已热加载 ({len(replace_map)} 条规则)",
                       file=sys.stderr)
         except Exception:
             pass
@@ -594,8 +624,9 @@ class AsrCorrector:
 
     def _tick(self) -> None:
         """单次轮询周期。"""
-        # 0. Prompt 热加载检查
+        # 0. 热加载检查（Prompt + 替换词典）
         self._check_prompt_reload()
+        self._check_dict_reload()
 
         # 1. 检查热键状态
         current_mods = _check_modifiers()

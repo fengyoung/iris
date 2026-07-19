@@ -1,10 +1,10 @@
-# Iris 3.19.5
+# Iris 3.19.6
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
 
-**v3.19.5** — 全面质量加固：双周报 Stage 4 拆分（4a 纯组装 + 4b LLM 审查）、`_TEAM_OKR_PATTERN` 配置化（`dept_op_keyword` + `team_okr_patterns`）、Stage 3 子方向顺序后置校验、ASR 音近推断示例动态化、`generate_misreadings` 超时上限修复、新增 30 个测试用例（407 通过）。
+**v3.19.6** — ASR 校正引擎加固：`max_mappings` 上限扩展 990→2000 并配置化至 `asr_profiles.json`、替换词典热加载（`_check_dict_reload`，无需重启进程）、手动热词合并机制（`data/asr_manual_hotwords.txt`）。
 
 ## 开发路线
 
@@ -159,6 +159,7 @@ iris3/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.19.6** | 2026-07-19 | ASR 校正引擎加固：max_mappings 990→2000 配置化 / 替换词典热加载 / 手动热词合并机制 |
 | **v3.19.5** | 2026-07-19 | 全面质量加固：Stage 4 拆分 / `_TEAM_OKR_PATTERN` 配置化 / Stage 3 顺序后置校验 / ASR 动态推断示例 / 超时修复 / +30 测试（407 通过） |
 | **v3.19.4** | 2026-07-19 | 双周报生成逻辑优化：方向标题精简化 / ≤4 条关键进展 / 来源按时间最新 / 严格 KR 顺序 + OP 文档选择修复 + 配置加载占位符误报修复 |
 | \*\*v3.19.3\*\* | 2026-07-19 | 交互体验：build-asr-prompt 实时进度输出（ProgressTracker + Phase 2 逐批进度 + 耗时汇总） |
