@@ -1,10 +1,10 @@
-# Iris 3.19.6
+# Iris 3.19.7
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
 
-**v3.19.6** — ASR 校正引擎加固：`max_mappings` 上限扩展 990→2000 并配置化至 `asr_profiles.json`、替换词典热加载（`_check_dict_reload`，无需重启进程）、手动热词合并机制（`data/asr_manual_hotwords.txt`）。
+**v3.19.7** — 全面质量加固（P0~P2 七项）：`_wiki.py` 5 处静默异常补日志、embedding 向量 LRU 缓存（128/600s）、`corrector.py` 拆分（834→712 行，`_clipboard_io.py` + `_text_detector.py`）、LLM `_CircuitBreaker` 熔断器、新增 109 个单元测试（biweekly helpers 48 + graph engine 26 + config models 35，总量 1,674）。
 
 ## 开发路线
 
@@ -90,7 +90,7 @@ SOURCE/                     LLM-WIKI/
 - macOS Keychain（可选密钥存储）
 - PyMuPDF / python-docx（PDF/DOCX 处理）
 - ffmpeg（视频抽帧/抽音轨，视频处理必需）+ openai-whisper（音轨转写，可选）
-- 1,565 个单元测试（96 个测试文件），覆盖率 60.42%（仅统计 Iris 自身 LLM 调用）
+- 1,674 个单元测试（99 个测试文件），覆盖率 60%+（仅统计 Iris 自身 LLM 调用）
 
 ## 开发环境
 
@@ -159,6 +159,7 @@ iris3/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.19.7** | 2026-07-19 | 全面质量加固（P0~P2 七项）：`_wiki.py` 静默异常补日志 / embedding 向量 LRU 缓存 / `corrector.py` 拆分（`_clipboard_io.py` + `_text_detector.py`）/ LLM `_CircuitBreaker` 熔断器 / +109 测试（1,674，99 文件） |
 | **v3.19.6** | 2026-07-19 | ASR 校正引擎加固：max_mappings 990→2000 配置化 / 替换词典热加载 / 手动热词合并机制 |
 | **v3.19.5** | 2026-07-19 | 全面质量加固：Stage 4 拆分 / `_TEAM_OKR_PATTERN` 配置化 / Stage 3 顺序后置校验 / ASR 动态推断示例 / 超时修复 / +30 测试（407 通过） |
 | **v3.19.4** | 2026-07-19 | 双周报生成逻辑优化：方向标题精简化 / ≤4 条关键进展 / 来源按时间最新 / 严格 KR 顺序 + OP 文档选择修复 + 配置加载占位符误报修复 |
