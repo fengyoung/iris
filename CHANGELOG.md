@@ -4,6 +4,26 @@
 
 ---
 
+## v3.19.7 (2026-07-19)
+
+全面质量加固 — P0/P1/P2 七项优化：可靠性、向量缓存、代码拆分、单元测试补全、LLM 熔断。
+
+### 改进
+
+- **`_wiki.py` 静默异常修复（P0）**：5 处 `except Exception: pass` 全部补充 `logger.warning/debug`，涵盖 asr_profiles.json 加载、手动热词合并、ai_settings.json 写入、postprocess.json 写入等场景，CLI 错误不再无感知吞噬
+- **向量缓存（P0）**：`retrieval/embedder.py` 新增 LRU + TTL 缓存层（`OrderedDict` + `threading.Lock`，128 条 / 600s），相同 query 反复 ask 时命中缓存不重复调用 embedding API，镜像 `enhanced.py` 既有模式
+- **`corrector.py` 拆分（P1）**：834→712 行，剪贴板 I/O 提取至 `wiki/asr/_clipboard_io.py`，ASR 文本检测提取至 `wiki/asr/_text_detector.py`，`corrector.py` 保留 re-export 确保向后兼容
+- **LLM 熔断机制（P2）**：`provider.py` 新增 `_CircuitBreaker`（threshold=5, reset_after=60s），集成到 `_fallback_loop`，连续失败自动开路、60s 后半开重试、成功后复位，防止 API 宕机时每次阻塞 90s
+
+### 测试
+
+- 新增 `tests/unit/test_biweekly_helpers.py`：48 个纯函数测试（`_biweekly_helpers.py` 全部无 I/O 函数）
+- 新增 `tests/unit/test_graph_engine.py`：26 个图算法测试（`build` / `neighbors` / `find_path` / `orphans` / `bridges` / `degree_stats`，零 mock）
+- 新增 `tests/unit/test_config_models.py`：35 个 Pydantic schema 测试（`BaseConfigModel` dict 兼容、validator 边界、嵌套模型组装）
+- 单元测试总量：379 用例（+109），全部通过
+
+---
+
 ## v3.19.6 (2026-07-19)
 
 ASR 校正引擎加固 — max_mappings 配置化、替换词典热加载、手动热词合并机制。
