@@ -77,6 +77,68 @@ class TestLoadOpDocument:
         second = c.load_op_document()
         assert first == second == "初始内容"
 
+    def test_prefers_dept_level_over_team_okr(self, tmp_path):
+        """目录同时存在部门级和团队 OKR 文件时，应优先取部门级文件。"""
+        src = tmp_path / "SOURCE"
+        op_dir = src / "01-目标管理"
+        op_dir.mkdir(parents=True)
+        # 团队 OKR（应被排除）
+        (op_dir / "20260701-数据智能部-质检研发-张三-OKR.md").write_text(
+            "团队OKR内容", encoding="utf-8")
+        # 部门级 OP（应被选中）
+        (op_dir / "20260701-数据智能部-OP规划.md").write_text(
+            "部门OP内容", encoding="utf-8")
+        bundle = _make_bundle(tmp_path, source_dir=src)
+        c = BiweeklyCollector(bundle)
+        result = c.load_op_document()
+        assert result == "部门OP内容"
+
+    def test_excludes_file_matching_team_okr_pattern(self, tmp_path):
+        """文件名命中 team_okr_patterns 时应被排除，只保留部门级文件。"""
+        src = tmp_path / "SOURCE"
+        op_dir = src / "01-目标管理"
+        op_dir.mkdir(parents=True)
+        # 自定义 team_okr_patterns
+        biweekly_cfg = {"team_okr_patterns": ["测试团队"], "dept_op_keyword": "数据智能部"}
+        (op_dir / "20260701-数据智能部-测试团队-李四-OKR.md").write_text(
+            "团队OKR", encoding="utf-8")
+        (op_dir / "20260701-数据智能部-年度规划.md").write_text(
+            "年度规划", encoding="utf-8")
+        bundle = _make_bundle(tmp_path, source_dir=src, biweekly_cfg=biweekly_cfg)
+        c = BiweeklyCollector(bundle)
+        result = c.load_op_document()
+        assert result == "年度规划"
+
+    def test_fallback_when_no_dept_keyword_file(self, tmp_path, caplog):
+        """没有含 dept_op_keyword 的文件时，fallback 到目录第一个文件并发出 warning。"""
+        import logging
+        src = tmp_path / "SOURCE"
+        op_dir = src / "01-目标管理"
+        op_dir.mkdir(parents=True)
+        # 无部门关键词，只有普通文件
+        (op_dir / "20260701-其他团队-OP.md").write_text("兜底内容", encoding="utf-8")
+        bundle = _make_bundle(tmp_path, source_dir=src)
+        c = BiweeklyCollector(bundle)
+        with caplog.at_level(logging.WARNING):
+            result = c.load_op_document()
+        assert result == "兜底内容"
+        # fallback 时应有 warning 提示
+        assert any("兜底" in r.message or "数据智能部" in r.message
+                   for r in caplog.records if r.levelno >= logging.WARNING)
+
+    def test_custom_dept_op_keyword(self, tmp_path):
+        """dept_op_keyword 配置后，按新关键词筛选文件。"""
+        src = tmp_path / "SOURCE"
+        op_dir = src / "01-目标管理"
+        op_dir.mkdir(parents=True)
+        biweekly_cfg = {"dept_op_keyword": "AI研发部", "team_okr_patterns": []}
+        (op_dir / "20260701-数据智能部-OP.md").write_text("旧部门", encoding="utf-8")
+        (op_dir / "20260701-AI研发部-OP.md").write_text("新部门", encoding="utf-8")
+        bundle = _make_bundle(tmp_path, source_dir=src, biweekly_cfg=biweekly_cfg)
+        c = BiweeklyCollector(bundle)
+        result = c.load_op_document()
+        assert result == "新部门"
+
 
 # ── collect_recent_files ────────────────────────────────────────
 

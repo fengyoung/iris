@@ -333,7 +333,7 @@ class TermExtractor:
                     raise
                 tracker.increment_error(detail=f"第{idx+1}批失败: {exc}")
 
-        _timeout = min(len(batches), 8) * 90
+        _timeout = len(batches) * 90
         from iris.core.thread_pool import shared_pool
         with shared_pool.executor(max_workers=min(len(batches), 8)) as executor:
             try:

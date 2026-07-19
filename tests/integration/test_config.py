@@ -124,3 +124,70 @@ class TestResolvePathVars:
         data = {"path": "${IRIS_DATA_DIR}"}
         result = resolve_path_vars(data, temp_project)
         assert result["path"] == f"{temp_project}/data"
+
+
+class TestWarnUnresolvedPlaceholders:
+    """回归测试：_warn_unresolved_placeholders 必须在 resolve_path_vars 之后执行，
+    确保内置路径占位符（${IRIS_DATA_DIR} 等）不被误报为未解析变量。
+
+    v3.19.4 修复：调用顺序调整（resolve_path_vars → _warn_unresolved_placeholders），
+    此测试防止回退。
+    """
+
+    def test_iris_data_dir_not_reported_as_unresolved(self, temp_project, caplog):
+        """配置中包含 ${IRIS_DATA_DIR} 时，加载后不应产生 '未解析占位符' 警告。"""
+        import logging
+        config_dir = temp_project / "config"
+        # app.json 中使用 ${IRIS_DATA_DIR}（由 resolve_path_vars 负责解析）
+        app_cfg = {
+            "version": "3.0",
+            "app": {"name": "Iris", "env": "test"},
+            "paths": {
+                "output_dir": "${IRIS_DATA_DIR}/output",
+                "project_root": "${IRIS_PROJECT_ROOT}",
+            },
+        }
+        (config_dir / "app.json").write_text(
+            __import__("json").dumps(app_cfg), encoding="utf-8"
+        )
+        for name in ("llm", "data_source"):
+            (config_dir / f"{name}.json").write_text("{}", encoding="utf-8")
+
+        with caplog.at_level(logging.WARNING, logger="iris.config.loader"):
+            load_config_bundle(temp_project)
+
+        unresolved_warnings = [
+            r for r in caplog.records
+            if "未解析占位符" in r.message and "IRIS_DATA_DIR" in r.message
+        ]
+        assert not unresolved_warnings, (
+            f"${'{IRIS_DATA_DIR}'} 被误报为未解析占位符，"
+            "说明 _warn_unresolved_placeholders 在 resolve_path_vars 之前执行了"
+        )
+
+    def test_truly_missing_var_still_warns(self, temp_project, caplog):
+        """真正缺失的环境变量（${MY_MISSING_SECRET}）应触发 warning。"""
+        import logging
+        import os
+        # 确保变量确实不存在
+        os.environ.pop("MY_MISSING_SECRET", None)
+
+        config_dir = temp_project / "config"
+        app_cfg = {
+            "version": "3.0",
+            "app": {"name": "Iris", "env": "test", "api_key": "${MY_MISSING_SECRET}"},
+        }
+        (config_dir / "app.json").write_text(
+            __import__("json").dumps(app_cfg), encoding="utf-8"
+        )
+        for name in ("llm", "data_source"):
+            (config_dir / f"{name}.json").write_text("{}", encoding="utf-8")
+
+        with caplog.at_level(logging.WARNING, logger="iris.config.loader"):
+            load_config_bundle(temp_project)
+
+        unresolved_warnings = [
+            r for r in caplog.records
+            if "未解析占位符" in r.message and "MY_MISSING_SECRET" in r.message
+        ]
+        assert unresolved_warnings, "真正缺失的变量应触发 '未解析占位符' warning，但未触发"

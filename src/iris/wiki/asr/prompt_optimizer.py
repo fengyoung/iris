@@ -37,8 +37,44 @@ class LLMPromptOptimizer:
         不使用 LLM 生成——LLM 输出不稳定，容易产生元评论或角色混淆。
         改为 Python 模板直接渲染，确定性、零延迟。
         """
-        # 使用旧的 LLM 方式作为后备（保留接口兼容性，但默认跳过）
         return LLMPromptOptimizer._render_v2(hotwords, terms, domain_context)
+
+    @staticmethod
+    def _pick_inference_examples(
+        persons: List[AsrTerm],
+        projects: List[AsrTerm],
+    ) -> str:
+        """从实际术语中动态选取 2 个人名 + 1 个项目名作为音近推断示例。
+
+        优先选取有 mis_asr 映射的术语，确保示例来自真实知识库。
+        回退到硬编码示例以防术语为空。
+        """
+        lines: List[str] = []
+
+        # 人名示例（最多 2 个，优先有误识别映射的）
+        person_with_mis = [p for p in persons if p.mis_asr]
+        for p in (person_with_mis or persons)[:2]:
+            if p.mis_asr:
+                lines.append(f"- 「{p.mis_asr[0]}」可能是人名「{p.term}」（声母或韵母混淆）")
+            else:
+                lines.append(f"- 音似「{p.term}」的词可能是该人名（声母或韵母混淆）")
+
+        # 项目名示例（1 个，优先有误识别映射的）
+        proj_with_mis = [p for p in projects if p.mis_asr]
+        for p in (proj_with_mis or projects)[:1]:
+            if p.mis_asr:
+                lines.append(f"- 「{p.mis_asr[0]}」在技术语境可能是项目「{p.term}」（CTC 分词错误）")
+            else:
+                lines.append(f"- 音似「{p.term}」的词在技术语境中可能是该项目名")
+
+        if not lines:
+            # 无术语时回退到通用示例
+            lines = [
+                "- 「大冒险」在技术语境可能是「大模型」（韵母混淆）",
+                "- 「交叉」可能是「矫正」（声母混淆）",
+            ]
+
+        return "\n".join(lines) + "\n"
 
     @staticmethod
     def _render_v2(
@@ -75,6 +111,9 @@ class LLMPromptOptimizer:
             t.term for t in (projects + concepts) if len(t.term) <= 12
         )[:60] or "暂无"
 
+        # 从实际术语中动态选取音近推断示例（优先有 mis_asr 的人名/项目名）
+        inference_examples = LLMPromptOptimizer._pick_inference_examples(persons, projects)
+
         return (
             "你是 ASR 语音转写编辑助手。\n\n"
             "## 核心规则（违反将导致输出被丢弃）\n"
@@ -85,8 +124,7 @@ class LLMPromptOptimizer:
             "首先检查以下映射，命中直接替换：\n"
             f"{mappings_text}\n\n"
             "未命中时，根据音近原则推断：\n"
-            "- 「大冒险」在技术语境可能是「大模型」（韵母混淆）\n"
-            "- 「交叉」可能是「矫正」（声母混淆）\n"
+            f"{inference_examples}"
             "- 如果某词听感相近但语境不符，尝试同音/近音替换为领域术语\n\n"
             "## 润色\n"
             "- 合并口语化碎片和重复表述（「包括…包括…」→ 精简表达）\n"
@@ -104,4 +142,3 @@ class LLMPromptOptimizer:
             f"领域：{domain_bg or '专业团队'}\n\n"
             "现在开始。输入文本："
         )
-

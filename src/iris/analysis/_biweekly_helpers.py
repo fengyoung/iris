@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections import OrderedDict
 from datetime import datetime
@@ -460,3 +461,43 @@ def _pick_group_line(structured, name):
 def _render_group_lines(structured, name, *, fallback):
     items = structured.get("groups", {}).get(name, [])
     return "\n".join(f"- {item['summary']}" for item in items[:3]) if items else fallback
+
+
+_s3_logger = logging.getLogger(__name__)
+
+
+def _s3_check_subarea_order(direction_name: str, section: str, sub_areas: list) -> None:
+    """检查 Stage 3 输出中子方向出现顺序是否和 sub_areas 定义一致。
+
+    通过在 Markdown 文本中查找每个子方向名称的首次出现位置，
+    与 sub_areas 预期顺序对比。不一致时仅记录 warning，不修改输出。
+    """
+    if not sub_areas:
+        return
+
+    names = [sa.get("name", "") for sa in sub_areas if sa.get("name")]
+    if len(names) < 2:
+        return
+
+    positions: list[tuple[int, str]] = []
+    for name in names:
+        # 用子方向名的前 10 字符进行模糊定位，避免截断导致找不到
+        key = name[:10]
+        pos = section.find(key)
+        if pos >= 0:
+            positions.append((pos, name))
+
+    if len(positions) < 2:
+        return  # 找不到足够多的子方向，无法判断顺序
+
+    actual_order = [name for _, name in sorted(positions)]
+    expected_order = [n for n in names if any(n == a for a in actual_order)]
+
+    if actual_order != expected_order:
+        _s3_logger.warning(
+            "Stage 3 [%s]: 子方向顺序与 OP 定义不一致。"
+            "预期: %s；实际: %s",
+            direction_name[:20],
+            [n[:8] for n in expected_order],
+            [n[:8] for n in actual_order],
+        )

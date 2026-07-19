@@ -1,4 +1,4 @@
-# Iris 3.19.4 — 项目执行说明
+# Iris 3.19.5 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -113,7 +113,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.19.4 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.19.5 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.11 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -158,7 +158,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.19.4 (2026-07-19)** — 双周报生成逻辑优化：修复 `load_op_document()` 误取个人 OKR、Stage 0a 支持 `### KR1：` 格式、Stage 3 Prompt 重写（方向标题精简化 / ≤4条 / 来源按时间最新 / 严格 KR 顺序）、`_warn_unresolved_placeholders` 误报修复。
+**当前 v3.19.5 (2026-07-19)** — 全面质量加固：双周报 Stage 4 拆分（4a 纯组装 + 4b LLM 审查）、`_TEAM_OKR_PATTERN` 配置化（`dept_op_keyword` + `team_okr_patterns`）、Stage 3 子方向顺序后置校验、ASR 音近推断示例动态化、`generate_misreadings` 超时修复、新增 30 个测试用例（407 通过）。
+
+> v3.19.4 (2026-07-19)：双周报生成逻辑优化：修复 `load_op_document()` 误取个人 OKR、Stage 0a 支持 `### KR1：` 格式、Stage 3 Prompt 重写（方向标题精简化 / ≤4条 / 来源按时间最新 / 严格 KR 顺序）、`_warn_unresolved_placeholders` 误报修复。
 
 > v3.19.3 (2026-07-19)：交互体验：`build-asr-prompt` 三阶段实时进度输出。新增 `_progress.py` 线程安全进度追踪器，Phase 2（误识别生成）补齐逐批进度（此前完全静默），Phase 级耗时和总耗时汇总，Phase 3 标签修正（去"LLM"误导）。产品版本 3.19.2 → 3.19.3。
 

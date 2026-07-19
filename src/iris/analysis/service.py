@@ -35,6 +35,7 @@ from ._biweekly_helpers import (
     _s3_build_concept_boundaries,
     _s3_load_historical_context,
     _s3_extract_strategic_insights,
+    _s3_check_subarea_order,
     _group_briefs_by_subarea,
     _build_file_manifest,
     _build_local_fallback,
@@ -224,9 +225,13 @@ class AnalysisReportService:
             logger.info("Stage 3: 单方向章节合成…")
             sections = self._stage3_synthesize_directions(directions, style_guide, file_briefs)
 
-            # ── Stage 4: 组装 + 审查 ──
-            logger.info("Stage 4: 终稿组装 + 质量审查…")
-            markdown = self._stage4_assemble_and_review(period, sections, directions)
+            # ── Stage 4a: 纯结构组装（无 LLM） ──
+            logger.info("Stage 4a: 终稿结构组装…")
+            assembled = self._stage4a_assemble(period, sections, directions)
+
+            # ── Stage 4b: LLM 质量审查 ──
+            logger.info("Stage 4b: LLM 质量审查修订…")
+            markdown = self._stage4b_review(period, assembled, directions)
 
             # 后处理
             markdown = markdown.strip()
@@ -664,6 +669,7 @@ class AnalysisReportService:
             section = re.sub(r'^```\w*\n?', '', section)
             section = re.sub(r'\n?```$', '', section)
 
+        _s3_check_subarea_order(d_name, section, direction.get("sub_areas", []))
         logger.info("  %s: 合成完成 (%d 字)", d_name[:25], len(section))
         return d_name, section
 
@@ -700,11 +706,10 @@ class AnalysisReportService:
 
         return "\n".join(brief_lines) if brief_lines else "（本期无相关文件）"
 
-    # ── Stage 4: 终稿组装 + 质量审查 ─────────────────────────
+    # ── Stage 4a: 纯结构组装（无 LLM） ──────────────────────
 
-    def _stage4_assemble_and_review(self, period: str, sections: dict,
-                                     directions: list) -> str:
-        """组装各方向章节并执行质量审查修订。"""
+    def _stage4a_assemble(self, period: str, sections: dict, directions: list) -> str:
+        """按方向顺序拼接各章节，追加时间周期头——无 LLM 调用。"""
         ordered_sections = []
         for d in directions:
             d_name = d.get("name", "")
@@ -712,7 +717,14 @@ class AnalysisReportService:
                 ordered_sections.append(sections[d_name])
 
         direction_sections = "\n\n".join(ordered_sections)
+        assembled = f"*时间周期：{period}*\n\n{direction_sections}"
+        logger.info("  Stage 4a 完成 (%d 字)", len(assembled))
+        return assembled
 
+    # ── Stage 4b: LLM 质量审查修订 ───────────────────────────
+
+    def _stage4b_review(self, period: str, assembled: str, directions: list) -> str:
+        """对已组装的终稿执行 LLM 质量审查修订。"""
         directions_summary = "\n".join(
             f"- {d.get('name', '')}: {d.get('scope_summary', '')[:100]}"
             for d in directions
@@ -720,7 +732,7 @@ class AnalysisReportService:
 
         prompt = self._prompt_loader.render("biweekly_stage4_assemble.md", {
             "period": period,
-            "direction_sections": direction_sections,
+            "assembled_report": assembled,
             "directions_summary": directions_summary,
         })
 
@@ -737,8 +749,16 @@ class AnalysisReportService:
         if not markdown.startswith("*时间周期"):
             markdown = f"*时间周期：{period}*\n\n{markdown}"
 
-        logger.info("  Stage 4 完成 (%d 字)", len(markdown))
+        logger.info("  Stage 4b 完成 (%d 字)", len(markdown))
         return markdown
+
+    # ── 向后兼容（旧代码直接调用 _stage4_assemble_and_review） ──
+
+    def _stage4_assemble_and_review(self, period: str, sections: dict,
+                                     directions: list) -> str:
+        """向后兼容：委托给 4a+4b 两阶段。"""
+        assembled = self._stage4a_assemble(period, sections, directions)
+        return self._stage4b_review(period, assembled, directions)
 
     # ── 向后兼容委托方法（供外部代码或子类访问） ──────────────────
 

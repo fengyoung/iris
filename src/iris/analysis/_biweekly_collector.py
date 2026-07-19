@@ -27,22 +27,37 @@ class BiweeklyCollector:
 
     # ── OP 文档 ────────────────────────────────────────────────
 
-    # 个人/团队 OKR 文件名特征：`-团队名-人名-OKR` 子串，用于排除
-    _TEAM_OKR_PATTERN = re.compile(
-        r'-(?:智能引擎组|质检研发|图验算法|搜索推荐部|价格策略|'
-        r'大模型算法组|推荐算法|搜索算法|搜推工程|硬件专项|软硬一体)'
-        r'-[一-鿿]{2,4}-OKR',
-    )
+    # 默认团队名单：文件名含「-团队名-人名-OKR」时排除（避免误取个人/团队 OKR）
+    # 可通过 app.biweekly_report.team_okr_patterns 配置覆盖
+    _DEFAULT_TEAM_OKR_NAMES = [
+        "智能引擎组", "质检研发", "图验算法", "搜索推荐部", "价格策略",
+        "大模型算法组", "推荐算法", "搜索算法", "搜推工程", "硬件专项", "软硬一体",
+    ]
+
+    def _build_team_okr_pattern(self) -> re.Pattern:
+        """根据配置动态构建团队 OKR 排除正则。"""
+        biweekly_cfg = self._config.app.get("biweekly_report", {})
+        names = biweekly_cfg.get("team_okr_patterns", self._DEFAULT_TEAM_OKR_NAMES)
+        if not names:
+            # 配置为空列表时：不排除任何文件
+            return re.compile(r'(?!)')  # 永不匹配
+        escaped = "|".join(re.escape(n) for n in names)
+        return re.compile(rf'-(?:{escaped})-[一-鿿]{{2,4}}-OKR')
 
     def load_op_document(self) -> str:
         """加载 SOURCE/01-目标管理/ 中最新的部门级 OP/OKR 规划文档（内存缓存）。
 
         按文件名中嵌入的 YYYYMMDD 日期降序排列，优先级：
         1. 含「数据智能部」且非个人/团队 OKR 的文件（部门级 OP/OKR）
-        2. 目录中第一个可用文件（兜底）
+        2. 目录中第一个可用文件（兜底，记录 warning）
         """
         if self._op_text_cache is not None:
             return self._op_text_cache
+
+        team_okr_re = self._build_team_okr_pattern()
+        biweekly_cfg = self._config.app.get("biweekly_report", {})
+        dept_keyword = biweekly_cfg.get("dept_op_keyword", "数据智能部")
+
         sources = self._config.data_source.get("sources", {})
         for cfg in sources.values():
             src_path = Path(cfg.get("path", "")).resolve()
@@ -52,19 +67,25 @@ class BiweeklyCollector:
             if not op_dir.exists():
                 continue
 
-            # 收集部门级文件（含「数据智能部」且非个人/团队 OKR）
+            # 收集部门级文件（含 dept_keyword 且非个人/团队 OKR）
             candidates: list[Path] = []
             for f in op_dir.glob("*.md"):
                 fname = f.name
-                if "数据智能部" not in fname:
+                if dept_keyword not in fname:
                     continue
-                if self._TEAM_OKR_PATTERN.search(fname):
+                if team_okr_re.search(fname):
                     continue
                 candidates.append(f)
 
             if not candidates:
-                # 兜底：取目录中第一个可用文件
-                candidates = sorted(op_dir.glob("*.md"), reverse=True)
+                # 兜底：取目录中所有文件，记录 warning 方便排查
+                fallback_all = sorted(op_dir.glob("*.md"), reverse=True)
+                if fallback_all:
+                    logger.warning(
+                        "未找到含「%s」的部门级 OP 文档，兜底使用: %s",
+                        dept_keyword, fallback_all[0].name,
+                    )
+                candidates = fallback_all
 
             # 按嵌入日期降序
             candidates.sort(

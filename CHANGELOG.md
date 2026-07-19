@@ -4,6 +4,34 @@
 
 ---
 
+## v3.19.5 (2026-07-19)
+
+全面质量加固 — 双周报流水线优化、ASR 子系统健壮性提升、测试覆盖补全。
+
+### 改进
+
+- **双周报 Stage 4 拆分**：`_stage4_assemble_and_review` 拆为 `_stage4a_assemble`（纯结构拼接，无 LLM）+ `_stage4b_review`（专项 LLM 审查），消除 9 项审查指令竞争；Stage 4 Prompt 去掉「组装终稿」任务描述，聚焦质量审查
+- **`_TEAM_OKR_PATTERN` 配置化**：硬编码团队名单提升为 `app.biweekly_report.team_okr_patterns` 配置项，支持 `dept_op_keyword`（部门关键词）+ `team_okr_patterns`（排除列表）两个新字段，零代码改动应对组织架构变化；`app.json.example` 同步更新
+- **Stage 3 子方向顺序后置校验**：新增 `_s3_check_subarea_order()`，合成完成后检查输出子方向顺序是否与 OP 定义一致，不一致记录 warning（不修改输出）
+- **ASR 音近推断示例动态化**：`_render_v2` 改为从实际 `terms` 中动态选取 2 个人名 + 1 个项目名作为推断示例，替代硬编码的「大冒险→大模型」，更贴合当前知识库
+- **`generate_misreadings` 超时修复**：移除 `min(len(batches), 8)` 上限（最大 720s），改为 `len(batches) * 90`，避免术语量大时批次超时丢失映射
+
+### 修复
+
+- **`load_op_document` fallback 日志**：兜底使用非部门级文件时，日志升级为 `warning` 并打印文件名，用户可感知
+- **`app.json.example` 配置歧义**：移除 `"team_okr_patterns": []`（显式空列表会完全禁用过滤，与注释描述矛盾），改为不配置此项，注释说明"不配置 = 使用内置默认值；显式 `[]` = 完全禁用"
+- **`_biweekly_helpers.py` import 位置**：`import logging` 移至文件顶部导入块（原在第 465 行末尾）
+- **Stage 4 Prompt 变量名**：`{{direction_sections}}` 改为 `{{assembled_report}}`，语义与实际传入内容（完整组装文档）一致
+
+### 测试
+
+- **`test_biweekly_collector.py`**：新增 OKR 过滤逻辑 4 个测试用例（部门级优先、团队排除、fallback warning、自定义关键词）
+- **`test_config.py`**（`TestWarnUnresolvedPlaceholders`）：2 个回归测试——`${IRIS_DATA_DIR}` 不误报 + 真正缺失变量仍触发 warning
+- **`tests/unit/test_asr_prompt_optimizer.py`**（新建）：19 个单元测试覆盖 `_render_v2` 和 `_pick_inference_examples` 的边界情况（空术语、动态示例、映射数量上限、接口一致性等）
+- 总测试数：**407 通过**（较上版新增 30 个）
+
+---
+
 ## v3.19.4 (2026-07-19)
 
 双周报生成逻辑优化 & 配置加载修复。
