@@ -6,8 +6,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Dict
+from dataclasses import dataclass, field
+from typing import Any, Dict, Optional
 
 
 @dataclass(frozen=True)
@@ -16,6 +16,8 @@ class LLMRequest:
 
     prompt: str
     route_context: Dict[str, Any]
+    extra_body: Optional[Dict[str, Any]] = None
+    """透传到 API 请求体的额外字段（如 thinking: disabled）"""
 
 
 @dataclass(frozen=True)

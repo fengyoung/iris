@@ -1,0 +1,33 @@
+{
+  "_comment": "ASR 校正策略配置示例。复制此文件为 asr_profiles.json 并根据需要修改。replace_dict 和 llm_prompt 由 build-asr-prompt --deploy 自动生成。",
+  "default": {
+    "replace_dict": "data/asr_replace_dict.json",
+    "llm_prompt": "data/asr_prompt.md",
+    "mode": "full",
+    "llm": {
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "timeout_ms": 4000,
+      "max_tokens": 2048,
+      "temperature": 0.1
+    }
+  },
+  "meeting": {
+    "replace_dict": "data/asr_replace_dict.json",
+    "llm_prompt": "data/asr_prompt_meeting.md",
+    "mode": "full",
+    "llm": {
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "timeout_ms": 5000,
+      "max_tokens": 2048,
+      "temperature": 0.1
+    }
+  },
+  "quick": {
+    "replace_dict": "data/asr_replace_dict.json",
+    "llm_prompt": null,
+    "mode": "fast",
+    "llm": null
+  }
+}

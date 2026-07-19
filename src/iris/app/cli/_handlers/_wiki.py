@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
@@ -298,6 +299,76 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
         new_version.prompt_text = prompt
         save_version(data_dir, new_version)
 
+    # ── 部署到 vocotype（--deploy） ───────────────────────
+    deployed: List[str] = []
+    if getattr(args, "deploy", False):
+        import shutil
+        from datetime import datetime as _dt
+
+        VOCO_DIR = os.environ.get(
+            "IRIS_VOCOTYPE_DIR",
+            os.path.expanduser("~/Library/Application Support/VocoType"),
+        )
+        voco_path = Path(VOCO_DIR)
+
+        if voco_path.exists():
+            # 备份
+            backup_dir = Path("output/vocotype-backup") / _dt.now().strftime("%Y%m%d-%H%M%S")
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            for fname in ("hotwords.txt", "postprocess.json", "ai_settings.json"):
+                src = voco_path / fname
+                if src.exists():
+                    shutil.copy2(str(src), str(backup_dir / fname))
+            deployed.append(f"备份: {backup_dir}")
+
+            # 部署热词
+            if hotwords_file and hotwords:
+                (voco_path / "hotwords.txt").write_text(
+                    "\n".join(hotwords) + "\n", encoding="utf-8"
+                )
+                deployed.append(f"hotwords.txt ({len(hotwords)} 词)")
+
+            # 写入 vocotype ai_settings.json：关闭 LLM 优化 + 清空替换词典
+            ai_settings_path = voco_path / "ai_settings.json"
+            if ai_settings_path.exists():
+                try:
+                    ai_settings = json.loads(ai_settings_path.read_text(encoding="utf-8"))
+                    if "global" in ai_settings:
+                        ai_settings["global"]["enabled"] = False
+                    ai_settings_path.write_text(
+                        json.dumps(ai_settings, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                    deployed.append("ai_settings.json (LLM 优化已关闭)")
+                except Exception:
+                    pass
+
+            # 写入 postprocess.json：清空 replace_map
+            pp_path = voco_path / "postprocess.json"
+            if pp_path.exists():
+                try:
+                    pp = json.loads(pp_path.read_text(encoding="utf-8"))
+                    pp["replace_map"] = {}
+                    pp_path.write_text(
+                        json.dumps(pp, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                    deployed.append("postprocess.json (替换词典已清空)")
+                except Exception:
+                    pass
+
+            # 部署到 Iris data/
+            data_dir = Path("data")
+            data_dir.mkdir(parents=True, exist_ok=True)
+            if replace_dict_file:
+                shutil.copy2(replace_dict_file, str(data_dir / "asr_replace_dict.json"))
+                deployed.append(f"data/asr_replace_dict.json")
+            if prompt and output_path:
+                shutil.copy2(output_path, str(data_dir / "asr_prompt.md"))
+                deployed.append(f"data/asr_prompt.md")
+        else:
+            deployed.append(f"⚠ vocotype 目录不存在: {VOCO_DIR}")
+
     # ── 输出报告 ─────────────────────────────────────────
     payload: Dict[str, Any] = {}
     if hotwords_file:
@@ -314,6 +385,8 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
         payload["output_file"] = output_path
         payload["fingerprint"] = new_version.fingerprint[:8]
         payload["prompt_chars"] = len(prompt)
+    if deployed:
+        payload["deployed"] = deployed
 
     _emit_output(args.command, payload, pretty=args.pretty)
     return 0
@@ -402,6 +475,199 @@ def _strip_version_suffix(stem: str) -> str:
     return _VERSION_SUFFIX_PATTERN.sub("", stem)
 
 
+# ── asr-audit ──────────────────────────────────────────────
+
+def handle_asr_audit(args, bundle, logger) -> int:
+    """运行 ASR 覆盖分析和替换词典质量检查。"""
+    from iris.wiki.context_loader import WikiContextLoader
+    from iris.wiki.asr.coverage import (
+        analyze_coverage, analyze_dict_quality,
+        render_coverage_text, render_dict_quality_text,
+    )
+
+    wiki_root = bundle.wiki.get("wiki_root", "")
+    if not wiki_root or not os.path.isdir(wiki_root):
+        _emit_output("asr-audit", {"error": "Wiki 根目录未配置或不存在"}, pretty=args.pretty)
+        return 1
+
+    loader = WikiContextLoader(wiki_root)
+    pages = loader.load_pages(sort_order=["person", "concept", "project", "domain"])
+
+    # 加载最新热词文件
+    hotwords: List[str] = []
+    output_dir = Path(bundle.app.get("data_dir", os.getcwd())) / "output" / "asr-modify"
+    hotword_files = sorted(output_dir.glob("asr-hotwords-*.txt"), reverse=True)
+    if hotword_files:
+        hotwords = [l.strip() for l in hotword_files[0].read_text(encoding="utf-8").splitlines() if l.strip()]
+
+    # 加载最新替换词典
+    terms: List = []
+    dict_files = sorted(output_dir.glob("asr-replace-dict-*.json"), reverse=True)
+    if dict_files:
+        with open(dict_files[0]) as f:
+            data = json.load(f)
+        replace_map = data.get("replace_map", {})
+        from iris.wiki.asr._types import AsrTerm
+        for wrong, right in replace_map.items():
+            terms.append(AsrTerm(term=right, category="domain_term", context="", mis_asr=[wrong]))
+
+    # 覆盖分析
+    cov_report = analyze_coverage(hotwords, pages)
+    cov_text = render_coverage_text(cov_report)
+
+    # 词典质量
+    dict_report = analyze_dict_quality(terms)
+    dict_text = render_dict_quality_text(dict_report)
+
+    result = {
+        "coverage": {
+            "hotword_count": cov_report.hotword_count,
+            "persons": f"{cov_report.persons_covered}/{cov_report.persons_total}",
+            "projects": f"{cov_report.projects_covered}/{cov_report.projects_total}",
+            "concepts": f"{cov_report.concepts_covered}/{cov_report.concepts_total}",
+            "noise_count": len(cov_report.noise_words),
+            "slot_efficiency": f"{cov_report.slot_efficiency:.1%}",
+        },
+        "dict_quality": {
+            "total_rules": dict_report.total_rules,
+            "format_errors": len(dict_report.format_errors),
+            "conflicts": len(dict_report.conflicting_pairs),
+        },
+    }
+
+    if args.pretty:
+        print(cov_text, file=sys.stderr)
+        print("", file=sys.stderr)
+        print(dict_text, file=sys.stderr)
+    _emit_output("asr-audit", result, pretty=args.pretty)
+
+    return 0
+
+
+# ── asr-corrector ─────────────────────────────────────────
+
+def handle_asr_corrector(args, bundle, logger) -> int:
+    """启动 ASR 实时校正守护进程。"""
+    import json as _json
+    from pathlib import Path as _Path
+
+    from iris.wiki.asr.corrector import AsrCorrector
+    from iris.llm.service import LLMService
+
+    mode = getattr(args, "correct_mode", "full") or "full"
+    profile_name = getattr(args, "profile", "default") or "default"
+
+    # 加载 profile 配置
+    profile_config: dict = {}
+    profile_path = _Path("config/asr_profiles.json")
+    if profile_path.exists():
+        try:
+            with open(profile_path) as f:
+                profiles = _json.load(f)
+            profile_config = profiles.get(profile_name, profiles.get("default", {}))
+        except Exception:
+            pass
+
+    # 加载替换词典
+    dict_path = profile_config.get(
+        "replace_dict",
+        str(_Path("data/asr_replace_dict.json")),
+    )
+    replace_dict: dict = {}
+    if _Path(dict_path).exists():
+        try:
+            with open(dict_path) as f:
+                data = _json.load(f)
+            replace_dict = data.get("replace_map", {})
+        except Exception:
+            _emit_output("asr-corrector", {"error": f"替换词典加载失败: {dict_path}"}, pretty=args.pretty)
+            return 1
+    else:
+        _emit_output("asr-corrector", {"error": f"替换词典不存在: {dict_path}，请先运行 build-asr-prompt --deploy"}, pretty=args.pretty)
+        return 1
+
+    # 加载 LLM Prompt
+    prompt_path = profile_config.get(
+        "llm_prompt",
+        str(_Path("data/asr_prompt.md")),
+    )
+    llm_prompt = ""
+    if _Path(prompt_path).exists():
+        llm_prompt = _Path(prompt_path).read_text(encoding="utf-8")
+
+    # LLM Provider（仅 full 模式）
+    provider = None
+    if mode == "full" and llm_prompt:
+        try:
+            service = LLMService(bundle)
+            provider = service.get_provider()
+        except Exception as e:
+            print(f"[warn] LLM Provider 初始化失败: {e}", file=sys.stderr)
+            print("[warn] 将降级为 fast 模式（仅替换词典）", file=sys.stderr)
+            mode = "fast"
+
+    # 反馈路径
+    feedback_path = str(_Path("data/asr_feedback.jsonl"))
+
+    # 启动校正引擎
+    corrector = AsrCorrector(
+        replace_dict=replace_dict,
+        llm_prompt=llm_prompt,
+        mode=mode,
+        feedback_path=feedback_path,
+    )
+
+    if provider:
+        corrector.set_provider(provider)
+
+    if prompt_path:
+        corrector.set_prompt_path(str(_Path(prompt_path)))
+
+    corrector.run_forever()
+    return 0
+
+
+# ── asr-report ───────────────────────────────────────────
+
+def handle_asr_report(args, bundle, logger) -> int:
+    """手动纠错：从剪贴板读取 ASR 原文，用户提供正确文本，写入 feedback。"""
+    import subprocess as _sp
+    from iris.wiki.asr.feedback import save_correction
+    from iris.wiki.asr._types import AsrCorrection
+
+    # 从位置参数获取正确文本
+    correct_text = getattr(args, "notes", "") or " ".join(getattr(args, "extra", []) or [])
+    if not correct_text:
+        _emit_output("asr-report", {"error": "用法: iris3 asr-report --notes '正确的文本'"}, pretty=False)
+        return 1
+
+    # 读取剪贴板中的 ASR 原文
+    try:
+        raw_text = _sp.check_output(["pbpaste"], text=True).strip()
+    except Exception:
+        _emit_output("asr-report", {"error": "无法读取剪贴板"}, pretty=False)
+        return 1
+
+    if not raw_text:
+        _emit_output("asr-report", {"error": "剪贴板为空"}, pretty=False)
+        return 1
+
+    # 写入 feedback
+    record = AsrCorrection(
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        raw_text=raw_text,
+        fast_corrected=correct_text,
+        full_corrected=correct_text,
+        mode="manual",
+        corrections_applied=[f"[手动] {raw_text}→{correct_text}"],
+    )
+    save_correction(record, "data/asr_feedback.jsonl")
+
+    result = {"ok": True, "raw": raw_text, "corrected": correct_text}
+    _emit_output("asr-report", result, pretty=args.pretty)
+    return 0
+
+
 # ── 命令映射 ─────────────────────────────────────────────
 
 WIKI_HANDLERS = {
@@ -414,5 +680,8 @@ WIKI_HANDLERS = {
     "wiki-update": handle_wiki_update,
     "enrich-persons": handle_enrich_persons,
     "build-asr-prompt": handle_build_asr_prompt,
+    "asr-corrector": handle_asr_corrector,
+    "asr-audit": handle_asr_audit,
+    "asr-report": handle_asr_report,
     "deep-eval": handle_deep_eval,
 }

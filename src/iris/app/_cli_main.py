@@ -21,7 +21,8 @@ COMMANDS = [
     "search", "ask", "build-report", "build-mindmap", "build-biweekly-report",
     "discover-wiki", "discover-wiki-auto", "build-wiki",
     "build-wiki-nav", "wiki-pipeline", "wiki-lint", "wiki-update",
-    "build-asr-prompt", "enrich-persons", "deep-eval",
+    "build-asr-prompt", "asr-corrector", "asr-audit", "asr-report",
+    "enrich-persons", "deep-eval",
     "memory-status", "memory-list", "memory-delete", "memory-maintenance",
     "memory-export", "memory-import", "working-set", "working-show",
     "working-clear", "process", "transcribe-meeting", "batch-transcribe", "daily-start",
@@ -120,6 +121,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help="build-asr-prompt 替换映射最大数量")
     parser.add_argument("--max-chars", type=int, default=20,
                         help="build-asr-prompt 热词/映射最大字符数")
+    parser.add_argument("--deploy", action="store_true",
+                        help="build-asr-prompt 生成后直接部署到 vocotype 配置目录")
+    parser.add_argument("--profile", default="default",
+                        help="asr-corrector 校正策略配置名")
+    parser.add_argument("--correct-mode", default="full", choices=["fast", "full"],
+                        help="asr-corrector 校正模式")
     # 飞书文档转换
     parser.add_argument("--url", default="", help="feishu-doc-convert 飞书文档 URL（逗号分隔多文档）")
     parser.add_argument("--from-config", action="store_true", help="feishu-doc-convert / chat-digest 从配置文件读取目标列表")

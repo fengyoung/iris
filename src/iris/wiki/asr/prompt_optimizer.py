@@ -33,94 +33,70 @@ class LLMPromptOptimizer:
         hotwords: List[str],
         terms: List[AsrTerm],
         domain_context: str = "",
+        top_n_mappings: int = 30,
     ) -> str:
-        """构建提示词——让 LLM 生成策略型校正 prompt，而非术语列表。"""
+        """构建 LLM 优化提示词 — 规则式 Prompt（V2）。
+
+        核心转变：从"指南式"（告诉 LLM 怎么纠错）改为"规则式"
+        （直接内嵌 top N 高频易错映射 + 精简规则），目标 ~800 字。
+
+        Args:
+            hotwords: 热词列表
+            terms: 已填充 mis_asr 的 AsrTerm 列表
+            domain_context: 领域上下文描述
+            top_n_mappings: 内嵌到 Prompt 的高频映射数（默认 30）
+        """
         persons = [t for t in terms if t.category == "person"]
-        concepts = [t for t in terms if t.category == "concept"]
         projects = [t for t in terms if t.category == "project"]
+        concepts = [t for t in terms if t.category == "concept"]
         domain_terms = [t for t in terms if t.category == "domain_term"]
 
-        # 按 term 长度分级：短词（≤4字）优先作为样例
-        short_domain = [t for t in domain_terms if len(t.term) <= 8][:30]
-        all_person_names = "、".join(t.term for t in persons)
-        all_project_names = "、".join(t.term for t in projects[:8])
-        all_concept_names = "、".join(t.term for t in concepts)
-        sample_domain_terms = "、".join(t.term for t in short_domain)
-        hotword_sample = "、".join(hotwords[:60]) if hotwords else ""
+        # 精选 top N 高频易错映射：首选有 mis_asr 的短词（≤8字），按 mis_asr 数量排序
+        candidates = [t for t in terms if t.mis_asr and len(t.term) <= 8]
+        candidates.sort(key=lambda t: -len(t.mis_asr))
+
+        embedded_mappings: List[str] = []
+        for t in candidates[:top_n_mappings]:
+            for mis in t.mis_asr[:2]:  # 每术语最多取 2 个误识别
+                if len(embedded_mappings) >= top_n_mappings:
+                    break
+                embedded_mappings.append(f"「{mis}」→「{t.term}」")
+            if len(embedded_mappings) >= top_n_mappings:
+                break
+
+        mappings_text = "、".join(embedded_mappings) if embedded_mappings else "（暂无）"
 
         # 统计摘要
         summary = (
             f"共 {len(persons)} 位成员、{len(concepts)} 个概念、"
-            f"{len(projects)} 个项目、{len(domain_terms)} 个领域术语、"
-            f"{len(hotwords)} 个热词"
+            f"{len(projects)} 个项目、{len(domain_terms)} 个领域术语"
         )
 
-        return f"""你是 ASR 校正提示词专家。你需要为语音转写（ASR）后处理生成一份 LLM 校正系统提示词。
+        # 关键人名（仅列前 8 个高频出现的，避免硬编码全量）
+        top_persons = "、".join(t.term for t in persons[:8]) if persons else ""
 
-## 背景
-{domain_context or "这是一个专业团队的内部语音场景（会议讨论、项目沟通）。"}
+        return f"""你是 ASR 校正助手。对 paraformer 语音转写结果进行校正，仅输出校正后文本，不解释。
 
-## 校正资源说明
-系统已配备一份**替换词典**（{len(terms)} 术语 × 平均 3-5 条误识别映射），
-词典负责词级别的确定性替换。你的 prompt 不需要重复列这个词表，
-而是聚焦于：
-1. **语境消歧**：告诉 LLM 如何根据上下文从多个候选词中选正确的
-2. **流畅润色**：修正 ASR 输出中的不自然停顿、重复、碎片
-3. **格式规范**：数字、日期、英文大小写、标点的统一规则
+## 内置映射（直接替换）
+以下为高频易错映射，命中时直接替换无需判断：
+{mappings_text}
 
-## 校正策略（需要在 prompt 中充分展开，这是重点）
-你生成的「校正策略」必须覆盖以下 6 类 ASR 典型错误模式，每一类都要写清**如何判断**并给出**一个本领域实例**，不能只写一句空泛规则：
-1. **词典优先**：先检查替换词典覆盖的词，命中即直接替换；未覆盖时才进入下列推断。
-2. **人名同音/近音消歧**：中文人名最易错。声母混淆（zh↔z、ch↔c、sh↔s、n↔l、r↔l、h↔f）、
-   韵母混淆（an↔ang、en↔eng、in↔ing、ian↔ie）、近形字。必须匹配成员名单（{all_person_names}），
-   音近则按名单校正（如「张山/章三」→「张三」）。
-3. **中英混排与英文缩写**：英文缩写保持全大写（DNN、OCR、MMoE、BM25）；字母被音译还原（如「爱吃200」→「H200」）；
-   大小写变体归一（qwen/QWEN→Qwen）；中英文之间加空格（「Qwen大模型」→「Qwen 大模型」）。
-4. **专有名词/项目名边界完整性**：长项目名不得被截断或误拆（如「AI外观定级系统」不能截断为「AI外观」，
-   「视频审核与在线稽查」不能拆成两段）；以词典/名单中的完整写法为准。
-5. **数字与版本号读法**：技术语境（版本号、参数、日期）用阿拉伯数字，口语语境（约数、估数）保留中文数字；
-   处理「三点零↔3.0」「三零↔30」等读法歧义。
-6. **ASR 分词错误纠正**：识别「一字被吞、两字被并、边界偏移」（如「智能化」被误分割为「智能画」），
-   结合领域上下文从多个候选中选出正确写法。
+## 通用规则
+1. 技术缩写全大写（dnn→DNN、ocr→OCR、mmoe→MMoE）
+2. 中英文间加空格（Qwen大模型→Qwen 大模型）
+3. 版本号用阿拉伯数字（三点零→3.0、v二→v2）
+4. 合并 ASR 误拆的短句碎片，去除口语填充词（嗯、啊、那个）
+5. 中文全角标点（，。？“”），英文缩写保留半角点
 
-## 润色规则（需要在 prompt 中体现）
-1. 修正 ASR 常见的口语填充（嗯、啊、那个、这个）
-2. 合并 ASR 错误拆分的短句片段
-3. 保留说话人的语气和风格，不过度书面化
-4. 会议场景保留"我们""咱们"等口语化表达
-5. 纠正常见标点错误（中文句号/英文句号混用）
+## 未覆盖的词
+- 人名优先匹配已知成员（{top_persons or '参考系统名单'}），音近校正
+- 技术术语根据上下文推断，保持音近原则
+- 不确定时不改，保留原文
 
-## 领域参考数据（用于 prompt 中的关键术语样例，不是全量列表）
-- 成员：{all_person_names}
-- 概念：{all_concept_names}
-- 项目：{all_project_names}
-- 领域术语样例：{sample_domain_terms}
-- 热词样例：{hotword_sample[:300]}
-- 术语统计：{summary}
+## 领域背景
+{domain_context or "专业团队工作场景"}（{summary}）
 
-## 输出规范
-1. 角色设定开头：「你是 ASR 语音转写后处理校正助手。」
-2. 分三个小节：「校正策略」「润色规则」「输出格式」
-3. **「校正策略」是全篇重点**，必须逐条覆盖上述 6 类错误模式，每条写清「判断依据 + 本领域实例」，
-   宁详勿略；不得压缩为一两句泛泛而谈。
-4. 总长度控制在 1500~2200 汉字，其中校正策略应占一半以上篇幅。
-5. 不要列全量术语表——这是替换词典的职责
-6. 不要写"以下是常见误识别映射"——那个在替换词典里
-7. 直接输出提示词文本，不要 Markdown 代码块包裹
-
-## 示例结构（供参考，不要照抄）
-你是 ASR 语音转写后处理校正助手。
-**校正策略**
-1. [词典优先：判断依据 + 实例]
-2. [人名同音/近音消歧：判断依据 + 实例]
-3. [中英混排与缩写：判断依据 + 实例]
-4. [专名边界完整性：判断依据 + 实例]
-5. [数字与版本号读法：判断依据 + 实例]
-6. [ASR 分词错误纠正：判断依据 + 实例]
-**润色规则**
-1~5. [具体润色条目]
-**输出格式**
-[输出格式说明]"""
+仅输出校正后文本。"""
 
     @staticmethod
     def _clean_text(text: str) -> str:
@@ -137,29 +113,83 @@ class LLMPromptOptimizer:
         provider: "EnvironmentConfiguredLLMProvider",
         domain_context: str = "",
     ) -> str:
-        """LLM 调用一次，生成策略型校正 prompt。"""
-        from iris.llm import LLMRequest
+        """直接渲染规则式校正 Prompt（V2）。
 
-        prompt = LLMPromptOptimizer.build_optimize_prompt(hotwords, terms, domain_context)
-        try:
-            response = provider.generate(
-                LLMRequest(
-                    prompt=prompt,
-                    route_context={
-                        "task_type": "asr_prompt_optimize",
-                        "input_type": "text",
-                    },
-                ),
-                temperature=0.3,
-                max_tokens=6144,
-            )
-            return LLMPromptOptimizer._clean_text(response.text)
-        except Exception as exc:
-            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
-                raise
-            print(f"[warn] Prompt 优化生成失败: {exc}", file=sys.stderr)
-            return _render_standard(terms, AsrPromptVersion(
-                version="0.0.0", generated_at="",
-                wiki_page_count=0, term_count=0, fingerprint="",
-            ))
+        不使用 LLM 生成——LLM 输出不稳定，容易产生元评论或角色混淆。
+        改为 Python 模板直接渲染，确定性、零延迟。
+        """
+        # 使用旧的 LLM 方式作为后备（保留接口兼容性，但默认跳过）
+        return LLMPromptOptimizer._render_v2(hotwords, terms, domain_context)
+
+    @staticmethod
+    def _render_v2(
+        hotwords: List[str],
+        terms: List[AsrTerm],
+        domain_context: str = "",
+        top_n_mappings: int = 30,
+    ) -> str:
+        """直接渲染 V2 规则式校正 Prompt。"""
+        persons = [t for t in terms if t.category == "person"]
+        projects = [t for t in terms if t.category == "project"]
+        concepts = [t for t in terms if t.category == "concept"]
+        domain_terms = [t for t in terms if t.category == "domain_term"]
+
+        # 精选 top N 易错映射
+        candidates = [t for t in terms if t.mis_asr and len(t.term) <= 8]
+        candidates.sort(key=lambda t: -len(t.mis_asr))
+
+        embedded: List[str] = []
+        for t in candidates:
+            for mis in t.mis_asr[:2]:
+                if len(embedded) >= top_n_mappings:
+                    break
+                if mis and mis != t.term:
+                    embedded.append(f"「{mis}」→「{t.term}」")
+            if len(embedded) >= top_n_mappings:
+                break
+
+        mappings_text = "、".join(embedded) if embedded else "（暂无）"
+        top_persons = "、".join(t.term for t in persons[:8]) if persons else ""
+
+        summary = (
+            f"共 {len(persons)} 位成员、{len(concepts)} 个概念、"
+            f"{len(projects)} 个项目、{len(domain_terms)} 个领域术语"
+        )
+
+        domain_bg = domain_context or "专业团队工作场景"
+
+        # 领域保护名单：项目名 + 概念名（来自 Wiki，确保 LLM 不改错）
+        protected_terms = "、".join(
+            t.term for t in (projects + concepts) if len(t.term) <= 12
+        )[:60] or "暂无"
+
+        return (
+            "你是 ASR 语音转写编辑助手。\n\n"
+            "## 核心规则（违反将导致输出被丢弃）\n"
+            "1. **直接输出校正后文本，不要输出任何其他内容**。不解释、不分析、不描述修改过程\n"
+            "2. 如果不需要修改，原样输出输入文本\n"
+            "3. 输出必须是完整的一段中文文本，不能只有半句\n\n"
+            "## 校正\n"
+            "首先检查以下映射，命中直接替换：\n"
+            f"{mappings_text}\n\n"
+            "未命中时，根据音近原则推断：\n"
+            "- 「大冒险」在技术语境可能是「大模型」（韵母混淆）\n"
+            "- 「交叉」可能是「矫正」（声母混淆）\n"
+            "- 如果某词听感相近但语境不符，尝试同音/近音替换为领域术语\n\n"
+            "## 润色\n"
+            "- 合并口语化碎片和重复表述（「包括…包括…」→ 精简表达）\n"
+            "- 补充缺失的标点符号，按语义合理分句\n"
+            "- 去除口语填充词（嗯、啊、那个、就是）\n"
+            "- 保持说话人的语气和原意，不过度书面化\n\n"
+            "## 格式\n"
+            "- 技术缩写全大写：llm→LLM、dnn→DNN、ocr→OCR\n"
+            "- 中英文间加空格：LLM训练→LLM 训练\n"
+            "- 中文全角标点：，。？「」\n"
+            "- wiki 等技术名词保持小写\n\n"
+            "## 领域保护名单（这些词是真实存在的，绝不要修改）\n"
+            f"{protected_terms}\n"
+            f"人名：{top_persons or '参考系统名单'}\n"
+            f"领域：{domain_bg or '专业团队'}\n\n"
+            "现在开始。输入文本："
+        )
 

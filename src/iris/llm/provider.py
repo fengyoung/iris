@@ -97,6 +97,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         max_retries: Optional[int] = None,
+        extra_body: Optional[Dict[str, Any]] = None,
     ) -> Tuple[str, int, int]:
         """按 provider 类型分发 API 调用，返回 (text, prompt_tokens, completion_tokens)。"""
         timeout = cfg.get("timeout_seconds", 60)
@@ -106,6 +107,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
                 api_base, api_key, model_name, prompt,
                 temperature=temperature, max_tokens=max_tokens,
                 timeout=timeout, max_retries=effective_retries,
+                extra_body=extra_body,
             )
         if provider_name == "anthropic":
             return self._call_anthropic(
@@ -137,6 +139,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
             text, pt, ct = self._dispatch_provider_call(
                 api_base, api_key, model_name, request_data.prompt, provider_name, model_cfg,
                 temperature=temperature, max_tokens=max_tokens, max_retries=max_retries,
+                extra_body=request_data.extra_body,
             )
             self._tracker.record(
                 model=model_name, provider=provider_name,
@@ -342,10 +345,12 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         max_tokens: Optional[int] = None,
         timeout: int = 60,
         max_retries: int = 0,
+        extra_body: Optional[Dict[str, Any]] = None,
     ) -> Tuple[str, int, int]:
         """统一的 OpenAI 兼容 Chat Completions 调用。
 
         content 可以是 str（纯文本）或 list[dict]（多模态 content_parts）。
+        extra_body 可包含要合并到请求体中的额外字段。
         返回 (text, prompt_tokens, completion_tokens)。
         """
         endpoint = _join_url(api_base_url, "/chat/completions")
@@ -356,6 +361,8 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         }
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
+        if extra_body:
+            payload.update(extra_body)
         data = self._post_json(
             endpoint,
             payload,
@@ -376,11 +383,13 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         max_tokens: Optional[int] = None,
         timeout: int = 60,
         max_retries: int = 0,
+        extra_body: Optional[Dict[str, Any]] = None,
     ) -> Tuple[str, int, int]:
         return self._call_openai_chat(
             api_base_url, api_key, model, prompt,
             temperature=temperature, max_tokens=max_tokens,
             timeout=timeout, max_retries=max_retries,
+            extra_body=extra_body,
         )
 
     def _call_openai_compatible_multimodal(
@@ -454,6 +463,11 @@ class NullLLMProvider(BaseLLMProvider):
 
 def _join_url(base_url: str, suffix: str) -> str:
     return base_url.rstrip("/") + suffix
+
+
+def _is_deepseek_thinking_model(model: str) -> bool:
+    """DeepSeek v4 系列模型默认开启 thinking（CoT 推理），需显式关闭。"""
+    return "deepseek-v4" in model.lower()
 
 
 def _extract_chat_completions_text(payload: Dict[str, Any]) -> str:

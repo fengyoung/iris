@@ -4,6 +4,38 @@
 
 ---
 
+## v3.19.0 (2026-07-19)
+
+ASR 实时校正引擎 — 从离线配置编译器升级为 vocotype 实时校正服务。
+
+### 新增模块
+
+- **`iris-asr-corrector`** 常驻守护进程：剪贴板监听 vocotype ASR 输出，Aho-Corasick 多模式匹配 + LLM 编辑助手双重校正，自动反馈数据采集（`data/asr_feedback.jsonl`）
+- **`iris-asr-audit`** 覆盖分析：热词覆盖率、噪音检测、高危映射检查、格式错误检查，纯本地秒级运行
+- **`iris-asr-report`** 手动纠错：从剪贴板读取 ASR 原文 + 用户提供正确文本，写入反馈数据
+
+### 策略 Prompt V3
+
+- Python 模板直渲染替代 LLM 生成，消除输出不稳定性
+- 编辑助手角色：纠错 + 润色 + 领域保护名单
+- Prompt ~930 字，支持热加载（文件变化自动重载）
+
+### 质量加固
+
+- 替换词典高危映射过滤：单字高频中文（在、是、的…）不得作为误识别目标
+- deepseek-v4-flash 推理关闭（`thinking: disabled`），消除 CoT 泄漏
+- CoT 安全网：LLM 输出 > 输入 ×3 时自动降级为词典结果
+- 词级 diff 追踪 LLM 修改（替代字符级拆分）
+- 处理耗时追踪：`llm_time_ms` 字段
+
+### CLI 变更
+
+- 新增 `asr-corrector`、`asr-audit`、`asr-report` 三个命令
+- `build-asr-prompt` 新增 `--deploy` 一键部署到 vocotype
+- 协议版本 3.10 → 3.11
+
+---
+
 ## v3.18.9 (2026-07-17)
 
 代码质量加固 — 并发安全、可观测性、成本控制、配置化。
