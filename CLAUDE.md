@@ -1,4 +1,4 @@
-# Iris 3.19.1 — 项目执行说明
+# Iris 3.19.2 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -113,7 +113,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.19.1 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.19.2 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.11 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -158,7 +158,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.19.1 (2026-07-19)** — ASR 代码质量加固：JSONL 反馈格式统一（`llm_time_ms` 写入/加载路径一致）、热词去重修正（移除去重前截断）、死代码清理（移除 `build_optimize_prompt` 等 V2 残留）、剪贴板等待策略改进（固定 delay → 基线+轮询）、coverage.py 常量复用。
+**当前 v3.19.2 (2026-07-19)** — ASR Phase 1 基础设施：`_AhoCorasick.list_patterns()` 模式枚举 API、`extract_llm_discoveries()` LLM 发现提取、daily-start 集成 ASR 覆盖审计（`_daily_asr_audit` 零 LLM 成本）、`extract_mappings_from_corrections` 修复 `[LLM]` 前缀解析 bug、运行日志中模式计数修复。
+
+> v3.19.1：ASR 代码质量加固：JSONL 反馈格式统一（`llm_time_ms` 写入/加载路径一致）、热词去重修正（移除去重前截断）、死代码清理（移除 `build_optimize_prompt` 等 V2 残留）、剪贴板等待策略改进（固定 delay → 基线+轮询）、coverage.py 常量复用。
 
 > v3.19.0：ASR 实时校正引擎：`iris-asr-corrector` 常驻守护进程，剪贴板监听 vocotype ASR 输出，Aho-Corasick 替换词典 + LLM 编辑助手双重校正，自动反馈数据采集。新增 `asr-audit`（覆盖分析）和 `asr-report`（手动纠错）命令。Prompt 生成改为 Python 模板直渲染（V3 编辑助手）。deepseek-v4-flash 推理关闭（`thinking: disabled`）。高危映射自动过滤。Prompt 热加载支持。
 

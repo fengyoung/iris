@@ -1,7 +1,7 @@
 # Iris ASR 实时校正引擎 — 构建与优化日志
 
 > 日期：2026-07-18 ~ 2026-07-19
-> 版本：Iris 3.18.9 → 3.19.0 → 3.19.1
+> 版本：Iris 3.18.9 → 3.19.0 → 3.19.1 → 3.19.2
 
 ---
 
@@ -129,9 +129,28 @@ asr_feedback.jsonl             build-asr-prompt     data/ (自动积累)
 | 4 | 固定 delay 不可靠 | `corrector.py` | `_replace_text_in_place` 改为基线等待 0.15s + 剪贴板稳定性轮询（最长 1.0s） |
 | 5 | 硬编码 prefix_map | `coverage.py` | 复用 `_constants.py` 的 `get_wiki_prefix()` |
 
-## 八、待 Phase 1 完成
+## 八、v3.19.2 Phase 1 基础设施（2026-07-19）
+
+为反馈驱动的反向优化闭环做准备，三项基础设施：
+
+### 新增
+
+| # | 内容 | 文件 | 说明 |
+|---|------|------|------|
+| 1 | `list_patterns()` | `corrector.py` | `_AhoCorasick` 新增公开方法，返回全部替换规则，供僵尸规则检测使用 |
+| 2 | `extract_llm_discoveries()` | `feedback.py` | 仅提取 `[LLM]` 标记的修正条目，区分词典命中 vs LLM 发现 |
+| 3 | `_daily_asr_audit()` | `_system.py` | daily-start 第 6 步，零 LLM 成本覆盖审计，无产物时静默跳过 |
+
+### 修复
+
+| # | 问题 | 文件 | 改动 |
+|---|------|------|------|
+| 4 | `[LLM]` 前缀污染 | `feedback.py` | `extract_mappings_from_corrections` 中剥离 `[LLM] ` 前缀 |
+| 5 | pattern_count 未插值 | `corrector.py` | `run_forever` 启动日志修复，改用 `list_patterns()` |
+
+## 九、待 Phase 1 完成
 
 - 从 feedback.jsonl 提取高频误识别，反向优化替换词典
 - 淘汰命中 0 次的僵尸规则
 - 场景自适应 profile 切换
-- daily-start 集成自动审计
+- ~~daily-start 集成自动审计~~ ✅ 已实现（v3.19.2）

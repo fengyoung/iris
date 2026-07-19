@@ -88,14 +88,19 @@ def load_corrections(feedback_path: str) -> List[AsrCorrection]:
     return records
 
 
+# [LLM] 标记前缀，用于区分词典命中 vs LLM 发现的修正
+_LLM_PREFIX = "[LLM] "
+
+
 def extract_mappings_from_corrections(
     corrections: List[AsrCorrection],
 ) -> Dict[str, List[str]]:
     """从校正记录中提取 (正确词 → 误识别词列表) 的映射。
 
     分析维度：
-    - corrections_applied：替换词典命中的规则
-    - full_corrected vs fast_corrected：LLM 修正了词典未覆盖的错误
+    - corrections_applied：替换词典命中的规则（格式 "误→正"）
+    - [LLM] 标记：LLM 修正了词典未覆盖的错误（格式 "[LLM] 误→正"）
+      此前缀会被自动剥离，确保解析结果正确。
 
     Args:
         corrections: AsrCorrection 列表
@@ -106,8 +111,10 @@ def extract_mappings_from_corrections(
     mappings: Dict[str, List[str]] = {}
 
     for c in corrections:
-        # 1. 从 corrections_applied 提取词典命中的规则
         for applied in c.corrections_applied:
+            # 剥离 [LLM] 前缀（LLM 发现的修正）
+            if applied.startswith(_LLM_PREFIX):
+                applied = applied[len(_LLM_PREFIX):]
             # 格式: "误识别词→正确词"
             parts = applied.split("→", 1)
             if len(parts) == 2:
@@ -118,6 +125,37 @@ def extract_mappings_from_corrections(
                     mappings[right].append(wrong)
 
     return mappings
+
+
+def extract_llm_discoveries(
+    corrections: List[AsrCorrection],
+) -> Dict[str, List[str]]:
+    """仅提取 LLM 发现的新修正（[LLM] 标记的条目），词典命中的除外。
+
+    用于 Phase 1 反向优化：高频 LLM 修正 → 提升为替换词典规则。
+
+    Args:
+        corrections: AsrCorrection 列表
+
+    Returns:
+        字典 {正确词: [LLM发现的误识别词列表]}
+    """
+    discoveries: Dict[str, List[str]] = {}
+
+    for c in corrections:
+        for applied in c.corrections_applied:
+            if not applied.startswith(_LLM_PREFIX):
+                continue
+            applied_clean = applied[len(_LLM_PREFIX):]
+            parts = applied_clean.split("→", 1)
+            if len(parts) == 2:
+                wrong, right = parts[0].strip(), parts[1].strip()
+                if right not in discoveries:
+                    discoveries[right] = []
+                if wrong not in discoveries[right]:
+                    discoveries[right].append(wrong)
+
+    return discoveries
 
 
 def compute_hit_frequency(

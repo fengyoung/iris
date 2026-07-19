@@ -4,6 +4,23 @@
 
 ---
 
+## v3.19.2 (2026-07-19)
+
+ASR Phase 1 基础设施 — 反馈驱动的反向优化闭环做准备。
+
+### 新增
+
+- **`_AhoCorasick.list_patterns()`**：返回全部已加载替换规则，供 Phase 1 僵尸规则检测使用
+- **`extract_llm_discoveries()`**：从 feedback 中仅提取 `[LLM]` 标记的修正条目，区分词典命中 vs LLM 发现
+- **`_daily_asr_audit()`**：daily-start 第 6 步 ASR 覆盖审计，纯本地零 LLM 成本，无产物时静默跳过
+
+### 修复
+
+- **`extract_mappings_from_corrections`** 修复 `[LLM]` 前缀未剥离导致解析错误的 bug
+- **`run_forever`** 启动日志中模式计数改用 `list_patterns()`，修复预存的 `pattern_count` 变量未插值 bug
+
+---
+
 ## v3.19.1 (2026-07-19)
 
 ASR 子系统代码质量加固 — 6 项修复/优化。

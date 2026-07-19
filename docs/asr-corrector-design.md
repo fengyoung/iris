@@ -1,8 +1,8 @@
 # Iris ASR 实时校正引擎 — 完整设计方案
 
 > 生成日期：2026-07-18 · 最后更新：2026-07-19
-> 关联项目：Iris 3.19.1 / VocoType (paraformer-large-zh-cn-contextual + deepseek-v4-flash)
-> 状态：Phase 0 已实施，v3.19.1 质量加固已完成
+> 关联项目：Iris 3.19.2 / VocoType (paraformer-large-zh-cn-contextual + deepseek-v4-flash)
+> 状态：Phase 0 已实施，v3.19.1 质量加固已完成，v3.19.2 Phase 1 基础设施已完成
 
 ---
 

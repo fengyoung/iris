@@ -255,7 +255,7 @@ class _AhoCorasick:
 
     def __init__(self, replace_map: Dict[str, str]):
         self._root = _TrieNode()
-        self._patterns: List[str] = []
+        self._replace_map = replace_map  # 保留原始映射，供 list_patterns() 查询
 
         # 按模式长度降序插入（确保最长匹配优先）
         sorted_patterns = sorted(replace_map.keys(), key=len, reverse=True)
@@ -293,6 +293,14 @@ class _AhoCorasick:
                     child.output.extend(child.fail.output)
                     # 排序：最长匹配优先
                     child.output.sort(key=lambda x: -x[0])
+
+    def list_patterns(self) -> Dict[str, str]:
+        """返回全部已加载的替换规则 {误识别词: 正确词}。
+
+        供 Phase 1 反向优化使用：对比 feedback 命中记录，
+        识别僵尸规则（从未命中）和高价值规则。
+        """
+        return dict(self._replace_map)
 
     def replace_all(self, text: str) -> Tuple[str, List[str]]:
         """执行全部替换。
@@ -572,8 +580,8 @@ class AsrCorrector:
                   file=sys.stderr)
         else:
             print("[Iris] 未检测到 vocotype 热键配置，将仅通过文本特征判定", file=sys.stderr)
-        pattern_count = sum(1 for _ in self._automaton._root.children) if self._automaton._root.children else 0
-        print(f"[Iris] 替换词典已加载, 模式数已构建",
+        patterns = self._automaton.list_patterns()
+        print(f"[Iris] 替换词典已加载 ({len(patterns)} 条规则)",
               file=sys.stderr)
         print("[Iris] 监听剪贴板... (Ctrl+C 退出)", file=sys.stderr)
 
