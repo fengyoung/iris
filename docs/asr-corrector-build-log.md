@@ -1,7 +1,7 @@
 # Iris ASR 实时校正引擎 — 构建与优化日志
 
 > 日期：2026-07-18 ~ 2026-07-19
-> 版本：Iris 3.18.9 → 3.19.0
+> 版本：Iris 3.18.9 → 3.19.0 → 3.19.1
 
 ---
 
@@ -110,7 +110,26 @@ asr_feedback.jsonl             build-asr-prompt     data/ (自动积累)
 | LLM 推理 | 已关闭（thinking: disabled） |
 | Prompt 热加载 | 支持（5 秒检查间隔） |
 
-## 七、待 Phase 1 完成
+## 七、v3.19.1 代码质量加固（2026-07-19）
+
+基于深度代码审查的 6 项修复/优化：
+
+### 修复
+
+| # | 问题 | 文件 | 改动 |
+|---|------|------|------|
+| 1 | JSONL 反馈格式不一致 | `feedback.py` | `save_correction` 补写 `llm_time_ms`；`load_corrections` 补读该字段 |
+| 2 | 热词去重前截断 | `hotwords.py` | 移除 `[:max_hotwords*2]` 前置截断，改为遍历全量后截断 |
+| 3 | V2 死代码残留 | `prompt_optimizer.py` | 移除 `build_optimize_prompt()` 和 `_clean_text()`，清理 8 个未使用的 import |
+
+### 优化
+
+| # | 问题 | 文件 | 改动 |
+|---|------|------|------|
+| 4 | 固定 delay 不可靠 | `corrector.py` | `_replace_text_in_place` 改为基线等待 0.15s + 剪贴板稳定性轮询（最长 1.0s） |
+| 5 | 硬编码 prefix_map | `coverage.py` | 复用 `_constants.py` 的 `get_wiki_prefix()` |
+
+## 八、待 Phase 1 完成
 
 - 从 feedback.jsonl 提取高频误识别，反向优化替换词典
 - 淘汰命中 0 次的僵尸规则

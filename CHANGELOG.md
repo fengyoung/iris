@@ -4,6 +4,23 @@
 
 ---
 
+## v3.19.1 (2026-07-19)
+
+ASR 子系统代码质量加固 — 6 项修复/优化。
+
+### 修复
+
+- **JSONL 反馈格式统一**：`save_correction()` 与 `_append_feedback_jsonl()` 字段集对齐，`llm_time_ms` 写入和加载路径一致
+- **热词去重逻辑修正**：移除去重前的前置截断 `[:max_hotwords * 2]`，改为遍历全部候选后截断，避免高重复率场景下热词数不足
+- **死代码清理**：移除 `prompt_optimizer.py` 中已废弃的 `build_optimize_prompt()` 和 `_clean_text()` 方法（V3 起由 `_render_v2()` 替代）
+
+### 优化
+
+- **等待策略改进**：`_replace_text_in_place` 从固定 `delay 0.2s` 改为基线等待 + 剪贴板稳定性轮询，总等待 ≤1.15s
+- **常量复用**：`coverage.py` 用 `get_wiki_prefix()` 替换函数内硬编码的 prefix_map
+
+---
+
 ## v3.19.0 (2026-07-19)
 
 ASR 实时校正引擎 — 从离线配置编译器升级为 vocotype 实时校正服务。

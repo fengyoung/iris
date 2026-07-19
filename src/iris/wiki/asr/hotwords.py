@@ -266,10 +266,10 @@ class LLMHotwordExtractor:
         for clean_batch in batch_results:
             all_hotwords.extend(clean_batch)
 
-        # 最终去重（防御性）
+        # 最终去重：遍历全部候选，去重后截断到 max_hotwords
         final = []
         final_seen = set()
-        for w in all_hotwords[:max_hotwords * 2]:  # 放宽上限给去重腾空间
+        for w in all_hotwords:
             key = w.lower().replace(" ", "")
             if key not in final_seen:
                 final_seen.add(key)

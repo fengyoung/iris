@@ -41,6 +41,7 @@ def save_correction(record: AsrCorrection, feedback_path: str) -> None:
             "full_corrected": record.full_corrected,
             "mode": record.mode,
             "corrections_applied": record.corrections_applied,
+            "llm_time_ms": record.llm_time_ms,
         },
         ensure_ascii=False,
     )
@@ -78,6 +79,7 @@ def load_corrections(feedback_path: str) -> List[AsrCorrection]:
                         full_corrected=data.get("full_corrected", ""),
                         mode=data.get("mode", "full"),
                         corrections_applied=data.get("corrections_applied", []),
+                        llm_time_ms=data.get("llm_time_ms", 0),
                     )
                 )
             except (json.JSONDecodeError, KeyError):
