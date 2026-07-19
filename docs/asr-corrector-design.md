@@ -1,8 +1,8 @@
 # Iris ASR 实时校正引擎 — 完整设计方案
 
-> 生成日期：2026-07-18
-> 关联项目：Iris 3.18.9 / VocoType (paraformer-large-zh-cn-contextual + deepseek-v4-flash)
-> 状态：Phase 0 设计方案，待实施
+> 生成日期：2026-07-18 · 最后更新：2026-07-19
+> 关联项目：Iris 3.19.0 / VocoType (paraformer-large-zh-cn-contextual + deepseek-v4-flash)
+> 状态：Phase 0 已实施
 
 ---
 
@@ -231,15 +231,17 @@ vocotype 录音热键按下？（从 ui_settings.json 动态读取）
                  └─ 否 → 窗口超时关闭（2秒内无剪贴板写入）
 ```
 
-#### 1.4 粘贴策略：双次粘贴
+#### 1.4 粘贴策略：Backspace 删除 + 重新粘贴
+
+vocotype 的粘贴不走标准 Cmd+V，Cmd+Z 无法可靠撤销。改为等 vocotype 粘贴落地后，按原始文本长度 N 次 Backspace 删除，再粘贴校正版。
 
 ```
-T+0ms      vocotype: Cmd+V → 光标处出现原始 ASR 文本
-T+5ms      Iris Step1: Cmd+V → 覆盖（词典修正，几乎无感知）
-T+1-3s     Iris Step2: Cmd+V → 再次覆盖（LLM 语境消歧+润色）
+T+0ms      vocotype: 写入原始 ASR 文本
+T+200ms    Iris: 按 Backspace × N 删除 → Cmd+V 粘贴校正版
+T+1-3s     Iris: LLM 校正完成后再次覆盖（如启用 full 模式）
 ```
 
-体感类似输入法自动修正——先出字，后修正。两次粘贴之间间隔极短（<10ms），第一步修正用户通常察觉不到闪烁。
+短文本几乎无感，长文本可能有短暂闪烁。
 
 #### 1.5 校正引擎核心类
 
@@ -801,3 +803,53 @@ config/
 | 敏感信息 | .gitignore + .example 模式 + 零硬编码 |
 | vocotype 路径 | 环境变量 `IRIS_VOCOTYPE_DIR`，有默认值 |
 | 配置文件 | `asr_profiles.json.example` 脱敏版进入版本控制 |
+
+---
+
+## 十、实施记录（2026-07-19）
+
+以下为实施过程中对原设计的调整：
+
+### 10.1 粘贴策略变更
+
+设计为"双次粘贴覆盖"，实测发现 vocotype 的粘贴不走标准 Cmd+V（使用剪贴板回退链路），Cmd+Z 无法可靠撤销，导致原始文本和校正文本叠加。
+
+**实际方案**：等 vocotype 粘贴完成后，按原始文本长度模拟 Backspace 删除，再粘贴校正版。
+
+### 10.2 Prompt V2 → V3
+
+设计为 V2"规则式"（~800 字），实施中升级为 V3"编辑助手"（~930 字）：
+- 加入**领域保护名单**（项目名、概念名），防止 LLM 误改专有名词
+- 加入**润色能力**（去重复、合并碎片、补标点），对标飞书妙记
+- 加入**音近推断示例**，引导 LLM 做语境消歧
+- 角色从"校正助手"升级为"编辑助手"
+
+### 10.3 deepseek-v4-flash 推理问题
+
+v4-flash 默认开启 Chain-of-Thought 推理，即使 Prompt 明确要求"不解释"，仍输出数千字推理过程。
+
+**解决方案**：
+1. 通过 `LLMRequest.extra_body` 传递 `{"thinking": {"type": "disabled"}}` 到 DeepSeek API
+2. 安全网：LLM 输出 > 输入 ×3 时判定为 CoT 泄漏，自动降级为词典结果
+
+### 10.4 高危映射过滤
+
+实测发现词典中有 `在→ZAI` 等映射——"在"是最高频中文字之一，导致大面积误伤（"一起在深圳"→"一起ZAI深圳"）。
+
+**解决方案**：在 `format_replace_dict` 和 `analyze_dict_quality` 中自动过滤单字高频中文映射（在、是、的、了、我…约 80 个最高频字）。
+
+### 10.5 热键格式兼容
+
+设计时假设 vocotype 热键格式为 `shift+control+KeyZ`，实际使用中遇到 `alt+ArrowRight`（方向键组合）和 `AltRight`（单个修饰键）。扩展了 `_parse_hotkey` 的解析能力。
+
+### 10.6 LLM 耗时追踪
+
+新增 `llm_time_ms` 字段到 `AsrCorrection`，终端输出和 JSONL 日志中均包含处理耗时。通过 `LLMRequest.extra_body` 机制透传到 API 层。
+
+### 10.7 Prompt 热加载
+
+`iris-asr-corrector` 启动后每 5 秒检查 `data/asr_prompt.md` 文件 mtime，变化时自动重载，无需重启。
+
+### 10.8 文件命名
+
+Prompt 文件名从 `asr_prompt_v2.md` 改为 `asr_prompt.md`（去掉版本后缀，固定路径）。
