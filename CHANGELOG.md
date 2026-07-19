@@ -4,6 +4,30 @@
 
 ---
 
+## v3.19.4 (2026-07-19)
+
+双周报生成逻辑优化 & 配置加载修复。
+
+### 修复
+
+- **`_biweekly_collector.py` OP 文档选择**：`load_op_document()` 曾误取个人/团队 OKR（如卞凯 OKR），改为按「数据智能部」关键词正选 + 正则排除 `-团队名-人名-OKR` 模式
+- **`loader.py` 占位符误报**：`_warn_unresolved_placeholders` 在 `resolve_path_vars` 之前执行，导致 `${IRIS_PROJECT_ROOT}` 等路径占位符误报
+
+### 改进
+
+- **Stage 0a Prompt**：支持 `### KR1：` 子方向格式；同 KR 下多个 KP 合并为一条 sub_area
+- **Stage 3 Prompt 全面重写**：
+  - `## ` 方向标题精简化（不照搬 OKR 原文）
+  - 每方向关键进展最多 **4 条**，每条只保留核心结论 + 1-2 个数据点
+  - 来源按时间优先级取最新（近一周优先）
+  - 严格按 KR 编号顺序排列
+  - 同 KR 下多个 KP 合并输出
+- **Stage 4 Prompt 审查维度**：增加标题精炼、条目数、来源新鲜度检查
+- **`app.json`**：新增 `report_author` 配置，启用双周报尾注
+- **`llm.json`**：新增 3 条 ASR 路由规则（`asr_correction` / `asr_misreading` / `asr_hotword`），用量统计可独立区分 ASR 消耗
+
+---
+
 ## v3.19.3 (2026-07-19)
 
 交互体验 — `build-asr-prompt` 三阶段实时进度输出。

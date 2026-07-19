@@ -1,4 +1,4 @@
-# Iris 3.19.3 — 项目执行说明
+# Iris 3.19.4 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -158,7 +158,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.19.3 (2026-07-19)** — 交互体验：`build-asr-prompt` 三阶段实时进度输出。新增 `_progress.py` 线程安全进度追踪器，Phase 2（误识别生成）补齐逐批进度（此前完全静默），Phase 级耗时和总耗时汇总，Phase 3 标签修正（去"LLM"误导）。产品版本 3.19.2 → 3.19.3。
+**当前 v3.19.4 (2026-07-19)** — 双周报生成逻辑优化：修复 `load_op_document()` 误取个人 OKR、Stage 0a 支持 `### KR1：` 格式、Stage 3 Prompt 重写（方向标题精简化 / ≤4条 / 来源按时间最新 / 严格 KR 顺序）、`_warn_unresolved_placeholders` 误报修复。
+
+> v3.19.3 (2026-07-19)：交互体验：`build-asr-prompt` 三阶段实时进度输出。新增 `_progress.py` 线程安全进度追踪器，Phase 2（误识别生成）补齐逐批进度（此前完全静默），Phase 级耗时和总耗时汇总，Phase 3 标签修正（去"LLM"误导）。产品版本 3.19.2 → 3.19.3。
 
 > v3.19.2：ASR Phase 1 基础设施：`_AhoCorasick.list_patterns()` 模式枚举 API、`extract_llm_discoveries()` LLM 发现提取、daily-start 集成 ASR 覆盖审计（`_daily_asr_audit` 零 LLM 成本）、`extract_mappings_from_corrections` 修复 `[LLM]` 前缀解析 bug、运行日志中模式计数修复。
 
