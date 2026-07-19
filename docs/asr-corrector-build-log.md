@@ -148,9 +148,87 @@ asr_feedback.jsonl             build-asr-prompt     data/ (自动积累)
 | 4 | `[LLM]` 前缀污染 | `feedback.py` | `extract_mappings_from_corrections` 中剥离 `[LLM] ` 前缀 |
 | 5 | pattern_count 未插值 | `corrector.py` | `run_forever` 启动日志修复，改用 `list_patterns()` |
 
-## 九、待 Phase 1 完成
+## 九、Phase 1 迭代计划
 
-- 从 feedback.jsonl 提取高频误识别，反向优化替换词典
-- 淘汰命中 0 次的僵尸规则
-- 场景自适应 profile 切换
-- ~~daily-start 集成自动审计~~ ✅ 已实现（v3.19.2）
+> 目标：反馈驱动的反向优化闭环 — 校正日志自动优化替换词典和热词表。
+
+### 当前状态
+
+```
+已完成 (v3.19.2):              待实现:
+├── B. list_patterns() API     ├── D. 僵尸规则淘汰
+├── C. [LLM] 前缀修复          ├── E. 热词补充逻辑
+├── G. daily-start ASR 审计    ├── F. build-asr-prompt 反馈回注
+└── 反馈数据采集链路              └── 场景自适应 profile
+```
+
+### 第 1 步：数据积累（前置条件，不可跳过）
+
+```
+依赖: iris-asr-corrector 常驻运行 1-2 周
+产出: data/asr_feedback.jsonl 积累数百条校正记录
+目的: 统计词典命中率、发现 LLM 高频修正模式
+```
+
+| 数据维度 | 用途 |
+|----------|------|
+| `corrections_applied` 命中频率 | 识别僵尸规则（0 命中 → 淘汰） |
+| `[LLM] X→Y` 修正条目 | 发现词典未覆盖的错误模式 → 提升为词典规则 |
+| `raw_text` 高频被误识词 | 补充进热词列表 |
+| 手动 `asr-report` 记录 | 高优先级加入替换词典 |
+
+### 第 2 步：分析函数（~60 行，数据就绪后实现）
+
+纯函数，零 LLM 成本：
+
+```python
+# D. 僵尸规则淘汰 — feedback.py
+def prune_zombie_rules(terms, hit_frequency, min_hits=0):
+    """移除从未命中的 mis_asr 条目，释放词典配额"""
+
+# E. 热词补充 — feedback.py
+def extract_new_hotwords(corrections, current_hotwords):
+    """从 LLM diff 中提取高频被纠词，补充为热词候选"""
+```
+
+### 第 3 步：build-asr-prompt 反馈回注（~30 行）
+
+在 Phase 2 之前插入 Phase 1.5，读 feedback → 分析 → 注入：
+
+```
+handle_build_asr_prompt 增加 --from-feedback 参数:
+  Phase 2 术语提取
+    ↓
+  Phase 1.5 反馈注入 ← 新增
+    ├── load_corrections(feedback.jsonl)
+    ├── compute_hit_frequency → 标记僵尸规则
+    ├── prune_zombie_rules → 淘汰 0 命中条目
+    ├── extract_llm_discoveries → LLM 发现 → 提升为词典规则
+    └── extract_new_hotwords → 补充热词候选
+    ↓
+  Phase 2 误识别生成（使用优化后的 terms）
+    ↓
+  Phase 3 Prompt 渲染
+```
+
+### 第 4 步：场景自适应（~50 行）
+
+根据 feedback 数据的时间/内容特征自动切换 profile：
+
+```
+分析 feedback.jsonl:
+  ├── 工作时间 + 技术术语密集 → 自动切 tech profile
+  ├── 高频人名出现 → 增强人物热词权重
+  └── 非工作语言/闲聊 → 切 quick 模式（仅格式归一）
+```
+
+### 工作量
+
+| 步骤 | 状态 | 代码量 | 依赖 |
+|------|:--:|:-----:|------|
+| 1. 数据积累 | ⏳ 等待中 | 0 | iris-asr-corrector 日常使用 |
+| 2. 分析函数 | ❌ 待实现 | ~60 行 | 第 1 步（数据） |
+| 3. 反馈回注 | ❌ 待实现 | ~30 行 | 第 2 步 |
+| 4. 场景自适应 | ❌ 待实现 | ~50 行 | 第 1 步（数据） |
+
+**核心瓶颈是第 1 步** — 代码总量 ~140 行，无真实反馈数据无法验证效果。
