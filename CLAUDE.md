@@ -1,4 +1,4 @@
-# Iris 3.19.0 — 项目执行说明
+# Iris 3.19.3 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~25,000 行 / 140 文件 / 21 模块 · CLI 49 命令 · 单元测试 1,565（96 文件）· 覆盖率 60.42% · 8 个项目级 Skill · Wiki 201 页 · 知识图谱节点 198 / 关系边 821（NetworkX 引擎） · 数据源 716 文档 / 4,271 Chunk · 向量索引 7,210 条 · LLM 响应缓存（内存 LRU 驱逐）· ASR 实时校正引擎（剪贴板监听 + Aho-Corasick + LLM 编辑助手）· Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听 · CI/CD（Makefile / pre-commit / GitHub Actions）。
+~25,000 行 / 140 文件 / 21 模块 · CLI 49 命令 · 单元测试 1,565（96 文件）· 覆盖率 60.42% · 8 个项目级 Skill · Wiki 201 页 · 知识图谱节点 198 / 关系边 821（NetworkX 引擎） · 数据源 716 文档 / 4,271 Chunk · 向量索引 7,210 条 · LLM 响应缓存（内存 LRU 驱逐）· ASR 实时校正引擎（剪贴板监听 + Aho-Corasick + LLM 编辑助手）· Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听 · CI/CD（Makefile / pre-commit / GitHub Actions）· ASR Pipeline 交互式进度输出。
 
 ### 关键路径
 
@@ -113,7 +113,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.19.0 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.19.3 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.11 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -146,7 +146,7 @@ iris3/
 └── pyproject.toml · README · CLAUDE · CHANGELOG.md
 ```
 
-**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配/共享线程池）· `memory`（记忆 5 子模块）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF+BM25缓存）· `qa`（检索问答+图谱注入）· `wiki`（Wiki 体系 + backlink/graph + ASR 校正引擎，最大模块；`wiki/asr/` 含 corrector/coverage/feedback/prompt_optimizer 等 9 个子模块）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估 + 引用解析）· `complex_input`（多模态三阶段：图片/PDF/DOCX/VIDEO）· `output`（格式化+DOCX）· `app/cli`（49 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py / shared.py）· `trello`（看板）。
+**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配/共享线程池）· `memory`（记忆 5 子模块）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF+BM25缓存）· `qa`（检索问答+图谱注入）· `wiki`（Wiki 体系 + backlink/graph + ASR 校正引擎，最大模块；`wiki/asr/` 含 corrector/coverage/feedback/prompt_optimizer/_progress 等 10 个子模块）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估 + 引用解析）· `complex_input`（多模态三阶段：图片/PDF/DOCX/VIDEO）· `output`（格式化+DOCX）· `app/cli`（49 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py / shared.py）· `trello`（看板）。
 
 ---
 
@@ -158,7 +158,13 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.19.0 (2026-07-19)** — ASR 实时校正引擎：`iris-asr-corrector` 常驻守护进程，剪贴板监听 vocotype ASR 输出，Aho-Corasick 替换词典 + LLM 编辑助手双重校正，自动反馈数据采集。新增 `asr-audit`（覆盖分析）和 `asr-report`（手动纠错）命令。Prompt 生成改为 Python 模板直渲染（V3 编辑助手）。deepseek-v4-flash 推理关闭（`thinking: disabled`）。高危映射自动过滤。Prompt 热加载支持。
+**当前 v3.19.3 (2026-07-19)** — 交互体验：`build-asr-prompt` 三阶段实时进度输出。新增 `_progress.py` 线程安全进度追踪器，Phase 2（误识别生成）补齐逐批进度（此前完全静默），Phase 级耗时和总耗时汇总，Phase 3 标签修正（去"LLM"误导）。产品版本 3.19.2 → 3.19.3。
+
+> v3.19.2：ASR Phase 1 基础设施：`_AhoCorasick.list_patterns()` 模式枚举 API、`extract_llm_discoveries()` LLM 发现提取、daily-start 集成 ASR 覆盖审计（`_daily_asr_audit` 零 LLM 成本）、`extract_mappings_from_corrections` 修复 `[LLM]` 前缀解析 bug、运行日志中模式计数修复。
+
+> v3.19.1：ASR 代码质量加固：JSONL 反馈格式统一（`llm_time_ms` 写入/加载路径一致）、热词去重修正（移除去重前截断）、死代码清理（移除 `build_optimize_prompt` 等 V2 残留）、剪贴板等待策略改进（固定 delay → 基线+轮询）、coverage.py 常量复用。
+
+> v3.19.0：ASR 实时校正引擎：`iris-asr-corrector` 常驻守护进程，剪贴板监听 vocotype ASR 输出，Aho-Corasick 替换词典 + LLM 编辑助手双重校正，自动反馈数据采集。新增 `asr-audit`（覆盖分析）和 `asr-report`（手动纠错）命令。Prompt 生成改为 Python 模板直渲染（V3 编辑助手）。deepseek-v4-flash 推理关闭（`thinking: disabled`）。高危映射自动过滤。Prompt 热加载支持。
 
 > v3.18.9：代码质量加固：内存系统 FileLock（并发安全）+ 向量索引模型追踪 + `.env` 行尾注释剥离 + Stage2 `max_tokens` 控制 + lark-cli fallback + Wiki 证据阈值配置化。
 

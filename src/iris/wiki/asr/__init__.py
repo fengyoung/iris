@@ -27,8 +27,8 @@ from .coverage import (
 )
 from .feedback import (
     save_correction, load_corrections,
-    extract_mappings_from_corrections, compute_hit_frequency,
-    apply_feedback_to_dict,
+    extract_mappings_from_corrections, extract_llm_discoveries,
+    compute_hit_frequency, apply_feedback_to_dict,
 )
 from .version import (
     load_version, save_version, bump_version,
@@ -50,8 +50,8 @@ __all__ = [
     "render_coverage_text", "render_dict_quality_text",
     # 反馈
     "save_correction", "load_corrections",
-    "extract_mappings_from_corrections", "compute_hit_frequency",
-    "apply_feedback_to_dict",
+    "extract_mappings_from_corrections", "extract_llm_discoveries",
+    "compute_hit_frequency", "apply_feedback_to_dict",
     # 校正
     "correct_text_static",
     # 版本管理

@@ -18,6 +18,7 @@ import re
 from typing import Dict, List, Set, Tuple
 
 from ._types import AsrTerm, CoverageReport, DictQualityReport
+from .._constants import get_wiki_prefix
 
 # ── 噪音检测规则 ──────────────────────────────────────────
 
@@ -139,8 +140,7 @@ def analyze_coverage(
         if ptype == "person":
             # 人物名取文件名去前缀
             stem = p.path.stem
-            prefix_map = {"person": "人物-", "concept": "概念-", "project": "项目-"}
-            prefix = prefix_map.get(ptype, "")
+            prefix = get_wiki_prefix(ptype)
             if stem.startswith(prefix):
                 name = stem[len(prefix):]
             person_names.add(name)

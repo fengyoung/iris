@@ -1,8 +1,8 @@
 # Iris ASR 实时校正引擎 — 完整设计方案
 
 > 生成日期：2026-07-18 · 最后更新：2026-07-19
-> 关联项目：Iris 3.19.0 / VocoType (paraformer-large-zh-cn-contextual + deepseek-v4-flash)
-> 状态：Phase 0 已实施
+> 关联项目：Iris 3.19.3 / VocoType (paraformer-large-zh-cn-contextual + deepseek-v4-flash)
+> 状态：Phase 0 已实施，v3.19.1 质量加固已完成，v3.19.2 Phase 1 基础设施已完成，v3.19.3 交互体验改进已完成
 
 ---
 
@@ -853,3 +853,26 @@ v4-flash 默认开启 Chain-of-Thought 推理，即使 Prompt 明确要求"不�
 ### 10.8 文件命名
 
 Prompt 文件名从 `asr_prompt_v2.md` 改为 `asr_prompt.md`（去掉版本后缀，固定路径）。
+
+### 10.9 v3.19.3 交互体验改进（2026-07-19）
+
+`build-asr-prompt` 执行慢（~1-2 分钟）但过程几乎无反馈的问题已修复：
+
+- **`_progress.py`**：新增线程安全进度追踪器 `ProgressTracker`，零外部依赖
+- **Phase 1 进度增强**：`hotwords.py` 集成 ProgressTracker，逐批显示 X/Y 完成 + 耗时
+- **Phase 2 进度补齐**：`extractor.py` 补齐逐批进度输出（此前完全静默）
+- **Phase 3 标签修正**：「LLM Prompt 优化压缩」→「校正提示词渲染」（实际无 LLM 调用）
+- **Phase 级耗时**：每个 Phase 完成后输出耗时和产出摘要
+- **总耗时汇总**：流程结束时打印全流程耗时和阶段产出
+- 测试：111 个已有测试全部通过，并发模拟验证线程安全
+
+### 10.10 v3.19.1 代码质量加固（2026-07-19）
+
+上线后深度代码审查发现 6 项改进点，已全部实施：
+
+- **JSONL 反馈格式统一**：`save_correction()` 与 `_append_feedback_jsonl()` 的写入字段集对齐，`llm_time_ms` 写入和加载路径一致
+- **热词去重修正**：移除去重前的前置截断，改为遍历全量候选后截断
+- **死代码清理**：移除 `build_optimize_prompt()` 和 `_clean_text()`（V2 残留，V3 起由 `_render_v2()` 替代）
+- **等待策略改进**：`_replace_text_in_place` 从固定 `delay 0.2s` 改为基线 0.15s + 剪贴板稳定性轮询
+- **常量复用**：`coverage.py` 用 `get_wiki_prefix()` 替换硬编码 prefix_map
+- 测试：84 ASR + 251 单元测试全部通过，无回归

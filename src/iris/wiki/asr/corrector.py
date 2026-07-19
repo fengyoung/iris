@@ -88,18 +88,39 @@ def _replace_text_in_place(corrected: str, raw_length: int) -> None:
     """用校正文本替换 vocotype 刚粘贴的原始文本。
 
     策略：
-    1. 等待 vocotype 粘贴完成
-    2. 按 raw_length 次 Delete 键删除原始文本
-    3. 粘贴校正文本
+    1. 写入校正文本到剪贴板（覆盖 vocotype 写入的原文）
+    2. 基线等待 vocotype 的 Cmd+V 贴入完成（最小 0.15s）
+    3. 轮询剪贴板确认稳定（最长额外 1.0s）
+    4. 按 raw_length 次 Delete 键删除原始文本，粘贴校正文本
     """
     _write_clipboard(corrected)
+
+    # 基线等待：vocotype 的 Cmd+V 至少需要 0.15s 完成
+    _BASELINE_WAIT = 0.15
+    time.sleep(_BASELINE_WAIT)
+
+    # 轮询确认剪贴板稳定（无其他写入方），最长再等 1.0s
+    _POLL_MAX_EXTRA = 1.0
+    _POLL_STABLE_CYCLES = 3
+    stable_count = 0
+    last_clip = _read_clipboard()
+    t_deadline = time.monotonic() + _POLL_MAX_EXTRA
+
+    while time.monotonic() < t_deadline:
+        time.sleep(0.05)
+        current = _read_clipboard()
+        if current == last_clip:
+            stable_count += 1
+            if stable_count >= _POLL_STABLE_CYCLES:
+                break
+        else:
+            stable_count = 0
+            last_clip = current
+
     try:
-        # 等 vocotype 粘贴落地，然后删掉原始文本并粘贴校正版
-        backspaces = "keystroke (ASCII character 8)"  # Delete 键
         subprocess.run([
             "osascript", "-e",
             f'''
-            delay 0.2
             tell application "System Events"
                 repeat {raw_length} times
                     key code 51  -- Delete / Backspace
@@ -234,7 +255,7 @@ class _AhoCorasick:
 
     def __init__(self, replace_map: Dict[str, str]):
         self._root = _TrieNode()
-        self._patterns: List[str] = []
+        self._replace_map = replace_map  # 保留原始映射，供 list_patterns() 查询
 
         # 按模式长度降序插入（确保最长匹配优先）
         sorted_patterns = sorted(replace_map.keys(), key=len, reverse=True)
@@ -272,6 +293,14 @@ class _AhoCorasick:
                     child.output.extend(child.fail.output)
                     # 排序：最长匹配优先
                     child.output.sort(key=lambda x: -x[0])
+
+    def list_patterns(self) -> Dict[str, str]:
+        """返回全部已加载的替换规则 {误识别词: 正确词}。
+
+        供 Phase 1 反向优化使用：对比 feedback 命中记录，
+        识别僵尸规则（从未命中）和高价值规则。
+        """
+        return dict(self._replace_map)
 
     def replace_all(self, text: str) -> Tuple[str, List[str]]:
         """执行全部替换。
@@ -551,8 +580,8 @@ class AsrCorrector:
                   file=sys.stderr)
         else:
             print("[Iris] 未检测到 vocotype 热键配置，将仅通过文本特征判定", file=sys.stderr)
-        pattern_count = sum(1 for _ in self._automaton._root.children) if self._automaton._root.children else 0
-        print(f"[Iris] 替换词典已加载, 模式数已构建",
+        patterns = self._automaton.list_patterns()
+        print(f"[Iris] 替换词典已加载 ({len(patterns)} 条规则)",
               file=sys.stderr)
         print("[Iris] 监听剪贴板... (Ctrl+C 退出)", file=sys.stderr)
 

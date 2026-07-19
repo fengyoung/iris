@@ -4,6 +4,57 @@
 
 ---
 
+## v3.19.3 (2026-07-19)
+
+交互体验 — `build-asr-prompt` 三阶段实时进度输出。
+
+### 新增
+
+- **`_progress.py`**：线程安全进度追踪器 `ProgressTracker`，并发批次实时输出，锁保护防交错
+- **Phase 2 逐批进度**：`extractor.py` 误识别生成阶段新增逐批完成输出（此前完全静默）
+- **Phase 级耗时**：每个 Phase 完成后输出耗时和产出摘要
+- **总耗时汇总**：流程结束时打印全流程耗时和各阶段产出
+
+### 修复
+
+- **Phase 3 标签修正**：「LLM Prompt 优化压缩」→「校正提示词渲染」（实际无 LLM 调用，为 Python 模板直渲染）
+
+---
+
+## v3.19.2 (2026-07-19)
+
+ASR Phase 1 基础设施 — 反馈驱动的反向优化闭环做准备。
+
+### 新增
+
+- **`_AhoCorasick.list_patterns()`**：返回全部已加载替换规则，供 Phase 1 僵尸规则检测使用
+- **`extract_llm_discoveries()`**：从 feedback 中仅提取 `[LLM]` 标记的修正条目，区分词典命中 vs LLM 发现
+- **`_daily_asr_audit()`**：daily-start 第 6 步 ASR 覆盖审计，纯本地零 LLM 成本，无产物时静默跳过
+
+### 修复
+
+- **`extract_mappings_from_corrections`** 修复 `[LLM]` 前缀未剥离导致解析错误的 bug
+- **`run_forever`** 启动日志中模式计数改用 `list_patterns()`，修复预存的 `pattern_count` 变量未插值 bug
+
+---
+
+## v3.19.1 (2026-07-19)
+
+ASR 子系统代码质量加固 — 6 项修复/优化。
+
+### 修复
+
+- **JSONL 反馈格式统一**：`save_correction()` 与 `_append_feedback_jsonl()` 字段集对齐，`llm_time_ms` 写入和加载路径一致
+- **热词去重逻辑修正**：移除去重前的前置截断 `[:max_hotwords * 2]`，改为遍历全部候选后截断，避免高重复率场景下热词数不足
+- **死代码清理**：移除 `prompt_optimizer.py` 中已废弃的 `build_optimize_prompt()` 和 `_clean_text()` 方法（V3 起由 `_render_v2()` 替代）
+
+### 优化
+
+- **等待策略改进**：`_replace_text_in_place` 从固定 `delay 0.2s` 改为基线等待 + 剪贴板稳定性轮询，总等待 ≤1.15s
+- **常量复用**：`coverage.py` 用 `get_wiki_prefix()` 替换函数内硬编码的 prefix_map
+
+---
+
 ## v3.19.0 (2026-07-19)
 
 ASR 实时校正引擎 — 从离线配置编译器升级为 vocotype 实时校正服务。

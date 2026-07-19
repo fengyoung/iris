@@ -47,6 +47,9 @@ def handle_daily_start(args, bundle, logger) -> int:
     # 5. LLM 用量概要（今日/本周/本月 + 预算预警）
     usage_summary = _compute_daily_usage_summary(bundle)
 
+    # 6. ASR 审计（纯本地，零 LLM 成本；无产物时静默跳过）
+    asr_audit_result = _daily_asr_audit(bundle)
+
     payload = {"memory_sync": {"scanned": sync_result.get("scanned", 0), "skipped": sync_result.get("skipped", 0),
                                 "corrections_added": sync_result.get("corrections_added", 0)},
                "memory_maintenance": maintenance_report, "scan": scan_info,
@@ -57,7 +60,8 @@ def handle_daily_start(args, bundle, logger) -> int:
                "wiki_discover": _auto_discover_wiki_for_daily(bundle, chunk_summaries),
                "wiki_update": wiki_update_result,
                "person_enrich": person_enrich_result,
-               "usage_summary": usage_summary}
+               "usage_summary": usage_summary,
+               "asr_audit": asr_audit_result}
     _emit_output(args.command, payload, pretty=args.pretty)
     return 0
 
@@ -208,6 +212,74 @@ def _daily_wiki_maintenance(bundle, chunk_summaries) -> tuple:
     append_changelog(Path(bundle.wiki["wiki_root"]), "daily-start 自动维护")
 
     return wiki_update_result, person_enrich_result
+
+
+def _daily_asr_audit(bundle) -> dict:
+    """ASR 热词覆盖审计 — 纯本地计算，零 LLM 成本。
+
+    仅检查上一次 build-asr-prompt 产出的热词文件是否存在且需要更新。
+    无产物时静默跳过，不影响 daily-start 主流程。
+    发现覆盖缺口时输出提醒。
+    """
+    try:
+        from pathlib import Path
+        from iris.wiki.asr.coverage import analyze_coverage, render_coverage_text
+        from iris.wiki.context_loader import WikiContextLoader
+
+        if not bundle.wiki or not bundle.wiki.get("wiki_root"):
+            return {"status": "skipped", "reason": "Wiki 未配置"}
+
+        wiki_root = bundle.wiki["wiki_root"]
+        if not Path(wiki_root).is_dir():
+            return {"status": "skipped", "reason": "Wiki 目录不存在"}
+
+        # 查找最新热词文件
+        output_dir = Path("output")
+        hotword_files = sorted(output_dir.glob("asr-hotwords-*.txt"), reverse=True)
+        if not hotword_files:
+            return {"status": "skipped", "reason": "未找到热词文件，请先运行 build-asr-prompt"}
+
+        hotwords = [
+            line.strip() for line in hotword_files[0].read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+
+        # 加载 Wiki 页面做覆盖分析
+        loader = WikiContextLoader(wiki_root)
+        pages = loader.load_pages(sort_order=["person", "concept", "project", "domain"])
+
+        report = analyze_coverage(hotwords, pages)
+
+        # 构建摘要
+        issues = []
+        if report.persons_missing:
+            issues.append(f"{len(report.persons_missing)} 人未覆盖")
+        if report.projects_missing:
+            issues.append(f"{len(report.projects_missing)} 项目未覆盖")
+        if report.noise_words:
+            issues.append(f"{len(report.noise_words)} 个噪音词")
+        if report.long_words:
+            issues.append(f"{len(report.long_words)} 个超长词")
+
+        needs_update = bool(issues)
+
+        result = {
+            "status": "ok",
+            "hotword_count": report.hotword_count,
+            "persons": f"{report.persons_covered}/{report.persons_total}",
+            "projects": f"{report.projects_covered}/{report.projects_total}",
+            "concepts": f"{report.concepts_covered}/{report.concepts_total}",
+            "slot_efficiency": f"{report.slot_efficiency:.1%}",
+            "issues": issues,
+            "needs_update": needs_update,
+        }
+
+        if needs_update:
+            result["suggestion"] = "建议运行 build-asr-prompt --deploy 更新 ASR 热词"
+
+        return result
+    except Exception:
+        return {"status": "error", "reason": "ASR 审计异常"}
 
 
 # ── 系统 ──────────────────────────────────────────────────
