@@ -35,9 +35,9 @@ NUMBERED_PATH_PATTERN = re.compile(
 NUMBERED_PATH_NO_LINE_PATTERN = re.compile(
     r"\d+\.\s*([^\s]+\.md)\s*(.*)"
 )
-# 格式4: 行号范围 path.md:109-116
+# 格式4: 行号范围 path.md:109-116（用 search 允许行中任意位置出现）
 RANGE_PATTERN = re.compile(
-    r".*(.+\.md):(\d+)-(\d+).*"
+    r"([^\s\[\]]+\.md):(\d+)-(\d+)"
 )
 # 格式5: 内联内容格式（跳过）
 INLINE_CONTENT_PATTERN = re.compile(
@@ -109,7 +109,7 @@ def parse_references(wiki_content: str) -> List[ReferenceEntry]:
 
         # 尝试格式4: 行号范围 path.md:109-116（取起始行）
         if not e:
-            m = RANGE_PATTERN.match(line)
+            m = RANGE_PATTERN.search(line)
             if m:
                 source_path = m.group(1).strip().lstrip("[")
                 line_number = int(m.group(2))

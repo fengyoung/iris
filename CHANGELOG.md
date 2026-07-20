@@ -4,6 +4,33 @@
 
 ---
 
+## v3.19.8 (2026-07-20)
+
+检测路径全面改进 — 4 条检测路径（复杂输入 / ASR 文本 / ASR 覆盖 / Wiki 深度评估）P0~P2 十四项修复，二轮核查追加 4 项。
+
+### P0 修复（正确性 Bug）
+
+- **`coverage.py` 死代码删除**：`is_dangerous_mapping()` 第 55 行条件与第 53 行完全相同，永远不会执行，删除
+- **`_reference_parser.py` RANGE_PATTERN 贪婪正则**：原 `r".*(.+\.md):..."` 的贪婪 `.*` 截断深层路径（如 `SOURCE/05-会议纪要/report.md:109-116` 只捕获到 `.md` 后缀），改为 `r"([^\s\[\]]+\.md):(\d+)-(\d+)"`，调用方同步改为 `search()` 支持行中任意位置
+- **`deep_eval.py` 字符串表达式未赋值**：`"\n".join(...)` 结果被丢弃，修复方案 `problem` 字段永远为空；修复为 `page_list_str = "\n".join(...)` 并注入字段
+- **`deep_eval.py` SourceLocator 加载无异常处理**：`_locator.load()` 遇文件损坏/缺失直接崩溃；包 `try/except (OSError, ValueError)` 输出定向提示
+
+### P1 修复（设计缺陷）
+
+- **`_types.py` 裸泛型类型**：`CoverageReport`/`DictQualityReport`/`AsrCorrection` 共 9 个字段 `list`/`dict` 改为 `List[str]`/`List[Tuple[str,str,str]]`/`Dict[str,int]`；导入补齐 `Tuple`
+- **`coverage.py` 槽位效率去重 + 参数化**：`effective` 计算对噪音词 `set()` 去重防 negative；`analyze_coverage()` 新增 `max_slots: int = 500` 参数（向后兼容），docstring 同步更新
+- **`_text_detector.py` 代码正则补全 + 参数签名化**：补 `from\s+\S+\s+import`，去除覆盖过宽的 `return\s`（中英混合场景误伤）；`_is_asr_text()` 三个阈值改为有默认值的参数
+- **`_source_locator.py` 路径归一化双端一致**：`load()` 阶段对 chunk 的 `relative_path` 同步归一化（原只在 `lookup()` 阶段归一化，`./` 前缀路径无法命中）；`find_sibling_sources` 使用归一化路径；`search_sources_by_keywords` 的 `exclude_path` 参数归一化后比对；行号无精确匹配时 fallback 前添加 `logger.warning`
+
+### P2 测试（+79 用例，总量 1,753）
+
+- **新建 `tests/unit/test_text_detector.py`**（40 用例）：`_count_chinese` + `_is_asr_text` 长度边界 / 中文比例 / 代码特征 / URL / Markdown 全分支覆盖；含一个代码特征测试改用中英混合输入真正由 `{}` 触发（而非中文比例过滤）
+- **`test_complex_input_detector.py`** 新增 6 个 `InputDetector.detect()` 集成用例：PNG 编码 / PDF 非编码 / 超大图跳过 / 不存在路径 / 混合类型 / 纯文本
+- **`test_deep_eval_pure.py`** 新增 3 个 RANGE_PATTERN 回归用例：简单路径 / 深层路径（回归防贪婪截断）/ search 匹配行中嵌入路径
+- **`test_deep_eval.py`** 新增 7 个 SourceLocator 用例：`./` 前缀归一化 / `/` 前缀归一化 / 反斜杠归一化 / 行号 fallback 回末尾 chunk / fallback `logger.warning` caplog（`lookup` + `lookup_with_context`）
+
+---
+
 ## v3.19.7 (2026-07-19)
 
 全面质量加固 — P0/P1/P2 七项优化：可靠性、向量缓存、代码拆分、单元测试补全、LLM 熔断。

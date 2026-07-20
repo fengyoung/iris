@@ -50,11 +50,7 @@ def is_dangerous_mapping(mis_word: str) -> bool:
     - 纯数字/标点
     此类映射会在大比例文本中产生误伤，不应加入替换词典。
     """
-    if len(mis_word) == 1 and mis_word in _COMMON_CHINESE_CHARS:
-        return True
-    if len(mis_word) == 1 and ("一" <= mis_word <= "鿿") and mis_word in _COMMON_CHINESE_CHARS:
-        return True
-    return False
+    return len(mis_word) == 1 and mis_word in _COMMON_CHINESE_CHARS
 
 
 def _count_chinese(text: str) -> int:
@@ -112,19 +108,21 @@ def _normalize_name(name: str) -> str:
 def analyze_coverage(
     hotwords: List[str],
     wiki_pages: List,  # List[WikiPageInfo] — 避免循环导入
+    max_slots: int = 500,
 ) -> CoverageReport:
     """对比热词列表与 Wiki 页面，计算覆盖率并检测噪音。
 
     Args:
         hotwords: 热词字符串列表（来自 build-asr-prompt Stage 1）
         wiki_pages: WikiPageInfo 列表（按 person/concept/project/domain 分类）
+        max_slots: 热词槽位上限（vocotype 默认 500，可从 asr_profiles.json 读取后传入）
 
     Returns:
         CoverageReport: 覆盖分析报告
     """
     report = CoverageReport(
         hotword_count=len(hotwords),
-        max_slots=500,
+        max_slots=max_slots,
     )
 
     # 分类 Wiki 页面
@@ -190,8 +188,9 @@ def analyze_coverage(
         if _count_chinese(hw) > 12:
             report.long_words.append(hw)
 
-    # 槽位效率
-    effective = report.hotword_count - len(report.noise_words)
+    # 槽位效率（对噪音词去重，防止同一热词因多次出现导致 effective 为负）
+    unique_noise = {w.split("（")[0] for w in report.noise_words}
+    effective = max(0, report.hotword_count - len(unique_noise))
     report.slot_efficiency = effective / report.max_slots if report.max_slots > 0 else 0.0
 
     return report

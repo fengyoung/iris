@@ -1,10 +1,10 @@
-# Iris 3.19.7
+# Iris 3.19.8
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
 
-**v3.19.7** — 全面质量加固（P0~P2 七项）：`_wiki.py` 5 处静默异常补日志、embedding 向量 LRU 缓存（128/600s）、`corrector.py` 拆分（834→712 行，`_clipboard_io.py` + `_text_detector.py`）、LLM `_CircuitBreaker` 熔断器、新增 109 个单元测试（biweekly helpers 48 + graph engine 26 + config models 35，总量 1,674）。
+**v3.19.8** — 检测路径全面改进（P0~P2 十四项）：4 处正确性 Bug 修复（死代码、正则贪婪、字符串表达式未赋值、缺失异常处理）、6 处设计缺陷修复（代码正则补全、路径归一化双端一致、泛型类型修正、槽位效率去重、参数签名化）、新建 `test_text_detector.py` 等 +79 测试（总量 1,753）。
 
 ## 开发路线
 
@@ -90,7 +90,7 @@ SOURCE/                     LLM-WIKI/
 - macOS Keychain（可选密钥存储）
 - PyMuPDF / python-docx（PDF/DOCX 处理）
 - ffmpeg（视频抽帧/抽音轨，视频处理必需）+ openai-whisper（音轨转写，可选）
-- 1,674 个单元测试（99 个测试文件），覆盖率 60%+（仅统计 Iris 自身 LLM 调用）
+- 1,753 个单元测试（100 个测试文件），覆盖率 60%+（仅统计 Iris 自身 LLM 调用）
 
 ## 开发环境
 
@@ -101,8 +101,8 @@ pip install -e ".[dev]"
 
 # 快速命令（Makefile）
 make test            # 运行全部测试
-make test-unit       # 纯逻辑单元测试（199 用例，0.5s）
-make test-integration # 集成测试（1,314 用例）
+make test-unit       # 纯逻辑单元测试（419 用例，0.5s）
+make test-integration # 集成测试（1,334 用例）
 make test-cov        # 运行测试 + 覆盖率报告
 make lint            # Ruff 代码检查
 make lint-fix        # Ruff 自动修复
@@ -145,9 +145,9 @@ iris3/
 │       └── asr/         #   ASR 提示词子系统（术语提取/热词/Prompt优化/版本管理）
 ├── scripts/            # CLI 入口 + 委托脚本
 ├── templates/          # Prompt / Wiki 模板
-├── tests/              # 1,513 用例（93 文件）
-│   ├── unit/           #   纯逻辑单元测试（199 用例）
-│   └── integration/    #   集成测试（1,314 用例）
+├── tests/              # 1,753 用例（100 文件）
+│   ├── unit/           #   纯逻辑单元测试（419 用例）
+│   └── integration/    #   集成测试（1,334 用例）
 ├── config/             # *.json gitignored，*.example 版本控制
 ├── .github/workflows/  # CI 流水线（Python 3.9-3.12 矩阵）
 ├── Makefile            # 常用开发命令
@@ -159,6 +159,7 @@ iris3/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.19.8** | 2026-07-20 | 检测路径全面改进（P0~P2）：4 Bug 修复（死代码 / 正则贪婪截断 / 字符串表达式未赋值 / 缺失异常处理）+ 6 设计缺陷修复（代码正则补全 / 路径归一化双端一致 / 泛型类型修正 / 槽位效率去重 / RANGE_PATTERN search 化）+ 新建 test_text_detector 等 +79 测试（1,753，100 文件） |
 | **v3.19.7** | 2026-07-19 | 全面质量加固（P0~P2 七项）：`_wiki.py` 静默异常补日志 / embedding 向量 LRU 缓存 / `corrector.py` 拆分（`_clipboard_io.py` + `_text_detector.py`）/ LLM `_CircuitBreaker` 熔断器 / +109 测试（1,674，99 文件） |
 | **v3.19.6** | 2026-07-19 | ASR 校正引擎加固：max_mappings 990→2000 配置化 / 替换词典热加载 / 手动热词合并机制 |
 | **v3.19.5** | 2026-07-19 | 全面质量加固：Stage 4 拆分 / `_TEAM_OKR_PATTERN` 配置化 / Stage 3 顺序后置校验 / ASR 动态推断示例 / 超时修复 / +30 测试（407 通过） |

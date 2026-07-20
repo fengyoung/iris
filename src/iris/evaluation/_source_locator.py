@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+import logging
+from pathlib import Path, PurePosixPath
 from typing import Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 class SourceLocator:
@@ -18,6 +21,13 @@ class SourceLocator:
         self._chunks_by_file: Dict[str, List[dict]] = {}
         self._loaded = False
 
+    @staticmethod
+    def _normalize_path(relative_path: str) -> str:
+        """规范化路径：统一斜杠、去除前导 ./ 和 /，消除 .. 等冗余段。"""
+        normalized = str(PurePosixPath(relative_path.replace("\\", "/")))
+        # PurePosixPath 会把 "./foo" 变成 "foo"，但保留 "/foo"
+        return normalized.lstrip("/")
+
     def load(self) -> None:
         """加载所有 chunk 摘要并建立 relative_path → chunks 索引。"""
         for csp in self._chunk_summary_paths:
@@ -27,7 +37,7 @@ class SourceLocator:
                 data = json.load(f)
             chunks = data["chunks"]
             for c in chunks:
-                rp = c["relative_path"]
+                rp = self._normalize_path(c["relative_path"])
                 if rp not in self._chunks_by_file:
                     self._chunks_by_file[rp] = []
                 self._chunks_by_file[rp].append(c)
@@ -40,15 +50,8 @@ class SourceLocator:
         if not self._loaded:
             self.load()
 
-        rp = relative_path.replace("\\", "/")
+        rp = self._normalize_path(relative_path)
         chunks = self._chunks_by_file.get(rp)
-        if not chunks:
-            for prefix in ("/", "./"):
-                if rp.startswith(prefix):
-                    rp = rp[len(prefix):]
-                    break
-            chunks = self._chunks_by_file.get(rp)
-
         if not chunks:
             return None
 
@@ -58,6 +61,7 @@ class SourceLocator:
                 le = c.get("line_end", 0)
                 if ls <= line_number <= le:
                     return c["content"]
+            logger.warning("行号 %d 在 %s 中无精确匹配，回退到末尾 chunk", line_number, rp)
             return chunks[-1]["content"]
 
         return chunks[0]["content"] if chunks else None
@@ -68,14 +72,8 @@ class SourceLocator:
         if not self._loaded:
             self.load()
 
-        rp = relative_path.replace("\\", "/")
+        rp = self._normalize_path(relative_path)
         chunks = self._chunks_by_file.get(rp)
-        if not chunks:
-            for prefix in ("/", "./"):
-                if rp.startswith(prefix):
-                    rp = rp[len(prefix):]
-                    break
-            chunks = self._chunks_by_file.get(rp)
         if not chunks:
             return None
 
@@ -88,6 +86,7 @@ class SourceLocator:
                     end = min(len(chunks), idx + context_extend + 1)
                     parts = [chunks[i]["content"] for i in range(start, end)]
                     return "\n\n".join(parts).strip() or None
+            logger.warning("行号 %d 在 %s 中无精确匹配，回退到末尾 chunk", line_number, rp)
             return chunks[-1]["content"]
 
         return chunks[0]["content"] if chunks else None
@@ -97,13 +96,14 @@ class SourceLocator:
         if not self._loaded:
             self.load()
 
-        parts = relative_path.split("/")
+        rp = self._normalize_path(relative_path)
+        parts = rp.split("/")
         if len(parts) <= 1:
             return []
 
         parent_dir = "/".join(parts[:-1])
-        siblings = [rp for rp in self._chunks_by_file if rp.startswith(parent_dir) and rp != relative_path]
-        siblings.sort(key=lambda rp: sum(len(c["content"]) for c in self._chunks_by_file[rp]), reverse=True)
+        siblings = [p for p in self._chunks_by_file if p.startswith(parent_dir) and p != rp]
+        siblings.sort(key=lambda p: sum(len(c["content"]) for c in self._chunks_by_file[p]), reverse=True)
         return siblings[:max_count]
 
     def search_sources_by_keywords(self, keywords: List[str], exclude_path: Optional[str] = None,
@@ -112,9 +112,10 @@ class SourceLocator:
         if not self._loaded:
             self.load()
 
+        normalized_exclude = self._normalize_path(exclude_path) if exclude_path else None
         scored: List[Tuple[int, str]] = []
         for rp in self._chunks_by_file:
-            if exclude_path and rp == exclude_path:
+            if normalized_exclude and rp == normalized_exclude:
                 continue
             rp_lower = rp.lower()
             score = sum(1 for kw in keywords if kw.lower() in rp_lower)
