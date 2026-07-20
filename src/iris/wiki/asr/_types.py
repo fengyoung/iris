@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List, Tuple
 
 
 @dataclass
@@ -50,7 +50,7 @@ class CoverageReport:
 
     Attributes:
         hotword_count: 当前热词总数
-        max_slots: 配额上限（vocotype 限制 500）
+        max_slots: 热词配额上限（默认 500，可通过 analyze_coverage 参数覆盖）
         persons_covered: 已覆盖人物数
         persons_total: Wiki 人物页面总数
         persons_missing: 未覆盖的人名列表
@@ -68,15 +68,15 @@ class CoverageReport:
     max_slots: int = 500
     persons_covered: int = 0
     persons_total: int = 0
-    persons_missing: list = field(default_factory=list)
+    persons_missing: List[str] = field(default_factory=list)
     projects_covered: int = 0
     projects_total: int = 0
-    projects_missing: list = field(default_factory=list)
+    projects_missing: List[str] = field(default_factory=list)
     concepts_covered: int = 0
     concepts_total: int = 0
-    concepts_missing: list = field(default_factory=list)
-    noise_words: list = field(default_factory=list)
-    long_words: list = field(default_factory=list)
+    concepts_missing: List[str] = field(default_factory=list)
+    noise_words: List[str] = field(default_factory=list)
+    long_words: List[str] = field(default_factory=list)
     slot_efficiency: float = 0.0
 
 
@@ -91,10 +91,10 @@ class DictQualityReport:
         category_distribution: 各类别映射数统计
     """
     total_rules: int = 0
-    format_errors: list = field(default_factory=list)
-    conflicting_pairs: list = field(default_factory=list)
-    dangerous_mappings: list = field(default_factory=list)
-    category_distribution: dict = field(default_factory=dict)
+    format_errors: List[str] = field(default_factory=list)
+    conflicting_pairs: List[Tuple[str, str, str]] = field(default_factory=list)
+    dangerous_mappings: List[str] = field(default_factory=list)
+    category_distribution: Dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -114,5 +114,5 @@ class AsrCorrection:
     fast_corrected: str = ""
     full_corrected: str = ""
     mode: str = "full"
-    corrections_applied: list = field(default_factory=list)
+    corrections_applied: List[str] = field(default_factory=list)
     llm_time_ms: int = 0

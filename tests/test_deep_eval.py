@@ -322,3 +322,85 @@ class TestAccuracyVerifierVerify:
         verdicts = verifier.verify([_entry(), _entry(path="src/a.md")])
         assert len(verdicts) == 2
         assert all(v.verdict == "consistent" for v in verdicts)
+
+
+# ── SourceLocator 路径归一化 + fallback warning ────────────────────
+
+
+class TestSourceLocatorPathNormalization:
+    """验证 _normalize_path 对 ./ 前缀和路径格式的归一化。"""
+
+    def _make_locator(self, tmp_path):
+        import json
+        summary = {
+            "chunks": [
+                {"relative_path": "SOURCE/dir/doc.md", "line_start": 1, "line_end": 10,
+                 "content": "正文内容"},
+            ]
+        }
+        p = tmp_path / "cs.json"
+        p.write_text(json.dumps(summary, ensure_ascii=False), encoding="utf-8")
+        from iris.evaluation._source_locator import SourceLocator
+        locator = SourceLocator([str(p)])
+        locator.load()
+        return locator
+
+    def test_dotslash_prefix_normalized(self, tmp_path):
+        locator = self._make_locator(tmp_path)
+        # "./SOURCE/dir/doc.md" 应等同于 "SOURCE/dir/doc.md"
+        content = locator.lookup("./SOURCE/dir/doc.md")
+        assert content is not None
+        assert "正文内容" in content
+
+    def test_leading_slash_normalized(self, tmp_path):
+        locator = self._make_locator(tmp_path)
+        content = locator.lookup("/SOURCE/dir/doc.md")
+        assert content is not None
+        assert "正文内容" in content
+
+    def test_backslash_normalized(self, tmp_path):
+        locator = self._make_locator(tmp_path)
+        content = locator.lookup("SOURCE\\dir\\doc.md")
+        assert content is not None
+        assert "正文内容" in content
+
+
+class TestSourceLocatorFallbackWarning:
+    """验证行号无精确匹配时回退到末尾 chunk 并发出 warning。"""
+
+    def _make_locator(self, tmp_path):
+        import json
+        summary = {
+            "chunks": [
+                {"relative_path": "SOURCE/doc.md", "line_start": 1, "line_end": 10,
+                 "content": "第一段"},
+                {"relative_path": "SOURCE/doc.md", "line_start": 11, "line_end": 20,
+                 "content": "最后一段"},
+            ]
+        }
+        p = tmp_path / "cs.json"
+        p.write_text(json.dumps(summary, ensure_ascii=False), encoding="utf-8")
+        from iris.evaluation._source_locator import SourceLocator
+        locator = SourceLocator([str(p)])
+        locator.load()
+        return locator
+
+    def test_line_not_found_returns_last_chunk(self, tmp_path):
+        locator = self._make_locator(tmp_path)
+        # 行号 999 超出所有 chunk 范围，应回退到最后一个 chunk
+        content = locator.lookup("SOURCE/doc.md", line_number=999)
+        assert content == "最后一段"
+
+    def test_line_not_found_logs_warning(self, tmp_path, caplog):
+        import logging
+        locator = self._make_locator(tmp_path)
+        with caplog.at_level(logging.WARNING, logger="iris.evaluation._source_locator"):
+            locator.lookup("SOURCE/doc.md", line_number=999)
+        assert any("无精确匹配" in r.message for r in caplog.records)
+
+    def test_line_not_found_with_context_logs_warning(self, tmp_path, caplog):
+        import logging
+        locator = self._make_locator(tmp_path)
+        with caplog.at_level(logging.WARNING, logger="iris.evaluation._source_locator"):
+            locator.lookup_with_context("SOURCE/doc.md", line_number=999)
+        assert any("无精确匹配" in r.message for r in caplog.records)

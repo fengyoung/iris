@@ -425,7 +425,12 @@ class DeepEvaluator:
 
         # 先加载源定位器
         print("  加载源文档索引...")
-        self._locator.load()
+        try:
+            self._locator.load()
+        except (OSError, ValueError) as e:
+            raise RuntimeError(
+                f"源定位器加载失败（{e}），请先运行 iris build-chunks --source main_source"
+            ) from e
         print(f"    已索引 {len(self._locator.get_all_source_paths())} 个源文件")
 
         # 逐页评估
@@ -536,14 +541,14 @@ class DeepEvaluator:
                 inconsistent_pages.append((pr, inc_issues))
 
         if inconsistent_pages:
-            "\n".join(
-                f"    - {pr.title}（{len(issues)} 条）"
+            page_list_str = "\n".join(
+                f"  - {pr.title}（{len(issues)} 条）"
                 for pr, issues in inconsistent_pages
             )
             recs.append({
                 "priority": "P0",
                 "category": "内容不一致",
-                "problem": f"{len(inconsistent_pages)} 个页面存在 {result.inconsistent_count} 条内容不一致",
+                "problem": f"{len(inconsistent_pages)} 个页面存在 {result.inconsistent_count} 条内容不一致\n{page_list_str}",
                 "detected_pages": [pr.title for pr, _ in inconsistent_pages],
                 "suggestion": "逐个页面复审并修正。对数字错误类（如算法能力评估中样本数有误），直接用源文档校正；"
                              "对描述完全偏离的（如逐层深入讨论、智能问答服务），建议用 `build-wiki` 命令重新生成 "

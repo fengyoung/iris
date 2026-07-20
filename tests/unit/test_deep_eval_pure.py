@@ -69,15 +69,28 @@ class TestParseReferences:
         assert refs[0].line_number is None
 
     def test_format4_line_range(self):
-        # RANGE_PATTERN 使用贪婪 .* 前缀，实际捕获的 source_path 为最短匹配后缀
-        # 例如 "docs/doc.md:109-116" 中 .* 匹配 "docs/do" 后 group(1)="c.md"
+        # 修复后 RANGE_PATTERN 使用非贪婪匹配，能正确捕获完整路径
         content = "## 参考来源\ndocs/doc.md:109-116\n"
         refs = parse_references(content)
         assert len(refs) == 1
-        # line_number 取范围起始行
         assert refs[0].line_number == 109
-        # source_path 以 .md 结尾
-        assert refs[0].source_path.endswith(".md")
+        assert refs[0].source_path == "docs/doc.md"
+
+    def test_format4_nested_path_regression(self):
+        """回归测试：深层路径不能被贪婪 .* 截断。"""
+        content = "## 参考来源\nSOURCE/05-会议纪要/2024/report.md:109-116\n"
+        refs = parse_references(content)
+        assert len(refs) == 1
+        assert refs[0].source_path == "SOURCE/05-会议纪要/2024/report.md"
+        assert refs[0].line_number == 109
+
+    def test_format4_with_leading_space(self):
+        """格式4 现用 search()，能匹配行中任意位置的路径。"""
+        content = "## 参考来源\n详见 SOURCE/dir/file.md:10-20 了解详情\n"
+        refs = parse_references(content)
+        assert len(refs) == 1
+        assert refs[0].source_path == "SOURCE/dir/file.md"
+        assert refs[0].line_number == 10
 
     def test_inline_format_skipped(self):
         content = "## 参考来源\n1. 1. 使用语境：某某项目\n"
