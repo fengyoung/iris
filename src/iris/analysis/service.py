@@ -36,7 +36,9 @@ from ._biweekly_helpers import (
     _s3_load_historical_context,
     _s3_extract_strategic_insights,
     _s3_check_subarea_order,
+    _sort_briefs_by_priority,
     _group_briefs_by_subarea,
+    _parse_owner_list,
     _build_file_manifest,
     _build_local_fallback,
     _try_parse_json,
@@ -223,7 +225,9 @@ class AnalysisReportService:
 
             # ── Stage 3: 单方向章节合成 ──
             logger.info("Stage 3: 单方向章节合成…")
-            sections = self._stage3_synthesize_directions(directions, style_guide, file_briefs)
+            max_items = biweekly_cfg.get("max_items_per_direction", 4)
+            sections = self._stage3_synthesize_directions(
+                directions, style_guide, dir_file_map, file_briefs, max_items=max_items)
 
             # ── Stage 4a: 纯结构组装（无 LLM） ──
             logger.info("Stage 4a: 终稿结构组装…")
@@ -231,7 +235,7 @@ class AnalysisReportService:
 
             # ── Stage 4b: LLM 质量审查 ──
             logger.info("Stage 4b: LLM 质量审查修订…")
-            markdown = self._stage4b_review(period, assembled, directions)
+            markdown = self._stage4b_review(period, assembled, directions, max_items=max_items)
 
             # 后处理
             markdown = markdown.strip()
@@ -363,19 +367,31 @@ class AnalysisReportService:
         inventory_lines = []
         for f in files:
             preview = f["content"][:300].replace("\n", " ")
+            author_tag = f"| 作者: {f['author']}" if f.get("author") else ""
             inventory_lines.append(
                 f"[{f['label']}] | {f['date'].strftime('%m%d')} | {f['dir']} | "
-                f"{f['char_count']}字 | 摘要：{preview}"
+                f"{f['char_count']}字{author_tag} | 摘要：{preview}"
             )
         file_inventory = "\n".join(inventory_lines)
         all_labels = {f["label"] for f in files}
+
+        # 构建 owner → 子方向映射，供 S1 prompt 使用
+        owner_map_lines: list[str] = []
+        for d in directions:
+            for sa in d.get("sub_areas", []) or []:
+                for owner_name in _parse_owner_list(sa.get("owner", "")):
+                    if owner_name:
+                        owner_map_lines.append(
+                            f"  - {owner_name} → {d.get('name','')} / {sa.get('name','')}"
+                        )
+        owner_map_text = "\n".join(owner_map_lines) if owner_map_lines else "（无）"
 
         inv_hash = self._cache.content_hash(file_inventory, 2000)
         dir_hash = self._cache.content_hash(
             json.dumps([{"id": d.get("id"), "name": d.get("name")} for d in directions],
                        ensure_ascii=False, sort_keys=True), 2000)
 
-        cached = self._cache.load_stage1_filter(inv_hash, dir_hash)
+        cached = self._cache.load_stage1_filter(inv_hash, dir_hash, len(directions))
         if cached is not None:
             return cached
 
@@ -388,6 +404,7 @@ class AnalysisReportService:
                 "direction_def": dir_def,
                 "file_inventory": file_inventory,
                 "direction_id": str(d_id),
+                "owner_map": owner_map_text,
             })
 
             result = self._llm.generate(prompt=prompt, route_context={
@@ -407,6 +424,42 @@ class AnalysisReportService:
                 parsed[level] = [i for i in items
                                  if isinstance(i, dict) and i.get("label", "") in all_labels]
 
+            # ── 全空兜底：LLM 返回有效 JSON 但四个级别全空时触发 ──
+            total_assigned = sum(
+                len(parsed.get(lv, [])) for lv in ("high", "medium", "low", "none")
+            )
+            if total_assigned == 0:
+                logger.warning(
+                    "  Stage 1 过滤 %s: LLM 返回全空，触发 owner-map + 成员周报兜底",
+                    d_name,
+                )
+                # 1) 提取本方向的 owner 集合
+                dir_owners: set = set()
+                for sa in (direction.get("sub_areas") or []):
+                    for on in _parse_owner_list(sa.get("owner", "")):
+                        if on:
+                            dir_owners.add(on)
+                # 2) 分配所有文件
+                for f in files:
+                    label = f.get("label", "")
+                    if not label:
+                        continue
+                    if f.get("author") and f["author"] in dir_owners:
+                        parsed.setdefault("high", []).append({
+                            "label": label,
+                            "reason": "owner 匹配兜底（LLM 全空）",
+                        })
+                    elif f.get("dir") == "成员周报":
+                        parsed.setdefault("medium", []).append({
+                            "label": label,
+                            "reason": "成员周报兜底（LLM 全空）",
+                        })
+                    else:
+                        parsed.setdefault("low", []).append({
+                            "label": label,
+                            "reason": "全空兜底（LLM 全空）",
+                        })
+
             parsed["direction_name"] = d_name
             logger.info("  %s: high=%d medium=%d low=%d",
                         d_name[:25], len(parsed.get("high", [])),
@@ -414,7 +467,7 @@ class AnalysisReportService:
             return parsed
 
         dir_file_map: dict = {}
-        _s1_timeout = max(120, len(directions) * 30)
+        _s1_timeout = max(240, len(directions) * 60)
         with shared_pool.executor(max_workers=min(len(directions), 6)) as executor:
             futures = {executor.submit(_filter_one, d): d for d in directions}
             try:
@@ -432,7 +485,24 @@ class AnalysisReportService:
                             "low": [{"label": label} for label in all_labels], "none": [],
                         }
             except FuturesTimeoutError:
-                logger.error("Stage 1 过滤超时（%ds）", _s1_timeout)
+                logger.error("Stage 1 过滤超时（%ds），已处理 %d/%d 个方向",
+                             _s1_timeout, len(dir_file_map), len(directions))
+                # 补跑超时的方向（逐个调用，不再并行）
+                completed_names = set(dir_file_map.keys())
+                for d in directions:
+                    d_name = d.get("name", f"方向{d.get('id','?')}")
+                    if d_name not in completed_names:
+                        logger.warning("  → 补跑超时方向: %s", d_name[:30])
+                        try:
+                            r = _filter_one(d)
+                            dir_file_map[r["direction_name"]] = r
+                        except Exception as e:
+                            logger.warning("  Stage 1 补跑失败 %s: %s", d_name, e)
+                            dir_file_map[d_name] = {
+                                "direction_name": d_name,
+                                "high": [], "medium": [],
+                                "low": [{"label": label} for label in all_labels], "none": [],
+                            }
 
         self._cache.save_stage1_filter(inv_hash, dir_hash, dir_file_map)
         return dir_file_map
@@ -459,13 +529,22 @@ class AnalysisReportService:
 
         to_summarize: list = []
         briefs: dict = {}
+        brief_hash_keys: dict = {}  # label → hash_key（含方向上下文签名）
 
         for label, dir_names in needed_labels.items():
             f_data = file_by_label.get(label)
             if not f_data:
                 continue
 
-            hash_key = self._cache.content_hash(f_data["content"], 2000)
+            # 包含方向上下文签名，当文件的方向分配变化时缓存自动失效
+            dir_sig = self._cache.content_hash(
+                json.dumps(sorted(dir_names), ensure_ascii=False), 128
+            )
+            hash_key = self._cache.content_hash(
+                f_data["content"] + "||dir_ctx:" + dir_sig, 2000
+            )
+            brief_hash_keys[label] = hash_key
+
             cached_brief = self._cache.load_brief(label, hash_key, brief_index)
             if cached_brief is not None:
                 briefs[label] = cached_brief
@@ -494,10 +573,22 @@ class AnalysisReportService:
                         brief = future.result()
                         if brief:
                             brief["dir_type"] = file_by_label.get(label, {}).get("dir", "")
+
+                            # 合并 Stage 1 的方向分类（LLM 可能只标注了 primary）
+                            s1_dir_names = needed_labels.get(label, [])
+                            if s1_dir_names:
+                                s1_dir_ids = set()
+                                for d in directions:
+                                    d_name = d.get("name", "")
+                                    if d_name in s1_dir_names:
+                                        s1_dir_ids.add(int(d.get("id", 0)))
+                                relevant = brief.get("relevant_directions", [])
+                                brief["relevant_directions"] = sorted(set(relevant) | s1_dir_ids)
+
                             briefs[label] = brief
                             f_data = file_by_label.get(label)
                             if f_data:
-                                hk = self._cache.content_hash(f_data["content"], 2000)
+                                hk = brief_hash_keys.get(label) or self._cache.content_hash(f_data["content"], 2000)
                                 self._cache.save_brief(label, hk, brief, brief_index)
                     except Exception as e:
                         logger.warning("  Stage 2 摘要失败 [%s]: %s", label, e)
@@ -513,10 +604,16 @@ class AnalysisReportService:
         MAX_CHARS = 50000
 
         content = f_data["content"]
+        original_len = len(content)
         if len(content) > MAX_CHARS:
             logger.warning("  文件过长 [%s]: %d 字 → 截断至 %d 字",
-                           f_data["label"], len(content), MAX_CHARS)
-            content = content[:MAX_CHARS]
+                           f_data["label"], original_len, MAX_CHARS)
+            content = content[:MAX_CHARS] + (
+                "\n\n---\n[文件过长，已截断。"
+                f"原始文件共 {original_len} 字，仅展示了前 {MAX_CHARS} 字。"
+                "如文件中与关联方向相关的信息未在以上内容中出现，"
+                "请降低对该文件'无相关信息'的置信度。]"
+            )
 
         dir_names = f_data.get("_dir_names", [])
         dir_parts = []
@@ -524,7 +621,16 @@ class AnalysisReportService:
             d_name = d.get("name", "")
             d_id = d.get("id", 0)
             if d_name in dir_names:
-                dir_parts.append(f"方向{d_id}: {d_name} — {d.get('scope_summary', '')}")
+                sub_info = []
+                for sa in (d.get("sub_areas") or []):
+                    owners = "、".join(_parse_owner_list(sa.get("owner", "")))
+                    goal = sa.get("goal", "")
+                    sub_info.append(f"  · {sa.get('name','')}（owner: {owners}，目标: {goal}）")
+                sub_lines = "\n".join(sub_info) if sub_info else ""
+                dir_parts.append(
+                    f"方向{d_id}: {d_name} — {d.get('scope_summary', '')}\n"
+                    f"  子方向与责任人（Owner）：\n{sub_lines}"
+                )
         dir_context = "\n".join(dir_parts) if dir_parts else "通用"
 
         prompt = self._prompt_loader.render("biweekly_stage2_summarize.md", {
@@ -570,7 +676,8 @@ class AnalysisReportService:
     # ── Stage 3: 单方向章节合成 ───────────────────────────────
 
     def _stage3_synthesize_directions(self, directions: list, style_guide: dict,
-                                      file_briefs: dict) -> dict:
+                                      dir_file_map: dict, file_briefs: dict,
+                                      max_items: int = 4) -> dict:
         """按方向并行合成章节。Returns {direction_name: markdown_section}."""
         style_text = json.dumps(style_guide, ensure_ascii=False, indent=2)
 
@@ -598,6 +705,8 @@ class AnalysisReportService:
                     multi_dedup=multi_dedup,
                     prev_by_dir=prev_by_dir,
                     style_text=style_text,
+                    dir_file_map=dir_file_map,
+                    max_items=max_items,
                 ): d for d in directions
             }
             try:
@@ -618,11 +727,24 @@ class AnalysisReportService:
     def _s3_synthesize_direction_section(
         self, *, direction: dict, dir_brief_index: dict,
         boundary_by_dir: dict, multi_dedup: dict, prev_by_dir: dict,
-        style_text: str,
+        style_text: str, dir_file_map: dict | None = None,
+        max_items: int = 4,
     ) -> tuple:
         """合成单个方向的章节内容。返回 (direction_name, markdown_section)。"""
         d_name = direction.get("name", "")
         briefs_for_dir = dir_brief_index.get(d_name, [])
+
+        # 按优先级排序 brief，并限制传入的 brief 数量
+        # 子方向数 × 9：每个子方向最多 3 条进展 × 每条进展引用约 3 份 brief
+        sub_count = len(direction.get("sub_areas", [])) or 3
+        max_briefs = max(sub_count * 9, 12)  # 至少 12 条，确保有足够素材
+        if len(briefs_for_dir) > max_briefs:
+            briefs_for_dir = _sort_briefs_by_priority(briefs_for_dir, direction, dir_file_map)
+            briefs_for_dir = briefs_for_dir[:max_briefs]
+            logger.info("  %s: %d 份 brief → 按优先级保留 %d 份", d_name[:25],
+                        len(dir_brief_index.get(d_name, [])), max_briefs)
+        else:
+            briefs_for_dir = _sort_briefs_by_priority(briefs_for_dir, direction, dir_file_map)
 
         brief_text = self._s3_format_briefs(briefs_for_dir, direction)
         insights_text = _s3_extract_strategic_insights(briefs_for_dir)
@@ -650,8 +772,14 @@ class AnalysisReportService:
                 prev_text = f"## 上期双周报中该方向的内容（本期不要重复以下已提过的进展）\n\n{prev_text[:1500]}\n"
 
         dir_def = json.dumps(direction, ensure_ascii=False, indent=2)
+
+        # 提取 key_indicators 作为结构化提示
+        indicators = direction.get("key_indicators", []) or []
+        indicators_text = "\n".join(f"- {ind}" for ind in indicators) if indicators else "（未定义）"
+
         prompt = self._prompt_loader.render("biweekly_stage3_direction.md", {
             "direction_def": dir_def,
+            "key_indicators": indicators_text,
             "style_guide": style_text,
             "direction_boundaries": boundaries_text,
             "previous_direction_content": prev_text or "",
@@ -723,17 +851,28 @@ class AnalysisReportService:
 
     # ── Stage 4b: LLM 质量审查修订 ───────────────────────────
 
-    def _stage4b_review(self, period: str, assembled: str, directions: list) -> str:
+    def _stage4b_review(self, period: str, assembled: str, directions: list,
+                         max_items: int = 4) -> str:
         """对已组装的终稿执行 LLM 质量审查修订。"""
         directions_summary = "\n".join(
             f"- {d.get('name', '')}: {d.get('scope_summary', '')[:100]}"
             for d in directions
         )
 
+        # 提取所有方向的 key_indicators 供审查
+        indicators_parts = []
+        for d in directions:
+            d_name = d.get("name", "")
+            inds = d.get("key_indicators", []) or []
+            if inds:
+                indicators_parts.append(f"### {d_name}\n" + "\n".join(f"- {ind}" for ind in inds))
+        indicators_summary = "\n\n".join(indicators_parts) if indicators_parts else "（无）"
+
         prompt = self._prompt_loader.render("biweekly_stage4_assemble.md", {
             "period": period,
             "assembled_report": assembled,
             "directions_summary": directions_summary,
+            "key_indicators_summary": indicators_summary,
         })
 
         result = self._llm.generate(prompt=prompt, route_context={
@@ -745,6 +884,9 @@ class AnalysisReportService:
         if markdown.startswith("```"):
             markdown = re.sub(r'^```\w*\n?', '', markdown)
             markdown = re.sub(r'\n?```$', '', markdown)
+
+        # 剔除 S4b LLM 可能生成的重复时间周期标题（S4a 已生成 *时间周期* 头）
+        markdown = re.sub(r'^#+\s*时间周期[：:][^\n]*\n+', '', markdown, flags=re.MULTILINE)
 
         if not markdown.startswith("*时间周期"):
             markdown = f"*时间周期：{period}*\n\n{markdown}"

@@ -68,16 +68,20 @@ class BiweeklyCache:
 
     # ── Stage 1 过滤缓存 ───────────────────────────────────────
 
-    def load_stage1_filter(self, inv_hash: str, dir_hash: str) -> dict | None:
-        """命中返回 dir_file_map，未命中返回 None。"""
+    def load_stage1_filter(self, inv_hash: str, dir_hash: str, expected_count: int = 0) -> dict | None:
+        """命中返回 dir_file_map，未命中或方向数不完整返回 None。"""
         path = self._root / "stage1_filter.json"
         if not path.exists():
             return None
         try:
             cached = json.loads(path.read_text(encoding="utf-8"))
             if cached.get("inv_hash") == inv_hash and cached.get("dir_hash") == dir_hash:
-                logger.info("  Stage 1 命中缓存 (%d 个方向)", len(cached.get("dir_file_map", {})))
-                return cached["dir_file_map"]
+                dir_count = len(cached.get("dir_file_map", {}))
+                if expected_count <= 0 or dir_count == expected_count:
+                    logger.info("  Stage 1 命中缓存 (%d 个方向)", dir_count)
+                    return cached["dir_file_map"]
+                logger.warning("  Stage 1 缓存不完整（期望 %d 个方向，实际 %d 个），废弃重跑",
+                               expected_count, dir_count)
         except (json.JSONDecodeError, KeyError):
             pass
         return None

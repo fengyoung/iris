@@ -228,6 +228,78 @@ def _s3_extract_strategic_insights(briefs_for_dir: list) -> str:
 # ── 子领域分组 ──────────────────────────────────────────
 
 
+def _rank_brief_priority(brief: dict, direction: dict) -> int:
+    """计算 brief 的优先级分（越小越优先）。
+
+    排序依据：
+    1. Stage 1 高相关（high）文件 + owner 匹配 → 分值 0
+    2. Stage 1 高相关文件 → 分值 1
+    3. Stage 1 中相关（medium）文件 → 分值 2
+    4. Stage 1 低相关（low）文件 → 分值 3
+    5. 非 owner 文件在每档内额外 +1
+
+    通过 dir_file_map 获取 Stage 1 分发。
+    """
+    label = brief.get("label", "")
+    priority = 10  # 默认最低
+
+    # 从 _s1_level hint 读取 Stage 1 分发（由 S2 侧注入）
+    s1_level = brief.get("_s1_level", "low")
+    level_score = {"high": 0, "medium": 2, "low": 4}.get(s1_level, 4)
+
+    # 检查 owner 匹配
+    owner_labels = _build_owner_label_set(direction)
+    owner_match = bool(owner_labels & {label, label.split("周报")[0].rsplit("-", 1)[0] if "周报" in label else ""})
+    owner_bonus = -1 if owner_match else 1
+
+    priority = level_score + owner_bonus
+    return max(0, priority)
+
+
+def _build_owner_label_set(direction: dict) -> set:
+    """从方向定义提取 owner 的可匹配标签集。"""
+    owners: set = set()
+    for sa in (direction.get("sub_areas") or []):
+        for owner_name in _parse_owner_list(sa.get("owner", "")):
+            if owner_name.strip():
+                owners.add(owner_name.strip())
+    return owners
+
+
+def _parse_owner_list(owner_field) -> list[str]:
+    """归一化 owner 字段为字符串列表。
+
+    兼容两种格式：
+    - 旧格式（字符串斜线分隔）："甄琰/卞凯/刘备" → ["甄琰", "卞凯", "刘备"]
+    - 新格式（JSON 数组）：["甄琰", "卞凯"] → ["甄琰", "卞凯"]
+    """
+    if isinstance(owner_field, list):
+        return [str(o).strip() for o in owner_field if str(o).strip()]
+    if isinstance(owner_field, str):
+        return [o.strip() for o in owner_field.split("/") if o.strip()]
+    return []
+
+
+def _sort_briefs_by_priority(briefs: list, direction: dict,
+                              dir_file_map: dict | None = None) -> list:
+    """按优先级排序 brief 列表，并附加 _s1_level 标记。"""
+    # 注入 Stage 1 分发
+    if dir_file_map:
+        d_name = direction.get("name", "")
+        s1_mapping = dir_file_map.get(d_name, {})
+        s1_labels: dict[str, str] = {}
+        for level in ("high", "medium", "low"):
+            for item in s1_mapping.get(level, []):
+                label = item.get("label", "")
+                if label:
+                    s1_labels[label] = level
+        for b in briefs:
+            if not b.get("_s1_level"):
+                b["_s1_level"] = s1_labels.get(b.get("label", ""), "low")
+
+    return sorted(briefs, key=lambda b: _rank_brief_priority(b, direction))
+
+
 # 预设子领域关键词（用于 brief 到 OP 子领域的模糊匹配）
 # 当方向定义中未配置 sub_areas 时作为兜底，优先从 OP 文档的方向定义中读取。
 # 用户可在此按实际业务子领域自定义，键为子领域名称，值为相关关键词列表。
@@ -470,7 +542,9 @@ def _s3_check_subarea_order(direction_name: str, section: str, sub_areas: list) 
     """检查 Stage 3 输出中子方向出现顺序是否和 sub_areas 定义一致。
 
     通过在 Markdown 文本中查找每个子方向名称的首次出现位置，
-    与 sub_areas 预期顺序对比。不一致时仅记录 warning，不修改输出。
+    与 sub_areas 预期顺序对比。匹配策略：
+    1. 先尝试全名匹配 2. fallback 到前 15 字符 3. 再 fallback 到前 10 字符。
+    不一致时记录 warning，提示预期顺序供人工修订参考。
     """
     if not sub_areas:
         return
@@ -481,9 +555,12 @@ def _s3_check_subarea_order(direction_name: str, section: str, sub_areas: list) 
 
     positions: list[tuple[int, str]] = []
     for name in names:
-        # 用子方向名的前 10 字符进行模糊定位，避免截断导致找不到
-        key = name[:10]
-        pos = section.find(key)
+        pos = -1
+        # 按优先级尝试：全名 → 15字符 → 10字符
+        for key in (name, name[:15], name[:10]):
+            pos = section.find(key)
+            if pos >= 0:
+                break
         if pos >= 0:
             positions.append((pos, name))
 
@@ -491,13 +568,17 @@ def _s3_check_subarea_order(direction_name: str, section: str, sub_areas: list) 
         return  # 找不到足够多的子方向，无法判断顺序
 
     actual_order = [name for _, name in sorted(positions)]
-    expected_order = [n for n in names if any(n == a for a in actual_order)]
+    # 只比较能找到的子方向
+    expected_subset = [n for n in names
+                       if any(n == a or a.startswith(n[:10]) for a in actual_order)]
 
-    if actual_order != expected_order:
+    if (actual_order != expected_subset and
+        [a for a in actual_order
+         if any(e for e in expected_subset if e.startswith(a[:10]))] != expected_subset):
         _s3_logger.warning(
             "Stage 3 [%s]: 子方向顺序与 OP 定义不一致。"
-            "预期: %s；实际: %s",
+            "预期: %s；实际: %s —— 请在人工审阅时调整条目顺序",
             direction_name[:20],
-            [n[:8] for n in expected_order],
-            [n[:8] for n in actual_order],
+            [n[:12] for n in expected_subset],
+            [n[:12] for n in actual_order],
         )

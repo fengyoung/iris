@@ -223,11 +223,15 @@ class BiweeklyCollector:
                     parts = content.split("---", 2)
                     content = parts[2].strip() if len(parts) >= 3 else content
                 label = self._build_citation_label(f.name, dir_label)
+                author = ""
+                if dir_label == "成员周报":
+                    author = self._extract_person_from_filename(f.name) or ""
                 all_files.append({
                     "date": d,
                     "dir": dir_label,
                     "filename": f.name,
                     "label": label,
+                    "author": author,
                     "content": content,
                     "char_count": len(content),
                 })
