@@ -4,6 +4,33 @@
 
 ---
 
+## v3.19.9 (2026-07-20)
+
+双周报流水线全面质量加固 — P0 数据遗漏防护 + P1 内容质量提升，共九项修复。
+
+### P0 修复（数据遗漏防护，3 项）
+
+- **Stage 1 全空兜底**：LLM 返回有效 JSON 但四个级别全空时，触发 owner-map + 成员周报分级分配（owner 匹配 → high，其他成员周报 → medium，其余 → low），防止方向级数据静默遗漏
+- **Stage 1 owner-map 注入**：文件清单标注作者字段 + prompt 显式输出 owner→子方向映射表，引导 LLM 将 owner 文件归入 high/medium
+- **Stage 1 缓存方向数校验**：`load_stage1_filter()` 新增 `expected_count` 参数，缓存方向数不完整时自动废弃重跑，避免脏缓存导致部分方向 0 文件
+
+### P1 改进（内容质量提升，6 项）
+
+- **Stage 3 约束重构**：`max_items` 硬约束 → 子方向全覆盖 + 每子方向 ≤3 条 + 每条 ~50 字精简。解决 3 子方向抢 4 条配额导致验真假被合并的问题
+- **Stage 3 brief 优先级排序**：按 Stage 1 分发（high/medium/low）+ owner 匹配计算优先级，确保高质量 brief 优先进入 LLM 上下文
+- **Stage 4b 审查维度扩展**：新增子方向覆盖完整性检查（维度 4），条目数量规则改为每子方向 ≤3 条，审查项 10→11 重新编号
+- **Stage 2 方向上下文增强**：注入子方向名称/责任人/目标信息 + `relevant_directions` 合并 Stage 1 分发，避免跨方向内容遗漏
+- **Stage 2 截断提示优化**：超长文件（>50K 字）截断时附加提示，降低 LLM 对「无相关信息」的置信度
+- **Stage 1 超时兜底**：并行超时后逐个补跑未完成方向（原方案静默丢弃），超时时间 120s→240s
+- **key_indicators 端到端贯通**：Stage 3 合成 + Stage 4b 审查均注入 `key_indicators` 上下文
+- **子方向顺序检测改进**：三级 fallback 匹配（全名 → 15 字符 → 10 字符）+ warning 提示优化
+
+### 相关文件
+
+`src/iris/analysis/service.py` (+170/-46)、`_biweekly_helpers.py` (+99)、`_biweekly_cache.py` (+12)、`_biweekly_collector.py` (+4)、`templates/prompt/biweekly_stage{3,4}*.md`（+34）
+
+---
+
 ## v3.19.8 (2026-07-20)
 
 检测路径全面改进 — 4 条检测路径（复杂输入 / ASR 文本 / ASR 覆盖 / Wiki 深度评估）P0~P2 十四项修复，二轮核查追加 4 项。

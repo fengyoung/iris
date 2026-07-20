@@ -1,4 +1,4 @@
-# Iris 3.19.8 — 项目执行说明
+# Iris 3.19.9 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -113,7 +113,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.19.6 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.19.9 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.11 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -158,7 +158,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.19.8 (2026-07-20)** — 检测路径全面改进（P0~P2 十四项）：4 处正确性 Bug（死代码 / RANGE_PATTERN 贪婪正则 / 字符串表达式未赋值 / 缺失异常处理）+ 6 处设计缺陷（代码正则补全 / 路径归一化双端一致 / 泛型类型修正 / 槽位效率去重 / 参数签名化）+ +79 测试新建（`test_text_detector.py` 40 用例 + detector/deep_eval/source_locator 补全，总量 1,753）
+**当前 v3.19.9 (2026-07-20)** — 双周报流水线全面质量加固（P0~P1 九项）：Stage 1 全空兜底 / owner-map 注入 / 缓存方向数校验 + Stage 3 子方向覆盖重构（max_items → 全覆盖 + ≤3条/子方向 + ~50字精简）+ Stage 2/4b 上下文增强 + brief 优先级排序 + 超时补跑 + key_indicators 端到端贯通（9 文件，+295 行）
+
+> v3.19.8 (2026-07-20)：检测路径全面改进（P0~P2 十四项）：4 处正确性 Bug（死代码 / RANGE_PATTERN 贪婪正则 / 字符串表达式未赋值 / 缺失异常处理）+ 6 处设计缺陷（代码正则补全 / 路径归一化双端一致 / 泛型类型修正 / 槽位效率去重 / 参数签名化）+ +79 测试新建（`test_text_detector.py` 40 用例 + detector/deep_eval/source_locator 补全，总量 1,753）
 
 > v3.19.7 (2026-07-19)：全面质量加固（P0~P2 七项）：`_wiki.py` 5 处静默异常补日志、embedding 向量 LRU 缓存（128/600s）、`corrector.py` 拆分（834→712 行，`_clipboard_io.py` + `_text_detector.py`）、LLM `_CircuitBreaker` 熔断器、新增 109 个单元测试（biweekly helpers 48 + graph engine 26 + config models 35，总量 1,674）
 
