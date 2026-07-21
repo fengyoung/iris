@@ -4,6 +4,43 @@
 
 ---
 
+## v3.19.11 (2026-07-21)
+
+五大方向全面优化 — 测试加固 + 架构演进 + 代码质量提升。
+
+### 方向 1: 测试覆盖率提升（+76 新测试，7 文件）
+- `tests/unit/test_clipboard_io.py`: mock subprocess，`_clipboard_io.py` 18%→95%
+- `tests/unit/test_memory_updater.py`: mock memory stores，`memory_updater.py` 42%→82%
+- `tests/unit/test_trello_client_pure.py`: IP/DNS 纯函数测试
+- `tests/unit/test_wiki_discovery.py`: 标题/术语检测纯函数
+- `tests/unit/test_person_enricher.py`: mock FeishuClient 测试
+- `tests/unit/test_wiki_generator_pure.py`: 数据类/初始化测试
+- `tests/unit/test_asr_corrector.py`: 扩展 LLM mock + 边界用例
+
+### 方向 2: analysis/service.py God Class 拆解
+- `_biweekly_helpers.py` 提取 `DEFAULT_STYLE_GUIDE` + `assemble_biweekly_sections()` 纯函数
+- `service.py` `_stage4a_assemble` 委托给纯函数，`_DEFAULT_STYLE_GUIDE` 委托常量
+
+### 方向 3: LLM 调用统一网关
+- `LLMService.generate()` 新增 `extra_body`/`use_cache` 参数
+- `_make_cache_key()` 加入 `temperature` 区分不同温度的缓存键
+- `AsrCorrector` 支持 `set_llm_service()`，优先使用 LLMService（享受缓存/熔断器）
+- CLI handler 自动注入 LLMService
+
+### 方向 4: 缓存层统一抽象
+- 新增 `core/memory_cache.py`: `MemoryCache[T]`（LRU + TTL + 可选线程安全）
+- `LLMResponseCache` 增加 `threading.Lock`（`generate_async` 并发安全修复）
+- `generate_async` 同步缓存逻辑与 `generate()`
+
+### 方向 5: Wiki/ASR 模块整理
+- 4 个兼容 shim 文件增加 `DeprecationWarning`
+- 测试导入路径修正到规范路径
+
+### 影响范围
+19 文件，+887 / -64 行。1,829 测试通过（含 1 预存 flaky）。
+
+---
+
 ## v3.19.10 (2026-07-21)
 
 ASR 引擎全面质量加固 — P0 字符串截断 + P1 正确性 + P2 健壮性 + P3 性能优化，共十四项修复。
