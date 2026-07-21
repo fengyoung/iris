@@ -1,7 +1,7 @@
 # Iris ASR 实时校正引擎 — 构建与优化日志
 
 > 日期：2026-07-18 ~ 2026-07-21
-> 版本：Iris 3.18.9 → ... → 3.19.9 → 3.19.10 → 3.19.11 → 3.19.12
+> 版本：Iris 3.18.9 → ... → 3.19.9 → 3.19.10 → 3.19.11 → 3.19.12 → 3.19.13
 
 ---
 
@@ -315,3 +315,45 @@ handle_build_asr_prompt 增加 --from-feedback 参数:
 | `feedback.py` | `save_correction` 序列化 `context_ab` |
 | `_cli_main.py` | 新增 `--context-ab` 参数 |
 | `_wiki.py` | handler 读取并传入 `context_ab` |
+
+---
+
+## 十八、v3.19.13 ASR shutdown SIGINT 保护（2026-07-21）
+
+### 问题
+
+用户 `Ctrl+C` 停止 ASR 引擎时，`finally` 块依次执行：
+1. `_hotkey_monitor.stop()` — 含 `thread.join(timeout=3.0)`
+2. `_shutdown_executor()` — 关闭线程池
+
+若用户在 `join()` 阻塞期间再次按 `Ctrl+C`，Python 在 `join()` 处抛出 `KeyboardInterrupt`，跳过 executor 关闭，残留线程在 atexit 阶段再次触发异常（Python 3.13 `ThreadPoolExecutor._python_exit` → `t.join()`）。
+
+### 修复
+
+**SIGINT 屏蔽提升到 finally 块顶层**
+
+此前 `_shutdown_executor()` 内部自行屏蔽 SIGINT，但 `_hotkey_monitor.stop()` 未受保护。修复将信号屏蔽统一到 `run_forever()` 的 `finally` 块：
+
+```python
+finally:
+    orig_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    try:
+        if self._hotkey_monitor:
+            self._hotkey_monitor.stop()   # join() 期间 Ctrl+C 被忽略
+        self._shutdown_executor()        # 无需自行屏蔽
+    finally:
+        signal.signal(signal.SIGINT, orig_handler)
+```
+
+`_shutdown_executor()` 简化为纯业务逻辑（取消 pending + shutdown），不再包含信号处理代码。
+
+### 验证
+
+- 连续快速 `Ctrl+C` 不再抛出 `KeyboardInterrupt` traceback
+- 两个清理步骤均完整执行
+
+### 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `corrector.py` | `run_forever()` finally 块统一 SIGINT 屏蔽；`_shutdown_executor()` 简化 |

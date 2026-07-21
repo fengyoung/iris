@@ -4,6 +4,33 @@
 
 ---
 
+## v3.19.13 (2026-07-21)
+
+ASR shutdown SIGINT 保护 — 清理流程统一信号屏蔽。
+
+### 问题
+
+用户按 `Ctrl+C` 停止 ASR 引擎时，`finally` 块的清理流程分两步执行：
+1. `_hotkey_monitor.stop()` — 含 `thread.join(timeout=3.0)`
+2. `_shutdown_executor()` — 关闭线程池 + 取消 pending 任务
+
+若用户在 `join()` 阻塞期间再次按 `Ctrl+C`，Python 在 `join()` 处抛出 `KeyboardInterrupt`，直接跳过 executor 关闭，残留线程在 atexit 阶段再次触发异常。
+
+### 修复
+
+- 将 SIGINT 屏蔽从 `_shutdown_executor()` 内部提升到 `run_forever()` 的 `finally` 块顶层
+- 入口统一 `signal(SIGINT, SIG_IGN)`，保护 `hotkey_monitor.stop()` + `_shutdown_executor()` 整个序列
+- `finally` 中 `signal(SIGINT, orig_handler)` 保证恢复原始处理器
+- `_shutdown_executor()` 简化：移除冗余 SIGINT 处理（由调用方统一管理）
+
+### 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `corrector.py` | `run_forever()` finally 块统一 SIGINT 屏蔽；`_shutdown_executor()` 简化 |
+
+---
+
 ## v3.19.12 (2026-07-21)
 
 ASR 引擎 LLM 推理模式管控 + 路由路径修复 + 上下文效果评估。

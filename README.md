@@ -1,10 +1,10 @@
-# Iris 3.19.12
+# Iris 3.19.13
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
 
-**v3.19.12** — ASR 引擎：LLM 思考模式关闭 + 路由路径 extra_body 修复 + 上下文 A/B 对比模式。v3.19.11 五大方向全面优化：+76 测试 / LLM 统一网关 / 缓存层统一抽象 / God Class 拆解 / Wiki 模块整理（19 文件，+887 / -64 行，1,829 测试）。
+**v3.19.13** — ASR shutdown SIGINT 保护：清理流程统一信号屏蔽，防止二次 Ctrl+C 中断 hotkey monitor / executor 关闭。v3.19.12 LLM 思考模式关闭 + extra_body 路由修复 + 上下文 A/B 对比。v3.19.11 五大方向全面优化：+76 测试 / LLM 统一网关 / 缓存层统一抽象 / God Class 拆解 / Wiki 模块整理（19 文件，+887 / -64 行，1,829 测试）。
 
 ## 开发路线
 
@@ -159,6 +159,7 @@ iris3/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.19.13** | 2026-07-21 | ASR shutdown SIGINT 保护：清理流程统一信号屏蔽（finally 块），防止二次 Ctrl+C 中断 hotkey monitor 线程 join + executor 关闭 |
 | **v3.19.12** | 2026-07-21 | ASR 引擎：LLM 思考模式关闭 + 路由路径 extra_body 修复 + 上下文 A/B 对比模式（`--context-ab`） |
 | **v3.19.11** | 2026-07-21 | 五大方向优化：+76 测试 / LLM 统一网关(extra_body+use_cache) / MemoryCache 通用缓存 / God Class 拆解 / Wiki shim 废弃化（19 文件，+887/-64 行，1,829 测试） |
 | **v3.19.10** | 2026-07-21 | ASR 引擎质量加固（P0~P3）：protected_terms 截断 / 热键校验 / 超时+参数化 / 预检查 / Aho-Corasick 优化 / worker 动态 / 重试（8 文件，+313/-114 行） |

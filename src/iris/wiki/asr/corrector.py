@@ -22,6 +22,7 @@ import difflib
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -1034,8 +1035,31 @@ class AsrCorrector:
         except KeyboardInterrupt:
             print("\n[Iris] 校正引擎已停止", file=sys.stderr)
         finally:
-            if self._hotkey_monitor:
-                self._hotkey_monitor.stop()
+            # 安全关闭：屏蔽 SIGINT 防止清理过程中二次 Ctrl+C 中断
+            # Python 3.13 在进程退出时会通过 atexit 调用
+            # ThreadPoolExecutor._python_exit 的 t.join()，
+            # 若此时仍有 SIGINT 未处理则抛出 KeyboardInterrupt
+            orig_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
+            try:
+                if self._hotkey_monitor:
+                    self._hotkey_monitor.stop()
+                self._shutdown_executor()
+            finally:
+                signal.signal(signal.SIGINT, orig_handler)
+
+    def _shutdown_executor(self) -> None:
+        """关闭 LLM 线程池（SIGINT 屏蔽由 run_forever 的 finally 块统一处理）。
+
+        取消 pending 任务 + shutdown executor，避免遗留到 atexit 阶段。
+        """
+        # 1. 取消尚未开始执行的 pending 任务
+        if self._pending_llm and not self._pending_llm.done():
+            self._pending_llm.cancel()
+            self._pending_llm = None
+
+        # 2. 关闭线程池
+        # cancel_futures=True: Python 3.9+，取消队列中所有等待任务
+        self._llm_executor.shutdown(wait=True, cancel_futures=True)
 
     def _tick(self) -> None:
         """单次轮询周期。"""

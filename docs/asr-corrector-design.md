@@ -1,8 +1,8 @@
 # Iris ASR 实时校正引擎 — 完整设计方案
 
 > 生成日期：2026-07-18 · 最后更新：2026-07-21
-> 关联项目：Iris 3.19.12 / VocoType (AltRight 热键 + vocotype ASR)
-> 状态：v3.19.12 LLM 思考模式关闭 + extra_body 路由修复 + 上下文 A/B 对比。v3.19.10 ASR 引擎全面质量加固（P0~P3 十四项）已完成，v3.19.11 五大方向优化已完成
+> 关联项目：Iris 3.19.13 / VocoType (AltRight 热键 + vocotype ASR)
+> 状态：v3.19.13 ASR shutdown SIGINT 保护，v3.19.12 LLM 思考模式关闭 + extra_body 路由修复 + 上下文 A/B 对比。v3.19.10 ASR 引擎全面质量加固（P0~P3 十四项）已完成，v3.19.11 五大方向优化已完成
 
 ---
 
@@ -906,3 +906,19 @@ Prompt 文件名从 `asr_prompt_v2.md` 改为 `asr_prompt.md`（去掉版本后�
 - 默认关闭（日常使用零额外开销）
 - 开启时 LLM 调用翻倍（仅评估场景使用）
 - 第一句无上下文时自动跳过，第二句起生效
+
+### 10.12 v3.19.13 ASR shutdown SIGINT 保护（2026-07-21）
+
+#### 问题
+
+用户 `Ctrl+C` 停止引擎后，`finally` 块依次执行 `_hotkey_monitor.stop()`（含 `thread.join(3s)`）→ `_shutdown_executor()`。若在 `join()` 期间再次 `Ctrl+C`，`KeyboardInterrupt` 中断清理序列，executor 未关闭，Python 3.13 atexit 阶段 `ThreadPoolExecutor._python_exit` 再次抛异常。
+
+#### 修复
+
+将 SIGINT 屏蔽从 `_shutdown_executor()` 内部提升到 `run_forever()` 的 `finally` 块顶层，统一保护 `hotkey_monitor.stop()` + `_shutdown_executor()` 整个序列。`_shutdown_executor()` 简化为纯业务逻辑。
+
+#### 设计考量
+
+- 信号屏蔽在 `finally` 中恢复，保证不泄露 `SIG_IGN` 到外层
+- 不修改 `_HotkeyMonitor.stop()` 内部逻辑（其职责单一：停止监听）
+- 与 Python 3.13 atexit 行为兼容
