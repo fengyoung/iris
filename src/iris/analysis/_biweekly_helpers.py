@@ -582,3 +582,49 @@ def _s3_check_subarea_order(direction_name: str, section: str, sub_areas: list) 
             [n[:12] for n in expected_subset],
             [n[:12] for n in actual_order],
         )
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Stage 4a: 纯组装函数（无 LLM 依赖）
+# ═══════════════════════════════════════════════════════════════════
+
+DEFAULT_STYLE_GUIDE: dict = {
+    "narrative_voice": "决策者视角，有判断有观点，不罗列事实",
+    "paragraph_structure": "引用块(OP方向定位) → 战略分析段(4-8句) → 关键进展bullets",
+    "citation_style": "（来源：标签1 / 标签2），原样复制不修改",
+    "density_note": "每方向3-6条关键进展，每条含量化数据+来源",
+    "strategic_patterns": [
+        "整体评价开头 → 关键突破引述 → 风险暴露分析 → 下一步重心指向",
+        "用'但'、'然而'标记结构性风险，用'下一步'指明行动方向",
+    ],
+    "writing_rules": [
+        "每个方向一个 ## 章节",
+        "bullet 中须含量化数据",
+        "引用标签放在句末括号内",
+        "无实质进展方向标注「本期无显著进展」",
+    ],
+}
+
+
+def assemble_biweekly_sections(
+    period: str,
+    sections: dict,
+    directions: list,
+) -> str:
+    """按方向顺序拼接各章节，追加时间周期头——纯函数，无 LLM 调用。
+
+    Args:
+        period: 时间周期字符串，如 "2026-07-07 ~ 2026-07-20"
+        sections: {direction_name: markdown_section} 映射
+        directions: 方向定义列表（来自 Stage 0a）
+
+    Returns:
+        组装后的完整双周报 markdown
+    """
+    ordered_sections = []
+    for d in directions:
+        d_name = d.get("name", "")
+        if d_name in sections:
+            ordered_sections.append(sections[d_name])
+    direction_sections = "\n\n".join(ordered_sections)
+    return f"*时间周期：{period}*\n\n{direction_sections}"

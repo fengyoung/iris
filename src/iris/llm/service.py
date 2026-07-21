@@ -75,6 +75,8 @@ class LLMService:
         max_tokens: Optional[int] = None,
         max_retries: Optional[int] = None,
         force_model: Optional[str] = None,
+        extra_body: Optional[Dict[str, Any]] = None,
+        use_cache: bool = False,
     ) -> GenerationResult:
         """调用 LLM 生成文本。
 
@@ -85,15 +87,18 @@ class LLMService:
             max_tokens: 最大输出 token
             max_retries: 重试次数
             force_model: 强制使用指定模型名称，跳过路由规则
+            extra_body: 透传给 LLM API 的额外参数（如 thinking: disabled）
+            use_cache: 显式启用缓存（非 t=0 时如需缓存可设为 True）
 
         Returns:
             GenerationResult：包含生成文本和调用元数据
         """
         ctx = route_context or {"input_type": "text", "task_type": "qa", "complexity": "standard"}
 
-        # 确定性调用（temperature=0）：先查缓存
-        if temperature == 0:
-            cached = self._cache.get(prompt, ctx, force_model)
+        # 缓存逻辑：temperature=0 自动缓存，或 use_cache=True 显式启用
+        _should_cache = temperature == 0 or use_cache
+        if _should_cache:
+            cached = self._cache.get(prompt, ctx, force_model, temperature)
             if cached:
                 return GenerationResult(
                     text=cached["text"],
@@ -106,7 +111,10 @@ class LLMService:
                     completion_tokens=cached.get("completion_tokens", 0),
                 )
 
-        request = LLMRequest(prompt=prompt, route_context=ctx)
+        request = LLMRequest(
+            prompt=prompt, route_context=ctx,
+            extra_body=extra_body,
+        )
         try:
             response = self._provider.generate(
                 request,
@@ -126,8 +134,8 @@ class LLMService:
                 completion_tokens=response.completion_tokens,
             )
             # 确定性调用：写入缓存
-            if temperature == 0:
-                self._cache.put(prompt, ctx, force_model, response)
+            if _should_cache:
+                self._cache.put(prompt, ctx, force_model, response, temperature)
             return result
         except LLMProviderError as exc:
             logger.error("LLM 文本生成失败: %s", exc)
@@ -183,6 +191,8 @@ class LLMService:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         force_model: Optional[str] = None,
+        extra_body: Optional[Dict[str, Any]] = None,
+        use_cache: bool = False,
     ) -> GenerationResult:
         """异步调用 LLM 生成文本（使用 httpx async 或 ThreadPoolExecutor fallback）。
 
@@ -193,9 +203,10 @@ class LLMService:
 
         ctx = route_context or {"input_type": "text", "task_type": "qa", "complexity": "standard"}
 
-        # 确定性调用：先查缓存
-        if temperature == 0:
-            cached = self._cache.get(prompt, ctx, force_model)
+        # 缓存逻辑：temperature=0 自动缓存，或 use_cache=True 显式启用
+        _should_cache = temperature == 0 or use_cache
+        if _should_cache:
+            cached = self._cache.get(prompt, ctx, force_model, temperature)
             if cached:
                 return GenerationResult(
                     text=cached["text"],
@@ -217,6 +228,7 @@ class LLMService:
                     prompt, ctx,
                     temperature=temperature, max_tokens=max_tokens,
                     force_model=force_model,
+                    extra_body=extra_body, use_cache=use_cache,
                 ),
             )
             return result

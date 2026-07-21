@@ -678,6 +678,11 @@ def handle_asr_corrector(args, bundle, logger) -> int:
 
     if provider:
         corrector.set_provider(provider)
+        # 同时注入 LLMService（推荐路径：享受缓存、熔断器）
+        try:
+            corrector.set_llm_service(service)
+        except Exception:
+            pass  # LLMService 不可用时降级为直接 provider 调用
 
     if prompt_path:
         corrector.set_prompt_path(str(_Path(prompt_path)))

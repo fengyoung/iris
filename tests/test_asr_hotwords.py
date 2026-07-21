@@ -6,7 +6,7 @@ import json
 import pytest
 
 from iris.wiki.context_loader import WikiPageInfo
-from iris.wiki.asr_hotwords import (
+from iris.wiki.asr.hotwords import (
     _build_page_batches,
     _clean_text_term,
     _is_valid_hotword,

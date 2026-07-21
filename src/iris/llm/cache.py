@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
@@ -37,12 +38,13 @@ def _make_cache_key(
     prompt: str,
     route_context: Optional[Dict[str, Any]] = None,
     force_model: Optional[str] = None,
+    temperature: Optional[float] = None,
 ) -> str:
-    """基于 prompt + route_context + force_model 生成缓存键。"""
+    """基于 prompt + route_context + force_model + temperature 生成缓存键。"""
     ctx_str = json.dumps(
         sorted((route_context or {}).items()), sort_keys=True, ensure_ascii=False
     )
-    key_parts = f"{prompt}|{ctx_str}|{force_model or ''}"
+    key_parts = f"{prompt}|{ctx_str}|{force_model or ''}|t={temperature}"
     return hashlib.md5(key_parts.encode("utf-8")).hexdigest()
 
 
@@ -67,6 +69,7 @@ class LLMResponseCache:
         # 内存 LRU: OrderedDict[cache_key → cached_at_ts]
         # 最近访问的在末尾，最旧的在开头
         self._lru: OrderedDict[str, float] = OrderedDict()
+        self._lock = threading.Lock()  # 并发安全（generate_async 多线程）
         self._available = self._init_dir()
 
     def _init_dir(self) -> bool:
@@ -86,6 +89,7 @@ class LLMResponseCache:
         prompt: str,
         route_context: Optional[Dict[str, Any]] = None,
         force_model: Optional[str] = None,
+        temperature: Optional[float] = None,
     ) -> Optional[Dict[str, Any]]:
         """检查缓存，命中则返回缓存条目 dict，未命中返回 None。
 
@@ -95,7 +99,7 @@ class LLMResponseCache:
         if not self._available:
             return None
 
-        key = _make_cache_key(prompt, route_context, force_model)
+        key = _make_cache_key(prompt, route_context, force_model, temperature)
         entry_path = self._entry_path(key)
         if not entry_path.exists():
             self._misses += 1
@@ -110,18 +114,21 @@ class LLMResponseCache:
                     entry_path.unlink()
                 except OSError:
                     logger.debug("TTL 过期缓存删除失败: %s", entry_path)
-                self._lru.pop(key, None)
+                with self._lock:
+                    self._lru.pop(key, None)
                 self._misses += 1
                 return None
 
             # 命中：移到 LRU 末尾（最近使用）
-            self._lru.pop(key, None)
-            self._lru[key] = cached_at
+            with self._lock:
+                self._lru.pop(key, None)
+                self._lru[key] = cached_at
             self._hits += 1
             return data
         except (json.JSONDecodeError, OSError) as exc:
             logger.debug("LLMResponseCache 读取失败: %s", exc)
-            self._lru.pop(key, None)
+            with self._lock:
+                self._lru.pop(key, None)
             self._misses += 1
             return None
 
@@ -131,6 +138,7 @@ class LLMResponseCache:
         route_context: Optional[Dict[str, Any]],
         force_model: Optional[str],
         response: Any,
+        temperature: Optional[float] = None,
     ) -> None:
         """写入缓存条目。超限时通过内存 LRU 驱逐最旧条目。
 
@@ -139,7 +147,7 @@ class LLMResponseCache:
         if not self._available:
             return
 
-        key = _make_cache_key(prompt, route_context, force_model)
+        key = _make_cache_key(prompt, route_context, force_model, temperature)
         entry_path = self._entry_path(key)
 
         # 从不同响应类型中提取字段
@@ -169,12 +177,17 @@ class LLMResponseCache:
             entry_path.write_text(json.dumps(entry, ensure_ascii=False), encoding="utf-8")
 
             # 更新 LRU（如果 key 已存在，移到最后；否则插入）
-            self._lru.pop(key, None)
-            self._lru[key] = now
+            with self._lock:
+                self._lru.pop(key, None)
+                self._lru[key] = now
 
-            # 超过限制时驱逐最旧条目
-            if self._max_entries > 0 and len(self._lru) > self._max_entries:
-                oldest_key, _ = self._lru.popitem(last=False)
+                # 超过限制时驱逐最旧条目
+                if self._max_entries > 0 and len(self._lru) > self._max_entries:
+                    oldest_key, _ = self._lru.popitem(last=False)
+                else:
+                    oldest_key = None
+
+            if oldest_key:
                 try:
                     self._entry_path(oldest_key).unlink(missing_ok=True)
                     self._evictions += 1

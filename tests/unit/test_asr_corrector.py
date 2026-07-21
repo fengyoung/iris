@@ -1,6 +1,7 @@
 """ASR 校正引擎 — 单元测试（Aho-Corasick + AsrCorrector）。"""
 
 import pytest
+from unittest.mock import MagicMock
 from iris.wiki.asr._types import AsrCorrection
 from iris.wiki.asr.corrector import (
     _AhoCorasick,
@@ -136,3 +137,101 @@ class TestChineseCount:
 
     def test_no_chinese(self):
         assert _count_chinese("hello world") == 0
+
+    def test_empty_string(self):
+        assert _count_chinese("") == 0
+
+    def test_punctuation_not_counted(self):
+        assert _count_chinese("你好。世界！") == 4
+
+    def test_kana_not_counted(self):
+        assert _count_chinese("これはテストです") == 0
+
+
+class TestCorrectTextStatic:
+    def test_fast_mode_only(self):
+        result, applied = correct_text_static(
+            "我写到检测板里头",
+            {"检测板": "剪切板"},
+        )
+        assert "剪切板" in result
+        assert "检测板" not in result
+
+    def test_no_dict_returns_original(self):
+        result, applied = correct_text_static(
+            "今天天气真好",
+            {},
+        )
+        assert result == "今天天气真好"
+        assert applied == []
+
+    def test_with_mock_provider_success(self):
+        """LLM provider 返回正确结果时使用 LLM 输出。"""
+        mock_provider = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "修正后的文本"
+        mock_provider.generate.return_value = mock_response
+
+        result, applied = correct_text_static(
+            "原始文本",
+            {"原始": "修正"},
+            llm_prompt="测试 prompt",
+            provider=mock_provider,
+        )
+        assert "修正" in result
+
+    def test_with_mock_provider_failure_falls_back(self):
+        """LLM provider 异常时降级为词典结果。"""
+        mock_provider = MagicMock()
+        mock_provider.generate.side_effect = Exception("API error")
+
+        result, applied = correct_text_static(
+            "我写到检测板里头",
+            {"检测板": "剪切板"},
+            llm_prompt="测试 prompt",
+            provider=mock_provider,
+        )
+        assert "剪切板" in result
+        assert "检测板" not in result
+
+
+class TestAsrCorrectionType:
+    def test_dataclass_defaults(self):
+        from iris.wiki.asr._types import AsrCorrection
+        c = AsrCorrection()
+        assert c.timestamp == ""
+        assert c.mode == "full"
+
+    def test_dataclass_full_fields(self):
+        from iris.wiki.asr._types import AsrCorrection
+        c = AsrCorrection(
+            timestamp="2026-01-01T00:00:00Z",
+            raw_text="原始文本",
+            fast_corrected="快速修正",
+            full_corrected="完整修正",
+            mode="full",
+            corrections_applied=["A→B"],
+            llm_time_ms=150,
+        )
+        assert c.raw_text == "原始文本"
+        assert c.llm_time_ms == 150
+
+
+class TestAsrTextDetectionEdgeCases:
+    def test_empty_text(self):
+        assert not _is_asr_text("")
+
+    def test_whitespace_text(self):
+        assert not _is_asr_text("   ")
+
+    def test_mixed_chinese_english(self):
+        """中文为主的混合文本应通过。"""
+        assert _is_asr_text("我们今天讨论一下LLM的训练策略")
+
+    def test_braces_single_char_passes(self):
+        """单个花括号不应触发代码检测（需≥2个）。"""
+        assert _is_asr_text("用花括号{}测试") or not _is_asr_text("{测试")
+
+    def test_double_semicolons_blocked(self):
+        """多个分号应被拦截。"""
+        assert not _is_asr_text("a; b; c; d; e; f; g; h")

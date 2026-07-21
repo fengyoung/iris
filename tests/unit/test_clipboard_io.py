@@ -1,0 +1,99 @@
+"""ASR 剪贴板 I/O — 单元测试（mock subprocess）。"""
+
+from __future__ import annotations
+
+import subprocess
+from unittest.mock import patch, MagicMock
+
+from iris.wiki.asr._clipboard_io import (
+    _read_clipboard,
+    _write_clipboard,
+    _paste,
+    _replace_text_in_place,
+)
+
+
+class TestReadClipboard:
+    def test_returns_text(self):
+        with patch("subprocess.check_output", return_value="hello world"):
+            assert _read_clipboard() == "hello world"
+
+    def test_returns_empty_on_exception(self):
+        with patch("subprocess.check_output", side_effect=subprocess.CalledProcessError(1, "pbpaste")):
+            assert _read_clipboard() == ""
+
+    def test_returns_empty_on_oserror(self):
+        with patch("subprocess.check_output", side_effect=OSError):
+            assert _read_clipboard() == ""
+
+    def test_handles_unicode(self):
+        with patch("subprocess.check_output", return_value="你好世界"):
+            assert _read_clipboard() == "你好世界"
+
+
+class TestWriteClipboard:
+    def test_calls_pbcopy_with_text(self):
+        with patch("subprocess.run") as mock_run:
+            _write_clipboard("test text")
+            mock_run.assert_called_once_with(
+                ["pbcopy"], input="test text", text=True
+            )
+
+    def test_silently_handles_exception(self):
+        with patch("subprocess.run", side_effect=OSError):
+            _write_clipboard("test")  # 不应抛出异常
+
+
+class TestPaste:
+    def test_simulates_cmd_v(self):
+        with patch("subprocess.run") as mock_run:
+            _paste()
+            args = mock_run.call_args[0][0]
+            assert "keystroke" in " ".join(args)
+            assert "command down" in " ".join(args)
+
+    def test_handles_timeout(self):
+        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 3)):
+            _paste()  # 不应抛出异常
+
+
+class TestReplaceTextInPlace:
+    def test_writes_corrected_to_clipboard(self):
+        with patch("iris.wiki.asr._clipboard_io._write_clipboard") as mock_write, \
+             patch("iris.wiki.asr._clipboard_io._read_clipboard", return_value="corrected"), \
+             patch("subprocess.run"), \
+             patch("time.sleep"), \
+             patch("time.monotonic", side_effect=[0, 0.2, 1.0]):
+            _replace_text_in_place("corrected", 5)
+            mock_write.assert_called_once_with("corrected")
+
+    def test_sends_delete_and_paste_keystrokes(self):
+        with patch("iris.wiki.asr._clipboard_io._write_clipboard"), \
+             patch("iris.wiki.asr._clipboard_io._read_clipboard", return_value="corrected"), \
+             patch("subprocess.run") as mock_run, \
+             patch("time.sleep"), \
+             patch("time.monotonic", side_effect=[0, 0.2, 1.0]):
+            _replace_text_in_place("corrected", 10)
+            # 最终调用应包含 AppleScript 命令
+            final_call_args = mock_run.call_args_list[-1][0][0]
+            script = " ".join(final_call_args)
+            assert "key code 51" in script  # Delete
+            assert "keystroke" in script     # Cmd+V
+            assert "command down" in script
+
+    def test_polling_waits_for_stable_clipboard(self):
+        """剪贴板不稳定时轮询等待，稳定后才粘贴。"""
+        call_count = [0]
+        def unstable_then_stable():
+            call_count[0] += 1
+            if call_count[0] < 5:
+                return f"changing_{call_count[0]}"
+            return "stable"
+        with patch("iris.wiki.asr._clipboard_io._write_clipboard"), \
+             patch("iris.wiki.asr._clipboard_io._read_clipboard", side_effect=unstable_then_stable), \
+             patch("subprocess.run") as mock_run, \
+             patch("time.sleep"), \
+             patch("time.monotonic", return_value=0):
+            _replace_text_in_place("corrected", 3)
+            # 应该等待稳定后才执行 keystroke
+            assert call_count[0] >= 3  # 至少轮询了几次

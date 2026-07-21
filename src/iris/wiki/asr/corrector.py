@@ -451,12 +451,17 @@ class AsrCorrector:
         self._dict_path = ""  # 由 CLI handler 设置
         self._dict_mtime: float = 0.0
 
-        # LLM provider（延迟初始化）
+        # LLM provider / service（延迟初始化，优先使用 llm_service）
         self._provider = None
+        self._llm_service = None
 
     def set_provider(self, provider) -> None:
         """设置 LLM Provider（由 CLI 层注入）。"""
         self._provider = provider
+
+    def set_llm_service(self, llm_service) -> None:
+        """设置 LLMService（推荐）：享受缓存、熔断器、统一重试策略。"""
+        self._llm_service = llm_service
 
     def set_prompt_path(self, path: str) -> None:
         """设置 Prompt 文件路径，启用热加载。"""
@@ -526,28 +531,44 @@ class AsrCorrector:
         Returns:
             (corrected_text, llm_specific_applied_rules, time_ms)
         """
-        if self._provider is None or not self._prompt:
+        if not self._prompt:
+            return text, [], 0
+        if self._llm_service is None and self._provider is None:
             return text, [], 0
 
         t_start = time.monotonic()
         try:
-            from iris.llm import LLMRequest
-
-            response = self._provider.generate(
-                LLMRequest(
+            # 优先使用 LLMService（享受缓存、熔断器、统一重试）
+            if self._llm_service is not None:
+                result = self._llm_service.generate(
                     prompt=self._prompt + "\n\n输入：" + text,
                     route_context={
                         "task_type": "asr_correction",
                         "input_type": "text",
                     },
+                    temperature=0.1,
+                    max_tokens=2048,
                     extra_body={"thinking": {"type": "disabled"}},
-                ),
-                temperature=0.1,
-                max_tokens=2048,
-            )
+                )
+                response_text = result.text
+            else:
+                from iris.llm import LLMRequest
+                response = self._provider.generate(
+                    LLMRequest(
+                        prompt=self._prompt + "\n\n输入：" + text,
+                        route_context={
+                            "task_type": "asr_correction",
+                            "input_type": "text",
+                        },
+                        extra_body={"thinking": {"type": "disabled"}},
+                    ),
+                    temperature=0.1,
+                    max_tokens=2048,
+                )
+                response_text = response.text if response else ""
             elapsed_ms = int((time.monotonic() - t_start) * 1000)
-            if response and response.text and len(response.text.strip()) >= 1:
-                llm_output = response.text.strip()
+            if response_text and len(response_text.strip()) >= 1:
+                llm_output = response_text.strip()
                 if len(llm_output) > len(text) * 3:
                     print(f"[Iris] ⚠ LLM 输出疑似推理过程（{len(llm_output)}字），降级为词典结果",
                           file=sys.stderr)

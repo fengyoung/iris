@@ -49,6 +49,8 @@ from ._biweekly_helpers import (
     _resolve_section_content,
     _pick_group_line,
     _render_group_lines,
+    DEFAULT_STYLE_GUIDE,
+    assemble_biweekly_sections,
 )
 
 logger = logging.getLogger(__name__)
@@ -297,22 +299,7 @@ class AnalysisReportService:
 
     # ── Stage 0b: 风格指南 ──────────────────────────────────
 
-    _DEFAULT_STYLE_GUIDE: dict = {
-        "narrative_voice": "决策者视角，有判断有观点，不罗列事实",
-        "paragraph_structure": "引用块(OP方向定位) → 战略分析段(4-8句) → 关键进展bullets",
-        "citation_style": "（来源：标签1 / 标签2），原样复制不修改",
-        "density_note": "每方向3-6条关键进展，每条含量化数据+来源",
-        "strategic_patterns": [
-            "整体评价开头 → 关键突破引述 → 风险暴露分析 → 下一步重心指向",
-            "用'但'、'然而'标记结构性风险，用'下一步'指明行动方向",
-        ],
-        "writing_rules": [
-            "每个方向一个 ## 章节",
-            "bullet 中须含量化数据",
-            "引用标签放在句末括号内",
-            "无实质进展方向标注「本期无显著进展」",
-        ],
-    }
+    _DEFAULT_STYLE_GUIDE: dict = DEFAULT_STYLE_GUIDE  # 向后兼容别名
 
     def _stage0b_load_style(self, style_from: Optional[str] = None) -> dict:
         """加载风格指南：--style-from 时分析并缓存，否则读缓存/默认。"""
@@ -837,15 +824,8 @@ class AnalysisReportService:
     # ── Stage 4a: 纯结构组装（无 LLM） ──────────────────────
 
     def _stage4a_assemble(self, period: str, sections: dict, directions: list) -> str:
-        """按方向顺序拼接各章节，追加时间周期头——无 LLM 调用。"""
-        ordered_sections = []
-        for d in directions:
-            d_name = d.get("name", "")
-            if d_name in sections:
-                ordered_sections.append(sections[d_name])
-
-        direction_sections = "\n\n".join(ordered_sections)
-        assembled = f"*时间周期：{period}*\n\n{direction_sections}"
+        """按方向顺序拼接各章节——委托给纯函数 assemble_biweekly_sections。"""
+        assembled = assemble_biweekly_sections(period, sections, directions)
         logger.info("  Stage 4a 完成 (%d 字)", len(assembled))
         return assembled
 
