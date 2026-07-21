@@ -4,6 +4,42 @@
 
 ---
 
+## v3.19.10 (2026-07-21)
+
+ASR 引擎全面质量加固 — P0 字符串截断 + P1 正确性 + P2 健壮性 + P3 性能优化，共十四项修复。
+
+### P0 严重 Bug
+
+- **`prompt_optimizer.py` `protected_terms` 字符串截断**：`join(generator)[:60]` 对 join 后的字符串切片，导致术语被拦腰截断（如 `"概念BM25算"`）。改为先取列表前 N 项再 join。
+
+### P1 正确性修复（4 项）
+
+- **`corrector.py` 非修饰键校验**：新增 `_check_key()` 函数，热键含非修饰键（如 Z / F5）时联动校验，避免仅靠修饰键误触发。
+- **`hotwords.py` 超时保护**：`executor.map` 无 timeout → 改用 `as_completed` + timeout，支持部分结果保留。
+- **`formatter.py` `max_chinese` 参数化**：从硬编码 `max_chinese=10` 改为函数参数，与 `max_chars` 语义一致。
+- **`coverage.py` 去重 `_count_chinese`**：复用 `iris.utils.tokenization.count_chinese`，移除本地重复实现。
+
+### P2 健壮性修复（4 项）
+
+- **`corrector.py` 书面中文预检查**：新增 `_looks_like_written_chinese()` 函数，在调用昂贵的 `osascript` 前快速过滤书面中文（标点≥2或含口语填充词），减少子进程开销。
+- **`extractor.py` JSON 截断 warning**：`_parse_misreadings_response` 解析失败时 `logger.warning` 记录丢失术语数，避免静默丢数据。
+- **`feedback.py` 空字符串校验**：`extract_mappings_from_corrections` / `extract_llm_discoveries` 增加 `if not wrong or not right: continue`。
+- **`corrector.py` 冗余 `_last_text` 赋值移除**。
+
+### P3 性能与代码质量（5 项）
+
+- **`corrector.py`** `_diff_changes` / `_looks_like_written_chinese` import 升至模块顶部。
+- **`corrector.py` Aho-Corasick 写指针优化**：`result_chars[:pos]` 切片复制 → `del result_chars[write_pos:]` 原地删除，减少内存分配。
+- **`extractor.py` / `hotwords.py` worker 数动态获取**：`os.cpu_count()` 替代硬编码上限 8/6。
+- **`_text_detector.py` 单字符代码分档**：`[{};]` 从一次触发改为需 ≥2 个代码特征才拦截，避免 ASR 转写中偶发单字符被误判。
+- **`extractor.py` / `hotwords.py` 失败批次重试**：LLM 调用失败自动重试一次（2s 退避）。
+
+### 影响范围
+
+`src/iris/wiki/asr/` 子包 8 文件，+313 / -114 行。全部 111 个现有单元测试通过。
+
+---
+
 ## v3.19.9 (2026-07-20)
 
 双周报流水线全面质量加固 — P0 数据遗漏防护 + P1 内容质量提升，共九项修复。

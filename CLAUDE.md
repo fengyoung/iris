@@ -1,4 +1,4 @@
-# Iris 3.19.9 — 项目执行说明
+# Iris 3.19.10 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -113,7 +113,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.19.9 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.19.10 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.11 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -158,7 +158,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.19.9 (2026-07-20)** — 双周报流水线全面质量加固（P0~P1 九项）：Stage 1 全空兜底 / owner-map 注入 / 缓存方向数校验 + Stage 3 子方向覆盖重构（max_items → 全覆盖 + ≤3条/子方向 + ~50字精简）+ Stage 2/4b 上下文增强 + brief 优先级排序 + 超时补跑 + key_indicators 端到端贯通（9 文件，+295 行）
+**当前 v3.19.10 (2026-07-21)** — ASR 引擎全面质量加固（P0~P3 十四项）：P0 Prompt `protected_terms` 字符串截断修复 / P1 非修饰键校验 + 热词超时保护 + `max_chinese` 参数化 + `_count_chinese` 去重 / P2 书面中文预检查 + JSON 截断 warning + 空字符串校验 / P3 Aho-Corasick 写指针优化 + worker 动态获取 + 单字符代码分档 + 失败批次重试（8 文件，+313 / -114 行）
+
+> v3.19.9 (2026-07-20)：双周报流水线全面质量加固（P0~P1 九项）：Stage 1 全空兜底 / owner-map 注入 / 缓存方向数校验 + Stage 3 子方向覆盖重构（max_items → 全覆盖 + ≤3条/子方向 + ~50字精简）+ Stage 2/4b 上下文增强 + brief 优先级排序 + 超时补跑 + key_indicators 端到端贯通（9 文件，+295 行）
 
 > v3.19.8 (2026-07-20)：检测路径全面改进（P0~P2 十四项）：4 处正确性 Bug（死代码 / RANGE_PATTERN 贪婪正则 / 字符串表达式未赋值 / 缺失异常处理）+ 6 处设计缺陷（代码正则补全 / 路径归一化双端一致 / 泛型类型修正 / 槽位效率去重 / 参数签名化）+ +79 测试新建（`test_text_detector.py` 40 用例 + detector/deep_eval/source_locator 补全，总量 1,753）
 
