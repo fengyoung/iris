@@ -22,8 +22,10 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 import sys
+import time
 from concurrent.futures import as_completed, TimeoutError as FuturesTimeoutError
 
 from datetime import datetime, timezone
@@ -313,29 +315,38 @@ class TermExtractor:
         def _run_batch(idx_batch):
             idx, batch = idx_batch
             prompt = self._build_misreadings_prompt(batch, domain_context)
-            try:
-                response = provider.generate(
-                    LLMRequest(
-                        prompt=prompt,
-                        route_context={
-                            "task_type": "asr_misreading",
-                            "input_type": "text",
-                        },
-                    ),
-                    temperature=0.3,
-                    max_tokens=8192,
-                )
-                self._parse_misreadings_response(response.text, batch)
-                filled = sum(1 for t in batch if t.mis_asr)
-                tracker.increment(detail=f"第{idx+1}批 {filled}/{len(batch)} 术语已映射")
-            except Exception as exc:
-                if isinstance(exc, (KeyboardInterrupt, SystemExit)):
-                    raise
-                tracker.increment_error(detail=f"第{idx+1}批失败: {exc}")
+            last_exc = None
+            for attempt in range(2):  # 最多一次重试
+                try:
+                    response = provider.generate(
+                        LLMRequest(
+                            prompt=prompt,
+                            route_context={
+                                "task_type": "asr_misreading",
+                                "input_type": "text",
+                            },
+                        ),
+                        temperature=0.3,
+                        max_tokens=8192,
+                    )
+                    self._parse_misreadings_response(response.text, batch)
+                    filled = sum(1 for t in batch if t.mis_asr)
+                    tag = f"第{idx+1}批" if attempt == 0 else f"第{idx+1}批(重试成功)"
+                    tracker.increment(detail=f"{tag} {filled}/{len(batch)} 术语已映射")
+                    return  # 成功，退出重试循环
+                except Exception as exc:
+                    if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                        raise
+                    last_exc = exc
+                    if attempt == 0:
+                        time.sleep(2)  # 短暂退避后重试
+            # 两次均失败
+            tracker.increment_error(detail=f"第{idx+1}批失败(已重试): {last_exc}")
 
         _timeout = len(batches) * 90
+        _max_workers = min(len(batches), os.cpu_count() or 8)
         from iris.core.thread_pool import shared_pool
-        with shared_pool.executor(max_workers=min(len(batches), 8)) as executor:
+        with shared_pool.executor(max_workers=_max_workers) as executor:
             try:
                 list(executor.map(_run_batch, enumerate(batches), timeout=_timeout))
             except FuturesTimeoutError:
@@ -456,8 +467,18 @@ class TermExtractor:
                 try:
                     data = json.loads(m.group(0))
                 except json.JSONDecodeError:
+                    logger.warning(
+                        "ASR 误识别生成：LLM 返回 JSON 解析失败（%d 术语本批丢失），"
+                        "原始响应前 120 字符: %s",
+                        len(terms), text[:120],
+                    )
                     return
             else:
+                logger.warning(
+                    "ASR 误识别生成：LLM 返回无有效 JSON 数组（%d 术语本批丢失），"
+                    "原始响应前 120 字符: %s",
+                    len(terms), text[:120],
+                )
                 return
 
         if not isinstance(data, list):

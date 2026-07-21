@@ -49,13 +49,14 @@ def format_replace_dict(
     output_path: str,
     max_mappings: int = 2000,
     max_chars: int = 20,
+    max_chinese: int = 10,
 ) -> str:
     """将术语+误识别映射输出为替换词典 JSON。
 
     replace_map 格式：{{"误识别": "正确写法", ...}}
 
     过滤规则：
-    - 错误词和正确词均不超过 20 字符或 10 个中文字
+    - 错误词和正确词均不超过 max_chars 字符或 max_chinese 个中文字
     - 误识别词不能是通用高频字（如"在""是"），避免大面积误伤
 
     Args:
@@ -63,6 +64,7 @@ def format_replace_dict(
         output_path: 输出文件路径
         max_mappings: 最多映射条数（默认 2000，可通过 profile 配置覆盖）
         max_chars: 误识别和正确词的最大字符数
+        max_chinese: 误识别和正确词的最大中文字数
 
     Returns:
         写入的文件路径
@@ -73,7 +75,7 @@ def format_replace_dict(
     added = set()
     dangerous_skipped = 0
     for t in terms:
-        if _exceeds_char_limit(t.term, max_total=max_chars, max_chinese=10):
+        if _exceeds_char_limit(t.term, max_total=max_chars, max_chinese=max_chinese):
             continue
         for mis in t.mis_asr:
             if not mis:
@@ -81,8 +83,8 @@ def format_replace_dict(
             if is_dangerous_mapping(mis):
                 dangerous_skipped += 1
                 continue
-            # 错误詞也检查长度
-            if _exceeds_char_limit(mis, max_total=max_chars, max_chinese=10):
+            # 错误词也检查长度
+            if _exceeds_char_limit(mis, max_total=max_chars, max_chinese=max_chinese):
                 continue
             if mis not in added and mis != t.term:
                 replace_map[mis] = t.term

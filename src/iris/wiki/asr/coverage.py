@@ -19,6 +19,7 @@ from typing import Dict, List, Set, Tuple
 
 from ._types import AsrTerm, CoverageReport, DictQualityReport
 from .._constants import get_wiki_prefix
+from iris.utils.tokenization import count_chinese as _count_chinese
 
 # ── 噪音检测规则 ──────────────────────────────────────────
 
@@ -51,11 +52,6 @@ def is_dangerous_mapping(mis_word: str) -> bool:
     此类映射会在大比例文本中产生误伤，不应加入替换词典。
     """
     return len(mis_word) == 1 and mis_word in _COMMON_CHINESE_CHARS
-
-
-def _count_chinese(text: str) -> int:
-    """统计中文字符数。"""
-    return sum(1 for ch in text if "一" <= ch <= "鿿")
 
 
 def _is_noise_word(word: str) -> Tuple[bool, str]:

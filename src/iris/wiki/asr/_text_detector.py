@@ -10,11 +10,15 @@ _MAX_ASR_LENGTH = 500
 _MIN_CHINESE_RATIO = 0.3
 
 # 非 ASR 文本特征（代码、URL、Markdown 等）
+# 注: 单字符触发已从 [{};] 改为至少 2 个代码特征才判定为非 ASR，
+#      避免 ASR 转写中偶发的单字符误识别被误判。
 _CODE_PATTERNS = re.compile(
-    r"[{};]|def\s|from\s+\S+\s+import|import\s|class\s|function\s|http[s]?://|"
+    r"def\s|from\s+\S+\s+import|import\s|class\s|function\s|http[s]?://|"
     r"```|^#{1,6}\s|^\*\s|^\d+\.\s|^\-\s",
     re.MULTILINE,
 )
+# 单字符代码特征：需要累积至少 2 个才判定为非 ASR
+_CODE_SINGLE_CHARS_RE = re.compile(r"[{};]")
 
 
 def _count_chinese(text: str) -> int:
@@ -47,6 +51,10 @@ def _is_asr_text(
         return False
 
     if _CODE_PATTERNS.search(text):
+        return False
+    # 单字符代码特征（{ }; 等）需要累积 ≥2 个才判定为非 ASR
+    single_matches = len(_CODE_SINGLE_CHARS_RE.findall(text))
+    if single_matches >= 2:
         return False
 
     return True

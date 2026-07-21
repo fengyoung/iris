@@ -8,7 +8,7 @@
 
 架构:
     - 剪贴板监听：轮询 NSPasteboard changeCount
-    - 文本来源判定：热键 + 内容特征双重检测
+    - 文本来源判定：热键（push-to-talk 按住→释放→转写）+ 内容特征 + 剪贴板格式三重检测
     - 两步校正：替换词典（Aho-Corasick，<1ms）→ LLM 异步精修
     - 反馈记录：每次校正写入 feedback.jsonl
 """
@@ -17,8 +17,11 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.util
+import difflib
 import json
 import os
+import re
+import subprocess
 import sys
 import threading
 import time
@@ -43,8 +46,8 @@ from ._text_detector import _CODE_PATTERNS, _count_chinese, _is_asr_text  # noqa
 _DEFAULT_VOCO_DIR = os.path.expanduser("~/Library/Application Support/VocoType")
 VOCO_DIR = os.environ.get("IRIS_VOCOTYPE_DIR", _DEFAULT_VOCO_DIR)
 
-# 监听窗口（热键按下后等待剪贴板变化的秒数）
-_LISTEN_WINDOW_SEC = 2.0
+# 监听窗口（热键释放后等待剪贴板变化的秒数，覆盖 vocotype 转写延迟）
+_LISTEN_WINDOW_SEC = 3.0
 
 # 剪贴板轮询间隔
 _POLL_INTERVAL = 0.2
@@ -73,19 +76,42 @@ _CG = _load_cg()
 
 # 键码常量（macOS Carbon key codes）
 _KEYCODE_MAP = {
-    "shift": 56,     # kVK_Shift
-    "rightShift": 60,
-    "control": 59,   # kVK_Control
-    "rightControl": 62,
-    "option": 58,    # kVK_Option
-    "rightOption": 61,
-    "command": 55,   # kVK_Command
-    "rightCommand": 54,
+    # 修饰键（左右独立键码）
+    "shift": 56,          # kVK_Shift (left)
+    "rightShift": 60,     # kVK_RightShift
+    "control": 59,        # kVK_Control (left)
+    "rightControl": 62,   # kVK_RightControl
+    "option": 58,         # kVK_Option (left)
+    "rightOption": 61,    # kVK_RightOption
+    "command": 55,        # kVK_Command (left)
+    "rightCommand": 54,   # kVK_RightCommand
     "capsLock": 57,
+    # 常用字母/符号键
     "KeyZ": 6,
     "KeyX": 7,
     "KeyC": 8,
     "KeyV": 9,
+    # F1-F12 功能键
+    "KeyF1": 122,         # kVK_F1
+    "KeyF2": 120,         # kVK_F2
+    "KeyF3": 99,          # kVK_F3
+    "KeyF4": 118,         # kVK_F4
+    "KeyF5": 96,          # kVK_F5
+    "KeyF6": 97,          # kVK_F6
+    "KeyF7": 98,          # kVK_F7
+    "KeyF8": 100,         # kVK_F8
+    "KeyF9": 101,         # kVK_F9
+    "KeyF10": 109,        # kVK_F10
+    "KeyF11": 103,        # kVK_F11
+    "KeyF12": 111,        # kVK_F12
+}
+
+# 每个修饰键类型对应的全部键码（左右两侧）
+_MODIFIER_KEYCODE_VARIANTS: Dict[str, List[int]] = {
+    "shift": [56, 60],     # left, right
+    "control": [59, 62],   # left, right
+    "option": [58, 61],    # left, right
+    "command": [55, 54],   # left, right
 }
 
 # 修饰键掩码
@@ -98,7 +124,7 @@ _MOD_MASKS = {
 
 
 def _check_modifiers() -> int:
-    """返回当前按下的修饰键掩码。"""
+    """返回当前按下的修饰键掩码（同时检测左右两侧）。"""
     if _CG is None:
         return 0
     try:
@@ -108,12 +134,31 @@ def _check_modifiers() -> int:
         ]
         mask = 0
         for mod_name, mod_mask in _MOD_MASKS.items():
-            keycode = _KEYCODE_MAP.get(mod_name, 0)
-            if keycode and _CG.CGEventSourceKeyState(1, ctypes.c_uint16(keycode)):
-                mask |= mod_mask
+            keycodes = _MODIFIER_KEYCODE_VARIANTS.get(mod_name, [])
+            if not keycodes:
+                continue
+            # 检查所有变体（左右键），任一按下即置位
+            for keycode in keycodes:
+                if _CG.CGEventSourceKeyState(1, ctypes.c_uint16(keycode)):
+                    mask |= mod_mask
+                    break
         return mask
     except Exception:
         return 0
+
+
+def _check_key(keycode: int) -> bool:
+    """检查指定非修饰键是否被按下（通过 CoreGraphics 轮询）。"""
+    if _CG is None or keycode == 0:
+        return False
+    try:
+        _CG.CGEventSourceKeyState.restype = ctypes.c_bool
+        _CG.CGEventSourceKeyState.argtypes = [
+            ctypes.c_int, ctypes.c_uint16,
+        ]
+        return bool(_CG.CGEventSourceKeyState(1, ctypes.c_uint16(keycode)))
+    except Exception:
+        return False
 
 
 def _parse_hotkey(hotkey_str: str) -> Tuple[int, int]:
@@ -229,6 +274,7 @@ class _AhoCorasick:
         """
         result_chars: List[str] = []
         applied: List[str] = []
+        write_pos = 0  # 写指针：result_chars 中有效内容的长度
         i = 0
         n = len(text)
         node = self._root
@@ -241,6 +287,7 @@ class _AhoCorasick:
             if node is None:
                 node = self._root
                 result_chars.append(ch)
+                write_pos += 1
                 i += 1
                 continue
 
@@ -250,14 +297,19 @@ class _AhoCorasick:
             if node.output:
                 # 取最长匹配（已按长度降序排好）
                 pattern_len, replacement = node.output[0]
-                # 回退到匹配起点
-                result_chars = result_chars[:len(result_chars) - (pattern_len - 1)]
+                # 回退到匹配起点（调整写指针，覆盖已写入的模式字符）
+                backtrack = pattern_len - 1
+                write_pos -= backtrack
+                # 截断列表到写指针位置
+                del result_chars[write_pos:]
                 result_chars.append(replacement)
+                write_pos += 1
                 applied.append(f"{text[i - pattern_len + 1:i + 1]}→{replacement}")
                 i += 1
                 node = self._root  # 重置（避免重叠匹配冲突）
             else:
                 result_chars.append(ch)
+                write_pos += 1
                 i += 1
 
         return "".join(result_chars), applied
@@ -284,6 +336,60 @@ def _load_vocotype_hotkey() -> Tuple[int, int]:
         return _parse_hotkey(hotkey_str)
     except Exception:
         return 0, 0
+
+
+def _looks_like_written_chinese(text: str) -> bool:
+    """廉价预检查：文本是否更像书面中文而非 ASR 口语转写。
+
+    ASR 口语转写的典型特征：无标点或标点稀疏、含口语填充词、
+    同音错字多。书面中文则标点规范、无口语填充。
+
+    此函数用于在调用昂贵的 osascript（_clipboard_has_rich_text）之前
+    快速过滤掉明显的手动复制文本，减少子进程开销。
+
+    Returns:
+        True 如果文本更像书面中文（建议进一步检查富文本格式）
+    """
+    # 含规范标点（中文句号/逗号/分号/问号）→ 更像书面中文
+    punct_count = len(re.findall(r"[。，；？、]", text))
+    if punct_count >= 2:
+        return True
+    # 含口语填充词 → 更像 ASR 输出
+    _FILLER_WORDS = {"嗯", "啊", "那个", "就是", "然后", "这个"}
+    if any(fw in text for fw in _FILLER_WORDS):
+        return False
+    # 默认：不阻塞，走后续检查
+    return False
+
+
+def _clipboard_has_rich_text() -> bool:
+    """检查剪贴板是否包含富文本格式（HTML/RTF/Styled）。
+
+    vocotype ASR 输出为纯文本（public.utf8-plain-text），不含富文本类型。
+    用户从浏览器/文档手动复制的内容通常附带 HTML/RTF 格式，
+    以此区分「语音输入转写」和「手动复制」两种剪贴板写入来源。
+
+    Returns:
+        True 如果剪贴板含富文本格式（大概率是手动复制），False 如果仅纯文本。
+    """
+    try:
+        result = subprocess.run(
+            [
+                "osascript", "-e",
+                'tell application "System Events" to get the name of every clipboard type',
+            ],
+            capture_output=True, text=True, timeout=3,
+        )
+        types_str = result.stdout.strip().lower()
+        # 富文本特征标记
+        _RICH_INDICATORS = [
+            "html", "rtf", "rich", "styled",
+            "public.html", "public.rtf", "com.apple",
+        ]
+        return any(ind in types_str for ind in _RICH_INDICATORS)
+    except Exception:
+        # 检测失败时不拦截，避免影响正常校正
+        return False
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -325,7 +431,11 @@ class AsrCorrector:
         # 热键状态
         self._hotkey_mask, self._hotkey_keycode = _load_vocotype_hotkey()
         self._last_modifiers = 0
-        self._listen_window_start: float = 0.0
+        # push-to-talk 状态追踪（hold_to_record 模式）
+        #   _hotkey_held: 当前是否正在按住热键
+        #   _hotkey_released_at: 最后一次释放的时间戳（monotonic），0 表示未触发或已过期
+        self._hotkey_held = False
+        self._hotkey_released_at: float = 0.0
 
         # 剪贴板状态
         self._last_text = ""
@@ -484,10 +594,18 @@ class AsrCorrector:
         """主循环：剪贴板监听 + 校正。"""
         print(f"[Iris] ASR 校正引擎已启动 (mode={self._mode})", file=sys.stderr)
         if self._hotkey_mask or self._hotkey_keycode:
-            print(f"[Iris] vocotype 热键已检测: mask={self._hotkey_mask} key={self._hotkey_keycode}",
-                  file=sys.stderr)
+            print(
+                f"[Iris] vocotype 热键已检测: mask={self._hotkey_mask}"
+                f" key={self._hotkey_keycode}"
+                f" (push-to-talk, 释放后 {_LISTEN_WINDOW_SEC}s 监听窗口)",
+                file=sys.stderr,
+            )
         else:
-            print("[Iris] 未检测到 vocotype 热键配置，将仅通过文本特征判定", file=sys.stderr)
+            print(
+                "[Iris] 未检测到 vocotype 热键配置，将仅通过"
+                "文本特征 + 剪贴板格式判定（富文本自动过滤）",
+                file=sys.stderr,
+            )
         patterns = self._automaton.list_patterns()
         print(f"[Iris] 替换词典已加载 ({len(patterns)} 条规则)",
               file=sys.stderr)
@@ -506,24 +624,39 @@ class AsrCorrector:
         self._check_prompt_reload()
         self._check_dict_reload()
 
-        # 1. 检查热键状态
+        # 1. 检查热键状态（push-to-talk：按住说话 → 释放 → 转写 → 剪贴板）
         current_mods = _check_modifiers()
-        hotkey_just_pressed = (
+        hotkey_currently_held = (
             self._hotkey_mask > 0
             and (current_mods & self._hotkey_mask) == self._hotkey_mask
-            and (self._last_modifiers & self._hotkey_mask) != self._hotkey_mask
         )
+        # 如果热键包含非修饰键（如 Z / F5），必须同时校验该键状态
+        if hotkey_currently_held and self._hotkey_keycode > 0:
+            if not _check_key(self._hotkey_keycode):
+                hotkey_currently_held = False
 
-        if hotkey_just_pressed:
-            self._listen_window_start = time.monotonic()
+        if hotkey_currently_held and not self._hotkey_held:
+            # 上升沿：热键刚按下，开始录音
+            self._hotkey_held = True
+        elif not hotkey_currently_held and self._hotkey_held:
+            # 下降沿：热键释放，vocotype 开始转写 → 剪贴板
+            self._hotkey_held = False
+            self._hotkey_released_at = time.monotonic()
 
         self._last_modifiers = current_mods
 
-        # 2. 监听窗口超时检查
-        in_listen_window = (
-            self._listen_window_start > 0
-            and (time.monotonic() - self._listen_window_start) < _LISTEN_WINDOW_SEC
-        )
+        # 2. 监听窗口判定
+        #   - 按住期间：用户正在说话（剪贴板尚未写入，但保持窗口开放）
+        #   - 释放后 _LISTEN_WINDOW_SEC 秒：vocotype 转写 + 写入剪贴板
+        #   - 热键不可检测时（_hotkey_mask == 0）：降级为纯内容特征判定
+        if self._hotkey_mask > 0:
+            in_listen_window = (
+                self._hotkey_held
+                or (self._hotkey_released_at > 0
+                    and (time.monotonic() - self._hotkey_released_at) < _LISTEN_WINDOW_SEC)
+            )
+        else:
+            in_listen_window = True
 
         # 3. 读取剪贴板
         current_text = _read_clipboard()
@@ -536,16 +669,21 @@ class AsrCorrector:
 
         self._last_text = current_text
 
-        # 4. 判定是否为 vocotype ASR 输出
+        # 4. 判定是否为 vocotype ASR 输出（文本特征 + 剪贴板类型）
         if not _is_asr_text(current_text):
-            # 不在监听窗口内 → 忽略
-            if not in_listen_window:
-                return
-            # 在监听窗口内但不满足 ASR 特征 → 忽略
+            return
+        # 额外检查：如果剪贴板含富文本格式（HTML/RTF），大概率是用户手动复制
+        # 先做廉价预检查：ASR 文本通常含口语特征（填充词、缺标点等），
+        # 纯书面中文大概率是手动复制，跳过昂贵的 osascript 调用
+        if _looks_like_written_chinese(current_text) and _clipboard_has_rich_text():
             return
 
-        # 5. 执行校正
-        self._last_text = current_text
+        # 5. 监听窗口门控
+        # 热键可检测时必须在窗口内；热键不可检测时仅依赖内容特征
+        if not in_listen_window:
+            return
+
+        # 6. 执行校正
         t_correct_start = time.monotonic()
 
         # Step 1: 替换词典（始终执行）
@@ -560,7 +698,7 @@ class AsrCorrector:
 
         total_ms = int((time.monotonic() - t_correct_start) * 1000)
 
-        # 6. 输出：删掉原始文本 → 粘贴校正版
+        # 7. 输出：删掉原始文本 → 粘贴校正版
         if full_result != current_text:
             self._last_corrected = full_result
             _replace_text_in_place(full_result, len(current_text))
@@ -576,11 +714,11 @@ class AsrCorrector:
             elif full_result != fast_result:
                 print(f"[Iris] ✏️ 润色 ({total_ms}ms)", file=sys.stderr)
 
-        # 7. 记录反馈
+        # 8. 记录反馈
         self._record(current_text, fast_result, full_result, dict_applied, llm_time_ms)
 
-        # 8. 重置监听窗口（一次热键仅触发一次校正）
-        self._listen_window_start = 0.0
+        # 9. 重置释放时间戳（一次热键仅触发一次校正）
+        self._hotkey_released_at = 0.0
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -588,13 +726,7 @@ class AsrCorrector:
 # ═══════════════════════════════════════════════════════════════════
 
 def _diff_changes(before: str, after: str) -> List[str]:
-    """对比校正前后的文本差异，词级比较。
-
-    使用正则分词（中文单字 + 英文单词 + 标点），
-    避免字符级 diff 拆分太碎（如 数→速 而非 数率→速率）。
-    """
-    import difflib, re
-
+    """对比校正前后的文本差异，词级比较。"""
     def _tokenize(text: str) -> List[str]:
         tokens: List[str] = []
         i = 0

@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
+import time
 from typing import Dict, List, Optional, Set, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -224,43 +226,76 @@ class LLMHotwordExtractor:
             """处理单批页面：LLM 提取 → 清理 → 质量过滤。
 
             每批使用独立的局部去重集，跨批去重统一交由末尾的最终去重完成，
-            从而消除并发下的共享状态竞争。
+            从而消除并发下的共享状态竞争。失败时自动重试一次。
             """
             idx, batch = idx_batch
             prompt = _build_hotwords_prompt(batch, domain_context)
-            try:
-                response = provider.generate(
-                    LLMRequest(
-                        prompt=prompt,
-                        route_context={
-                            "task_type": "asr_hotword",
-                            "input_type": "text",
-                        },
-                    ),
-                    temperature=0.3,
-                    max_tokens=8192,
-                )
-                local_seen: set = set()
-                batch_terms = _parse_hotwords_response(response.text, local_seen)
-                # 后处理：质量过滤 + 文本清理
-                clean_batch = []
-                for t in batch_terms:
-                    cleaned = _clean_text_term(t)
-                    if not _is_valid_hotword(cleaned):
-                        continue
-                    clean_batch.append(cleaned)
-                tracker.increment(detail=f"第{idx+1}批 {len(clean_batch)}词 (候选{len(batch_terms)})")
-                return clean_batch
-            except Exception as exc:
-                if isinstance(exc, (KeyboardInterrupt, SystemExit)):
-                    raise
-                tracker.increment_error(detail=f"第{idx+1}批失败: {exc}")
-                return []
+            last_exc = None
+            for attempt in range(2):  # 最多一次重试
+                try:
+                    response = provider.generate(
+                        LLMRequest(
+                            prompt=prompt,
+                            route_context={
+                                "task_type": "asr_hotword",
+                                "input_type": "text",
+                            },
+                        ),
+                        temperature=0.3,
+                        max_tokens=8192,
+                    )
+                    local_seen: set = set()
+                    batch_terms = _parse_hotwords_response(response.text, local_seen)
+                    # 后处理：质量过滤 + 文本清理
+                    clean_batch = []
+                    for t in batch_terms:
+                        cleaned = _clean_text_term(t)
+                        if not _is_valid_hotword(cleaned):
+                            continue
+                        clean_batch.append(cleaned)
+                    tag = f"第{idx+1}批" if attempt == 0 else f"第{idx+1}批(重试成功)"
+                    tracker.increment(detail=f"{tag} {len(clean_batch)}词 (候选{len(batch_terms)})")
+                    return clean_batch
+                except Exception as exc:
+                    if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                        raise
+                    last_exc = exc
+                    if attempt == 0:
+                        time.sleep(2)  # 短暂退避后重试
+            # 两次均失败
+            tracker.increment_error(detail=f"第{idx+1}批失败(已重试): {last_exc}")
+            return []
 
-        # 并发执行；executor.map 保持批次顺序，去重优先保留靠前批次的写法
+        # 并发执行，使用 as_completed 支持超时 + 部分结果保留
+        from concurrent.futures import as_completed
         from iris.core.thread_pool import shared_pool
-        with shared_pool.executor(max_workers=min(len(batches), 6)) as executor:
-            batch_results = list(executor.map(_run_batch, enumerate(batches)))
+        _timeout = len(batches) * 90
+        _max_workers = min(len(batches), os.cpu_count() or 6)
+        with shared_pool.executor(max_workers=_max_workers) as executor:
+            futures = {
+                executor.submit(_run_batch, (idx, batch)): idx
+                for idx, batch in enumerate(batches)
+            }
+            batch_results_map: dict = {}
+            try:
+                for future in as_completed(futures, timeout=_timeout):
+                    idx = futures[future]
+                    try:
+                        batch_results_map[idx] = future.result()
+                    except Exception:
+                        batch_results_map[idx] = []
+            except TimeoutError:
+                import logging
+                _log = logging.getLogger(__name__)
+                _log.warning(
+                    "ASR 热词提取超时（%ds），%d/%d 批已完成",
+                    _timeout, len(batch_results_map), len(batches),
+                )
+            # 按原始顺序重建结果列表
+            batch_results = [
+                batch_results_map.get(i, [])
+                for i in range(len(batches))
+            ]
 
         all_hotwords: List[str] = []
         for clean_batch in batch_results:

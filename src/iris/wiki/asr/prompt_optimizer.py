@@ -107,9 +107,10 @@ class LLMPromptOptimizer:
         domain_bg = domain_context or "专业团队工作场景"
 
         # 领域保护名单：项目名 + 概念名（来自 Wiki，确保 LLM 不改错）
-        protected_terms = "、".join(
+        _protected_list = [
             t.term for t in (projects + concepts) if len(t.term) <= 12
-        )[:60] or "暂无"
+        ]
+        protected_terms = "、".join(_protected_list[:60]) or "暂无"
 
         # 从实际术语中动态选取音近推断示例（优先有 mis_asr 的人名/项目名）
         inference_examples = LLMPromptOptimizer._pick_inference_examples(persons, projects)

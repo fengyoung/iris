@@ -119,6 +119,8 @@ def extract_mappings_from_corrections(
             parts = applied.split("→", 1)
             if len(parts) == 2:
                 wrong, right = parts[0].strip(), parts[1].strip()
+                if not wrong or not right:
+                    continue
                 if right not in mappings:
                     mappings[right] = []
                 if wrong not in mappings[right]:
@@ -150,6 +152,8 @@ def extract_llm_discoveries(
             parts = applied_clean.split("→", 1)
             if len(parts) == 2:
                 wrong, right = parts[0].strip(), parts[1].strip()
+                if not wrong or not right:
+                    continue
                 if right not in discoveries:
                     discoveries[right] = []
                 if wrong not in discoveries[right]:
