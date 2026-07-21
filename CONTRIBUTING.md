@@ -50,7 +50,7 @@ pip install -e ".[dev]"
 pre-commit install
 
 # 快速命令（Makefile）
-make test            # 运行全部测试（199 unit + 1,314 integration）
+make test            # 运行全部测试（1,829 用例，103 文件）
 make test-unit       # 纯逻辑单元测试（0.5s 快速反馈）
 make test-integration # 集成测试
 make test-cov        # 运行测试 + 覆盖率报告

@@ -1,8 +1,8 @@
 # Iris ASR 实时校正引擎 — 完整设计方案
 
-> 生成日期：2026-07-18 · 最后更新：2026-07-19
-> 关联项目：Iris 3.19.7 / VocoType (paraformer-large-zh-cn-contextual + deepseek-v4-flash)
-> 状态：Phase 0 已实施，v3.19.1 质量加固已完成，v3.19.2 Phase 1 基础设施已完成，v3.19.3 交互体验改进已完成，v3.19.4 双周报生成逻辑优化已完成，v3.19.5 全面质量加固已完成，v3.19.6 ASR 校正引擎加固已完成，v3.19.7 全面质量加固（可靠性/缓存/拆分/熔断/测试）已完成
+> 生成日期：2026-07-18 · 最后更新：2026-07-21
+> 关联项目：Iris 3.19.11 / VocoType (AltRight 热键 + vocotype ASR)
+> 状态：v3.19.10 ASR 引擎全面质量加固（P0~P3 十四项）已完成，v3.19.11 五大方向优化（+76 测试 / LLM 网关 / 缓存统一 / God Class 拆解）已完成
 
 ---
 
@@ -188,17 +188,20 @@ iris3 asr-corrector [--mode fast|full] [--profile <name>]
 #### 1.2 完整运行时链路
 
 ```
-用户按下 vocotype 热键 → 说话 → 松手
+用户按下 vocotype 热键（按住说话）→ 说话 → 松手（触发转写）
   │
-  ├─ Iris 监听到热键事件
+  ├─ Iris 监听到热键按下（上升沿），记录 _hotkey_held = True
   │    （从 ~/Library/Application Support/VocoType/ui_settings.json
-  │     读取 recording_hotkey，不硬编码）
-  │   → 开启 2 秒"监听窗口"
+  │     读取 recording_hotkey，支持左右修饰键 + F1-F12 功能键）
+  │
+  ├─ Iris 监听到热键释放（下降沿），记录 _hotkey_released_at
+  │   → 开启 3 秒"释放后监听窗口"（覆盖 vocotype 转写延迟）
   │
   ├─ vocotype: ASR → 写入剪贴板 → Cmd+V（原始文本闪现）
   │
-  ├─ Iris: 监听窗口内检测到剪贴板 changeCount 变化
-  │    → 内容通过 ASR 特征检测 ✓
+  ├─ Iris: 监听窗口内检测到剪贴板变化
+  │    → 内容通过 ASR 文本特征检测 ✓
+  │    → 剪贴板格式检查（纯文本才放行，拒绝 HTML/RTF）✓
   │    → Step 1: 替换词典（Aho-Corasick，<1ms）
   │    → 写入剪贴板 → Cmd+V（覆盖原始文本）
   │
@@ -209,26 +212,27 @@ iris3 asr-corrector [--mode fast|full] [--profile <name>]
   └─ Iris: 记录校正日志 → feedback.jsonl
 ```
 
-#### 1.3 vocotype 文本来源判定：热键 + 内容特征双重检测
+#### 1.3 vocotype 文本来源判定：热键（push-to-talk）+ 内容特征 + 剪贴板格式三重检测
 
 ```
-vocotype 录音热键按下？（从 ui_settings.json 动态读取）
+vocotype 录音热键按下？（从 ui_settings.json 动态读取，支持左右修饰键）
   │
-  ├─ 否 → 忽略（普通剪贴板操作，零开销）
+  ├─ 否 → 忽略（普通剪贴板操作）
   │
-  └─ 是 → 开启 2 秒监听窗口
+  └─ 是 → 追踪 push-to-talk 状态：
+           按住期间保持窗口开放，释放后 3s 内等待转写结果
            │
-           └─ 剪贴板 changeCount 变化？
+           └─ 剪贴板变化且内容匹配？
                  │
-                 ├─ 是 → 内容匹配 ASR 特征？全部满足才触发：
-                 │         ☐ 中文为主（>50% 汉字）
+                 ├─ 是 → 三重判定全部满足才触发：
+                 │         ☐ 中文为主（>30% 汉字）
                  │         ☐ 5-500 字符
                  │         ☐ 无代码特征（无 { ; def import class http:// 等）
                  │         ☐ 无 URL 模式
                  │         ☐ 无 markdown 格式标记
                  │         └─ 全部满足 → 触发校正
                  │
-                 └─ 否 → 窗口超时关闭（2秒内无剪贴板写入）
+                 └─ 否 → 窗口超时关闭（释放后 3s 内无剪贴板写入）
 ```
 
 #### 1.4 粘贴策略：Backspace 删除 + 重新粘贴
@@ -558,7 +562,7 @@ iris3 build-asr-prompt --deploy
 
 | 决策 | 结论 | 理由 |
 |------|------|------|
-| 文本来源判定 | 热键 + 内容特征双重检测 | 热键从 vocotype 配置动态读取，不硬编码；组合判定误判率接近零 |
+| 文本来源判定 | 热键(push-to-talk) + 内容特征 + 剪贴板格式三重检测 | 左右修饰键均检测、非修饰键联动校验、富文本自动过滤、书面中文预检查 |
 | 粘贴策略 | 接受双次粘贴 | vocotype 不支持"只写剪贴板不粘贴"；先出字后修正体感自然 |
 | 进程模型 | 独立守护进程 | 与 Claude Code 无关，通过 launchd 注册开机自启 |
 | 与 vocotype 关系 | 伴生软件 | vocotype=前端（音频+ASR），Iris=后端（校正+反馈） |
