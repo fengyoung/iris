@@ -668,12 +668,20 @@ def handle_asr_corrector(args, bundle, logger) -> int:
     # 反馈路径
     feedback_path = str(_Path("data/asr_feedback.jsonl"))
 
+    # 近期上下文配置
+    context_window_size = profile_config.get("context_window_size", 5)
+    context_expire_minutes = profile_config.get("context_expire_minutes", 10)
+    context_ab = getattr(args, "context_ab", False)
+
     # 启动校正引擎
     corrector = AsrCorrector(
         replace_dict=replace_dict,
         llm_prompt=llm_prompt,
         mode=mode,
         feedback_path=feedback_path,
+        context_window_size=context_window_size,
+        context_expire_minutes=context_expire_minutes,
+        context_ab=context_ab,
     )
 
     if provider:

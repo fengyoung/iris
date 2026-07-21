@@ -1,8 +1,8 @@
 # Iris ASR 实时校正引擎 — 完整设计方案
 
 > 生成日期：2026-07-18 · 最后更新：2026-07-21
-> 关联项目：Iris 3.19.11 / VocoType (AltRight 热键 + vocotype ASR)
-> 状态：v3.19.10 ASR 引擎全面质量加固（P0~P3 十四项）已完成，v3.19.11 五大方向优化（+76 测试 / LLM 网关 / 缓存统一 / God Class 拆解）已完成
+> 关联项目：Iris 3.19.12 / VocoType (AltRight 热键 + vocotype ASR)
+> 状态：v3.19.12 LLM 思考模式关闭 + extra_body 路由修复 + 上下文 A/B 对比。v3.19.10 ASR 引擎全面质量加固（P0~P3 十四项）已完成，v3.19.11 五大方向优化已完成
 
 ---
 
@@ -880,3 +880,29 @@ Prompt 文件名从 `asr_prompt_v2.md` 改为 `asr_prompt.md`（去掉版本后�
 - **等待策略改进**：`_replace_text_in_place` 从固定 `delay 0.2s` 改为基线 0.15s + 剪贴板稳定性轮询
 - **常量复用**：`coverage.py` 用 `get_wiki_prefix()` 替换硬编码 prefix_map
 - 测试：84 ASR + 251 单元测试全部通过，无回归
+
+### 10.11 v3.19.12 LLM 推理模式管控 + 上下文效果评估（2026-07-21）
+
+#### LLM 思考模式关闭
+
+**问题**：`deepseek-v4-flash` 默认开启 thinking 模式，ASR 校正时输出冗长 CoT 推理过程（数百字），导致耗时 2-5 秒且频繁触发「输出超长降级为词典结果」。
+
+**修复**：
+- `AsrCorrector._correct_llm()` 两处 LLM 调用添加 `extra_body={"thinking": {"type": "disabled"}}`
+- `EnvironmentConfiguredLLMProvider.generate()` 路由路径 `_try_call` 闭包补传 `extra_body=request_data.extra_body`（此前仅 `force_model` 路径正确传递，路由路径静默丢弃）
+
+#### 上下文 A/B 对比
+
+**动机**：无法量化评估上下文窗口对 LLM 校正效果的影响。
+
+**实现**：
+- `AsrCorrector` 新增 `context_ab` 参数，通过 CLI `--context-ab` 开关控制
+- 开启后：上下文非空时每句跑两次 LLM（带/不带上下文），对比差异
+- `_correct_llm()` 新增 `force_no_context` 参数，支持强制跳过上下文注入
+- 日志输出差异摘要，A/B 数据写入 feedback JSONL 的 `context_ab` 字段
+- 新 `AsrCorrection.context_ab` 字段，非 None 时序列化到 JSONL
+
+**设计权衡**：
+- 默认关闭（日常使用零额外开销）
+- 开启时 LLM 调用翻倍（仅评估场景使用）
+- 第一句无上下文时自动跳过，第二句起生效

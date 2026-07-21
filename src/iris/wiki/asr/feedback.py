@@ -33,18 +33,18 @@ def save_correction(record: AsrCorrection, feedback_path: str) -> None:
     path = Path(feedback_path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    line = json.dumps(
-        {
-            "timestamp": record.timestamp,
-            "raw_text": record.raw_text,
-            "fast_corrected": record.fast_corrected,
-            "full_corrected": record.full_corrected,
-            "mode": record.mode,
-            "corrections_applied": record.corrections_applied,
-            "llm_time_ms": record.llm_time_ms,
-        },
-        ensure_ascii=False,
-    )
+    record_dict = {
+        "timestamp": record.timestamp,
+        "raw_text": record.raw_text,
+        "fast_corrected": record.fast_corrected,
+        "full_corrected": record.full_corrected,
+        "mode": record.mode,
+        "corrections_applied": record.corrections_applied,
+        "llm_time_ms": record.llm_time_ms,
+    }
+    if record.context_ab is not None:
+        record_dict["context_ab"] = record.context_ab
+    line = json.dumps(record_dict, ensure_ascii=False)
 
     with open(path, "a", encoding="utf-8") as f:
         f.write(line + "\n")

@@ -1,7 +1,7 @@
 # Iris ASR 实时校正引擎 — 构建与优化日志
 
 > 日期：2026-07-18 ~ 2026-07-21
-> 版本：Iris 3.18.9 → ... → 3.19.9 → 3.19.10 → 3.19.11
+> 版本：Iris 3.18.9 → ... → 3.19.9 → 3.19.10 → 3.19.11 → 3.19.12
 
 ---
 
@@ -271,3 +271,47 @@ handle_build_asr_prompt 增加 --from-feedback 参数:
 
 - 111 个已有测试全部通过（52 unit + 59 integration）
 - 8 批 / 10 批并发模拟验证线程安全，无行交错
+
+---
+
+## 十七、v3.19.12 LLM 推理模式管控 + 上下文效果评估（2026-07-21）
+
+### 问题
+
+`deepseek-v4-flash` 默认开启 thinking 模式，ASR 校正时 LLM 输出冗长 CoT 推理过程（数百字），导致：
+
+- 单次 LLM 调用耗时 2-5 秒（预期 <1s）
+- 频繁触发「输出超长降级为词典结果」（输出 > 输入 3 倍的安全保护）
+- 日志中常出现 `⚠ LLM 输出疑似推理过程（788字），降级为词典结果`
+
+### 修复
+
+**P0：LLM 思考模式关闭**
+
+`AsrCorrector._correct_llm()` 两处 LLM 调用路径均已添加 `extra_body={"thinking": {"type": "disabled"}}`：
+
+| 路径 | 位置 | 说明 |
+|------|------|------|
+| `LLMService.generate()` | 主路径 | 享受缓存/熔断器 |
+| `Provider.generate()` | 回退路径 | LLMService 不可用时降级 |
+
+在修复 `corrector.py` 后发现问题仍未解决，经追踪发现 `EnvironmentConfiguredLLMProvider.generate()` 的路由路径 `_try_call` 闭包在调用 `_dispatch_provider_call` 时漏传了 `extra_body` 参数（`force_model` 路径正确，但路由路径遗漏）。补传后修复生效。
+
+**新特性：上下文 A/B 对比**
+
+- `AsrCorrector` 新增 `context_ab` 参数 + CLI `--context-ab` 开关
+- 开启后：当上下文窗口非空时，每句跑两次 LLM（带/不带上下文），对比差异
+- 日志输出差异摘要：`🔬 A/B 对比 (1300ms/1150ms): 上下文带来 2 处差异 → -还就是, +就是问题`
+- A/B 数据写入 feedback JSONL 的 `context_ab` 字段，便于事后统计分析
+- `_correct_llm()` 新增 `force_no_context` 参数
+
+### 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `corrector.py` | LLM 调用补 `extra_body`；`_record`/`_llm_refine` 支持 A/B 对比；`_append_feedback_jsonl` 序列化 `context_ab` |
+| `provider.py` | 路由路径 `_try_call` 闭包补传 `extra_body=request_data.extra_body` |
+| `_types.py` | `AsrCorrection` 新增 `context_ab` 字段 |
+| `feedback.py` | `save_correction` 序列化 `context_ab` |
+| `_cli_main.py` | 新增 `--context-ab` 参数 |
+| `_wiki.py` | handler 读取并传入 `context_ab` |

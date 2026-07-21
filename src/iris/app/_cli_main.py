@@ -127,6 +127,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="asr-corrector 校正策略配置名")
     parser.add_argument("--correct-mode", default="full", choices=["fast", "full"],
                         help="asr-corrector 校正模式")
+    parser.add_argument("--context-ab", action="store_true",
+                        help="asr-corrector 开启上下文 A/B 对比（每句 LLM 跑两次，对比有无上下文的效果）")
     # 飞书文档转换
     parser.add_argument("--url", default="", help="feishu-doc-convert 飞书文档 URL（逗号分隔多文档）")
     parser.add_argument("--from-config", action="store_true", help="feishu-doc-convert / chat-digest 从配置文件读取目标列表")

@@ -4,6 +4,36 @@
 
 ---
 
+## v3.19.12 (2026-07-21)
+
+ASR 引擎 LLM 推理模式管控 + 路由路径修复 + 上下文效果评估。
+
+### LLM 思考模式关闭 (P0)
+
+- **问题**：`deepseek-v4-flash` 默认开启 thinking 模式，ASR 校正时输出冗长 CoT 推理过程（数百字），导致耗时 2-5 秒且频繁触发「输出超长降级为词典结果」
+- **修复**：`AsrCorrector._correct_llm()` 两处 LLM 调用添加 `extra_body={"thinking": {"type": "disabled"}}`（LLMService 路径 + Provider 回退路径）
+- **相关修复**：`EnvironmentConfiguredLLMProvider.generate()` 路由路径 `_try_call` 闭包漏传 `extra_body`，导致 thinking 关闭参数被静默丢弃 → 补传 `extra_body=request_data.extra_body`
+
+### 上下文 A/B 对比模式 (新特性)
+
+- `AsrCorrector` 新增 `context_ab` 参数 + CLI `--context-ab` 开关
+- 开启后：上下文非空时，每句跑两次 LLM（带/不带上下文），对比差异并记录到 feedback JSONL
+- `_correct_llm()` 新增 `force_no_context` 参数，支持强制跳过上下文注入
+- `AsrCorrection` / `_append_feedback_jsonl` 支持 `context_ab` 字段序列化
+
+### 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `corrector.py` | LLM 调用补 `extra_body`、`_record`/`_llm_refine` 支持 A/B 对比、`_append_feedback_jsonl` 序列化 |
+| `provider.py` | 路由路径 `_try_call` 补传 `extra_body` |
+| `_types.py` | `AsrCorrection` 新增 `context_ab` 字段 |
+| `feedback.py` | `save_correction` 序列化 `context_ab` |
+| `_cli_main.py` | 新增 `--context-ab` 参数 |
+| `_wiki.py` | handler 读取并传入 `context_ab` |
+
+---
+
 ## v3.19.11 (2026-07-21)
 
 五大方向全面优化 — 测试加固 + 架构演进 + 代码质量提升。

@@ -1,6 +1,6 @@
 # ASR 实时校正引擎 — 使用指南
 
-> Iris 3.19.11 · 将 vocotype 语音转写接入 Iris，实现实时纠错 + 润色 + 反馈闭环。
+> Iris 3.19.12 · 将 vocotype 语音转写接入 Iris，实现实时纠错 + 润色 + 反馈闭环。
 
 ## 快速开始
 
@@ -20,7 +20,7 @@ iris3 asr-corrector --correct-mode full
 | 命令 | 用途 | 常用参数 |
 |------|------|------|
 | `iris3 build-asr-prompt --deploy` | 生成三件套 + 部署到 vocotype | `--deploy` 一键部署 |
-| `iris3 asr-corrector` | 启动实时校正守护进程 | `--correct-mode fast\|full` |
+| `iris3 asr-corrector` | 启动实时校正守护进程 | `--correct-mode fast\|full` `--context-ab` 上下文 A/B 对比 |
 | `iris3 asr-audit --pretty` | 热词覆盖率 + 词典质量检查 | `--pretty` 人类可读 |
 | `iris3 asr-report --notes "..."` | 手动纠错（剪贴板原文 + 用户提供正确文本） | |
 
@@ -78,6 +78,9 @@ A: 启动 `asr-corrector` 后，用 vocotype 说句话，终端会显示 `[Iris]
 
 **Q: LLM 校正太慢怎么办？**
 A: 使用 `--correct-mode fast` 仅启用词典校正，毫秒级。
+
+**Q: 如何评估上下文窗口的效果？**
+A: 使用 `iris3 asr-corrector --context-ab` 开启 A/B 对比模式，每句会跑两次 LLM（带/不带上下文），差异记录在 feedback JSONL 的 `context_ab` 字段。评估完关闭即可，日常使用无需开启。
 
 **Q: 如何贡献纠错数据？**
 A: 发现校正结果不对时，运行 `iris3 asr-report --notes "正确的文本"`。

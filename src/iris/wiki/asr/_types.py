@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -116,3 +116,12 @@ class AsrCorrection:
     mode: str = "full"
     corrections_applied: List[str] = field(default_factory=list)
     llm_time_ms: int = 0
+    context_ab: Optional[Dict[str, Any]] = None
+    """A/B 对比结果（--context-ab 模式）。
+
+    None 表示未启用 A/B 对比，否则包含：
+        - context_sentence_count: 上下文窗口中的句子数
+        - with_context: 带上下文的 LLM 校正结果
+        - without_context: 不带上下文的 LLM 校正结果
+        - diff: with 和 without 之间的差异列表 [\"+添加\", \"-删除\"]
+    """

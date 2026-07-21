@@ -5,6 +5,8 @@
     "llm_prompt": "data/asr_prompt.md",
     "mode": "full",
     "max_mappings": 2000,
+    "context_window_size": 5,
+    "context_expire_minutes": 10,
     "llm": {
       "provider": "deepseek",
       "model": "deepseek-v4-flash",
@@ -18,6 +20,8 @@
     "llm_prompt": "data/asr_prompt_meeting.md",
     "mode": "full",
     "max_mappings": 2000,
+    "context_window_size": 5,
+    "context_expire_minutes": 10,
     "llm": {
       "provider": "deepseek",
       "model": "deepseek-v4-flash",
@@ -31,6 +35,8 @@
     "llm_prompt": null,
     "mode": "fast",
     "max_mappings": 2000,
+    "context_window_size": 5,
+    "context_expire_minutes": 10,
     "llm": null
   }
 }

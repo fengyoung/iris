@@ -203,11 +203,12 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
                 pass
 
         def _try_call(api_base: str, api_key: str, model_name: str, cfg: Dict[str, Any]) -> Tuple[str, int, int]:
-            """文本 API 调用闭包，捕获 prompt / temperature / max_tokens。"""
+            """文本 API 调用闭包，捕获 prompt / temperature / max_tokens / extra_body。"""
             return self._dispatch_provider_call(
                 api_base, api_key, model_name, request_data.prompt,
                 str(cfg["provider"]).lower(), cfg,
                 temperature=temperature, max_tokens=max_tokens, max_retries=max_retries,
+                extra_body=request_data.extra_body,
             )
 
         text, role, provider_name, model_name, api_base, pt, ct = self._fallback_loop(

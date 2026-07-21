@@ -37,18 +37,16 @@ def _replace_text_in_place(corrected: str, raw_length: int) -> None:
     """用校正文本替换 vocotype 刚粘贴的原始文本。
 
     策略：
-    1. 写入校正文本到剪贴板（覆盖 vocotype 写入的原文）
-    2. 基线等待 vocotype 的 Cmd+V 贴入完成（最小 0.15s）
-    3. 轮询剪贴板确认稳定（最长额外 1.0s）
+    1. 基线等待 vocotype 的 Cmd+V 贴入完成（最小 0.15s）
+    2. 轮询剪贴板确认稳定（剪贴板仍为原文，vocotype 没有二次写入）
+    3. 写入校正文本到剪贴板
     4. 按 raw_length 次 Delete 键删除原始文本，粘贴校正文本
     """
-    _write_clipboard(corrected)
-
     # 基线等待：vocotype 的 Cmd+V 至少需要 0.15s 完成
     _BASELINE_WAIT = 0.15
     time.sleep(_BASELINE_WAIT)
 
-    # 轮询确认剪贴板稳定（无其他写入方），最长再等 1.0s
+    # 轮询确认剪贴板稳定（此时剪贴板仍含原文，检测 vocotype 是否二次写入）
     _POLL_MAX_EXTRA = 1.0
     _POLL_STABLE_CYCLES = 3
     stable_count = 0
@@ -65,6 +63,9 @@ def _replace_text_in_place(corrected: str, raw_length: int) -> None:
         else:
             stable_count = 0
             last_clip = current
+
+    # 剪贴板稳定后写入校正文本，紧接着执行删除 + 粘贴
+    _write_clipboard(corrected)
 
     try:
         subprocess.run([
