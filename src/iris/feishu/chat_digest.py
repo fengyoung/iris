@@ -145,8 +145,8 @@ class ChatDigester:
         # 9. 路由
         if output == "to_source":
             route = self._classify(extracted)
-            target_dir = resolve_source_sub_dir(self._bundle, route)
-            output_path = target_dir / filename
+            output_path = resolve_source_sub_dir(self._bundle, route,
+                                                 filename)
         else:
             output_path = Path(output)
             route = ""

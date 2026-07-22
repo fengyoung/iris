@@ -111,7 +111,9 @@ def handle_build_biweekly_report(args, bundle, logger) -> int:
     elif getattr(args, "to_source", False):
         source_root = _resolve_data_source_root(bundle)
         if source_root:
-            output = str(source_root / "06-我的周报" / auto_filename)
+            from iris.utils.paths import resolve_source_archive_path
+            output = str(resolve_source_archive_path(
+                source_root, "06-我的周报", auto_filename))
 
     if output:
         path = Path(output)

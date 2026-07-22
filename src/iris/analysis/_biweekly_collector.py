@@ -69,7 +69,7 @@ class BiweeklyCollector:
 
             # 收集部门级文件（含 dept_keyword 且非个人/团队 OKR）
             candidates: list[Path] = []
-            for f in op_dir.glob("*.md"):
+            for f in op_dir.rglob("*.md"):
                 fname = f.name
                 if dept_keyword not in fname:
                     continue
@@ -79,7 +79,7 @@ class BiweeklyCollector:
 
             if not candidates:
                 # 兜底：取目录中所有文件，记录 warning 方便排查
-                fallback_all = sorted(op_dir.glob("*.md"), reverse=True)
+                fallback_all = sorted(op_dir.rglob("*.md"), reverse=True)
                 if fallback_all:
                     logger.warning(
                         "未找到含「%s」的部门级 OP 文档，兜底使用: %s",
@@ -131,7 +131,7 @@ class BiweeklyCollector:
         cutoff = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - \
                  timedelta(days=since_days)
         results: list[dict] = []
-        for f in sorted(report_dir.glob("双周报-*.md"), reverse=True):
+        for f in sorted(report_dir.rglob("双周报-*.md"), reverse=True):
             date_match = re.search(r'(\d{8})', f.name)
             if not date_match:
                 continue
@@ -206,7 +206,7 @@ class BiweeklyCollector:
             if not dir_path.exists():
                 logger.warning("  双周报数据目录不存在: %s", dir_path)
                 continue
-            for f in sorted(dir_path.glob("*.md")):
+            for f in sorted(dir_path.rglob("*.md")):
                 try:
                     raw_content = f.read_text(encoding="utf-8")
                 except (OSError, UnicodeDecodeError):

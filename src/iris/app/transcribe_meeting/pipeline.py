@@ -286,15 +286,23 @@ FILENAME: <文件名>"""
         return self._temp_dir
 
     def _resolve_routed_output(self, route_result: Dict[str, str], input_stem: str) -> Path:
-        """根据路由结果生成输出文件路径。"""
+        """根据路由结果生成输出文件路径（含归档子目录）。"""
         route = route_result.get("route", "05-会议纪要")
-        target_dir = self._resolve_routed_source_dir(route)
         filename = route_result.get("filename", "")
         if not filename:
             filename = f"{input_stem}.md"
         elif not filename.endswith(".md"):
             filename = f"{filename}.md"
-        return target_dir / filename
+
+        data_source = self._bundle.data_source
+        sources = data_source.get("sources", {})
+        for cfg in sources.values():
+            if cfg.get("enabled") and cfg.get("path"):
+                src_root = Path(cfg["path"]).resolve()
+                if src_root.exists():
+                    from iris.utils.paths import resolve_source_archive_path
+                    return resolve_source_archive_path(src_root, route, filename)
+        return self._temp_dir / filename
 
     def _get_transcript_search_dir(self) -> Path | None:
         """获取转写文件默认搜索目录（OS环境变量 > .env 文件）。"""

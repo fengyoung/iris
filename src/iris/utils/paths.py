@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 
 def get_agent_data_dir(data_root: Path) -> Path:
@@ -28,3 +30,65 @@ def resolve_source_root(bundle) -> Optional[Path]:
             if p.exists():
                 return p
     return None
+
+
+# ── SOURCE 目录归档配置 ──────────────────────────────────────────────
+
+_ARCHIVE_CONFIG: Optional[Dict[str, str]] = None
+_ARCHIVE_CONFIG_PATH = "config/source_archive.json"
+
+
+def _load_archive_config(project_root: Optional[Path] = None) -> Dict[str, str]:
+    """加载归档配置，返回 { category: mode } 映射。"""
+    global _ARCHIVE_CONFIG
+    if _ARCHIVE_CONFIG is not None:
+        return _ARCHIVE_CONFIG
+
+    root = project_root or Path(__file__).resolve().parent.parent.parent.parent
+    path = root / _ARCHIVE_CONFIG_PATH
+    if path.exists():
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    else:
+        # fallback: all flat
+        data = {"categories": {}}
+    _ARCHIVE_CONFIG = {
+        cat: info["mode"]
+        for cat, info in data.get("categories", {}).items()
+    }
+    return _ARCHIVE_CONFIG
+
+
+def get_archive_mode(category: str, project_root: Optional[Path] = None) -> str:
+    """获取指定类别的归档模式：'yearly' | 'monthly' | 'flat'。"""
+    config = _load_archive_config(project_root)
+    return config.get(category, "flat")
+
+
+def resolve_source_archive_path(
+    source_root: Path, category: str, filename: str,
+    project_root: Optional[Path] = None,
+) -> Path:
+    """按归档规则计算文件最终路径，自动创建子目录。
+
+    归档模式（由 config/source_archive.json 定义）：
+      - yearly:   {category}/{YYYY}/{filename}
+      - monthly:  {category}/{YYYYMM}/{filename}
+      - flat:     {category}/{filename}    （不归档）
+
+    文件名需以 ``YYYYMMDD-`` 开头才能提取时间前缀。
+    """
+    mode = get_archive_mode(category, project_root)
+    m = re.match(r"(\d{4})(\d{2})\d{2}-", filename)
+    if m and mode != "flat":
+        if mode == "yearly":
+            sub = m.group(1)  # YYYY
+        elif mode == "monthly":
+            sub = m.group(1) + m.group(2)  # YYYYMM
+        else:
+            sub = ""
+        target = source_root / category / sub
+    else:
+        target = source_root / category
+    target.mkdir(parents=True, exist_ok=True)
+    return target / filename

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "categories": {
+    "01-目标管理":   { "mode": "yearly" },
+    "02-部门管理":   { "mode": "yearly" },
+    "03-方案报告":   { "mode": "yearly" },
+    "04-讨论思考":   { "mode": "monthly" },
+    "05-会议纪要":   { "mode": "monthly" },
+    "06-我的周报":   { "mode": "yearly" },
+    "07-成员周报":   { "mode": "monthly" },
+    "08-参考资料":   { "mode": "yearly" },
+    "09-工作简报":   { "mode": "monthly" }
+  }
+}

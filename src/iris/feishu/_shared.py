@@ -22,10 +22,20 @@ def resolve_source_root(bundle: ConfigBundle) -> Optional[Path]:
     return None
 
 
-def resolve_source_sub_dir(bundle: ConfigBundle, sub_dir: str) -> Path:
-    """获取 SOURCE 子目录，不存在则创建。"""
+def resolve_source_sub_dir(
+    bundle: ConfigBundle, sub_dir: str, filename: str = "",
+) -> Path:
+    """获取 SOURCE 子目录（或归档路径），不存在则创建。
+
+    当提供 ``filename`` 时，按 ``config/source_archive.json`` 的归档规则
+    自动在子目录下追加 ``YYYY``（年报）或 ``YYYYMM``（月报）子目录。
+    不提供 filename 时保持原行为：直接返回 ``{src}/{sub_dir}``。
+    """
     src = resolve_source_root(bundle)
     if src:
+        if filename:
+            from iris.utils.paths import resolve_source_archive_path
+            return resolve_source_archive_path(src, sub_dir, filename)
         d = src / sub_dir
         d.mkdir(parents=True, exist_ok=True)
         return d

@@ -100,8 +100,8 @@ class FeishuDocConverter:
         # 6. 路由
         if output == "to_source":
             route = self._classify(doc["content"], title)
-            target_dir = resolve_source_sub_dir(self._bundle, route)
-            output_path = target_dir / f"{stem}.md"
+            output_path = resolve_source_sub_dir(self._bundle, route,
+                                                 f"{stem}.md")
         else:
             output_path = Path(output)
             route = ""
