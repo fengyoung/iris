@@ -108,12 +108,24 @@ class UserProfileMemoryStore:
 
     def save(self, payload: Dict[str, Any]) -> None:
         payload.setdefault("iris_persona", {})
-        payload.setdefault("user_preferences", {"likes": [], "dislikes": [], "style_preferences": [], "notes": []})
+        prefs = payload.setdefault("user_preferences", {"likes": [], "dislikes": [], "style_preferences": [], "notes": []})
+        # Phase 3：写入时自动压缩（超标当场裁剪）
+        prefs["likes"] = _trim_list(prefs.get("likes", []), max_len=15)
+        prefs["dislikes"] = _trim_list(prefs.get("dislikes", []), max_len=15)
+        prefs["style_preferences"] = _trim_list(prefs.get("style_preferences", []), max_len=15)
+        prefs["notes"] = _trim_list(prefs.get("notes", []), max_len=20)
         payload["updated_at"] = payload.get("updated_at") or _now_iso()
         with FileLock(self._path):
             self._save(payload)
 
     def _save(self, payload: Dict[str, Any]) -> None:
+        # Phase 3：写入时自动压缩（save() 和 apply_text_update() 路径共享）
+        prefs = payload.get("user_preferences", {})
+        if prefs:
+            prefs["likes"] = _trim_list(prefs.get("likes", []), max_len=15)
+            prefs["dislikes"] = _trim_list(prefs.get("dislikes", []), max_len=15)
+            prefs["style_preferences"] = _trim_list(prefs.get("style_preferences", []), max_len=15)
+            prefs["notes"] = _trim_list(prefs.get("notes", []), max_len=20)
         _atomic_write_json(self._path, payload)
 
 
@@ -270,6 +282,18 @@ def _extract_after(text: str, tokens: tuple[str, ...]) -> str:
 
 def _clean_term(value: str) -> str:
     return value.strip().strip("：:，,。；; ").strip("“”\"'")
+
+
+def _trim_list(items: List[str], max_len: int) -> List[str]:
+    """裁剪列表至 max_len，去重后保留最新条目。"""
+    seen = set()
+    result = []
+    for item in items:
+        text = str(item).strip()
+        if text and text not in seen:
+            seen.add(text)
+            result.append(text)
+    return result[-max_len:] if len(result) > max_len else result
 
 
 def _now_iso() -> str:

@@ -52,6 +52,17 @@ def infer_question_type(question: str, wiki_hits: List[Dict[str, Any]]) -> str:
     return "topic"
 
 
+def _merge_updates(quick: list, llm: list) -> list:
+    """合并两轮记忆更新，保持顺序并去重。"""
+    seen = set()
+    merged = []
+    for item in (quick or []) + (llm or []):
+        if item not in seen:
+            seen.add(item)
+            merged.append(item)
+    return merged
+
+
 def block_bonus(block: AnswerBlock, question_type: str) -> float:
     joined = (block.title + " " + " > ".join(block.citation.section_path) + " " + block.summary).lower()
     bonus = 0.0

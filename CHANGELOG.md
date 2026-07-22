@@ -4,6 +4,64 @@
 
 ---
 
+## v3.19.14 (2026-07-22)
+
+记忆自动更新引擎 — 从手动/半自动演进为全自动化记忆学习系统。
+
+### Phase 1：LLM 双通道记忆提取器
+
+双通道架构：正则快速匹配（显式命令"记住"/"纠正"/"我喜欢"，免费毫秒级）+ LLM 深度分析（完整对话上下文，轻量模型按需触发）。
+
+每次 `iris ask` 分两遍调用：第一遍仅问题文本走正则通道，第二遍等回答生成后走 LLM 深度通道，两遍结果自动合并去重。
+
+### Phase 2：会话模式挖掘器
+
+新增 `src/iris/memory/session_miner.py` — `SessionPatternMiner`，用 LLM 从多次会话中识别高频主题/偏好模式/新事实，自动晋升为长期记忆。
+
+触发机制：Q&A 结束时懒检查（距上次 ≥24h 自动触发，后台线程不阻塞响应）+ daily-start 兜底。
+
+### Phase 3：全自治生命周期
+
+- 老化归档：daily-start 默认自动执行，memory-maintenance 默认 `--auto-age`
+- 纠正自动确认：LLM 提取 ≥5 次一致 → `[AUTO-CONFIRMED]`，正则提取 ≥5 次 → 同
+- 纠正自动裁决：正则提取检测"不是 X，而是 Y"模式，preferred 指向被否定值时自动修正为 affirmed
+- 写入时自动压缩：`UserProfileMemoryStore._save()` 所有路径统一 trim（likes ≤15、dislikes ≤15、styles ≤15、notes ≤20）
+- 写时压缩由 `_trim_list()` 实现：去重 + FIFO 保留最新条目
+
+### 新增文件
+
+| 文件 | 说明 |
+|------|------|
+| `src/iris/memory/session_miner.py` | 会话模式挖掘器（~300 行） |
+| `templates/prompt/memory_extract.md` | LLM 记忆提取 prompt 模板 |
+| `tests/unit/test_session_miner.py` | 会话挖掘单元测试（15 用例） |
+| `tests/unit/test_memory_updater_llm.py` | 记忆更新器 LLM 通道测试（14 用例） |
+| `docs/memory-auto-update-design.md` | 记忆自动更新完整设计文档 |
+
+### 修改文件
+
+| 文件 | 改动 |
+|------|------|
+| `src/iris/qa/memory_updater.py` | 重写：双通道架构 + 会话挖掘懒触发 + 冲突自动解决（~500 行） |
+| `src/iris/qa/service.py` | 两遍记忆更新：第一遍正则（answer=None），第二遍 LLM（skip_regex=True） |
+| `src/iris/qa/helpers.py` | 新增 `_merge_updates()` 去重合并 |
+| `src/iris/memory/long_term.py` | `_save()` 写入时自动压缩；新增 `_trim_list()` |
+| `src/iris/memory/__init__.py` | 导出 `SessionPatternMiner` |
+| `src/iris/app/cli/_handlers/_system.py` | daily-start：自动老化 + 会话挖掘兜底 + session_mine 输出 |
+| `CLAUDE.md` | 记忆系统文档重写：5→6 子模块，新增自动更新引擎章节 |
+| `CHANGELOG.md` | 本条目 |
+| `pyproject.toml` | 版本 3.19.13 → 3.19.14 |
+
+### 测试
+
+新增 29 个用例，全量 1,858 全部通过。
+
+### 代码审查
+
+第二轮审查发现并修复 7 个问题：regex 通道两遍重复执行（`skip_regex` 参数）、JSON 回退路径缺类型检查、`_promote` 批量晋升优化、会话挖掘阻塞 Q&A 响应（后台线程）、`_extract_json_object()` 括号计数替代脆弱正则、`_apply_extracted` 单次 load-save、`_auto_resolve_conflict` 分支处理 LLM/正则。
+
+---
+
 ## v3.19.13 (2026-07-21)
 
 ASR shutdown SIGINT 保护 — 清理流程统一信号屏蔽。

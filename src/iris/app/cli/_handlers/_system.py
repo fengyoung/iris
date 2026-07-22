@@ -10,6 +10,7 @@ from iris.memory import (
     CorrectionMemoryStore,
     LongTermMemoryManager,
     MemoryLifecycle,
+    SessionPatternMiner,
     UserProfileMemoryStore,
     WorkingContextStore,
 )
@@ -33,26 +34,37 @@ def handle_daily_start(args, bundle, logger) -> int:
     if sync_result.get("synced"):
         logger.log("sync_memory", {"corrections_added": sync_result.get("corrections_added", 0)})
 
-    # 2. 记忆自治维护
-    maintenance_report = MemoryLifecycle(bundle).maintenance()
+    # 2. 记忆自治维护（Phase 3：自动老化归档）
+    lifecycle = MemoryLifecycle(bundle)
+    maintenance_report = lifecycle.maintenance()
+    age_result = lifecycle.age()  # Phase 3：默认自动老化，无需 --auto-age
+    maintenance_report["age_result"] = age_result
 
-    # 3. 扫描 + 切块 + 向量索引
+    # 3. 会话模式挖掘（Phase 2：daily-start 兜底，Q&A 懒触发没跑到时补上）
+    try:
+        session_mine_result = SessionPatternMiner(bundle).mine_and_promote()
+    except Exception:
+        session_mine_result = {"mined": False, "reason": "会话挖掘异常"}
+
+    # 4. 扫描 + 切块 + 向量索引
     scan_info, chunk_summaries, vector_index_result = _daily_scan_and_chunk(bundle)
 
-    # 4. Wiki 自动发现 + 索引维护 + 增量更新
+    # 5. Wiki 自动发现 + 索引维护 + 增量更新
     wiki_update_result, person_enrich_result = _daily_wiki_maintenance(
         bundle, chunk_summaries,
     )
 
-    # 5. LLM 用量概要（今日/本周/本月 + 预算预警）
+    # 6. LLM 用量概要（今日/本周/本月 + 预算预警）
     usage_summary = _compute_daily_usage_summary(bundle)
 
-    # 6. ASR 审计（纯本地，零 LLM 成本；无产物时静默跳过）
+    # 7. ASR 审计（纯本地，零 LLM 成本；无产物时静默跳过）
     asr_audit_result = _daily_asr_audit(bundle)
 
     payload = {"memory_sync": {"scanned": sync_result.get("scanned", 0), "skipped": sync_result.get("skipped", 0),
                                 "corrections_added": sync_result.get("corrections_added", 0)},
-               "memory_maintenance": maintenance_report, "scan": scan_info,
+               "memory_maintenance": maintenance_report,
+               "session_mine": session_mine_result,
+               "scan": scan_info,
                "chunks": [{"source_name": cs.source_name, "chunk_count": cs.chunk_count,
                             "reused_documents": cs.build_stats.get("reused_documents", 0),
                             "rebuilt_documents": cs.build_stats.get("rebuilt_documents", 0)} for cs in chunk_summaries],
@@ -339,9 +351,10 @@ def handle_memory_delete(args, bundle, logger) -> int:
 def handle_memory_maintenance(args, bundle, logger) -> int:
     lifecycle = MemoryLifecycle(bundle)
     age_days = getattr(args, "age_days", 90)
-    auto_age = getattr(args, "auto_age", False)
     report = lifecycle.maintenance(age_days=age_days)
-    if auto_age:
+    # Phase 3：默认自动老化，--no-age 可跳过
+    no_age = getattr(args, "no_age", False)
+    if not no_age:
         report["age_result"] = lifecycle.age(days=age_days)
     _emit_output("memory-maintenance", report, pretty=args.pretty)
     return 0

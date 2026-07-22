@@ -1,4 +1,4 @@
-# Iris 3.19.13 — 项目执行说明
+# Iris 3.19.14 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~26,000 行 / 145 文件 / 21 模块 · CLI 49 命令 · 单元测试 1,753（100 文件）· 覆盖率 60%+ · 8 个项目级 Skill · Wiki 201 页 · 知识图谱节点 201 / 关系边 928（NetworkX 引擎） · 数据源 731 文档 / 4,350 Chunk · 向量索引 7,289 条 · LLM 响应缓存（内存 LRU 驱逐）· embedding 向量缓存（LRU + TTL 600s）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· ASR 实时校正引擎（剪贴板监听 + Aho-Corasick + LLM 编辑助手，`_clipboard_io.py` + `_text_detector.py` 拆分，替换词典热加载 + 手动热词合并）· Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听 · CI/CD（Makefile / pre-commit / GitHub Actions）· ASR Pipeline 交互式进度输出。
+~27,000 行 / 148 文件 / 21 模块 · CLI 49 命令 · 单元测试 1,858（102 文件）· 覆盖率 60%+ · 8 个项目级 Skill · Wiki 201 页 · 知识图谱节点 201 / 关系边 928（NetworkX 引擎） · 数据源 731 文档 / 4,350 Chunk · 向量索引 7,289 条 · LLM 响应缓存（内存 LRU 驱逐）· embedding 向量缓存（LRU + TTL 600s）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（LLM 深度提取 + 会话模式挖掘 + 全自治生命周期，`memory_updater.py` + `session_miner.py`，双通道架构）· ASR 实时校正引擎（剪贴板监听 + Aho-Corasick + LLM 编辑助手，`_clipboard_io.py` + `_text_detector.py` 拆分，替换词典热加载 + 手动热词合并）· Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听 · CI/CD（Makefile / pre-commit / GitHub Actions）· ASR Pipeline 交互式进度输出。
 
 ### 关键路径
 
@@ -67,9 +67,15 @@ Wiki 命令：`discover-wiki`（发现候选，4 类型分层排序）· `build-
 
 路由规则存于 `config/meeting_routes.json`（gitignored），代码零硬编码。
 
-### 记忆系统（5 子模块）
+### 记忆系统（6 子模块）
 
-`lifecycle.py`（自治维护：老化/冲突检测/合并）· `long_term.py`（用户画像+概念纠正）· `session.py`（会话记忆）· `working.py`（工作上下文 Markdown）· `manager.py`（统一编排：浏览/删除/导入/导出）。
+`long_term.py`（用户画像+概念纠正，写入时自动压缩）· `session.py`（会话记忆）· `working.py`（工作上下文 Markdown）· `lifecycle.py`（自治维护：老化/冲突检测/合并，默认自动老化）· `session_miner.py`（会话模式挖掘：LLM 分析跨会话模式，自动晋升为长期记忆）· `manager.py`（统一编排：浏览/删除/导入/导出）。
+
+**记忆自动更新引擎**（v3.19.14 新增）：
+- **双通道架构**：`MemoryUpdater`（`qa/memory_updater.py`）→ 正则快速通道（显式命令，免费毫秒级）+ LLM 深度通道（完整对话分析，轻量模型按需触发）
+- **会话挖掘**：`SessionPatternMiner`（`memory/session_miner.py`）→ 懒触发（Q&A 后 ≥24h 检查）+ daily-start 兜底，发现高频主题/偏好模式/新事实
+- **自治生命周期**：老化默认自动执行（daily-start + memory-maintenance），纠正 ≥5 次自动确认，写入时列表超标当场压缩
+- **触发机制**：Q&A 实时 → daily-start 每日 → 写入时检查（融入业务流程，无需独立调度）
 
 ### 知识图谱
 
@@ -146,7 +152,7 @@ iris3/
 └── pyproject.toml · README · CLAUDE · CHANGELOG.md
 ```
 
-**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配/共享线程池）· `memory`（记忆 5 子模块）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF+BM25缓存）· `qa`（检索问答+图谱注入）· `wiki`（Wiki 体系 + backlink/graph + ASR 校正引擎，最大模块；`wiki/asr/` 含 corrector/coverage/feedback/prompt_optimizer/_progress 等 10 个子模块）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估 + 引用解析）· `complex_input`（多模态三阶段：图片/PDF/DOCX/VIDEO）· `output`（格式化+DOCX）· `app/cli`（49 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py / shared.py）· `trello`（看板）。
+**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配/共享线程池）· `memory`（记忆 6 子模块：含 `session_miner.py` 会话模式挖掘）· `qa`（检索问答+图谱注入+`memory_updater.py` 双通道记忆提取）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF+BM25缓存）· `wiki`（Wiki 体系 + backlink/graph + ASR 校正引擎，最大模块；`wiki/asr/` 含 corrector/coverage/feedback/prompt_optimizer/_progress 等 10 个子模块）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估 + 引用解析）· `complex_input`（多模态三阶段：图片/PDF/DOCX/VIDEO）· `output`（格式化+DOCX）· `app/cli`（49 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py / shared.py）· `trello`（看板）。
 
 ---
 
@@ -158,7 +164,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.19.13 (2026-07-21)** — ASR shutdown SIGINT 保护：清理流程统一信号屏蔽，防止二次 Ctrl+C 中断线程回收。v3.19.12 LLM 思考模式关闭 + extra_body 路由修复 + 上下文 A/B 对比。v3.19.11 五大方向全面优化：测试 +76 / LLM 统一网关 + 缓存层抽象 + God Class 拆解 + Wiki 模块整理（19 文件，+887 / -64 行，1,829 测试）
+**当前 v3.19.14 (2026-07-22)** — 记忆自动更新引擎：Phase 1 LLM 双通道记忆提取器（正则快速 + LLM 深度，每次 Q&A 自动运行）+ Phase 2 会话模式挖掘器（`session_miner.py`，懒触发 + daily-start 兜底）+ Phase 3 全自治生命周期（默认自动老化、纠正自动确认/裁决、写入时自动压缩）。新增 `templates/prompt/memory_extract.md` 模板。29 新增单元测试（`test_memory_updater_llm.py` 14 + `test_session_miner.py` 15），总量 1,858。记忆模块 5→6 子模块，`CLAUDE.md` 记忆系统文档重写。第二轮代码审查修复 7 个问题（regex 通道重复执行/JSON 回退类型检查/批量晋升优化/会话挖掘后台线程等）。
+
+**v3.19.13 (2026-07-21)** — ASR shutdown SIGINT 保护：清理流程统一信号屏蔽，防止二次 Ctrl+C 中断线程回收。v3.19.12 LLM 思考模式关闭 + extra_body 路由修复 + 上下文 A/B 对比。v3.19.11 五大方向全面优化：测试 +76 / LLM 统一网关 + 缓存层抽象 + God Class 拆解 + Wiki 模块整理（19 文件，+887 / -64 行，1,829 测试）
 
 > v3.19.10 (2026-07-21)：ASR 引擎全面质量加固（P0~P3 十四项）：P0 Prompt `protected_terms` 字符串截断修复 / P1 热键校验 + 超时 + 参数化 / P2 预检查 + warning + 校验 / P3 Aho-Corasick 优化 + worker 动态 + 单字符代码分档 + 重试（8 文件，+313 / -114 行）
 

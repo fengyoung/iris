@@ -15,7 +15,7 @@ from iris.utils.logging import IrisLogger
 from iris.utils.prompting import PromptTemplateLoader
 
 from .context import PromptContextPacker
-from .helpers import infer_evidence_type, intent_title, group_title, infer_question_type, block_bonus, is_memory_only_instruction
+from .helpers import infer_evidence_type, intent_title, group_title, infer_question_type, block_bonus, is_memory_only_instruction, _merge_updates
 from .memory_updater import MemoryUpdater
 from .models import AnswerBlock, Citation, QAResponse
 
@@ -38,11 +38,14 @@ class QAService:
         self._graph_cache: Any = None      # 惰性加载并缓存 WikiGraph（None=未尝试, False=不可用）
 
     def ask(self, question: str, *, top_k: int = 5, mode: str = "local") -> QAResponse:
-        memory_updates = self._memory_updater.apply_updates(question)
-        if memory_updates and is_memory_only_instruction(question):
-            response = QAResponse(question=question, answer="已更新记忆：\n" + "\n".join(f"- {item}" for item in memory_updates),
+        # 第一遍：正则快速通道（仅问题文本，免费毫秒级；跳过 LLM 和挖掘检查）
+        quick_updates = self._memory_updater.apply_updates(
+            question, answer=None, skip_mine_check=True,
+        )
+        if quick_updates and is_memory_only_instruction(question):
+            response = QAResponse(question=question, answer="已更新记忆：\n" + "\n".join(f"- {item}" for item in quick_updates),
                                   retrieval_total_hits=0, mode="memory_update", blocks=[],
-                                  structured={"memory_updates": memory_updates}, llm={"memory_updates": memory_updates})
+                                  structured={"memory_updates": quick_updates}, llm={"memory_updates": quick_updates})
             session_state = self._memory.save_interaction(question=question, mode=response.mode, blocks=[], wiki_hits=[])
             response.llm.setdefault("session_memory", session_state)
             self._logger.log("qa_ask", response.to_dict())
@@ -64,16 +67,24 @@ class QAService:
                                        "query_intent": result.query_intent, "query_plan": result.query_plan,
                                        "explanations": result.explanations})
 
+        # 第二遍：LLM 深度通道（回答后触发，跳过已执行的正则通道）
+        llm_updates = self._memory_updater.apply_updates(
+            question, answer=response.answer, skip_regex=True,
+        )
+        # 合并两轮更新（去重）
+        all_updates = _merge_updates(quick_updates, llm_updates)
+
         session_state = self._memory.save_interaction(question=question, mode=response.mode, blocks=response.blocks, wiki_hits=result.wiki_hits)
         if response.llm is None:
             response = QAResponse(question=response.question, answer=response.answer, retrieval_total_hits=response.retrieval_total_hits,
                                   mode=response.mode, blocks=response.blocks, structured=response.structured, llm={"session_memory": session_state})
         else:
             response.llm.setdefault("session_memory", session_state)
-            if memory_updates:
-                response.llm.setdefault("memory_updates", memory_updates)
-        if memory_updates:
-            response = QAResponse(question=response.question, answer=response.answer + "\n\n已同步记忆更新：\n" + "\n".join(f"- {item}" for item in memory_updates),
+            if all_updates:
+                response.llm.setdefault("memory_updates", all_updates)
+        if all_updates:
+            update_text = "\n".join(f"- {item}" for item in all_updates)
+            response = QAResponse(question=response.question, answer=response.answer + "\n\n已同步记忆更新：\n" + update_text,
                                   retrieval_total_hits=response.retrieval_total_hits, mode=response.mode,
                                   blocks=response.blocks, structured=response.structured, llm=response.llm)
         self._logger.log("qa_ask", response.to_dict())
