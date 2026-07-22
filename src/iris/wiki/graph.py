@@ -350,42 +350,45 @@ class WikiGraph:
     # ══════════════════════════════════════════════════════════
 
     def save(self) -> None:
-        """将图谱持久化到 data/graph/。"""
+        """将图谱持久化到 data/graph/（FileLock 保护并发写入）。"""
+        from iris.core.locks import FileLock
         self._data_dir.mkdir(parents=True, exist_ok=True)
+        lock_path = self._data_dir / "nodes.json"
 
-        # 节点
-        nodes_data = {
-            "nodes": {
-                nid: {
-                    "id": n.id,
-                    "title": n.title,
-                    "page_type": n.page_type,
-                    "tags": n.tags,
-                    "summary": n.summary,
-                    "wiki_path": n.wiki_path,
-                }
-                for nid, n in self._nodes.items()
-            },
-            "updated_at": now_iso(),
-        }
-        atomic_write_json(self._data_dir / "nodes.json", nodes_data)
+        with FileLock(lock_path):
+            # 节点
+            nodes_data = {
+                "nodes": {
+                    nid: {
+                        "id": n.id,
+                        "title": n.title,
+                        "page_type": n.page_type,
+                        "tags": n.tags,
+                        "summary": n.summary,
+                        "wiki_path": n.wiki_path,
+                    }
+                    for nid, n in self._nodes.items()
+                },
+                "updated_at": now_iso(),
+            }
+            atomic_write_json(self._data_dir / "nodes.json", nodes_data)
 
-        # 边
-        edges_data = {
-            "edges": [
-                {
-                    "source": e.source,
-                    "target": e.target,
-                    "relation": e.relation,
-                    "source_type": e.source_type,
-                    "confidence": e.confidence,
-                    "evidence_page": e.evidence_page,
-                }
-                for e in self._edges
-            ],
-            "updated_at": now_iso(),
-        }
-        atomic_write_json(self._data_dir / "edges.json", edges_data)
+            # 边
+            edges_data = {
+                "edges": [
+                    {
+                        "source": e.source,
+                        "target": e.target,
+                        "relation": e.relation,
+                        "source_type": e.source_type,
+                        "confidence": e.confidence,
+                        "evidence_page": e.evidence_page,
+                    }
+                    for e in self._edges
+                ],
+                "updated_at": now_iso(),
+            }
+            atomic_write_json(self._data_dir / "edges.json", edges_data)
 
         logger.info("图谱已保存: %d 节点, %d 边", len(self._nodes), len(self._edges))
 

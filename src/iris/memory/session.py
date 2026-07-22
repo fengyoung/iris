@@ -34,25 +34,27 @@ class SessionMemoryStore:
         if not self._enabled:
             return self.load()
 
-        state = self.load()
-        questions = [question] + [item for item in state.get("recent_questions", []) if item != question]
-        topics = _build_topics(blocks, wiki_hits) + state.get("recent_topics", [])
-        deduped_topics: List[str] = []
-        for topic in topics:
-            if topic and topic not in deduped_topics:
-                deduped_topics.append(topic)
+        from iris.core.locks import FileLock
+        with FileLock(self._path):
+            state = self.load()
+            questions = [question] + [item for item in state.get("recent_questions", []) if item != question]
+            topics = _build_topics(blocks, wiki_hits) + state.get("recent_topics", [])
+            deduped_topics: List[str] = []
+            for topic in topics:
+                if topic and topic not in deduped_topics:
+                    deduped_topics.append(topic)
 
-        topic_threads = _update_topic_threads(state.get("topic_threads", {}), question=question, topics=deduped_topics, mode=mode)
-        payload = {
-            "recent_questions": questions[:8],
-            "recent_topics": deduped_topics[:12],
-            "topic_threads": topic_threads,
-            "recent_summary": _build_recent_summary(questions[:5], deduped_topics[:6], topic_threads),
-            "last_mode": mode,
-            "updated_at": datetime.now().isoformat(timespec="seconds"),
-        }
-        from iris.memory.long_term import _atomic_write_json
-        _atomic_write_json(self._path, payload)
+            topic_threads = _update_topic_threads(state.get("topic_threads", {}), question=question, topics=deduped_topics, mode=mode)
+            payload = {
+                "recent_questions": questions[:8],
+                "recent_topics": deduped_topics[:12],
+                "topic_threads": topic_threads,
+                "recent_summary": _build_recent_summary(questions[:5], deduped_topics[:6], topic_threads),
+                "last_mode": mode,
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+            }
+            from iris.memory.long_term import _atomic_write_json
+            _atomic_write_json(self._path, payload)
         return payload
 
 

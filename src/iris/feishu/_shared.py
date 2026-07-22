@@ -92,10 +92,12 @@ def load_dedup_index(path: Path) -> Dict[str, Any]:
 
 
 def save_dedup_index(path: Path, index: Dict[str, Any]) -> None:
-    """保存排重索引。"""
+    """保存排重索引（FileLock 保护并发写入）。"""
+    from iris.core.locks import FileLock
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+    with FileLock(path):
+        path.write_text(
+            json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def upsert_dedup_item(index: Dict[str, Any], dedup_key: str, item: Dict[str, Any]) -> None:

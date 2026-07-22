@@ -60,32 +60,34 @@ class WorkingContextStore:
                recent_changes: List[str] = None, notes: str = None, append_pending: List[str] = None,
                append_changes: List[str] = None) -> Dict[str, Any]:
         """增量更新工作上下文的指定字段。"""
-        state = self.load()
-        if current_task is not None:
-            state["current_task"] = str(current_task).strip()
-        if pending_items is not None:
-            state["pending_items"] = list(pending_items)
-        if append_pending:
-            existing = set(state.get("pending_items", []))
-            for item in append_pending:
-                if item not in existing:
-                    state.setdefault("pending_items", []).append(item)
-                    existing.add(item)
-        if recent_changes is not None:
-            state["recent_changes"] = list(recent_changes)
-        if append_changes:
-            existing_changes = set(state.get("recent_changes", []))
-            for item in append_changes:
-                if item not in existing_changes:
-                    state.setdefault("recent_changes", []).append(item)
-                    existing_changes.add(item)
-        if notes is not None:
-            state["notes"] = str(notes).strip()
-        if not state.get("pending_items"):
-            state["pending_items"] = []
-        if not state.get("recent_changes"):
-            state["recent_changes"] = []
-        return self.save(state)
+        from iris.core.locks import FileLock
+        with FileLock(self._path):
+            state = self.load()
+            if current_task is not None:
+                state["current_task"] = str(current_task).strip()
+            if pending_items is not None:
+                state["pending_items"] = list(pending_items)
+            if append_pending:
+                existing = set(state.get("pending_items", []))
+                for item in append_pending:
+                    if item not in existing:
+                        state.setdefault("pending_items", []).append(item)
+                        existing.add(item)
+            if recent_changes is not None:
+                state["recent_changes"] = list(recent_changes)
+            if append_changes:
+                existing_changes = set(state.get("recent_changes", []))
+                for item in append_changes:
+                    if item not in existing_changes:
+                        state.setdefault("recent_changes", []).append(item)
+                        existing_changes.add(item)
+            if notes is not None:
+                state["notes"] = str(notes).strip()
+            if not state.get("pending_items"):
+                state["pending_items"] = []
+            if not state.get("recent_changes"):
+                state["recent_changes"] = []
+            return self.save(state)
 
     def clear(self) -> Dict[str, Any]:
         """清空工作上下文。"""
