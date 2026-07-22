@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from iris.config.loader import ConfigBundle
-from iris.core.locks import FileLock
 from iris.memory import CorrectionMemoryStore, UserProfileMemoryStore
 from iris.qa.helpers import EXPLICIT_MEMORY_RE
 
@@ -32,7 +31,6 @@ _MIN_QUESTION_LENGTH = 15      # 问题少于 15 字不触发 LLM 分析
 _MIN_CONFIDENCE = 0.5           # LLM 提取置信度低于此值则丢弃
 # ── 会话挖掘触发条件 ──────────────────────────────────────────
 _SESSION_MINE_INTERVAL_HOURS = 24  # 两次挖掘最小间隔
-_SESSION_MINE_MIN_NEW = 10         # 累积新会话数触发提前挖掘
 _LAST_MINE_STATE_FILE = "last_session_mine.json"
 
 

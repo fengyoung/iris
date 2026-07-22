@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from iris.config.loader import ConfigBundle
-from iris.core.locks import FileLock
 from iris.memory import SessionMemoryStore, UserProfileMemoryStore, CorrectionMemoryStore
 
 logger = logging.getLogger(__name__)
