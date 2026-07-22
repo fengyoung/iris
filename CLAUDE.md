@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~27,000 行 / 148 文件 / 21 模块 · CLI 49 命令 · 单元测试 1,858（102 文件）· 覆盖率 60%+ · 8 个项目级 Skill · Wiki 201 页 · 知识图谱节点 201 / 关系边 928（NetworkX 引擎） · 数据源 731 文档 / 4,350 Chunk · 向量索引 7,289 条 · LLM 响应缓存（内存 LRU 驱逐）· embedding 向量缓存（LRU + TTL 600s）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（LLM 深度提取 + 会话模式挖掘 + 全自治生命周期，`memory_updater.py` + `session_miner.py`，双通道架构）· ASR 实时校正引擎（剪贴板监听 + Aho-Corasick + LLM 编辑助手，`_clipboard_io.py` + `_text_detector.py` 拆分，替换词典热加载 + 手动热词合并）· Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听 · CI/CD（Makefile / pre-commit / GitHub Actions）· ASR Pipeline 交互式进度输出。
+~27,000 行 / 149 文件 / 21 模块 · CLI 49 命令 · 单元测试 1,858（102 文件）· 覆盖率 60%+ · 8 个项目级 Skill · Wiki 201 页 · 知识图谱节点 201 / 关系边 928（NetworkX 引擎） · 数据源 731 文档 / 4,350 Chunk · 向量索引 7,289 条 · LLM 响应缓存（内存 LRU 驱逐）· embedding 向量缓存（LRU + TTL 600s）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（LLM 深度提取 + 会话模式挖掘 + 全自治生命周期，`memory_updater.py` + `session_miner.py`，双通道架构）· 多 Agent 并发安全（FileLock 推广 + SQLite WAL + Agent 记忆隔离 `IRIS_AGENT_ID` + 进程注册表 `ProcessRegistry`）· ASR 实时校正引擎（剪贴板监听 + Aho-Corasick + LLM 编辑助手，`_clipboard_io.py` + `_text_detector.py` 拆分，替换词典热加载 + 手动热词合并）· Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听 · CI/CD（Makefile / pre-commit / GitHub Actions）· ASR Pipeline 交互式进度输出。
 
 ### 关键路径
 
@@ -112,6 +112,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 | `IRIS_WIKI_ROOT` | LLM-WIKI 输出路径 |
 | `IRIS_MEETING_TRANS_DIR` | 会议转写文件搜索目录 |
 | `LARK_APP_ID` / `LARK_APP_SECRET` | 飞书应用凭证 |
+| `IRIS_AGENT_ID` | 多 Agent 隔离标识（可选，默认 "default"） |
 
 ---
 
@@ -119,7 +120,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.19.13 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.19.15 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.11 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -140,7 +141,7 @@ iris3/
 ├── src/iris/          # 20 模块（见下）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
-├── tests/             # 1,753 用例，100 文件
+├── tests/             # 1,858 用例，102 文件
 │   ├── unit/          #   纯逻辑单元测试（419 用例，0.5s）
 │   └── integration/   #   集成测试（1,334 用例）
 ├── config/            # *.json gitignored，*.example 版本控制
