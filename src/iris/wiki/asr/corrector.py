@@ -1030,7 +1030,8 @@ class AsrCorrector:
 
         # 进程注册：防止重复启动
         from iris.core.locks import ProcessRegistry
-        pid_dir = self._config.root / "data"
+        from pathlib import Path
+        pid_dir = Path(__file__).resolve().parent.parent.parent.parent.parent / "data"
         registry = ProcessRegistry("asr-corrector", pid_dir)
         if not registry.register():
             print("[Iris] ⚠ asr-corrector 已有实例在运行，退出", file=sys.stderr)
