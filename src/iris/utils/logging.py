@@ -74,12 +74,28 @@ class IrisLogger:
             self._write_file(record)
 
     def _write_file(self, record: Dict[str, Any]) -> None:
-        """写入 JSONL 文件（带 fcntl 文件锁 + 自动归档）。"""
+        """写入 JSONL 文件（fcntl 写锁 + 锁内归档检查，消除 TOCTOU 窗口）。"""
         self._log_path.parent.mkdir(parents=True, exist_ok=True)
-        if self._log_path.exists() and self._log_path.stat().st_size > _MAX_LOG_SIZE_BYTES:
-            archive = self._log_path.with_suffix(".jsonl.bak")
-            self._rotate_with_lock(archive)
+
+        # 获取写锁后进行归档判断，然后释放锁、写入（保持原子性）
+        lock_path = self._log_path.with_suffix(".jsonl.lock")
+        lock_fd = None
         try:
+            lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            try:
+                if self._log_path.exists() and self._log_path.stat().st_size > _MAX_LOG_SIZE_BYTES:
+                    archive = self._log_path.with_suffix(".jsonl.bak")
+                    try:
+                        os.rename(str(self._log_path), str(archive))
+                    except OSError:
+                        pass
+            finally:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                os.close(lock_fd)
+                lock_fd = None
+
+            # 写入（持有独立的写入锁）
             with self._log_path.open("a", encoding="utf-8") as file:
                 fcntl.flock(file.fileno(), fcntl.LOCK_EX)
                 try:
@@ -90,13 +106,12 @@ class IrisLogger:
                     fcntl.flock(file.fileno(), fcntl.LOCK_UN)
         except (OSError, IOError):
             pass
-
-    def _rotate_with_lock(self, archive: Path) -> None:
-        """使用 os.rename（原子）完成日志归档。"""
-        try:
-            os.rename(str(self._log_path), str(archive))
-        except OSError:
-            pass
+        finally:
+            if lock_fd is not None:
+                try:
+                    os.close(lock_fd)
+                except OSError:
+                    pass
 
 
 def _normalize(value: Any) -> Any:

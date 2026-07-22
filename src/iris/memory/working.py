@@ -23,8 +23,11 @@ class WorkingContextStore:
     """
 
     def __init__(self, config: ConfigBundle):
+        from iris.utils.paths import get_agent_data_dir
         memory_dir = config.root / config.app["paths"]["memory_dir"].replace("./", "")
-        self._path = memory_dir / "working" / "working_context.md"
+        # 多 Agent 隔离：按 IRIS_AGENT_ID 分目录
+        agent_dir = get_agent_data_dir(memory_dir)
+        self._path = agent_dir / "working_context.md"
 
     @property
     def path(self) -> Path:

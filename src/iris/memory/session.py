@@ -14,10 +14,13 @@ class SessionMemoryStore:
     """保存最近问题、主题与命中来源，供后续问答参考。"""
 
     def __init__(self, config: ConfigBundle):
+        from iris.utils.paths import get_agent_data_dir
         session_cfg = config.app["session"]
         self._enabled = bool(session_cfg.get("enable_session_memory", True))
-        summary_dir = config.root / session_cfg["session_summary_dir"].replace("./", "")
-        self._path = summary_dir / "latest_session.json"
+        base_dir = config.root / session_cfg["session_summary_dir"].replace("./", "")
+        # 多 Agent 隔离：按 IRIS_AGENT_ID 分目录
+        agent_dir = get_agent_data_dir(base_dir.parent)
+        self._path = agent_dir / "latest_session.json"
 
     def load(self) -> Dict[str, Any]:
         if not self._enabled or not self._path.exists():
