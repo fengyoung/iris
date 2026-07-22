@@ -108,12 +108,7 @@ class UserProfileMemoryStore:
 
     def save(self, payload: Dict[str, Any]) -> None:
         payload.setdefault("iris_persona", {})
-        prefs = payload.setdefault("user_preferences", {"likes": [], "dislikes": [], "style_preferences": [], "notes": []})
-        # Phase 3：写入时自动压缩（超标当场裁剪）
-        prefs["likes"] = _trim_list(prefs.get("likes", []), max_len=15)
-        prefs["dislikes"] = _trim_list(prefs.get("dislikes", []), max_len=15)
-        prefs["style_preferences"] = _trim_list(prefs.get("style_preferences", []), max_len=15)
-        prefs["notes"] = _trim_list(prefs.get("notes", []), max_len=20)
+        payload.setdefault("user_preferences", {"likes": [], "dislikes": [], "style_preferences": [], "notes": []})
         payload["updated_at"] = payload.get("updated_at") or _now_iso()
         with FileLock(self._path):
             self._save(payload)

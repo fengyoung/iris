@@ -28,10 +28,23 @@ class WorkingContextStore:
         # 多 Agent 隔离：按 IRIS_AGENT_ID 分目录
         agent_dir = get_agent_data_dir(memory_dir)
         self._path = agent_dir / "working_context.md"
+        # 向后兼容：迁移旧路径数据
+        self._migrate_from_legacy(memory_dir / "working" / "working_context.md")
 
     @property
     def path(self) -> Path:
         return self._path
+
+    def _migrate_from_legacy(self, legacy_path: Path) -> None:
+        """向后兼容：若旧路径有数据且新路径不存在，迁移到 agent 隔离目录。"""
+        if self._path.exists() or not legacy_path.exists():
+            return
+        try:
+            import shutil
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(legacy_path, self._path)
+        except OSError:
+            pass
 
     def load(self) -> Dict[str, Any]:
         """读取工作上下文，若无文件则返回空字典。"""
