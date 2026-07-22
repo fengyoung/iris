@@ -22,7 +22,7 @@ from iris.memory.session import (
 def _make_config(tmp_path: Path, enabled: bool = True) -> MagicMock:
     config = MagicMock()
     config.root = tmp_path
-    session_dir = tmp_path / "data" / "session"
+    session_dir = tmp_path / "data" / "agents" / "default"
     session_dir.mkdir(parents=True, exist_ok=True)
     config.app = {
         "session": {
@@ -49,7 +49,7 @@ class TestSessionMemoryStoreLoad:
         config = _make_config(tmp_path)
         payload = {"recent_questions": ["Q1"], "recent_topics": ["T1"],
                    "topic_threads": {}, "recent_summary": "摘要", "updated_at": "2026-01-01T00:00:00"}
-        path = tmp_path / "data" / "session" / "latest_session.json"
+        path = tmp_path / "data" / "agents" / "default" / "latest_session.json"
         path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         store = SessionMemoryStore(config)
         state = store.load()
@@ -58,7 +58,7 @@ class TestSessionMemoryStoreLoad:
 
     def test_load_returns_empty_when_disabled(self, tmp_path):
         config = _make_config(tmp_path, enabled=False)
-        path = tmp_path / "data" / "session" / "latest_session.json"
+        path = tmp_path / "data" / "agents" / "default" / "latest_session.json"
         path.write_text(json.dumps({"recent_questions": ["Q"]}), encoding="utf-8")
         store = SessionMemoryStore(config)
         state = store.load()
@@ -79,7 +79,7 @@ class TestSessionMemoryStoreSave:
         config = _make_config(tmp_path)
         payload = {"recent_questions": ["旧问题", "什么是 BM25？"],
                    "recent_topics": [], "topic_threads": {}, "recent_summary": ""}
-        path = tmp_path / "data" / "session" / "latest_session.json"
+        path = tmp_path / "data" / "agents" / "default" / "latest_session.json"
         path.write_text(json.dumps(payload), encoding="utf-8")
         store = SessionMemoryStore(config)
         with patch("iris.memory.long_term._atomic_write_json"):

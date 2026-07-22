@@ -23,12 +23,28 @@ class WorkingContextStore:
     """
 
     def __init__(self, config: ConfigBundle):
+        from iris.utils.paths import get_agent_data_dir
         memory_dir = config.root / config.app["paths"]["memory_dir"].replace("./", "")
-        self._path = memory_dir / "working" / "working_context.md"
+        # 多 Agent 隔离：按 IRIS_AGENT_ID 分目录
+        agent_dir = get_agent_data_dir(memory_dir)
+        self._path = agent_dir / "working_context.md"
+        # 向后兼容：迁移旧路径数据
+        self._migrate_from_legacy(memory_dir / "working" / "working_context.md")
 
     @property
     def path(self) -> Path:
         return self._path
+
+    def _migrate_from_legacy(self, legacy_path: Path) -> None:
+        """向后兼容：若旧路径有数据且新路径不存在，迁移到 agent 隔离目录。"""
+        if self._path.exists() or not legacy_path.exists():
+            return
+        try:
+            import shutil
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(legacy_path, self._path)
+        except OSError:
+            pass
 
     def load(self) -> Dict[str, Any]:
         """读取工作上下文，若无文件则返回空字典。"""
@@ -60,32 +76,34 @@ class WorkingContextStore:
                recent_changes: List[str] = None, notes: str = None, append_pending: List[str] = None,
                append_changes: List[str] = None) -> Dict[str, Any]:
         """增量更新工作上下文的指定字段。"""
-        state = self.load()
-        if current_task is not None:
-            state["current_task"] = str(current_task).strip()
-        if pending_items is not None:
-            state["pending_items"] = list(pending_items)
-        if append_pending:
-            existing = set(state.get("pending_items", []))
-            for item in append_pending:
-                if item not in existing:
-                    state.setdefault("pending_items", []).append(item)
-                    existing.add(item)
-        if recent_changes is not None:
-            state["recent_changes"] = list(recent_changes)
-        if append_changes:
-            existing_changes = set(state.get("recent_changes", []))
-            for item in append_changes:
-                if item not in existing_changes:
-                    state.setdefault("recent_changes", []).append(item)
-                    existing_changes.add(item)
-        if notes is not None:
-            state["notes"] = str(notes).strip()
-        if not state.get("pending_items"):
-            state["pending_items"] = []
-        if not state.get("recent_changes"):
-            state["recent_changes"] = []
-        return self.save(state)
+        from iris.core.locks import FileLock
+        with FileLock(self._path):
+            state = self.load()
+            if current_task is not None:
+                state["current_task"] = str(current_task).strip()
+            if pending_items is not None:
+                state["pending_items"] = list(pending_items)
+            if append_pending:
+                existing = set(state.get("pending_items", []))
+                for item in append_pending:
+                    if item not in existing:
+                        state.setdefault("pending_items", []).append(item)
+                        existing.add(item)
+            if recent_changes is not None:
+                state["recent_changes"] = list(recent_changes)
+            if append_changes:
+                existing_changes = set(state.get("recent_changes", []))
+                for item in append_changes:
+                    if item not in existing_changes:
+                        state.setdefault("recent_changes", []).append(item)
+                        existing_changes.add(item)
+            if notes is not None:
+                state["notes"] = str(notes).strip()
+            if not state.get("pending_items"):
+                state["pending_items"] = []
+            if not state.get("recent_changes"):
+                state["recent_changes"] = []
+            return self.save(state)
 
     def clear(self) -> Dict[str, Any]:
         """清空工作上下文。"""

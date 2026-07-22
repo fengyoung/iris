@@ -646,19 +646,21 @@ class AnalysisReportService:
 
     @staticmethod
     def _save_brief_index(index_path: Path, brief_index: dict, briefs_dir: Path) -> None:
-        index_path.write_text(json.dumps(brief_index, ensure_ascii=False, indent=2),
-                              encoding="utf-8")
-        cutoff = (datetime.now() - timedelta(days=30)).timestamp()
-        valid_hashes = set(brief_index.values())
-        for f in briefs_dir.glob("*.json"):
-            if f.name == "index.json":
-                continue
-            if f.name.replace(".json", "") not in valid_hashes:
-                try:
-                    if f.stat().st_mtime < cutoff:
-                        f.unlink()
-                except OSError:
-                    logger.debug("过期 brief 清理失败: %s", f)
+        from iris.core.locks import FileLock
+        with FileLock(index_path):
+            index_path.write_text(json.dumps(brief_index, ensure_ascii=False, indent=2),
+                                  encoding="utf-8")
+            cutoff = (datetime.now() - timedelta(days=30)).timestamp()
+            valid_hashes = set(brief_index.values())
+            for f in briefs_dir.glob("*.json"):
+                if f.name == "index.json":
+                    continue
+                if f.name.replace(".json", "") not in valid_hashes:
+                    try:
+                        if f.stat().st_mtime < cutoff:
+                            f.unlink()
+                    except OSError:
+                        logger.debug("过期 brief 清理失败: %s", f)
 
     # ── Stage 3: 单方向章节合成 ───────────────────────────────
 

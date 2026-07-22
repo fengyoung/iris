@@ -169,30 +169,30 @@ class MarkdownChunker:
         return summary_path
 
     def write_hash_index(self, summary: ChunkSummary) -> Path:
-        index: Dict[str, Dict[str, str]] = {}
-        existing_path = self._metadata_dir / "chunk_hash_index.json"
-        if existing_path.exists():
-            try:
-                index = json.loads(existing_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, KeyError) as exc:
-                logger.warning("数据解析失败: %s", exc)
-                pass
-        scan_modified: Dict[str, str] = {}
-        scan_path = self._metadata_dir / f"{summary.source_name}_scan_summary.json"
-        if scan_path.exists():
-            try:
-                scan_data = json.loads(scan_path.read_text(encoding="utf-8"))
-                for doc in scan_data.get("documents", []):
-                    scan_modified[doc["relative_path"]] = doc.get("modified_at", "")
-            except (json.JSONDecodeError, KeyError) as exc:
-                logger.warning("数据解析失败: %s", exc)
-                pass
-        for chunk in summary.chunks:
-            rp = chunk.relative_path
-            if rp not in index:
-                index[rp] = {"hash": chunk.document_hash, "modified_at": scan_modified.get(rp, summary.scanned_at)}
         index_path = self._metadata_dir / "chunk_hash_index.json"
-        index_path.write_text(json.dumps(index, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+        from iris.core.locks import FileLock
+
+        with FileLock(index_path):
+            index: Dict[str, Dict[str, str]] = {}
+            if index_path.exists():
+                try:
+                    index = json.loads(index_path.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, KeyError) as exc:
+                    logger.warning("数据解析失败: %s", exc)
+            scan_modified: Dict[str, str] = {}
+            scan_path = self._metadata_dir / f"{summary.source_name}_scan_summary.json"
+            if scan_path.exists():
+                try:
+                    scan_data = json.loads(scan_path.read_text(encoding="utf-8"))
+                    for doc in scan_data.get("documents", []):
+                        scan_modified[doc["relative_path"]] = doc.get("modified_at", "")
+                except (json.JSONDecodeError, KeyError) as exc:
+                    logger.warning("数据解析失败: %s", exc)
+            for chunk in summary.chunks:
+                rp = chunk.relative_path
+                if rp not in index:
+                    index[rp] = {"hash": chunk.document_hash, "modified_at": scan_modified.get(rp, summary.scanned_at)}
+            index_path.write_text(json.dumps(index, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
         return index_path
 
     @staticmethod

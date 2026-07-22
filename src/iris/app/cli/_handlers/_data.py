@@ -325,8 +325,18 @@ def handle_watch(args, bundle, logger) -> int:
             build_incremental_on_change(bundle)(events)
         return 0
 
+    # 进程注册：防止重复启动
+    from iris.core.locks import ProcessRegistry
+    registry = ProcessRegistry("iris-watch", bundle.root / "data")
+    if not registry.register():
+        print("[Iris] ⚠ iris-watch 已有实例在运行，退出", file=__import__("sys").stderr)
+        return 1
+
     on_change = build_incremental_on_change(bundle)
-    watcher.start(on_change, poll_interval=poll_interval, run_once=run_once)
+    try:
+        watcher.start(on_change, poll_interval=poll_interval, run_once=run_once)
+    finally:
+        registry.unregister()
     return 0
 
 

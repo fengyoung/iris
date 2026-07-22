@@ -101,7 +101,9 @@ class UsageTracker:
             return False
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
+        conn = sqlite3.connect(str(self._db_path))
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -118,24 +120,30 @@ class UsageTracker:
         completion_tokens: int = 0,
         is_multimodal: bool = False,
     ) -> None:
-        """记录一次 API 调用（静默失败）。"""
+        """记录一次 API 调用（WAL 模式，并发写入安全）。"""
         if not self._available:
             return
         now = datetime.now(tz=timezone.utc)
         ts = now.strftime("%Y-%m-%dT%H:%M:%S")
         date = now.strftime("%Y-%m-%d")
-        try:
-            with self._connect() as conn:
-                conn.execute(
-                    """INSERT INTO api_calls
-                       (ts, date, model, provider, route_role, matched_rule,
-                        prompt_tokens, completion_tokens, is_multimodal)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (ts, date, model, provider, route_role, matched_rule,
-                     prompt_tokens, completion_tokens, 1 if is_multimodal else 0),
-                )
-        except Exception as exc:
-            logger.debug("UsageTracker.record 失败（静默）: %s", exc)
+        for attempt in range(1, 4):  # 最多重试 3 次
+            try:
+                with self._connect() as conn:
+                    conn.execute(
+                        """INSERT INTO api_calls
+                           (ts, date, model, provider, route_role, matched_rule,
+                            prompt_tokens, completion_tokens, is_multimodal)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (ts, date, model, provider, route_role, matched_rule,
+                         prompt_tokens, completion_tokens, 1 if is_multimodal else 0),
+                    )
+                return
+            except Exception as exc:
+                if attempt == 3:
+                    logger.warning("UsageTracker.record 写入失败（已重试 %d 次）: %s", attempt, exc)
+                else:
+                    import time
+                    time.sleep(0.05 * (2 ** (attempt - 1)))  # 50ms → 100ms → 200ms
 
     # ── 查询 ─────────────────────────────────────────────────
 

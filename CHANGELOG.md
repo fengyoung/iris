@@ -4,11 +4,11 @@
 
 ---
 
-## v3.19.14 (2026-07-22)
+## v3.19.16 (2026-07-22)
 
-新增 `iris-okr-check` 项目级 Skill — OKR 双周逐项检查。
+合并 0722-alpha — 多 Agent 并发安全 + iris-okr-check Skill。
 
-### 新增
+### 新增 (A)
 
 - **iris-okr-check Skill**：新增第 9 个项目级 Skill，支持从 SOURCE 数据源提取近两周会议纪要/讨论思考/工作简报/成员周报，对照 OKR 原文逐 KR 提炼进展小结与支撑细则，输出结构化检查记录并归档到 `01-目标管理/`。提供 Tier 象限划分可视化输出、交叉检查等完整能力。
 
@@ -17,6 +17,114 @@
 | 文件 | 改动 |
 |------|------|
 | `.claude/skills/iris-okr-check/SKILL.md` | 新增 skill 定义（版本 1.0.0）|
+
+## v3.19.15 (2026-07-22)
+
+多 Agent 并发安全 — 三层防护体系全面实施。
+
+### P0：FileLock 推广 + SQLite WAL
+
+**步骤 1** — RMW 模式 FileLock 加锁（6 文件）：
+- `ingest/chunker.py`: `write_hash_index()` RMW 段整体包裹 FileLock
+- `memory/session.py`: `save_interaction()` 全文程锁内完成
+- `memory/working.py`: `update()` 全文程锁内完成
+- `feishu/_shared.py`: `save_dedup_index()` 写入前 FileLock 保护
+- `wiki/graph.py`: `save()` nodes+edges 双文件同锁内原子写入
+- `retrieval/vector_index.py`: `save()` vectors/ids/meta 三文件锁内写入
+
+**步骤 2** — SQLite WAL + 重试（1 文件）：
+- `llm/usage_tracker.py`: WAL 模式 + busy_timeout=5000 + 3 次指数退避重试
+- `record()` 静默吞异常 → warning 级别日志
+
+### P1：功能加固
+
+**步骤 3** — 双周报缓存加锁（2 文件）：
+- `analysis/_biweekly_cache.py`: `flush_brief_index()` FileLock
+- `analysis/service.py`: `_save_brief_index()` 静态方法同上
+
+**步骤 4** — Agent 记忆隔离（3 文件）：
+- `utils/paths.py`: 新增 `get_agent_data_dir()`，按 `IRIS_AGENT_ID` 分目录 + 安全过滤
+- `memory/session.py`: `SessionMemoryStore` agent 专属路径 + 旧数据自动迁移
+- `memory/working.py`: `WorkingContextStore` agent 专属路径 + 旧数据自动迁移
+
+**步骤 5** — 日志归档 TOCTOU 修复（1 文件）：
+- `utils/logging.py`: 归档判断用独立 fcntl 锁，先加锁再检查文件大小
+
+### P2：体验优化
+
+**步骤 6** — 进程注册表（3 文件）：
+- `core/locks.py`: 新增 `ProcessRegistry`，PID 文件 + stale 检测
+- `wiki/asr/corrector.py`: ASR 守护进程启动注册
+- `app/cli/_handlers/_data.py`: watch 守护进程启动注册
+
+**步骤 7** — 追加写 fcntl 保护（1 文件）：
+- `wiki/asr/feedback.py`: JSONL 追加写前 fcntl.LOCK_EX
+
+### 代码审查
+
+3 轮审查修复 7 个问题：冗余 trim / 未使用 import / 死代码 / Agent 隔离路径迁移 / 两遍调用重复等。
+
+### 设计文档
+
+新增 `docs/multi-agent-concurrency-design.md` 完整方案文档（含适用/不适用场景边界速查表）。
+
+---
+
+## v3.19.14 (2026-07-22)
+
+记忆自动更新引擎 — 从手动/半自动演进为全自动化记忆学习系统。
+
+### Phase 1：LLM 双通道记忆提取器
+
+双通道架构：正则快速匹配（显式命令"记住"/"纠正"/"我喜欢"，免费毫秒级）+ LLM 深度分析（完整对话上下文，轻量模型按需触发）。
+
+每次 `iris ask` 分两遍调用：第一遍仅问题文本走正则通道，第二遍等回答生成后走 LLM 深度通道，两遍结果自动合并去重。
+
+### Phase 2：会话模式挖掘器
+
+新增 `src/iris/memory/session_miner.py` — `SessionPatternMiner`，用 LLM 从多次会话中识别高频主题/偏好模式/新事实，自动晋升为长期记忆。
+
+触发机制：Q&A 结束时懒检查（距上次 ≥24h 自动触发，后台线程不阻塞响应）+ daily-start 兜底。
+
+### Phase 3：全自治生命周期
+
+- 老化归档：daily-start 默认自动执行，memory-maintenance 默认 `--auto-age`
+- 纠正自动确认：LLM 提取 ≥5 次一致 → `[AUTO-CONFIRMED]`，正则提取 ≥5 次 → 同
+- 纠正自动裁决：正则提取检测"不是 X，而是 Y"模式，preferred 指向被否定值时自动修正为 affirmed
+- 写入时自动压缩：`UserProfileMemoryStore._save()` 所有路径统一 trim（likes ≤15、dislikes ≤15、styles ≤15、notes ≤20）
+- 写时压缩由 `_trim_list()` 实现：去重 + FIFO 保留最新条目
+
+### 新增文件
+
+| 文件 | 说明 |
+|------|------|
+| `src/iris/memory/session_miner.py` | 会话模式挖掘器（~300 行） |
+| `templates/prompt/memory_extract.md` | LLM 记忆提取 prompt 模板 |
+| `tests/unit/test_session_miner.py` | 会话挖掘单元测试（15 用例） |
+| `tests/unit/test_memory_updater_llm.py` | 记忆更新器 LLM 通道测试（14 用例） |
+| `docs/memory-auto-update-design.md` | 记忆自动更新完整设计文档 |
+
+### 修改文件
+
+| 文件 | 改动 |
+|------|------|
+| `src/iris/qa/memory_updater.py` | 重写：双通道架构 + 会话挖掘懒触发 + 冲突自动解决（~500 行） |
+| `src/iris/qa/service.py` | 两遍记忆更新：第一遍正则（answer=None），第二遍 LLM（skip_regex=True） |
+| `src/iris/qa/helpers.py` | 新增 `_merge_updates()` 去重合并 |
+| `src/iris/memory/long_term.py` | `_save()` 写入时自动压缩；新增 `_trim_list()` |
+| `src/iris/memory/__init__.py` | 导出 `SessionPatternMiner` |
+| `src/iris/app/cli/_handlers/_system.py` | daily-start：自动老化 + 会话挖掘兜底 + session_mine 输出 |
+| `CLAUDE.md` | 记忆系统文档重写：5→6 子模块，新增自动更新引擎章节 |
+| `CHANGELOG.md` | 本条目 |
+| `pyproject.toml` | 版本 3.19.13 → 3.19.14 |
+
+### 测试
+
+新增 29 个用例，全量 1,858 全部通过。
+
+### 代码审查
+
+第二轮审查发现并修复 7 个问题：regex 通道两遍重复执行（`skip_regex` 参数）、JSON 回退路径缺类型检查、`_promote` 批量晋升优化、会话挖掘阻塞 Q&A 响应（后台线程）、`_extract_json_object()` 括号计数替代脆弱正则、`_apply_extracted` 单次 load-save、`_auto_resolve_conflict` 分支处理 LLM/正则。
 
 ---
 

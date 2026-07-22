@@ -4,6 +4,7 @@ from .lifecycle import MemoryLifecycle
 from .long_term import CorrectionMemoryStore, UserProfileMemoryStore
 from .manager import LongTermMemoryManager
 from .session import SessionMemoryStore
+from .session_miner import SessionPatternMiner
 from .working import WorkingContextStore
 
 __all__ = [
@@ -11,6 +12,7 @@ __all__ = [
     "LongTermMemoryManager",
     "MemoryLifecycle",
     "SessionMemoryStore",
+    "SessionPatternMiner",
     "UserProfileMemoryStore",
     "WorkingContextStore",
 ]

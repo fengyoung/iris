@@ -148,18 +148,20 @@ class BiweeklyCache:
         brief_index[label] = content_hash
 
     def flush_brief_index(self, brief_index: dict) -> None:
-        """将 brief_index 写回磁盘，并清理 30 天未使用的旧 brief 文件。"""
+        """将 brief_index 写回磁盘，并清理 30 天未使用的旧 brief 文件（FileLock 保护）。"""
+        from iris.core.locks import FileLock
         index_path = self.briefs_dir / "index.json"
-        index_path.write_text(json.dumps(brief_index, ensure_ascii=False, indent=2),
-                               encoding="utf-8")
-        cutoff = (datetime.now() - timedelta(days=30)).timestamp()
-        valid_hashes = set(brief_index.values())
-        for f in self.briefs_dir.glob("*.json"):
-            if f.name == "index.json":
-                continue
-            if f.name.replace(".json", "") not in valid_hashes:
-                try:
-                    if f.stat().st_mtime < cutoff:
-                        f.unlink()
-                except OSError:
-                    pass
+        with FileLock(index_path):
+            index_path.write_text(json.dumps(brief_index, ensure_ascii=False, indent=2),
+                                   encoding="utf-8")
+            cutoff = (datetime.now() - timedelta(days=30)).timestamp()
+            valid_hashes = set(brief_index.values())
+            for f in self.briefs_dir.glob("*.json"):
+                if f.name == "index.json":
+                    continue
+                if f.name.replace(".json", "") not in valid_hashes:
+                    try:
+                        if f.stat().st_mtime < cutoff:
+                            f.unlink()
+                    except OSError:
+                        pass

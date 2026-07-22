@@ -82,8 +82,12 @@ class VectorIndex:
             return False
 
     def save(self) -> None:
+        from iris.core.locks import FileLock
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._save_binary()
+        # FileLock 保护向量索引三文件并发写入
+        lock_path = self._binary_dir() / _VECTORS_NPY
+        with FileLock(lock_path):
+            self._save_binary()
 
     def _save_binary(self) -> None:
         if not self._data:
