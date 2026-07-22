@@ -4,6 +4,50 @@
 
 ---
 
+## v3.19.17 (2026-07-22)
+
+SOURCE 目录按月/年归档 — 9 目录 3 级归档策略。
+
+### 归档策略
+
+`config/source_archive.json` 定义 3 种归档模式：
+
+| 模式 | 目录 | 子目录格式 |
+|:--|:--|:--|
+| **yearly** | 01-目标管理、02-部门管理、03-方案报告、06-我的周报、08-参考资料 | `{category}/{YYYY}/` |
+| **monthly** | 04-讨论思考、05-会议纪要、07-成员周报、09-工作简报 | `{category}/{YYYYMM}/` |
+| **flat** | 其他（默认） | `{category}/` |
+
+### 新增
+
+- **工具函数** `resolve_source_archive_path()` 在 `utils/paths.py` — 按文件名 `YYYYMMDD-` 前缀和配置自动计算归档路径，创建子目录
+- **迁移脚本** `scripts/source_monthly_archive.py` — 一次性搬迁，已运行将 740 文件按规则归档
+
+### 修改
+
+所有向 SOURCE 写入的模块均改为归档路径：
+- `feishu/_shared.py` — `resolve_source_sub_dir()` 支持 filename 参数
+- `feishu/doc_convert.py` / `chat_digest.py` — 飞书文档/聊天提炼归档
+- `transcribe_meeting/pipeline.py` — 会议转录归档
+- `cli/_handlers/_content.py` — 双周报归档
+- `analysis/_biweekly_collector.py` — 3 处 `glob` → `rglob` 递归读取子目录
+
+### 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `config/source_archive.json.example` | 新增归档配置模板 |
+| `src/iris/utils/paths.py` | 新增 `resolve_source_archive_path()` + `get_archive_mode()` |
+| `src/iris/feishu/_shared.py` | `resolve_source_sub_dir()` 增加 filename 参数 |
+| `src/iris/feishu/doc_convert.py` | 归档路径调用新函数 |
+| `src/iris/feishu/chat_digest.py` | 同上 |
+| `src/iris/app/transcribe_meeting/pipeline.py` | 会议转录归档路径 |
+| `src/iris/app/cli/_handlers/_content.py` | 双周报归档路径 |
+| `src/iris/analysis/_biweekly_collector.py` | 3 处 glob → rglob 递归读取 |
+| `scripts/source_monthly_archive.py` | 新增迁移脚本 |
+
+---
+
 ## v3.19.16 (2026-07-22)
 
 合并 0722-alpha — 多 Agent 并发安全 + iris-okr-check Skill。

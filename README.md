@@ -1,8 +1,10 @@
-# Iris 3.19.16
+# Iris 3.19.17
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
+
+**v3.19.17** — SOURCE 目录按月/年归档：9 目录 3 级策略（yearly 5 目录 + monthly 4 目录），自动按文件名生成年月子目录；740 文件已搬迁。v3.19.16 合并 0722-alpha：多 Agent 并发安全 + iris-okr-check Skill。v3.19.15 多 Agent 并发安全；记忆自动更新引擎。9 文件，+284 / -15 行。全量 1,858 测试通过。
 
 **v3.19.16** — 合并 0722-alpha：多 Agent 并发安全（FileLock 推广至 6 处 RMW + SQLite WAL + Agent 记忆隔离 + 进程注册表）+ 新增 `iris-okr-check` 项目级 Skill（OKR 双周逐项检查）。v3.19.15 多 Agent 并发安全；记忆自动更新引擎。19 文件。全量 1,858 测试通过。
 
@@ -163,6 +165,7 @@ iris3/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.19.17** | 2026-07-22 | SOURCE 目录按月/年归档：9 目录 3 级策略（yearly/monthly/flat），自动生成年月子目录，740 文件搬迁 |
 | **v3.19.16** | 2026-07-22 | 合并 0722-alpha：多 Agent 并发安全（FileLock 推广至 6 处 RMW + SQLite WAL + Agent 记忆隔离 + 进程注册表）+ 新增 iris-okr-check Skill |
 | **v3.19.15** | 2026-07-22 | 多 Agent 并发安全三层防护体系（P0 FileLock 推广 + SQLite WAL / P1 缓存锁+Agent 隔离+TOCTOU / P2 进程注册表+JSONL 锁），3 轮审查 7 修复 |
 | **v3.19.14** | 2026-07-22 | 记忆自动更新引擎：Phase 1 LLM 双通道提取 + Phase 2 会话模式挖掘 + Phase 3 全自治生命周期，29 新增测试 |

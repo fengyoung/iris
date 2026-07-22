@@ -1,4 +1,4 @@
-# Iris 3.19.16 — 项目执行说明
+# Iris 3.19.17 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -122,7 +122,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.19.16 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.19.17 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.11 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -167,7 +167,7 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.19.16 (2026-07-22)** — 合并 0722-alpha 功能（多 Agent 并发安全）+ 新增 `iris-okr-check` 项目级 Skill：OKR 双周逐项检查（从 SOURCE 数据源对照 OKR 原文逐 KR 提取进展，输出结构化检查记录）。v3.19.15 多 Agent 并发安全：三层防护体系（FileLock 推广至 6 处 RMW + SQLite WAL + Agent 记忆隔离 `IRIS_AGENT_ID` + 进程注册表 `ProcessRegistry`）。v3.19.14 记忆自动更新引擎：Phase 1 LLM 双通道记忆提取器 + Phase 2 会话模式挖掘器 + Phase 3 全自治生命周期。v3.19.13 ASR shutdown SIGINT 保护。
+**当前 v3.19.17 (2026-07-22)** — SOURCE 目录按月/年归档：9 目录 3 级归档策略（yearly: 5 目录 / monthly: 4 目录 / flat），写入点自动按文件名生成年月子目录；scripts/source_monthly_archive.py 已搬迁 740 文件。v3.19.16 合并 0722-alpha 功能（多 Agent 并发安全）+ 新增 `iris-okr-check` Skill。v3.19.15 多 Agent 并发安全：三层防护体系。v3.19.14 记忆自动更新引擎。v3.19.13 ASR shutdown SIGINT 保护。
 
 > v3.19.10 (2026-07-21)：ASR 引擎全面质量加固（P0~P3 十四项）：P0 Prompt `protected_terms` 字符串截断修复 / P1 热键校验 + 超时 + 参数化 / P2 预检查 + warning + 校验 / P3 Aho-Corasick 优化 + worker 动态 + 单字符代码分档 + 重试（8 文件，+313 / -114 行）
 
