@@ -109,3 +109,58 @@ class FileLock:
                 self._lock_path.unlink(missing_ok=True)
             except OSError:
                 logger.debug("清理锁文件失败: %s", self._lock_path)
+
+
+# ── 进程注册表 ─────────────────────────────────────────────────
+
+
+class ProcessRegistry:
+    """进程注册表 — 基于 PID 文件防止守护进程重复启动。
+
+    用法：
+        registry = ProcessRegistry("asr-corrector", pid_dir)
+        if not registry.register():
+            raise RuntimeError("已有 asr-corrector 进程在运行")
+        try:
+            run_forever()
+        finally:
+            registry.unregister()
+    """
+
+    def __init__(self, name: str, pid_dir: Path):
+        self._name = name
+        self._pid_file = pid_dir / f"{name}.pid"
+
+    def register(self) -> bool:
+        """注册当前进程。返回 False 表示已有同名进程运行。"""
+        self._pid_file.parent.mkdir(parents=True, exist_ok=True)
+        if self._pid_file.exists():
+            try:
+                stale_pid = int(self._pid_file.read_text().strip())
+                if self._is_alive(stale_pid):
+                    logger.warning("进程注册失败: %s (PID %d 仍在运行)", self._name, stale_pid)
+                    return False
+                # PID 文件残留（进程已死），覆盖
+                logger.debug("清理残留 PID 文件: %s (PID %d 已死)", self._name, stale_pid)
+            except (ValueError, OSError):
+                pass  # 文件损坏，覆盖
+        self._pid_file.write_text(str(os.getpid()))
+        logger.info("进程已注册: %s (PID %d)", self._name, os.getpid())
+        return True
+
+    def unregister(self) -> None:
+        """注销当前进程。"""
+        try:
+            self._pid_file.unlink(missing_ok=True)
+            logger.debug("进程已注销: %s", self._name)
+        except OSError:
+            pass
+
+    @staticmethod
+    def _is_alive(pid: int) -> bool:
+        """检查进程是否存活（发送信号 0）。"""
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False

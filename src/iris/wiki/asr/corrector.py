@@ -1028,6 +1028,14 @@ class AsrCorrector:
               file=sys.stderr)
         print("[Iris] 监听剪贴板... (Ctrl+C 退出)", file=sys.stderr)
 
+        # 进程注册：防止重复启动
+        from iris.core.locks import ProcessRegistry
+        pid_dir = self._config.root / "data"
+        registry = ProcessRegistry("asr-corrector", pid_dir)
+        if not registry.register():
+            print("[Iris] ⚠ asr-corrector 已有实例在运行，退出", file=sys.stderr)
+            return
+
         try:
             while True:
                 self._tick()
@@ -1035,6 +1043,7 @@ class AsrCorrector:
         except KeyboardInterrupt:
             print("\n[Iris] 校正引擎已停止", file=sys.stderr)
         finally:
+            registry.unregister()
             # 安全关闭：屏蔽 SIGINT 防止清理过程中二次 Ctrl+C 中断
             # Python 3.13 在进程退出时会通过 atexit 调用
             # ThreadPoolExecutor._python_exit 的 t.join()，

@@ -46,8 +46,14 @@ def save_correction(record: AsrCorrection, feedback_path: str) -> None:
         record_dict["context_ab"] = record.context_ab
     line = json.dumps(record_dict, ensure_ascii=False)
 
+    import fcntl
     with open(path, "a", encoding="utf-8") as f:
-        f.write(line + "\n")
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        try:
+            f.write(line + "\n")
+            f.flush()
+        finally:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
 def load_corrections(feedback_path: str) -> List[AsrCorrection]:
