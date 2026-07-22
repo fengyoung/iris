@@ -1,4 +1,4 @@
-# Iris 3.19.14 — 项目执行说明
+# Iris 3.19.15 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -164,7 +164,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.19.14 (2026-07-22)** — 记忆自动更新引擎：Phase 1 LLM 双通道记忆提取器（正则快速 + LLM 深度，每次 Q&A 自动运行）+ Phase 2 会话模式挖掘器（`session_miner.py`，懒触发 + daily-start 兜底）+ Phase 3 全自治生命周期（默认自动老化、纠正自动确认/裁决、写入时自动压缩）。新增 `templates/prompt/memory_extract.md` 模板。29 新增单元测试（`test_memory_updater_llm.py` 14 + `test_session_miner.py` 15），总量 1,858。记忆模块 5→6 子模块，`CLAUDE.md` 记忆系统文档重写。第二轮代码审查修复 7 个问题（regex 通道重复执行/JSON 回退类型检查/批量晋升优化/会话挖掘后台线程等）。
+**当前 v3.19.15 (2026-07-22)** — 多 Agent 并发安全：三层防护体系（FileLock 推广 + 存储引擎加固 + 进程级协调），7 步骤全面实施。P0 FileLock 推广至 6 处 RMW（chunker/session/working/feishu_dedup/graph/vector_index）+ SQLite WAL 模式+重试。P1 双周报缓存锁 + Agent 记忆隔离（`IRIS_AGENT_ID`）+ 日志归档 TOCTOU 修复 + 旧路径自动迁移。P2 进程注册表 `ProcessRegistry`（ASR correcotr/watch 防止重复启动）+ JSONL 追加写 fcntl 保护。3 轮审查修复 7 个问题（冗余 trim/unused import/死代码等）。19 文件，+215 / -208 行。全量 1,858 测试通过。软链配置方案已完成（`config/` + `data/` + `.env` → main 分支共享）。
+
+**v3.19.14 (2026-07-22)** — 记忆自动更新引擎：Phase 1 LLM 双通道记忆提取器（正则快速 + LLM 深度，每次 Q&A 自动运行）+ Phase 2 会话模式挖掘器（`session_miner.py`，懒触发 + daily-start 兜底）+ Phase 3 全自治生命周期（默认自动老化、纠正自动确认/裁决、写入时自动压缩）。新增 `templates/prompt/memory_extract.md` 模板。29 新增单元测试，总量 1,858。记忆模块 5→6 子模块。
 
 **v3.19.13 (2026-07-21)** — ASR shutdown SIGINT 保护：清理流程统一信号屏蔽，防止二次 Ctrl+C 中断线程回收。v3.19.12 LLM 思考模式关闭 + extra_body 路由修复 + 上下文 A/B 对比。v3.19.11 五大方向全面优化：测试 +76 / LLM 统一网关 + 缓存层抽象 + God Class 拆解 + Wiki 模块整理（19 文件，+887 / -64 行，1,829 测试）
 

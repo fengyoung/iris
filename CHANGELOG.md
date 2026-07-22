@@ -4,6 +4,58 @@
 
 ---
 
+## v3.19.15 (2026-07-22)
+
+多 Agent 并发安全 — 三层防护体系全面实施。
+
+### P0：FileLock 推广 + SQLite WAL
+
+**步骤 1** — RMW 模式 FileLock 加锁（6 文件）：
+- `ingest/chunker.py`: `write_hash_index()` RMW 段整体包裹 FileLock
+- `memory/session.py`: `save_interaction()` 全文程锁内完成
+- `memory/working.py`: `update()` 全文程锁内完成
+- `feishu/_shared.py`: `save_dedup_index()` 写入前 FileLock 保护
+- `wiki/graph.py`: `save()` nodes+edges 双文件同锁内原子写入
+- `retrieval/vector_index.py`: `save()` vectors/ids/meta 三文件锁内写入
+
+**步骤 2** — SQLite WAL + 重试（1 文件）：
+- `llm/usage_tracker.py`: WAL 模式 + busy_timeout=5000 + 3 次指数退避重试
+- `record()` 静默吞异常 → warning 级别日志
+
+### P1：功能加固
+
+**步骤 3** — 双周报缓存加锁（2 文件）：
+- `analysis/_biweekly_cache.py`: `flush_brief_index()` FileLock
+- `analysis/service.py`: `_save_brief_index()` 静态方法同上
+
+**步骤 4** — Agent 记忆隔离（3 文件）：
+- `utils/paths.py`: 新增 `get_agent_data_dir()`，按 `IRIS_AGENT_ID` 分目录 + 安全过滤
+- `memory/session.py`: `SessionMemoryStore` agent 专属路径 + 旧数据自动迁移
+- `memory/working.py`: `WorkingContextStore` agent 专属路径 + 旧数据自动迁移
+
+**步骤 5** — 日志归档 TOCTOU 修复（1 文件）：
+- `utils/logging.py`: 归档判断用独立 fcntl 锁，先加锁再检查文件大小
+
+### P2：体验优化
+
+**步骤 6** — 进程注册表（3 文件）：
+- `core/locks.py`: 新增 `ProcessRegistry`，PID 文件 + stale 检测
+- `wiki/asr/corrector.py`: ASR 守护进程启动注册
+- `app/cli/_handlers/_data.py`: watch 守护进程启动注册
+
+**步骤 7** — 追加写 fcntl 保护（1 文件）：
+- `wiki/asr/feedback.py`: JSONL 追加写前 fcntl.LOCK_EX
+
+### 代码审查
+
+3 轮审查修复 7 个问题：冗余 trim / 未使用 import / 死代码 / Agent 隔离路径迁移 / 两遍调用重复等。
+
+### 设计文档
+
+新增 `docs/multi-agent-concurrency-design.md` 完整方案文档（含适用/不适用场景边界速查表）。
+
+---
+
 ## v3.19.14 (2026-07-22)
 
 记忆自动更新引擎 — 从手动/半自动演进为全自动化记忆学习系统。
