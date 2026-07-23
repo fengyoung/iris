@@ -1,4 +1,4 @@
-.PHONY: test test-unit test-integration test-cov lint lint-fix format clean all
+.PHONY: test test-unit test-integration test-cov lint lint-fix format clean audit install-dev all
 
 # 运行全部测试
 test: test-unit test-integration
@@ -27,10 +27,18 @@ lint-fix:
 format:
 	ruff format src/ tests/
 
+# 依赖安全审计（需安装 pip-audit: pip install pip-audit）
+audit:
+	pip-audit
+
+# 安装开发依赖（使用约束文件确保可复现构建）
+install-dev:
+	pip install -e ".[dev]" -c constraints.txt
+
 # 清理缓存
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	rm -rf .pytest_cache htmlcov .coverage .ruff_cache
 
 # 全量检查
-all: lint test-cov
+all: lint audit test-cov

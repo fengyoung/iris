@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
 from iris.config.loader import ConfigBundle
+
+logger = logging.getLogger(__name__)
 
 
 class SessionMemoryStore:
@@ -32,8 +35,9 @@ class SessionMemoryStore:
             import shutil
             self._path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(legacy_path, self._path)
-        except OSError:
-            pass  # 迁移失败不阻塞正常流程
+        except OSError as exc:
+            logger.warning("会话记忆旧路径迁移失败 (%s → %s): %s", legacy_path, self._path, exc)
+            # 迁移失败不阻塞正常流程
 
     def load(self) -> Dict[str, Any]:
         if not self._enabled or not self._path.exists():

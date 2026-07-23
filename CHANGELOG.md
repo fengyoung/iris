@@ -53,6 +53,87 @@
 | 向量索引 | 9,019 条 (100%) |
 | 知识图谱 | 2,161 边 (1,175 wikilink + 986 LLM) |
 | LLM 用量 | 644 次 / ~3.78M tokens (CLI + Skill 分离) |
+## v3.19.19 (2026-07-23)
+
+测试覆盖全面优化 — 90 新增用例，P1 三模块接近全绿，P2 纯逻辑增强。
+
+### 新增测试文件
+
+| 文件 | 用例 | 覆盖模块 | 覆盖率变化 |
+|------|:---:|------|:---:|
+| `tests/unit/test_graph_engine_fallback.py` | 21 | `_graph_engine.py` | 61% → **97%** |
+| `tests/unit/test_asr_formatter.py` | 26 | `asr/formatter.py` | 59% → **98%** |
+| `tests/unit/test_navigation_pure.py` | 23 | `navigation.py` | 67% → **70%** |
+| `tests/unit/test_wiki_generator_pure.py` | +8 | `generator.py` | 纯逻辑增强 |
+
+### P1：核心模块覆盖率提升
+
+- **`_graph_engine.py`（61%→97%，+21 用例）**：完整覆盖纯 Python 回退路径（build / neighbors / find_path / orphans / bridges / degree_stats），确保 NetworkX 不可用时功能不退化
+- **`asr/formatter.py`（59%→98%，+26 用例）**：覆盖 `format_hotwords_file`（去重逻辑）、`format_replace_dict`（高危过滤/长度限制/去重/上限截断）、`render_asr_prompt`（standard/compact 双格式 + domain_term/concept/project 各类型块）
+- **`navigation.py`（67%→70%，+23 用例）**：覆盖 `_is_wiki_broken_link` 全部 7 个豁免分支（源文档引用/噪音/技术术语/外部概念/精确/模糊/前缀/归一化/字符序列/数字修复）、`append_changelog`、`_atomic_write`、`_char_sequence_match`
+
+### P2：generator 纯逻辑增强
+
+- `_extract_wiki_content` 5 个 heuristic 分支全覆盖
+- `_render_with_fallback` 模板/fallback 双路径
+- `_validate_update_output` frontmatter 恢复/title 修复/不可恢复回退/结尾代码块剥离
+- `check_reference_quality` 引用计数/描述判定/无引用处理
+
+### 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `tests/unit/test_graph_engine_fallback.py` | 新增，21 用例 |
+| `tests/unit/test_asr_formatter.py` | 新增，26 用例 |
+| `tests/unit/test_navigation_pure.py` | 新增，23 用例 |
+| `tests/unit/test_wiki_generator_pure.py` | +8 用例（18→26） |
+
+---
+
+## v3.19.18 (2026-07-23)
+
+代码质量全面加固 — P0 静默异常修复 + P1 重复代码消除 + P2 工程基础设施增强 + P3 代码优化 / 测试精化。
+
+### 修复 (P0)
+
+- **`memory/session.py` 静默吞异常**：旧路径迁移失败时 `except OSError: pass` 无日志，改为 `logger.warning` 记录源路径、目标路径和异常信息
+
+### 重构 (P1)
+
+- **`llm/service.py` 缓存检查 DRY**：`generate()` 和 `generate_async()` 中 ~14 行重复的缓存检查逻辑提取为 `_check_cache()` 私有方法
+- **`analysis/service.py` 死代码清理**：删除 9 个仅委托 `BiweeklyCollector` 的向后兼容方法（−48 行），包括 `_load_op_document` / `_load_recent_biweeklies` / `_load_previous_biweekly` / `_collect_recent_files` / `_extract_date_from_path` / `_extract_date_from_frontmatter` / `_extract_person_from_filename` / `_build_citation_label` / `_stage4_assemble_and_review`
+- **`wiki/generator.py` prompt 构建 DRY**：4 处 `_build_*_prompt` 方法的模板→fallback 重复模式提取为 `_render_with_fallback()` 辅助方法
+
+### 新增 (P2)
+
+- **依赖安全审计**：Makefile 新增 `audit` 目标（`pip-audit`），CI 新增对应步骤（`continue-on-error: true`）
+- **git tag 发布流程**：`CONTRIBUTING.md` 新增发布流程文档（7 步：更新版本号 → changelog → commit → tag → push → GitHub Release）
+- **依赖约束文件**：新增 `constraints.txt`（PyMuPDF / python-docx / numpy / pydantic / networkx / httpx / beautifulsoup4），Makefile / CI 使用 `-c constraints.txt` 确保可复现构建
+
+### 优化 (P3)
+
+- **测试分类精化**：`tests/conftest.py` 新增 14 个顶层纯逻辑文件白名单，正确标记为 `unit`（单元测试 526→794）
+- **lint 清理**：修复 `_wiki.py` 中 3 个预存 lint 问题（2 处 f-string 无占位符 + 1 处 E741 歧义变量名 `l`）
+
+### 测试
+
+- `test_biweekly_files.py` 引用更新：`AnalysisReportService` → `BiweeklyCollector`（适配已删除的委托方法）
+
+### 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `src/iris/memory/session.py` | P0: +6/-2 |
+| `src/iris/llm/service.py` | P1: 提取 `_check_cache()` |
+| `src/iris/analysis/service.py` | P1: −48 行死代码 |
+| `src/iris/wiki/generator.py` | P1: 提取 `_render_with_fallback()` |
+| `Makefile` | P2: +audit +install-dev |
+| `.github/workflows/ci.yml` | P2: +pip-audit +constraints |
+| `CONTRIBUTING.md` | P2: +发布流程 +audit |
+| `constraints.txt` | P2: 新增，15 行 |
+| `tests/conftest.py` | P3: +14 文件白名单 |
+| `tests/test_biweekly_files.py` | P3: 引用更新 |
+| `src/iris/app/cli/_handlers/_wiki.py` | lint: f-string + E741 |
 
 ---
 

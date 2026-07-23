@@ -411,10 +411,10 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
             data_dir.mkdir(parents=True, exist_ok=True)
             if replace_dict_file:
                 shutil.copy2(replace_dict_file, str(data_dir / "asr_replace_dict.json"))
-                deployed.append(f"data/asr_replace_dict.json")
+                deployed.append("data/asr_replace_dict.json")
             if prompt and output_path:
                 shutil.copy2(output_path, str(data_dir / "asr_prompt.md"))
-                deployed.append(f"data/asr_prompt.md")
+                deployed.append("data/asr_prompt.md")
         else:
             deployed.append(f"⚠ vocotype 目录不存在: {VOCO_DIR}")
 
@@ -557,7 +557,7 @@ def handle_asr_audit(args, bundle, logger) -> int:
     output_dir = Path(bundle.app.get("data_dir", os.getcwd())) / "output" / "asr-modify"
     hotword_files = sorted(output_dir.glob("asr-hotwords-*.txt"), reverse=True)
     if hotword_files:
-        hotwords = [l.strip() for l in hotword_files[0].read_text(encoding="utf-8").splitlines() if l.strip()]
+        hotwords = [line.strip() for line in hotword_files[0].read_text(encoding="utf-8").splitlines() if line.strip()]
 
     # 加载最新替换词典
     terms: List = []
