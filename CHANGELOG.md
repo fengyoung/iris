@@ -1,10 +1,43 @@
-# Iris 变更历史
+## v3.19.19 (2026-07-23)
 
-> 产品版本（pyproject.toml）完整变更记录。协议版本和数据版本独立演进，仅当真正变化时才在此记录。
+测试覆盖全面优化 — 90 新增用例，P1 三模块接近全绿，P2 纯逻辑增强。
+
+### 新增测试文件
+
+| 文件 | 用例 | 覆盖模块 | 覆盖率变化 |
+|------|:---:|------|:---:|
+| `tests/unit/test_graph_engine_fallback.py` | 21 | `_graph_engine.py` | 61% → **97%** |
+| `tests/unit/test_asr_formatter.py` | 26 | `asr/formatter.py` | 59% → **98%** |
+| `tests/unit/test_navigation_pure.py` | 23 | `navigation.py` | 67% → **70%** |
+| `tests/unit/test_wiki_generator_pure.py` | +8 | `generator.py` | 纯逻辑增强 |
+
+### P1：核心模块覆盖率提升
+
+- **`_graph_engine.py`（61%→97%，+21 用例）**：完整覆盖纯 Python 回退路径（build / neighbors / find_path / orphans / bridges / degree_stats），确保 NetworkX 不可用时功能不退化
+- **`asr/formatter.py`（59%→98%，+26 用例）**：覆盖 `format_hotwords_file`（去重逻辑）、`format_replace_dict`（高危过滤/长度限制/去重/上限截断）、`render_asr_prompt`（standard/compact 双格式 + domain_term/concept/project 各类型块）
+- **`navigation.py`（67%→70%，+23 用例）**：覆盖 `_is_wiki_broken_link` 全部 7 个豁免分支（源文档引用/噪音/技术术语/外部概念/精确/模糊/前缀/归一化/字符序列/数字修复）、`append_changelog`、`_atomic_write`、`_char_sequence_match`
+
+### P2：generator 纯逻辑增强
+
+- `_extract_wiki_content` 5 个 heuristic 分支全覆盖
+- `_render_with_fallback` 模板/fallback 双路径
+- `_validate_update_output` frontmatter 恢复/title 修复/不可恢复回退/结尾代码块剥离
+- `check_reference_quality` 引用计数/描述判定/无引用处理
+
+### 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `tests/unit/test_graph_engine_fallback.py` | 新增，21 用例 |
+| `tests/unit/test_asr_formatter.py` | 新增，26 用例 |
+| `tests/unit/test_navigation_pure.py` | 新增，23 用例 |
+| `tests/unit/test_wiki_generator_pure.py` | +8 用例（18→26） |
 
 ---
 
+
 ## v3.19.18 (2026-07-23)
+
 
 知识库质量全面加固 + LLM 用量追踪体系完善。
 
@@ -53,44 +86,8 @@
 | 向量索引 | 9,019 条 (100%) |
 | 知识图谱 | 2,161 边 (1,175 wikilink + 986 LLM) |
 | LLM 用量 | 644 次 / ~3.78M tokens (CLI + Skill 分离) |
-## v3.19.19 (2026-07-23)
-
-测试覆盖全面优化 — 90 新增用例，P1 三模块接近全绿，P2 纯逻辑增强。
-
-### 新增测试文件
-
-| 文件 | 用例 | 覆盖模块 | 覆盖率变化 |
-|------|:---:|------|:---:|
-| `tests/unit/test_graph_engine_fallback.py` | 21 | `_graph_engine.py` | 61% → **97%** |
-| `tests/unit/test_asr_formatter.py` | 26 | `asr/formatter.py` | 59% → **98%** |
-| `tests/unit/test_navigation_pure.py` | 23 | `navigation.py` | 67% → **70%** |
-| `tests/unit/test_wiki_generator_pure.py` | +8 | `generator.py` | 纯逻辑增强 |
-
-### P1：核心模块覆盖率提升
-
-- **`_graph_engine.py`（61%→97%，+21 用例）**：完整覆盖纯 Python 回退路径（build / neighbors / find_path / orphans / bridges / degree_stats），确保 NetworkX 不可用时功能不退化
-- **`asr/formatter.py`（59%→98%，+26 用例）**：覆盖 `format_hotwords_file`（去重逻辑）、`format_replace_dict`（高危过滤/长度限制/去重/上限截断）、`render_asr_prompt`（standard/compact 双格式 + domain_term/concept/project 各类型块）
-- **`navigation.py`（67%→70%，+23 用例）**：覆盖 `_is_wiki_broken_link` 全部 7 个豁免分支（源文档引用/噪音/技术术语/外部概念/精确/模糊/前缀/归一化/字符序列/数字修复）、`append_changelog`、`_atomic_write`、`_char_sequence_match`
-
-### P2：generator 纯逻辑增强
-
-- `_extract_wiki_content` 5 个 heuristic 分支全覆盖
-- `_render_with_fallback` 模板/fallback 双路径
-- `_validate_update_output` frontmatter 恢复/title 修复/不可恢复回退/结尾代码块剥离
-- `check_reference_quality` 引用计数/描述判定/无引用处理
-
-### 涉及文件
-
-| 文件 | 改动 |
-|------|------|
-| `tests/unit/test_graph_engine_fallback.py` | 新增，21 用例 |
-| `tests/unit/test_asr_formatter.py` | 新增，26 用例 |
-| `tests/unit/test_navigation_pure.py` | 新增，23 用例 |
-| `tests/unit/test_wiki_generator_pure.py` | +8 用例（18→26） |
 
 ---
-
-## v3.19.18 (2026-07-23)
 
 代码质量全面加固 — P0 静默异常修复 + P1 重复代码消除 + P2 工程基础设施增强 + P3 代码优化 / 测试精化。
 
@@ -136,6 +133,7 @@
 | `src/iris/app/cli/_handlers/_wiki.py` | lint: f-string + E741 |
 
 ---
+
 
 ## v3.19.17 (2026-07-22)
 
