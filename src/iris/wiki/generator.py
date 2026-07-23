@@ -193,12 +193,9 @@ class WikiGenerator:
                                            evidence=evidence, related=related)
 
     def _build_generic_prompt(self, type_name, page_type, title, query, evidence, related, now):
-        template = self._load_template("wiki/generate_generic.txt")
-        if template:
-            return template.format(type_name=type_name, page_type=page_type, title=title,
-                                   query=query, evidence=evidence, related=related, now=now)
-        # 降级：内联 prompt（与外部模板保持同步）
-        return f"""你是一个知识库编辑助手。请生成一份 {type_name} 类型的 Wiki 页面。
+        return self._render_with_fallback(
+            "wiki/generate_generic.txt",
+            f"""你是一个知识库编辑助手。请生成一份 {type_name} 类型的 Wiki 页面。
 
 ## 页面信息
 - 标题：{title}
@@ -217,15 +214,15 @@ class WikiGenerator:
 5. 关联页面：{related}
 6. 参考来源格式：每条引用使用 [path.md:行号] 事实断言描述的格式，描述 10-30 字说明关键信息。禁止仅罗列文件路径。
 
-请输出完整的 Markdown。"""
+请输出完整的 Markdown。""",
+            type_name=type_name, page_type=page_type, title=title,
+            query=query, evidence=evidence, related=related, now=now,
+        )
 
     def _build_person_prompt(self, title, query, evidence, related, now):
-        template = self._load_template("wiki/generate_person.txt")
-        if template:
-            return template.format(title=title, query=query, evidence=evidence,
-                                   related=related, now=now)
-        # 降级：内联 prompt（与外部模板保持同步）
-        return f"""你是一个知识库编辑助手。请为团队成员 **{title}** 生成一份人物 Wiki 页面。
+        return self._render_with_fallback(
+            "wiki/generate_person.txt",
+            f"""你是一个知识库编辑助手。请为团队成员 **{title}** 生成一份人物 Wiki 页面。
 
 ## 参考证据（来自周报、会议纪要、项目文档）
 {evidence}
@@ -246,12 +243,25 @@ class WikiGenerator:
 5. email 字段提取证据中的邮箱信息
 6. 参考来源格式：每条引用使用 [path.md:行号] 事实断言描述的格式，描述 10-30 字说明关键信息。禁止仅罗列文件路径。
 
-请输出完整的 Markdown。"""
+请输出完整的 Markdown。""",
+            title=title, query=query, evidence=evidence, related=related, now=now,
+        )
 
     @staticmethod
     def _load_template(name: str) -> Optional[str]:
         """从项目根目录的 templates/ 加载 Prompt 模板，不存在返回 None。"""
         return _load_template_file(name)
+
+    @staticmethod
+    def _render_with_fallback(template_name: str, fallback_text: str, **kwargs) -> str:
+        """尝试从模板渲染，模板不可用时使用 fallback 文本。
+
+        统一处理模板→fallback 模式，消除 _build_*_prompt 方法中的重复。
+        """
+        template = _load_template_file(template_name)
+        if template and template.strip():
+            return template.format(**kwargs)
+        return fallback_text
 
     @staticmethod
     def _extract_wiki_content(text: str) -> str:
@@ -294,15 +304,10 @@ class WikiGenerator:
                            evidence: str, related: str) -> str:
         """LLM 不可用时的降级生成。"""
         now = datetime.now().strftime("%Y-%m-%d")
-        type_name = TYPE_NAMES.get(page_type, page_type)
-        template = self._load_template("wiki/fallback_markdown.txt")
-        if template:
-            return template.format(
-                title=title, page_type=page_type, now=now,
-                type_name=type_name, evidence=evidence[:500], related=related,
-            )
-        # 降级：内联
-        return f"""---
+        type_name = get_display_name(page_type)
+        return self._render_with_fallback(
+            "wiki/fallback_markdown.txt",
+            f"""---
 title: {title}
 type: {page_type}
 status: draft
@@ -323,8 +328,10 @@ sources:
 {related}
 
 ## 参考来源
-- 待补充
-"""
+- 待补充""",
+            title=title, page_type=page_type, now=now, type_name=type_name,
+            evidence=evidence[:500], related=related,
+        )
 
     def _build_backup_path(self, output_path: Path) -> Path:
         counter = 1
@@ -382,16 +389,10 @@ sources:
             return None
 
     def _build_generic_update_prompt(self, existing_content, type_name, last_updated, evidence, related, today):
-        template = self._load_template("wiki/update_generic.txt")
         last_updated_str = last_updated or '未知'
-        if template:
-            return template.format(
-                type_name=type_name, existing_content=existing_content,
-                last_updated=last_updated_str, evidence=evidence,
-                related=related, today=today,
-            )
-        # 降级：内联 prompt
-        return f"""你是一个知识库编辑助手。请对一篇现有的 {type_name} 类型 Wiki 页面做增量更新。
+        return self._render_with_fallback(
+            "wiki/update_generic.txt",
+            f"""你是一个知识库编辑助手。请对一篇现有的 {type_name} 类型 Wiki 页面做增量更新。
 
 ## 现有页面内容
 ```markdown
@@ -415,18 +416,17 @@ sources:
 3. 更新 YAML frontmatter 中的 updated 字段为 {today}
 4. 保持 [[Wiki-链接]] 交叉引用格式
 5. 在「参考来源」中补充新证据的来源，每条引用附 10-30 字事实断言描述
-6. **输出纯 Markdown，以 --- 开头，不要任何对话前缀或代码块包裹**"""
+6. **输出纯 Markdown，以 --- 开头，不要任何对话前缀或代码块包裹**""",
+            type_name=type_name, existing_content=existing_content,
+            last_updated=last_updated_str, evidence=evidence,
+            related=related, today=today,
+        )
 
     def _build_person_update_prompt(self, existing_content, last_updated, evidence, related, today):
-        template = self._load_template("wiki/update_person.txt")
         last_updated_str = last_updated or '未知'
-        if template:
-            return template.format(
-                existing_content=existing_content, last_updated=last_updated_str,
-                evidence=evidence, related=related, today=today,
-            )
-        # 降级：内联 prompt
-        return f"""你是一个知识库编辑助手。请对团队成员 Wiki 页面做增量更新。
+        return self._render_with_fallback(
+            "wiki/update_person.txt",
+            f"""你是一个知识库编辑助手。请对团队成员 Wiki 页面做增量更新。
 
 ## 现有页面内容
 ```markdown
@@ -453,7 +453,10 @@ sources:
 3. 更新 YAML frontmatter 中的 updated 字段为 {today}
 4. 保持 [[Wiki-链接]] 交叉引用格式
 5. 在「参考来源」中补充新来源，每条引用附 10-30 字事实断言描述
-6. **输出纯 Markdown，以 --- 开头，不要任何对话前缀或代码块包裹**"""
+6. **输出纯 Markdown，以 --- 开头，不要任何对话前缀或代码块包裹**""",
+            existing_content=existing_content, last_updated=last_updated_str,
+            evidence=evidence, related=related, today=today,
+        )
 
     @staticmethod
     def _validate_update_output(new_content: str, existing_content: str, expected_title: str) -> str:

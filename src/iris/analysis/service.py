@@ -876,54 +876,6 @@ class AnalysisReportService:
         logger.info("  Stage 4b 完成 (%d 字)", len(markdown))
         return markdown
 
-    # ── 向后兼容（旧代码直接调用 _stage4_assemble_and_review） ──
-
-    def _stage4_assemble_and_review(self, period: str, sections: dict,
-                                     directions: list) -> str:
-        """向后兼容：委托给 4a+4b 两阶段。"""
-        assembled = self._stage4a_assemble(period, sections, directions)
-        return self._stage4b_review(period, assembled, directions)
-
-    # ── 向后兼容委托方法（供外部代码或子类访问） ──────────────────
-
-    def _load_op_document(self) -> str:
-        """向后兼容：委托给 BiweeklyCollector。"""
-        return self._collector.load_op_document()
-
-    def _load_recent_biweeklies(self, since_days: int = 35) -> list[dict]:
-        """向后兼容：委托给 BiweeklyCollector。"""
-        return self._collector.load_recent_biweeklies(since_days=since_days)
-
-    def _load_previous_biweekly(self) -> str:
-        """向后兼容：委托给 BiweeklyCollector。"""
-        return self._collector.load_previous_biweekly()
-
-    def _collect_recent_files(self, since_date: datetime) -> list[dict]:
-        """向后兼容：委托给 BiweeklyCollector。"""
-        return self._collector.collect_recent_files(since_date)
-
-    @staticmethod
-    def _extract_date_from_path(relative_path: str) -> Optional[datetime]:
-        """向后兼容：委托给 BiweeklyCollector。"""
-        return BiweeklyCollector._extract_date_from_path(relative_path)
-
-    @staticmethod
-    def _extract_date_from_frontmatter(content: str) -> Optional[datetime]:
-        """向后兼容：委托给 BiweeklyCollector。"""
-        return BiweeklyCollector._extract_date_from_frontmatter(content)
-
-    @staticmethod
-    def _extract_person_from_filename(filename: str) -> Optional[str]:
-        """向后兼容：委托给 BiweeklyCollector。"""
-        return BiweeklyCollector._extract_person_from_filename(filename)
-
-    @staticmethod
-    def _build_citation_label(filename: str, dir_label: str) -> str:
-        """向后兼容：委托给 BiweeklyCollector。"""
-        return BiweeklyCollector._build_citation_label(filename, dir_label)
-
-    # ── 质量审查（供 build_report 两阶段模式使用）──────────────
-
     def _review_and_revise(self, query, draft, structured, llm_payload) -> Tuple[str, Optional[Dict], bool]:
         structured_ctx = render_structured_evidence(structured)
         try:

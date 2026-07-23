@@ -13,12 +13,32 @@ from iris.config.loader import ConfigBundle, load_config_bundle
 from iris.config.secrets import KeychainError
 
 
+# 顶层目录中实际为纯单元测试的文件（无 mock / I/O 依赖，应为 unit）
+_TOPLEVEL_UNIT_FILES: set[str] = {
+    "test_asr_hotwords.py",
+    "test_biweekly_dedup.py",
+    "test_biweekly_helpers.py",
+    "test_embedder.py",
+    "test_memory.py",
+    "test_mindmap.py",
+    "test_person_enricher.py",
+    "test_qa_context.py",
+    "test_qa_helpers.py",
+    "test_router.py",
+    "test_tokenization.py",
+    "test_transcribe_meeting.py",
+    "test_trello_models.py",
+    "test_validation.py",
+}
+
+
 def pytest_collection_modifyitems(items):
-    """按目录自动标记测试：tests/unit/ → unit，其余 → integration。"""
+    """按目录 + 白名单自动标记测试：tests/unit/ → unit，顶层纯逻辑文件 → unit，其余 → integration。"""
     for item in items:
         if not any(marker.name in ("unit", "integration") for marker in item.iter_markers()):
             test_path = str(item.fspath)
-            if "/unit/" in test_path:
+            filename = test_path.rsplit("/", 1)[-1] if "/" in test_path else test_path
+            if "/unit/" in test_path or filename in _TOPLEVEL_UNIT_FILES:
                 item.add_marker(pytest.mark.unit)
             else:
                 item.add_marker(pytest.mark.integration)

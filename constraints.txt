@@ -1,0 +1,15 @@
+# Iris 依赖约束文件 — 可复现构建
+# 生成日期：2026-07-23
+# 用法：pip install -e ".[dev]" -c constraints.txt
+# 更新：pip list --format=freeze | grep -E "pymupdf|python-docx|numpy|pydantic|networkx|httpx|beautifulsoup4" > constraints.txt
+
+# 核心依赖
+PyMuPDF==1.27.2.2
+python-docx==1.2.0
+numpy==2.4.4
+pydantic==2.10.5
+
+# 可选依赖
+networkx==3.6.1         # graph
+httpx==0.28.1           # async
+beautifulsoup4==4.14.3  # weekly

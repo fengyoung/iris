@@ -43,8 +43,10 @@
 ### 开发环境
 
 ```bash
-# 安装开发依赖
-pip install -e ".[dev]"
+# 安装开发依赖（推荐使用约束文件确保可复现构建）
+make install-dev     # 等同于 pip install -e ".[dev]" -c constraints.txt
+# 或手动安装
+pip install -e ".[dev]" -c constraints.txt
 
 # 安装 pre-commit hooks（可选，推荐）
 pre-commit install
@@ -57,6 +59,7 @@ make test-cov        # 运行测试 + 覆盖率报告
 make lint            # Ruff 代码检查
 make lint-fix        # Ruff 自动修复
 make format          # 代码格式化
+make audit           # 依赖安全审计
 make clean           # 清理缓存
 
 # 或直接使用 pytest
@@ -69,6 +72,20 @@ python -m pytest tests/ -q --cov=iris --cov-report=term
 - 不要在代码、注释或提交信息中包含 API 密钥、密码或个人身份信息
 - 本地配置文件（`.env`、`config/*.json`、`.claude/settings.*`）已在 `.gitignore` 中排除
 - 如发现安全漏洞，请参考 [SECURITY.md](SECURITY.md) 的私密报告流程
+
+### 发布流程
+
+每次版本发布需执行以下步骤：
+
+1. 更新 `pyproject.toml` 中的 `version` 字段
+2. 更新 `src/iris/__init__.py` 中的 `__version__`（仅在 CLI 命令集变更时）
+3. 更新 `CHANGELOG.md`，记录本版本的全部变更
+4. 提交变更：`git commit -m "chore: 升级产品版本 X.Y.Z → X.Y.Z+1"`
+5. 打 tag：`git tag -a vX.Y.Z+1 -m "Iris X.Y.Z+1"`
+6. 推送 tag：`git push origin vX.Y.Z+1`
+7. 在 GitHub Releases 页面基于 tag 创建 Release
+
+> 注意：打 tag 前确保所有 CI 检查通过（`make all`）。
 
 ## 行为准则
 

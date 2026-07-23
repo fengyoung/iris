@@ -56,6 +56,28 @@ class LLMService:
 
     # ── 缓存访问 ────────────────────────────────────────────────────
 
+    def _check_cache(
+        self,
+        prompt: str,
+        ctx: Dict[str, Any],
+        force_model: Optional[str],
+        temperature: Optional[float],
+    ) -> Optional[GenerationResult]:
+        """检查缓存并返回命中结果，未命中返回 None。"""
+        cached = self._cache.get(prompt, ctx, force_model, temperature)
+        if cached is None:
+            return None
+        return GenerationResult(
+            text=cached["text"],
+            selected_role=cached.get("selected_role", ""),
+            provider=cached.get("provider", ""),
+            model=cached.get("model", ""),
+            api_base_url=cached.get("api_base_url", ""),
+            matched_rule=cached.get("matched_rule", ""),
+            prompt_tokens=cached.get("prompt_tokens", 0),
+            completion_tokens=cached.get("completion_tokens", 0),
+        )
+
     def get_cache_stats(self) -> "Dict[str, Any]":
         """返回 LLM 响应缓存统计信息（命中/未命中/命中率）。"""
         return self._cache.stats()
@@ -98,18 +120,9 @@ class LLMService:
         # 缓存逻辑：temperature=0 自动缓存，或 use_cache=True 显式启用
         _should_cache = temperature == 0 or use_cache
         if _should_cache:
-            cached = self._cache.get(prompt, ctx, force_model, temperature)
-            if cached:
-                return GenerationResult(
-                    text=cached["text"],
-                    selected_role=cached.get("selected_role", ""),
-                    provider=cached.get("provider", ""),
-                    model=cached.get("model", ""),
-                    api_base_url=cached.get("api_base_url", ""),
-                    matched_rule=cached.get("matched_rule", ""),
-                    prompt_tokens=cached.get("prompt_tokens", 0),
-                    completion_tokens=cached.get("completion_tokens", 0),
-                )
+            hit = self._check_cache(prompt, ctx, force_model, temperature)
+            if hit is not None:
+                return hit
 
         request = LLMRequest(
             prompt=prompt, route_context=ctx,
@@ -206,18 +219,9 @@ class LLMService:
         # 缓存逻辑：temperature=0 自动缓存，或 use_cache=True 显式启用
         _should_cache = temperature == 0 or use_cache
         if _should_cache:
-            cached = self._cache.get(prompt, ctx, force_model, temperature)
-            if cached:
-                return GenerationResult(
-                    text=cached["text"],
-                    selected_role=cached.get("selected_role", ""),
-                    provider=cached.get("provider", ""),
-                    model=cached.get("model", ""),
-                    api_base_url=cached.get("api_base_url", ""),
-                    matched_rule=cached.get("matched_rule", ""),
-                    prompt_tokens=cached.get("prompt_tokens", 0),
-                    completion_tokens=cached.get("completion_tokens", 0),
-                )
+            hit = self._check_cache(prompt, ctx, force_model, temperature)
+            if hit is not None:
+                return hit
 
         # 在默认 executor 中运行同步 generate（兼容现有 provider 实现）
         loop = asyncio.get_running_loop()

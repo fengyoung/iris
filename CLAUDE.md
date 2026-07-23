@@ -1,4 +1,4 @@
-# Iris 3.19.17 — 项目执行说明
+# Iris 3.19.19 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -9,9 +9,7 @@
 
 ### 当前规模
 
-### 当前规模
-
-~27,000 行 / 149 文件 / 23 模块 · CLI 49 命令 · 单元测试 1,858（102 文件）· 覆盖率 60%+ · 9 个项目级 Skill · Wiki 201 页 · 知识图谱节点 201 / 关系边 928（NetworkX 引擎） · 数据源 731 文档 / 4,350 Chunk · 向量索引 7,289 条 · LLM 响应缓存（内存 LRU 驱逐）· embedding 向量缓存（LRU + TTL 600s）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（LLM 深度提取 + 会话模式挖掘 + 全自治生命周期，`memory_updater.py` + `session_miner.py`，双通道架构）· 多 Agent 并发安全（FileLock 推广 + SQLite WAL + Agent 记忆隔离 `IRIS_AGENT_ID` + 进程注册表 `ProcessRegistry`）· ASR 实时校正引擎（剪贴板监听 + Aho-Corasick + LLM 编辑助手，`_clipboard_io.py` + `_text_detector.py` 拆分，替换词典热加载 + 手动热词合并）· Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听 · CI/CD（Makefile / pre-commit / GitHub Actions）· ASR Pipeline 交互式进度输出。
+~28,600 行 / 141 文件 / 23 模块 · CLI 49 命令 · 测试 1,948（112 文件，含 794 unit）· 覆盖率 59% · 9 个项目级 Skill · Wiki 201 页 · 知识图谱节点 201 / 关系边 928（NetworkX 引擎） · 数据源 731 文档 / 4,350 Chunk · 向量索引 7,289 条 · LLM 响应缓存（内存 LRU 驱逐）· embedding 向量缓存（LRU + TTL 600s）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（LLM 深度提取 + 会话模式挖掘 + 全自治生命周期，`memory_updater.py` + `session_miner.py`，双通道架构）· 多 Agent 并发安全（FileLock 推广 + SQLite WAL + Agent 记忆隔离 `IRIS_AGENT_ID` + 进程注册表 `ProcessRegistry`）· ASR 实时校正引擎（剪贴板监听 + Aho-Corasick + LLM 编辑助手，`_clipboard_io.py` + `_text_detector.py` 拆分，替换词典热加载 + 手动热词合并）· Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听 · CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit 安全审计 · constraints.txt 可复现构建 · ASR Pipeline 交互式进度输出。
 
 ### 关键路径
 
@@ -122,7 +120,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.19.17 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.19.19 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.11 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -167,7 +165,7 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.19.17 (2026-07-22)** — SOURCE 目录按月/年归档：9 目录 3 级归档策略（yearly: 5 目录 / monthly: 4 目录 / flat），写入点自动按文件名生成年月子目录；scripts/source_monthly_archive.py 已搬迁 740 文件。v3.19.16 合并 0722-alpha 功能（多 Agent 并发安全）+ 新增 `iris-okr-check` Skill。v3.19.15 多 Agent 并发安全：三层防护体系。v3.19.14 记忆自动更新引擎。v3.19.13 ASR shutdown SIGINT 保护。
+**当前 v3.19.19 (2026-07-23)** — 测试覆盖全面优化：P1 `_graph_engine` 61%→97%（纯 Python 回退路径 24 用例）+ `asr/formatter` 59%→98%（热词/词典/Prompt 26 用例）+ `navigation` 67%→70%（断裂链接 7 豁免分支 + changelog/原子写入 23 用例）；P2 `generator` +8 纯逻辑用例（内容提取/更新校验/引用质量）。新增 3 测试文件，+90 用例（1,858→1,948），覆盖率 58.17%→59%。v3.19.18 代码质量全面加固。v3.19.17 SOURCE 目录按月/年归档。
 
 > v3.19.10 (2026-07-21)：ASR 引擎全面质量加固（P0~P3 十四项）：P0 Prompt `protected_terms` 字符串截断修复 / P1 热键校验 + 超时 + 参数化 / P2 预检查 + warning + 校验 / P3 Aho-Corasick 优化 + worker 动态 + 单字符代码分档 + 重试（8 文件，+313 / -114 行）
 
