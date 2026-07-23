@@ -4,6 +4,58 @@
 
 ---
 
+## v3.19.18 (2026-07-23)
+
+知识库质量全面加固 + LLM 用量追踪体系完善。
+
+### P1 修复
+
+- **wiki-pipeline 已有页面检测** — 分离检测与过滤逻辑，始终运行 `_check_existing_wiki()`；文件名匹配改用 `slugify_title()` 对齐页面创建时的命名规则。检测准确率 0% → 85%。
+- **知识图谱 LLM 关系边** — `build-graph --full` 批量提取语义关系，新增 986 条 LLM 边（负责/使用/属于/依赖），图总边数 1,098 → 2,161。
+
+### P2 修复
+
+- **断链清零** — 移除 5 个页面中 12 处无效 wikilink，wiki-lint `broken_count` 11 → 0。
+- **零出链清零** — 27 个页面添加关联链接（人物→组织架构/团队，概念→相关领域），wiki-lint `zero_outbound_count` 27 → 0。
+- **重复检测优化** — 跳过正文 < 200 字符的页面（空模板），重复对 920 → 676，相似度从 1.0 降至 0.6-0.8。
+
+### P3 修复
+
+- **wiki-lint 索引质量检测** — `_discover_index_paths()` 自动发现数据源，替代硬编码 `main_source`。修复后 `source_documents: 0 → 743`、`vector_index_exists: false → true`。
+- **向量索引首次构建** — 9,019 chunks × 1,024 维，text-embedding-v3 (百炼)，39.7 MB。
+
+### 用量追踪体系
+
+- **Embedding 用量纳入统计** — `TextEmbedder._record_usage()` 调用 `UsageTracker`，text-embedding-v3 调用单独统计。
+- **CLI / Skill 来源标记** — `api_calls` 表新增 `source` 列，`--call-source` CLI 参数 + `IRIS_CALL_SOURCE` 环境变量，Provider 层兜底读取。9 个项目 Skill 已更新传递 `--call-source skill`。
+
+### 代码变更
+
+| 文件 | 变更 |
+|------|------|
+| `src/iris/wiki/discovery.py` | `_check_existing_wiki()` + `slugify_title()` 匹配 |
+| `src/iris/wiki/navigation.py` | `_discover_index_paths()` + 重复检测跳过短页面 |
+| `src/iris/llm/usage_tracker.py` | `source` 列 + 迁移 + `record()` 参数 |
+| `src/iris/llm/provider.py` | `source` 提取（route_context → env var 兜底） |
+| `src/iris/llm/service.py` | `_source` 字段 + `generate()` 注入 |
+| `src/iris/retrieval/embedder.py` | `_record_usage()` 用量追踪 + `_infer_provider()` |
+| `src/iris/app/_cli_main.py` | `--call-source` 参数 |
+| `.claude/skills/*/SKILL.md` (×9) | 注入 `--call-source skill` |
+| Wiki 页面 (×32) | 断链移除 + 零出链修复 + 反向链接 + 新页面 |
+
+### 知识库最终状态
+
+| 指标 | 值 |
+|------|:--|
+| Wiki 页面 | 219 |
+| 断链 | 0 |
+| 零出链 | 0 |
+| 向量索引 | 9,019 条 (100%) |
+| 知识图谱 | 2,161 边 (1,175 wikilink + 986 LLM) |
+| LLM 用量 | 644 次 / ~3.78M tokens (CLI + Skill 分离) |
+
+---
+
 ## v3.19.17 (2026-07-22)
 
 SOURCE 目录按月/年归档 — 9 目录 3 级归档策略。

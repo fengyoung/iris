@@ -5,7 +5,7 @@ description: 飞书知识导入 — 将飞书文档和聊天记录提炼为本�
 metadata:
   requires:
     bins: ["python3"]
-  cliHelp: "python3 scripts/run_cli.py feishu-doc-convert --help"
+  cliHelp: "python3 scripts/run_cli.py --call-source skill feishu-doc-convert --help"
 ---
 
 # Iris 飞书知识导入
@@ -20,19 +20,19 @@ metadata:
 
 ```bash
 # 单篇文档
-python3 scripts/run_cli.py feishu-doc-convert --url "<飞书文档URL>"
+python3 scripts/run_cli.py --call-source skill feishu-doc-convert --url "<飞书文档URL>"
 
 # 批量
-python3 scripts/run_cli.py feishu-doc-convert --url "<URL1>" --url "<URL2>"
+python3 scripts/run_cli.py --call-source skill feishu-doc-convert --url "<URL1>" --url "<URL2>"
 
 # 从配置文件批量导入
-python3 scripts/run_cli.py feishu-doc-convert --from-config
+python3 scripts/run_cli.py --call-source skill feishu-doc-convert --from-config
 ```
 
 ### 预览模式（推荐先用）
 
 ```bash
-python3 scripts/run_cli.py feishu-doc-convert --url "<URL>" --dry-run
+python3 scripts/run_cli.py --call-source skill feishu-doc-convert --url "<URL>" --dry-run
 ```
 
 `--dry-run` 会显示：
@@ -48,7 +48,7 @@ python3 scripts/run_cli.py feishu-doc-convert --url "<URL>" --dry-run
 用户提供 URL 后，先用 `--dry-run` 预览：
 
 ```bash
-python3 scripts/run_cli.py feishu-doc-convert --url "<用户提供的URL>" --dry-run
+python3 scripts/run_cli.py --call-source skill feishu-doc-convert --url "<用户提供的URL>" --dry-run
 ```
 
 **步骤 2：呈现预览结果**
@@ -63,7 +63,7 @@ python3 scripts/run_cli.py feishu-doc-convert --url "<用户提供的URL>" --dry
 用户确认后执行实际转换：
 
 ```bash
-python3 scripts/run_cli.py feishu-doc-convert --url "<URL>"
+python3 scripts/run_cli.py --call-source skill feishu-doc-convert --url "<URL>"
 ```
 
 **步骤 4：处理结果**
@@ -101,16 +101,16 @@ python3 scripts/run_cli.py feishu-doc-convert --url "<URL>"
 
 ```bash
 # 按群聊名称 + 时间范围
-python3 scripts/run_cli.py chat-digest --group "<群聊名>" --range 7
+python3 scripts/run_cli.py --call-source skill chat-digest --group "<群聊名>" --range 7
 
 # 按用户单聊
-python3 scripts/run_cli.py chat-digest --user "<用户名>" --range 3
+python3 scripts/run_cli.py --call-source skill chat-digest --user "<用户名>" --range 3
 
 # 交互模式（列出可用群聊供选择）
-python3 scripts/run_cli.py chat-digest --interactive
+python3 scripts/run_cli.py --call-source skill chat-digest --interactive
 
 # 从配置文件
-python3 scripts/run_cli.py chat-digest --from-config
+python3 scripts/run_cli.py --call-source skill chat-digest --from-config
 ```
 
 ### Claude 的工作流程

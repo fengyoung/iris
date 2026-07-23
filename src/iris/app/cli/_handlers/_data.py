@@ -118,7 +118,7 @@ def handle_build_vector_index(args, bundle, logger) -> int:
     if not emb_cfg.get("enabled", False):
         _emit_output(args.command, {"error": "向量检索未启用，请在 llm.json 的 embedding 段设置 enabled=true"}, pretty=args.pretty)
         return 1
-    embedder = build_embedder_from_config(bundle.llm)
+    embedder = build_embedder_from_config(bundle.llm, data_dir=bundle.root / "data")
     if embedder is None:
         _emit_output(args.command, {"error": "embedding 配置不完整"}, pretty=args.pretty)
         return 1

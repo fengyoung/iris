@@ -5,7 +5,7 @@ description: Iris 每日启动维护 — 记忆同步、扫描切块、向量索
 metadata:
   requires:
     bins: ["python3"]
-  cliHelp: "python3 scripts/run_cli.py daily-start --help"
+  cliHelp: "python3 scripts/run_cli.py --call-source skill daily-start --help"
 ---
 
 # Iris 每日启动维护
@@ -15,13 +15,13 @@ metadata:
 ## 执行命令
 
 ```bash
-python3 scripts/run_cli.py daily-start
+python3 scripts/run_cli.py --call-source skill daily-start
 ```
 
 如需 JSON 格式输出（便于解析）：
 
 ```bash
-python3 scripts/run_cli.py daily-start --pretty
+python3 scripts/run_cli.py --call-source skill daily-start --pretty
 ```
 
 ## 管道流程（5 步）

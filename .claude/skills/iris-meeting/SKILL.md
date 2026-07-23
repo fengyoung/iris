@@ -5,7 +5,7 @@ description: Iris 会议纪要 — 音频转写 + LLM 纪要生成 + 智能路�
 metadata:
   requires:
     bins: ["python3"]
-  cliHelp: "python3 scripts/run_cli.py transcribe-meeting --help"
+  cliHelp: "python3 scripts/run_cli.py --call-source skill transcribe-meeting --help"
 ---
 
 # Iris 会议纪要
@@ -17,7 +17,7 @@ metadata:
 ### 单次会议处理
 
 ```bash
-python3 scripts/run_cli.py transcribe-meeting \
+python3 scripts/run_cli.py --call-source skill transcribe-meeting \
   --audio-file <音频文件路径> \
   --whisper-model base \
   --to-source
@@ -31,7 +31,7 @@ python3 scripts/run_cli.py transcribe-meeting \
 ### 已有转写文本的处理
 
 ```bash
-python3 scripts/run_cli.py transcribe-meeting \
+python3 scripts/run_cli.py --call-source skill transcribe-meeting \
   --transcript-file <转写文本路径> \
   --to-source
 ```
@@ -42,10 +42,10 @@ python3 scripts/run_cli.py transcribe-meeting \
 
 ```bash
 # 指定多个文件
-python3 scripts/run_cli.py batch-transcribe --files "file1.m4a,file2.m4a"
+python3 scripts/run_cli.py --call-source skill batch-transcribe --files "file1.m4a,file2.m4a"
 
 # 扫描整个目录
-python3 scripts/run_cli.py batch-transcribe --dir <目录路径>
+python3 scripts/run_cli.py --call-source skill batch-transcribe --dir <目录路径>
 ```
 
 ## Claude 的工作流程
@@ -69,7 +69,7 @@ python3 scripts/run_cli.py batch-transcribe --dir <目录路径>
 **步骤 3：执行**
 
 ```bash
-python3 scripts/run_cli.py transcribe-meeting \
+python3 scripts/run_cli.py --call-source skill transcribe-meeting \
   --audio-file "<绝对路径>" \
   --whisper-model base \
   --to-source
@@ -91,7 +91,7 @@ python3 scripts/run_cli.py transcribe-meeting \
 **步骤 2：执行**
 
 ```bash
-python3 scripts/run_cli.py transcribe-meeting \
+python3 scripts/run_cli.py --call-source skill transcribe-meeting \
   --transcript-file "<路径>" \
   --to-source
 ```

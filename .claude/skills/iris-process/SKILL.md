@@ -5,7 +5,7 @@ description: Iris 富媒体处理 — 自动检测图片/PDF/文档/视频输入
 metadata:
   requires:
     bins: ["python3"]
-  cliHelp: "python3 scripts/run_cli.py process --help"
+  cliHelp: "python3 scripts/run_cli.py --call-source skill process --help"
 ---
 
 # Iris 富媒体处理

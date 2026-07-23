@@ -6,6 +6,7 @@ import hashlib
 import threading
 import time
 from collections import OrderedDict
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 _EMBED_CACHE_MAXSIZE = 128
@@ -18,7 +19,8 @@ class EmbedderError(RuntimeError):
 
 class TextEmbedder:
     def __init__(self, api_base_url: str, api_key: str, model: str, *,
-                 timeout: int = 30, max_retries: int = 2):
+                 timeout: int = 30, max_retries: int = 2,
+                 data_dir: Optional[Path] = None):
         self._api_base_url = api_base_url.rstrip("/")
         self._api_key = api_key
         self._model = model
@@ -26,6 +28,8 @@ class TextEmbedder:
         self._max_retries = max_retries
         self._cache: OrderedDict[str, Tuple[List[float], float]] = OrderedDict()
         self._cache_lock = threading.Lock()
+        self._data_dir = data_dir
+        self._tracker = None  # 延迟初始化
 
     @property
     def model(self) -> str:
@@ -53,6 +57,8 @@ class TextEmbedder:
             payload = {"model": self._model, "input": uncached_texts}
             data = self._post_json(endpoint, payload)
             vectors = _extract_vectors(data)
+            # 记录 embedding API 用量
+            self._record_usage(data, len(uncached_texts))
             for j, vec in enumerate(vectors):
                 results[uncached_indices[j]] = vec
                 self._put_cache(uncached_texts[j], vec)
@@ -93,8 +99,48 @@ class TextEmbedder:
             while len(self._cache) > _EMBED_CACHE_MAXSIZE:
                 self._cache.popitem(last=False)
 
+    def _record_usage(self, response_data: dict, batch_size: int) -> None:
+        """记录 embedding API 调用到用量数据库（静默失败）。"""
+        if self._data_dir is None:
+            return
+        if self._tracker is None:
+            try:
+                from iris.llm.usage_tracker import UsageTracker
+                self._tracker = UsageTracker(self._data_dir)
+            except Exception:
+                return
+        try:
+            usage = response_data.get("usage", {})
+            prompt_tokens = int(usage.get("prompt_tokens", 0)) if usage else 0
+            import os
+            source = os.environ.get("IRIS_CALL_SOURCE", "cli")
+            self._tracker.record(
+                model=self._model,
+                provider=self._infer_provider(),
+                route_role="embedding",
+                matched_rule="embedding",
+                prompt_tokens=prompt_tokens,
+                completion_tokens=0,
+                is_multimodal=False,
+                source=source,
+            )
+        except Exception:
+            pass  # 用量记录失败不影响主流程
 
-def build_embedder_from_config(llm_config: dict) -> Optional[TextEmbedder]:
+    def _infer_provider(self) -> str:
+        """从 api_base_url 推断提供商名称。"""
+        url = self._api_base_url.lower()
+        if "dashscope" in url or "bailian" in url:
+            return "Bailian"
+        if "deepseek" in url:
+            return "Deepseek"
+        if "openai" in url:
+            return "OpenAI"
+        return "Unknown"
+
+
+def build_embedder_from_config(llm_config: dict, *,
+                               data_dir: Optional[Path] = None) -> Optional[TextEmbedder]:
     """从 llm.json 的 embedding 段构造 TextEmbedder。"""
     emb_cfg = llm_config.get("embedding", {})
     if not emb_cfg.get("enabled", False):
@@ -105,7 +151,8 @@ def build_embedder_from_config(llm_config: dict) -> Optional[TextEmbedder]:
     return TextEmbedder(api_base_url=emb_cfg.get("api_base_url", ""),
                         api_key=api_key, model=emb_cfg.get("model", "text-embedding-v3"),
                         timeout=emb_cfg.get("timeout_seconds", 30),
-                        max_retries=emb_cfg.get("max_retries", 2))
+                        max_retries=emb_cfg.get("max_retries", 2),
+                        data_dir=data_dir)
 
 
 def _extract_vectors(data: dict) -> List[List[float]]:

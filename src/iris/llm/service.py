@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -47,6 +48,8 @@ class LLMService:
         self._provider = EnvironmentConfiguredLLMProvider(config)
         from iris.llm.cache import LLMResponseCache
         self._cache = LLMResponseCache(config.root / "data")
+        # 来源标记：环境变量 IRIS_CALL_SOURCE 或默认 "cli"
+        self._source = os.environ.get("IRIS_CALL_SOURCE", "cli")
 
     # ── Provider 访问 ──────────────────────────────────────────────
 
@@ -94,6 +97,7 @@ class LLMService:
             GenerationResult：包含生成文本和调用元数据
         """
         ctx = route_context or {"input_type": "text", "task_type": "qa", "complexity": "standard"}
+        ctx.setdefault("source", self._source)  # 注入来源标记（CLI / Skill）
 
         # 缓存逻辑：temperature=0 自动缓存，或 use_cache=True 显式启用
         _should_cache = temperature == 0 or use_cache
@@ -169,6 +173,7 @@ class LLMService:
             "task_type": "image_understanding",
             "complexity": "complex",
         }
+        ctx.setdefault("source", self._source)  # 注入来源标记（CLI / Skill）
         try:
             return self._provider.generate_multimodal(
                 content_parts,

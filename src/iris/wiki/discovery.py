@@ -11,6 +11,7 @@ from iris.config.loader import ConfigBundle
 from iris.ingest.chunker import ChunkSlim
 
 from ._constants import get_wiki_dir, get_wiki_prefix
+from ._wiki_io import slugify_title
 from .discovery_rules import GENERIC_TERM_SUPPRESS, PERSON_PATTERNS
 from .discovery_types import CandidateItem
 from .discovery_utils import (
@@ -119,20 +120,22 @@ class CandidateDiscovery:
         selected.extend(remaining[:limit - len(selected)])
         selected.sort(key=lambda c: (-c.score, -c.evidence_count, c.title))
 
-        # 增量模式：检查已有 Wiki 页面
+        # 始终检查已有 Wiki 页面（设置 has_wiki / wiki_stale），
+        # 仅在增量模式下过滤掉已有且非 stale 的候选
+        selected = self._check_existing_wiki(selected)
         if incremental:
-            selected = self._filter_incremental(selected)
+            selected = [c for c in selected if not c.has_wiki or c.wiki_stale]
 
         return selected[:limit]
 
-    def _filter_incremental(self, candidates: List[CandidateItem]) -> List[CandidateItem]:
-        """过滤掉已有且非 stale 的候选。"""
+    def _check_existing_wiki(self, candidates: List[CandidateItem]) -> List[CandidateItem]:
+        """为每个候选检查是否已有 Wiki 页面，设置 has_wiki / wiki_stale 字段。"""
         if not self._config.wiki:
             return candidates
         wiki_root = Path(self._config.wiki["wiki_root"])
         if not wiki_root.exists():
             return candidates
-        filtered = []
+        checked = []
         for item in candidates:
             wiki_path = self._find_wiki_path(item)
             if wiki_path:
@@ -141,19 +144,18 @@ class CandidateDiscovery:
                                      sample_paths=item.sample_paths, rationale=item.rationale,
                                      has_wiki=True, wiki_stale=is_wiki_stale(wiki_path),
                                      wiki_path=str(wiki_path))
-                if not item.wiki_stale:
-                    continue
-            filtered.append(item)
-        return filtered
+            checked.append(item)
+        return checked
 
     def _find_wiki_path(self, item: CandidateItem) -> Optional[Path]:
-        """在 Wiki 目录中查找候选对应的页面文件。"""
+        """在 Wiki 目录中查找候选对应的页面文件（使用与页面创建一致的 slug 化标题）。"""
         if not self._config.wiki:
             return None
         wiki_root = Path(self._config.wiki["wiki_root"])
         subdir = get_wiki_dir(item.page_type)
         prefix = get_wiki_prefix(item.page_type)
-        expected = wiki_root / subdir / f"{prefix}{item.title}.md"
+        slug = slugify_title(item.title)
+        expected = wiki_root / subdir / f"{prefix}{slug}.md"
         if expected.exists():
             return expected
         return None

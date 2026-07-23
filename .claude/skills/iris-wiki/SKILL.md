@@ -5,7 +5,7 @@ description: Iris Wiki 知识管道 — 从数据源发现候选主题、生成 
 metadata:
   requires:
     bins: ["python3"]
-  cliHelp: "python3 scripts/run_cli.py --help"
+  cliHelp: "python3 scripts/run_cli.py --call-source skill --help"
 ---
 
 # Iris Wiki 知识管道
@@ -21,7 +21,7 @@ metadata:
 **步骤 1：运行发现**
 
 ```bash
-python3 scripts/run_cli.py wiki-pipeline --limit 20
+python3 scripts/run_cli.py --call-source skill wiki-pipeline --limit 20
 ```
 
 这会生成三个文件：
@@ -56,13 +56,13 @@ python3 scripts/run_cli.py wiki-pipeline --limit 20
 根据用户选择，用 Edit 工具修改 `temp/wiki_pipeline/review.jsonl`，将选中项的 `selected` 设为 `true`，然后执行：
 
 ```bash
-python3 scripts/run_cli.py build-wiki --review-file temp/wiki_pipeline/review.jsonl --write --backup
+python3 scripts/run_cli.py --call-source skill build-wiki --review-file temp/wiki_pipeline/review.jsonl --write --backup
 ```
 
 生成完成后，自动运行 lint 检查：
 
 ```bash
-python3 scripts/run_cli.py wiki-lint
+python3 scripts/run_cli.py --call-source skill wiki-lint
 ```
 
 如果 lint 发现问题，呈现给用户并询问是否需要 `--fix` 自动修复。
@@ -72,7 +72,7 @@ python3 scripts/run_cli.py wiki-lint
 用户直接指定要生成的页面：
 
 ```bash
-python3 scripts/run_cli.py build-wiki --query "<搜索查询>" --title "<页面标题>" --page-type <类型> --write
+python3 scripts/run_cli.py --call-source skill build-wiki --query "<搜索查询>" --title "<页面标题>" --page-type <类型> --write
 ```
 
 **参数说明**：
@@ -93,23 +93,23 @@ python3 scripts/run_cli.py build-wiki --query "<搜索查询>" --title "<页面�
 批量更新所有已有 Wiki 页面：
 
 ```bash
-python3 scripts/run_cli.py wiki-update
+python3 scripts/run_cli.py --call-source skill wiki-update
 ```
 
 或更新单个页面：
 
 ```bash
-python3 scripts/run_cli.py wiki-update --title "<页面标题>" --page-type <类型>
+python3 scripts/run_cli.py --call-source skill wiki-update --title "<页面标题>" --page-type <类型>
 ```
 
 ### 流程 4：健康检查
 
 ```bash
 # 仅检查
-python3 scripts/run_cli.py wiki-lint
+python3 scripts/run_cli.py --call-source skill wiki-lint
 
 # 自动修复
-python3 scripts/run_cli.py wiki-lint --fix
+python3 scripts/run_cli.py --call-source skill wiki-lint --fix
 ```
 
 `wiki-lint` 检查 6 个维度：frontmatter 完整性、摘要存在性、出链有效性、draft 状态、过期页面、断链。

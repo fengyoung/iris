@@ -25,11 +25,18 @@ CREATE TABLE IF NOT EXISTS api_calls (
     matched_rule      TEXT    NOT NULL DEFAULT '',
     prompt_tokens     INTEGER NOT NULL DEFAULT 0,
     completion_tokens INTEGER NOT NULL DEFAULT 0,
-    is_multimodal     INTEGER NOT NULL DEFAULT 0
+    is_multimodal     INTEGER NOT NULL DEFAULT 0,
+    source            TEXT    NOT NULL DEFAULT 'cli'
 );
-CREATE INDEX IF NOT EXISTS idx_date  ON api_calls(date);
-CREATE INDEX IF NOT EXISTS idx_model ON api_calls(model);
+CREATE INDEX IF NOT EXISTS idx_date   ON api_calls(date);
+CREATE INDEX IF NOT EXISTS idx_model  ON api_calls(model);
+CREATE INDEX IF NOT EXISTS idx_source ON api_calls(source);
 """
+
+_MIGRATIONS = [
+    # v1 → v2: 增加 source 字段（CLI vs Skill 来源标记）
+    """ALTER TABLE api_calls ADD COLUMN source TEXT NOT NULL DEFAULT 'cli'""",
+]
 
 _PERIOD_EXPR: Dict[str, str] = {
     "day":   "date",
@@ -95,6 +102,12 @@ class UsageTracker:
             self._db_path.parent.mkdir(parents=True, exist_ok=True)
             with self._connect() as conn:
                 conn.executescript(_SCHEMA)
+                # 运行增量迁移（静默失败）
+                for sql in _MIGRATIONS:
+                    try:
+                        conn.execute(sql)
+                    except sqlite3.OperationalError:
+                        pass  # 列已存在
             return True
         except Exception as exc:
             logger.warning("UsageTracker 初始化失败（用量统计将不可用）: %s", exc)
@@ -119,6 +132,7 @@ class UsageTracker:
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
         is_multimodal: bool = False,
+        source: str = "cli",
     ) -> None:
         """记录一次 API 调用（WAL 模式，并发写入安全）。"""
         if not self._available:
@@ -132,10 +146,11 @@ class UsageTracker:
                     conn.execute(
                         """INSERT INTO api_calls
                            (ts, date, model, provider, route_role, matched_rule,
-                            prompt_tokens, completion_tokens, is_multimodal)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            prompt_tokens, completion_tokens, is_multimodal, source)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                         (ts, date, model, provider, route_role, matched_rule,
-                         prompt_tokens, completion_tokens, 1 if is_multimodal else 0),
+                         prompt_tokens, completion_tokens, 1 if is_multimodal else 0,
+                         source),
                     )
                 return
             except Exception as exc:

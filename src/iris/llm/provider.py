@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os as _os
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -179,10 +180,12 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
                 temperature=temperature, max_tokens=max_tokens, max_retries=max_retries,
                 extra_body=request_data.extra_body,
             )
+            source = (request_data.route_context.get("source") if request_data.route_context else None) or _os.environ.get("IRIS_CALL_SOURCE", "cli")
             self._tracker.record(
                 model=model_name, provider=provider_name,
                 route_role="forced", matched_rule="force_model",
                 prompt_tokens=pt, completion_tokens=ct,
+                source=source,
             )
             return LLMResponse(
                 text=text, selected_role="forced", provider=provider_name,
@@ -214,10 +217,12 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         text, role, provider_name, model_name, api_base, pt, ct = self._fallback_loop(
             decision, _try_call,
         )
+        source = (request_data.route_context.get("source") if request_data.route_context else None) or _os.environ.get("IRIS_CALL_SOURCE", "cli")
         self._tracker.record(
             model=model_name, provider=provider_name,
             route_role=role, matched_rule=decision.matched_rule,
             prompt_tokens=pt, completion_tokens=ct,
+            source=source,
         )
         return LLMResponse(
             text=text, selected_role=role, provider=provider_name,
@@ -363,11 +368,13 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
             model_filter=lambda cfg: cfg.get("multimodal", False),
             error_label="多模态 LLM",
         )
+        m_source = (route_context.get("source") if route_context else None) or _os.environ.get("IRIS_CALL_SOURCE", "cli")
         self._tracker.record(
             model=_model, provider=_provider,
             route_role=_role, matched_rule=decision.matched_rule,
             prompt_tokens=pt, completion_tokens=ct,
             is_multimodal=True,
+            source=m_source,
         )
         return text
 

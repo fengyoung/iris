@@ -54,6 +54,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pretty", action="store_true", help="人类可读输出")
     # 数据源层
     parser.add_argument("--source", default="", help="scan-source / build-chunks 指定数据源名称")
+    parser.add_argument("--call-source", default="cli", choices=["cli", "skill"],
+                        help="LLM 调用来源标记（cli=命令行直接调用, skill=Claude Skill 触发）")
     parser.add_argument("--summary-only", action="store_true", help="仅输出摘要")
     parser.add_argument("--write-summary", action="store_true", help="写入摘要到 data/metadata")
     parser.add_argument("--incremental", action="store_true", help="增量扫描/构建（仅处理变更文件）")
@@ -170,6 +172,10 @@ def main() -> int:
 
     parser = build_parser()
     args = parser.parse_args()
+
+    # 注入调用来源标记，供 LLMService 读取并写入用量统计
+    import os as _os
+    _os.environ["IRIS_CALL_SOURCE"] = getattr(args, "call_source", "cli")
 
     # workspace 命令：不需要加载完整配置
     if args.command == "workspace":

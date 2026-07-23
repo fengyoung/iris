@@ -146,7 +146,7 @@ def _daily_vector_index(bundle) -> dict:
         emb_cfg = bundle.llm.get("embedding", {})
         if not emb_cfg.get("enabled", False):
             return {"status": "skipped", "reason": "embedding_disabled"}
-        embedder = build_embedder_from_config(bundle.llm)
+        embedder = build_embedder_from_config(bundle.llm, data_dir=bundle.root / "data")
         if not embedder:
             return {"status": "skipped", "reason": "embedder_not_configured"}
         from iris.retrieval.vector_index import VectorIndex, build_vector_index

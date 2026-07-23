@@ -5,7 +5,7 @@ description: Iris 知识库健康检查 — Wiki 深度评估、lint 质量检�
 metadata:
   requires:
     bins: ["python3"]
-  cliHelp: "python3 scripts/run_cli.py wiki-lint --help"
+  cliHelp: "python3 scripts/run_cli.py --call-source skill wiki-lint --help"
 ---
 
 # Iris 知识库健康检查
@@ -17,7 +17,7 @@ metadata:
 ### 1. 结构健康 (`wiki-lint`)
 
 ```bash
-python3 scripts/run_cli.py wiki-lint
+python3 scripts/run_cli.py --call-source skill wiki-lint
 ```
 
 检查 6 个维度：
@@ -34,17 +34,17 @@ python3 scripts/run_cli.py wiki-lint
 自动修复：
 
 ```bash
-python3 scripts/run_cli.py wiki-lint --fix
+python3 scripts/run_cli.py --call-source skill wiki-lint --fix
 ```
 
 ### 2. 内容质量 (`deep-eval`)
 
 ```bash
 # 评估所有页面（随机抽样）
-python3 scripts/run_cli.py deep-eval --sample-rate 0.3
+python3 scripts/run_cli.py --call-source skill deep-eval --sample-rate 0.3
 
 # 评估特定页面
-python3 scripts/run_cli.py deep-eval --page-filter "<页面标题>"
+python3 scripts/run_cli.py --call-source skill deep-eval --page-filter "<页面标题>"
 ```
 
 两个评估维度：
@@ -55,10 +55,10 @@ python3 scripts/run_cli.py deep-eval --page-filter "<页面标题>"
 
 ```bash
 # 预览
-python3 scripts/run_cli.py enrich-persons --dry-run
+python3 scripts/run_cli.py --call-source skill enrich-persons --dry-run
 
 # 执行更新
-python3 scripts/run_cli.py enrich-persons
+python3 scripts/run_cli.py --call-source skill enrich-persons
 ```
 
 通过飞书通讯录自动补充人物 Wiki 页面的：
@@ -72,7 +72,7 @@ python3 scripts/run_cli.py enrich-persons
 **步骤 1：运行 lint**
 
 ```bash
-python3 scripts/run_cli.py wiki-lint
+python3 scripts/run_cli.py --call-source skill wiki-lint
 ```
 
 **步骤 2：解读结果**
@@ -93,7 +93,7 @@ python3 scripts/run_cli.py wiki-lint
 **步骤 4：深度评估（可选，更耗时）**
 
 ```bash
-python3 scripts/run_cli.py deep-eval --sample-rate 0.2
+python3 scripts/run_cli.py --call-source skill deep-eval --sample-rate 0.2
 ```
 
 解读评估结果：
@@ -105,7 +105,7 @@ python3 scripts/run_cli.py deep-eval --sample-rate 0.2
 **步骤 5：人物丰富（可选）**
 
 ```bash
-python3 scripts/run_cli.py enrich-persons --dry-run
+python3 scripts/run_cli.py --call-source skill enrich-persons --dry-run
 ```
 
 先预览，展示哪些人物页面将更新，确认后执行。

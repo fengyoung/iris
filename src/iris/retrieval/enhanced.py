@@ -332,7 +332,7 @@ def _init_embedder(config: ConfigBundle):
     emb_cfg = llm_cfg.get("embedding", {})
     if not emb_cfg.get("enabled", False):
         return None
-    return build_embedder_from_config(llm_cfg)
+    return build_embedder_from_config(llm_cfg, data_dir=config.root / "data")
 
 
 def _load_vector_indexes(config: ConfigBundle) -> Dict[str, VectorIndex]:

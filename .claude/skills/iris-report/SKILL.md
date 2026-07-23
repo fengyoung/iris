@@ -5,7 +5,7 @@ description: Iris 报告生成 — 分析报告、思维导图、双周报。当
 metadata:
   requires:
     bins: ["python3"]
-  cliHelp: "python3 scripts/run_cli.py build-report --help"
+  cliHelp: "python3 scripts/run_cli.py --call-source skill build-report --help"
 ---
 
 # Iris 报告生成
@@ -17,7 +17,7 @@ metadata:
 ### 1. 分析报告 (`build-report`)
 
 ```bash
-python3 scripts/run_cli.py build-report --query "<主题>" [选项]
+python3 scripts/run_cli.py --call-source skill build-report --query "<主题>" [选项]
 ```
 
 **选项**：
@@ -32,7 +32,7 @@ python3 scripts/run_cli.py build-report --query "<主题>" [选项]
 ### 2. 思维导图 (`build-mindmap`)
 
 ```bash
-python3 scripts/run_cli.py build-mindmap --query "<主题>" [选项]
+python3 scripts/run_cli.py --call-source skill build-mindmap --query "<主题>" [选项]
 ```
 
 **选项**：
@@ -44,7 +44,7 @@ python3 scripts/run_cli.py build-mindmap --query "<主题>" [选项]
 ### 3. 双周报 (`build-biweekly-report`)
 
 ```bash
-python3 scripts/run_cli.py build-biweekly-report [选项]
+python3 scripts/run_cli.py --call-source skill build-biweekly-report [选项]
 ```
 
 **选项**：
@@ -74,7 +74,7 @@ python3 scripts/run_cli.py build-biweekly-report [选项]
 **步骤 3：执行并展示**
 
 ```bash
-python3 scripts/run_cli.py build-report --query "<精炼后的查询>" --output-format standard
+python3 scripts/run_cli.py --call-source skill build-report --query "<精炼后的查询>" --output-format standard
 ```
 
 在对话中展示报告摘要，标注来源和关键发现。
@@ -90,7 +90,7 @@ python3 scripts/run_cli.py build-report --query "<精炼后的查询>" --output-
 **步骤 2：执行**
 
 ```bash
-python3 scripts/run_cli.py build-mindmap --query "<查询>" --format both
+python3 scripts/run_cli.py --call-source skill build-mindmap --query "<查询>" --format both
 ```
 
 Mermaid 格式的导图可以在对话中直接展示。
@@ -104,7 +104,7 @@ Mermaid 格式的导图可以在对话中直接展示。
 在生成前，先用 `--dry-run` 模式预览数据源覆盖情况：
 
 ```bash
-python3 scripts/run_cli.py build-biweekly-report --dry-run
+python3 scripts/run_cli.py --call-source skill build-biweekly-report --dry-run
 ```
 
 确认：
@@ -117,7 +117,7 @@ python3 scripts/run_cli.py build-biweekly-report --dry-run
 **步骤 2：执行生成**
 
 ```bash
-python3 scripts/run_cli.py build-biweekly-report --to-source
+python3 scripts/run_cli.py --call-source skill build-biweekly-report --to-source
 ```
 
 **选项：**
@@ -148,10 +148,10 @@ python3 scripts/run_cli.py build-biweekly-report --to-source
 
 | 场景 | 命令 |
 |------|------|
-| 标准生成 | `python3 scripts/run_cli.py build-biweekly-report --to-source` |
-| 预览检查 | `python3 scripts/run_cli.py build-biweekly-report --dry-run` |
-| 指定风格 | `python3 scripts/run_cli.py build-biweekly-report --to-source --style-from 双周报-w25-20260621.md` |
-| 手动输出 | `python3 scripts/run_cli.py build-biweekly-report --output-file output/双周报.md` |
+| 标准生成 | `python3 scripts/run_cli.py --call-source skill build-biweekly-report --to-source` |
+| 预览检查 | `python3 scripts/run_cli.py --call-source skill build-biweekly-report --dry-run` |
+| 指定风格 | `python3 scripts/run_cli.py --call-source skill build-biweekly-report --to-source --style-from 双周报-w25-20260621.md` |
+| 手动输出 | `python3 scripts/run_cli.py --call-source skill build-biweekly-report --output-file output/双周报.md` |
 
 ## 常见场景
 

@@ -5,7 +5,7 @@ description: Iris 智能问答 — 基于本地知识库的检索增强问答（
 metadata:
   requires:
     bins: ["python3"]
-  cliHelp: "python3 scripts/run_cli.py ask --help"
+  cliHelp: "python3 scripts/run_cli.py --call-source skill ask --help"
 ---
 
 # Iris 智能问答
@@ -17,7 +17,7 @@ metadata:
 ### 纯文本问答
 
 ```bash
-python3 scripts/run_cli.py ask --query "<问题>"
+python3 scripts/run_cli.py --call-source skill ask --query "<问题>"
 ```
 
 可选的增强参数：
@@ -38,7 +38,7 @@ python3 scripts/run_cli.py ask --query "<问题>"
 2. **检索并整合**：
 
 ```bash
-python3 scripts/run_cli.py ask --query "<用户问题>"
+python3 scripts/run_cli.py --call-source skill ask --query "<用户问题>"
 ```
 
 3. **解读结果**：

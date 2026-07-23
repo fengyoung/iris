@@ -235,6 +235,38 @@ def _clean_noise_links(content: str) -> str:
     return NOISE_WIKILINK_PATTERN.sub("", content)
 
 
+def _discover_index_paths(metadata_dir: Path) -> tuple:
+    """自动发现数据源的索引文件路径（替代硬编码 source_name）。
+
+    Returns:
+        (scan_path, chunk_path, vector_dir) — 任一可为 None
+    """
+    scan_path = None
+    chunk_path = None
+    vector_dir = None
+    if not metadata_dir.exists():
+        return scan_path, chunk_path, vector_dir
+    # 按优先级查找：先找 *_scan_summary.json，再对应 chunk 和 vector
+    for f in sorted(metadata_dir.glob("*_scan_summary.json")):
+        stem = f.name.replace("_scan_summary.json", "")
+        candidate_chunk = metadata_dir / f"{stem}_chunk_summary.json"
+        candidate_vector = metadata_dir / f"{stem}_vector_index"
+        if candidate_chunk.exists():
+            scan_path = f
+            chunk_path = candidate_chunk
+            vector_dir = candidate_vector if candidate_vector.exists() else None
+            break
+    # fallback: 即使没有 scan，也尝试找 chunk
+    if chunk_path is None:
+        for f in sorted(metadata_dir.glob("*_chunk_summary.json")):
+            stem = f.name.replace("_chunk_summary.json", "")
+            candidate_vector = metadata_dir / f"{stem}_vector_index"
+            chunk_path = f
+            vector_dir = candidate_vector if candidate_vector.exists() else None
+            break
+    return scan_path, chunk_path, vector_dir
+
+
 def lint_wiki(wiki_root: Path, data_root: Optional[Path] = None) -> Dict[str, Any]:
     """全面 Wiki 健康检查 + 索引质量检查。"""
     import json as _json
@@ -349,12 +381,11 @@ def lint_wiki(wiki_root: Path, data_root: Optional[Path] = None) -> Dict[str, An
     index_info: Dict[str, Any] = {}
     if data_root:
         metadata_dir = data_root / "metadata"
-        scan_path = metadata_dir / "main_source_scan_summary.json"
-        chunk_path = metadata_dir / "main_source_chunk_summary.json"
-        vector_dir = metadata_dir / "main_source_vector_index"
+        # 自动发现数据源（而非硬编码 "main_source"）
+        scan_path, chunk_path, vector_dir = _discover_index_paths(metadata_dir)
 
         # 扫描信息
-        if scan_path.exists():
+        if scan_path and scan_path.exists():
             scan = _json.loads(scan_path.read_text(encoding="utf-8"))
             index_info["source_documents"] = scan.get("document_count", 0)
             index_info["last_scanned"] = scan.get("scanned_at", "")
@@ -362,14 +393,12 @@ def lint_wiki(wiki_root: Path, data_root: Optional[Path] = None) -> Dict[str, An
             index_info["source_documents"] = 0
 
         # 切块信息
-        if chunk_path.exists():
+        if chunk_path and chunk_path.exists():
             chunk_data = _json.loads(chunk_path.read_text(encoding="utf-8"))
             chunks = chunk_data.get("chunks", [])
             index_info["total_chunks"] = len(chunks)
-            # 按来源文件统计
             sources = set(c.get("relative_path", "") for c in chunks)
             index_info["chunked_documents"] = len(sources)
-            # chunk 文档覆盖比例
             if index_info.get("source_documents", 0) > 0:
                 cov = len(sources) / index_info["source_documents"] * 100
                 index_info["chunk_coverage_pct"] = round(cov, 1)
@@ -378,7 +407,7 @@ def lint_wiki(wiki_root: Path, data_root: Optional[Path] = None) -> Dict[str, An
             index_info["chunked_documents"] = 0
 
         # 向量索引信息
-        if vector_dir.exists():
+        if vector_dir and vector_dir.exists():
             vec_files = list(vector_dir.glob("*"))
             index_info["vector_index_exists"] = True
             index_info["vector_index_files"] = len(vec_files)
@@ -390,7 +419,7 @@ def lint_wiki(wiki_root: Path, data_root: Optional[Path] = None) -> Dict[str, An
 
         # Wiki 覆盖度
         source_files = set()
-        if chunk_path.exists():
+        if chunk_path and chunk_path.exists():
             for c in chunks:
                 src = c.get("relative_path", "")
                 if src:
@@ -554,14 +583,18 @@ def _compute_content_quality(page_titles: dict, wiki_root: Path) -> Dict[str, An
         "dense_pages": [p["title"] for p in pages if p["words"] > 3000][:5],
     }
 
-    # 重复检测：计算页面间的 Jaccard 相似度
+    # 重复检测：计算页面间的 Jaccard 相似度（跳过内容过短的页面）
     duplicates = []
     tokenized = {}
+    MIN_BODY_LENGTH_FOR_DUP = 200  # 少于 200 字符不参与重复比较（避免空模板误报）
     for p in pages:
         try:
             body_text = Path(p["path"]).read_text(encoding="utf-8")
             if body_text.startswith("---"):
                 body_text = body_text.split("---", 2)[-1]
+            # 跳过正文过短的页面（大多数是人物空模板）
+            if len(body_text.strip()) < MIN_BODY_LENGTH_FOR_DUP:
+                continue
             tokens = set(re.findall(r"[\w一-鿿]{3,}", body_text.lower()))
             tokenized[p["title"]] = tokens
         except Exception as exc:
