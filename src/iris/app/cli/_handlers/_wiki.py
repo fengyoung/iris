@@ -247,6 +247,57 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
         if hotwords and mode == "all":
             terms = hotwords_to_terms(hotwords, terms)
 
+        # ── 反馈反向优化：从 feedback.jsonl 学习，淘汰僵尸规则 + 提升LLM发现 ──
+        _fb_removed, _fb_promoted, _fb_hotwords = 0, 0, 0
+        if mode in ("all", "replace-dict"):
+            from iris.wiki.asr.feedback import (
+                load_corrections, build_feedback_recommendations,
+                apply_feedback_optimizations,
+            )
+            feedback_path = data_dir / "asr_feedback.jsonl"
+            if feedback_path.exists():
+                try:
+                    corrections = load_corrections(str(feedback_path))
+                    if len(corrections) >= 50:
+                        recs = build_feedback_recommendations(
+                            corrections, terms, hotwords,
+                            min_samples=50, promote_threshold=3,
+                        )
+                        # 应用优化
+                        _fb_removed, _fb_promoted, _fb_hotwords = \
+                            apply_feedback_optimizations(terms, hotwords, recs)
+                        # 输出摘要
+                        _parts = []
+                        if _fb_removed:
+                            _parts.append(f"淘汰 {_fb_removed} 条僵尸规则")
+                        if _fb_promoted:
+                            _parts.append(f"提升 {_fb_promoted} 条 LLM 发现")
+                        if _fb_hotwords:
+                            _parts.append(f"补充 {_fb_hotwords} 个热词")
+                        if _parts:
+                            print(
+                                f"[asr] 📊 反馈反向优化（{len(corrections)} 条记录）: "
+                                + ", ".join(_parts),
+                                file=sys.stderr,
+                            )
+                        else:
+                            print(
+                                f"[asr] 📊 反馈分析完成（{len(corrections)} 条记录），"
+                                f"无需优化",
+                                file=sys.stderr,
+                            )
+                    else:
+                        print(
+                            f"[asr] ⏭ 反馈数据不足（{len(corrections)}<50 条），"
+                            f"跳过反向优化",
+                            file=sys.stderr,
+                        )
+                except Exception as _fb_exc:
+                    print(
+                        f"[asr] ⚠ 反馈分析失败（不影响主流程）: {_fb_exc}",
+                        file=sys.stderr,
+                    )
+
         # 版本判定
         bump = getattr(args, "bump", "auto") or "auto"
         new_version = determine_new_version(pages, data_dir, bump=bump)
