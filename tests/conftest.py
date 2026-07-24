@@ -28,7 +28,10 @@ _TOPLEVEL_UNIT_FILES: set[str] = {
     "test_tokenization.py",
     "test_transcribe_meeting.py",
     "test_trello_models.py",
+    "test_trello_formatter.py",
+    "test_trello_service.py",
     "test_validation.py",
+    "test_output_formatter.py",
 }
 
 
