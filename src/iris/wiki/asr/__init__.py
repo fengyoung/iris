@@ -29,6 +29,8 @@ from .feedback import (
     save_correction, load_corrections,
     extract_mappings_from_corrections, extract_llm_discoveries,
     compute_hit_frequency, apply_feedback_to_dict,
+    find_zombie_rules, build_feedback_recommendations,
+    apply_feedback_optimizations,
 )
 from .version import (
     load_version, save_version, bump_version,
@@ -52,6 +54,8 @@ __all__ = [
     "save_correction", "load_corrections",
     "extract_mappings_from_corrections", "extract_llm_discoveries",
     "compute_hit_frequency", "apply_feedback_to_dict",
+    "find_zombie_rules", "build_feedback_recommendations",
+    "apply_feedback_optimizations",
     # 校正
     "correct_text_static",
     # 版本管理

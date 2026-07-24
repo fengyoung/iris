@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set, Tuple
 
 from ._types import AsrCorrection, AsrTerm
 
@@ -184,6 +184,256 @@ def compute_hit_frequency(
         for applied in c.corrections_applied:
             freq[applied] = freq.get(applied, 0) + 1
     return freq
+
+
+def find_zombie_rules(
+    corrections: List[AsrCorrection],
+    terms: List[AsrTerm],
+    min_samples: int = 50,
+) -> List[tuple]:
+    """找出反馈数据中从未命中的替换词典规则。
+
+    判断依据：在一段时间的反馈数据中，该规则没有出现过任何命中记录。
+    足够样本量（≥ min_samples）下仍未命中，说明规则大概率无效。
+
+    Args:
+        corrections: AsrCorrection 列表
+        terms: 当前 AsrTerm 列表（含 mis_asr 映射）
+        min_samples: 最少需要多少条反馈记录才触发分析
+
+    Returns:
+        [(mis, correct, category), ...] 僵尸规则列表
+    """
+    if len(corrections) < min_samples:
+        return []
+
+    # 收集所有被触发过的（非 LLM）规则
+    triggered: set = set()
+    for c in corrections:
+        for applied in c.corrections_applied:
+            if not applied.startswith(_LLM_PREFIX):
+                triggered.add(applied)
+
+    zombies: List[tuple] = []
+    for t in terms:
+        for mis in t.mis_asr:
+            rule_key = f"{mis}→{t.term}"
+            if rule_key not in triggered:
+                zombies.append((mis, t.term, t.category))
+
+    return zombies
+
+
+def build_feedback_recommendations(
+    corrections: List[AsrCorrection],
+    terms: List[AsrTerm],
+    hotwords: List[str],
+    min_samples: int = 50,
+    promote_threshold: int = 3,
+) -> Dict[str, object]:
+    """分析 feedback.jsonl 并返回优化建议。
+
+    这是 Phase 1 反馈反向优化的核心分析函数。三个维度：
+    1. 淘汰僵尸规则 — 从未命中的替换映射
+    2. 提升 LLM 发现 — 高频 LLM 修正提升为词典规则
+    3. 补充热词 — 反馈中被 LLM 纠正的专有名词
+
+    Args:
+        corrections: AsrCorrection 列表
+        terms: 当前 AsrTerm 列表
+        hotwords: 当前热词列表
+        min_samples: 最少需要多少条反馈记录
+        promote_threshold: LLM 发现需达到多少次才提升为词典规则
+
+    Returns:
+        {
+            "total_corrections": int,
+            "dict_hit_count": int,
+            "dict_hit_rate": float,
+            "total_rules": int,
+            "zombie_rules": [(mis, correct, category), ...],
+            "zombie_count": int,
+            "promote_to_dict": {correct: [mis1, mis2, ...], ...},
+            "promote_count": int,
+            "new_hotwords": ["词1", "词2", ...],
+            "new_hotword_count": int,
+        }
+    """
+    total_rules = sum(len(t.mis_asr) for t in terms)
+
+    result: Dict[str, object] = {
+        "total_corrections": len(corrections),
+        "dict_hit_count": 0,
+        "dict_hit_rate": 0.0,
+        "total_rules": total_rules,
+        "zombie_rules": [],
+        "zombie_count": 0,
+        "promote_to_dict": {},
+        "promote_count": 0,
+        "new_hotwords": [],
+        "new_hotword_count": 0,
+    }
+
+    if len(corrections) < min_samples:
+        return result
+
+    # ── 1. 命中频率统计 ──────────────────────────────────
+    hit_freq = compute_hit_frequency(corrections)
+    dict_hits = {k: v for k, v in hit_freq.items()
+                 if not k.startswith(_LLM_PREFIX)}
+    result["dict_hit_count"] = sum(dict_hits.values())
+    result["dict_hit_rate"] = (
+        result["dict_hit_count"] / max(len(corrections), 1)
+    )
+
+    # ── 2. 僵尸规则检测 ──────────────────────────────────
+    zombies = find_zombie_rules(corrections, terms, min_samples=min_samples)
+    result["zombie_rules"] = zombies
+    result["zombie_count"] = len(zombies)
+
+    # ── 3. LLM 发现 → 词典规则提升 ───────────────────────
+    # 直接统计原始频率（不用 extract_llm_discoveries 因为其内部去重）
+    discovery_freq: Dict[str, int] = {}
+    for c in corrections:
+        seen_in_record: Set[str] = set()
+        for applied in c.corrections_applied:
+            if not applied.startswith(_LLM_PREFIX):
+                continue
+            if applied in seen_in_record:
+                continue  # 同一条记录内去重
+            seen_in_record.add(applied)
+            discovery_freq[applied] = discovery_freq.get(applied, 0) + 1
+
+    promotions: Dict[str, List[str]] = {}
+    for key, freq in discovery_freq.items():
+        if freq >= promote_threshold:
+            # 剥离 [LLM] 前缀后解析 "误→正"
+            applied_clean = key[len(_LLM_PREFIX):]
+            parts = applied_clean.split("→", 1)
+            if len(parts) == 2:
+                mis, correct = parts[0].strip(), parts[1].strip()
+                if not mis or not correct:
+                    continue
+                if correct not in promotions:
+                    promotions[correct] = []
+                if mis not in promotions[correct]:
+                    promotions[correct].append(mis)
+
+    result["promote_to_dict"] = promotions
+    result["promote_count"] = sum(len(v) for v in promotions.values())
+
+    # ── 4. 高频被误识词 → 热词补充 ──────────────────────
+    existing_hotword_keys: Set[str] = {
+        hw.lower().replace(" ", "") for hw in hotwords
+    }
+    for t in terms:
+        existing_hotword_keys.add(t.term.lower().replace(" ", ""))
+
+    word_freq: Dict[str, int] = {}
+    for c in corrections:
+        if c.full_corrected == c.fast_corrected:
+            continue
+        for applied in c.corrections_applied:
+            if applied.startswith(_LLM_PREFIX):
+                applied_clean = applied[len(_LLM_PREFIX):]
+                parts = applied_clean.split("→", 1)
+                if len(parts) == 2:
+                    correct_word = parts[1].strip()
+                    if correct_word and len(correct_word) >= 2:
+                        key = correct_word.lower().replace(" ", "")
+                        if key not in existing_hotword_keys:
+                            word_freq[correct_word] = (
+                                word_freq.get(correct_word, 0) + 1
+                            )
+
+    result["new_hotwords"] = [
+        w for w, f in sorted(word_freq.items(), key=lambda x: -x[1])
+        if f >= 2
+    ]
+    result["new_hotword_count"] = len(result["new_hotwords"])
+
+    return result
+
+
+def apply_feedback_optimizations(
+    terms: List[AsrTerm],
+    hotwords: List[str],
+    recommendations: Dict[str, object],
+) -> tuple:
+    """将反馈优化建议应用到 terms 和 hotwords（原地修改）。
+
+    Args:
+        terms: AsrTerm 列表（原地修改 — 移除僵尸规则、添加提升映射）
+        hotwords: 热词列表（原地修改 — 追加新热词）
+        recommendations: build_feedback_recommendations() 的返回值
+
+    Returns:
+        (zombie_removed, promoted, hotwords_added)
+    """
+    # ── 淘汰僵尸规则 ─────────────────────────────────────
+    zombie_set: Set[str] = set()
+    zombie_list = recommendations.get("zombie_rules", [])
+    if isinstance(zombie_list, list):
+        for item in zombie_list:
+            if isinstance(item, tuple) and len(item) >= 2:
+                zombie_set.add(f"{item[0]}→{item[1]}")
+
+    zombie_removed = 0
+    for t in terms:
+        new_mis = []
+        for mis in t.mis_asr:
+            if f"{mis}→{t.term}" in zombie_set:
+                zombie_removed += 1
+            else:
+                new_mis.append(mis)
+        t.mis_asr = new_mis
+
+    # ── 提升 LLM 发现为词典规则 ──────────────────────────
+    promoted = 0
+    promote_dict = recommendations.get("promote_to_dict", {})
+    if isinstance(promote_dict, dict):
+        for correct, mis_list in promote_dict.items():
+            if not isinstance(mis_list, list):
+                continue
+            # 查找已有 term
+            found = False
+            for t in terms:
+                if t.term == correct:
+                    for mis in mis_list:
+                        mis_str = str(mis)
+                        if mis_str not in t.mis_asr:
+                            t.mis_asr.append(mis_str)
+                            promoted += 1
+                    found = True
+                    break
+            if not found:
+                terms.append(AsrTerm(
+                    term=str(correct),
+                    category="domain_term",
+                    context="来自 feedback.jsonl 反馈提升",
+                    mis_asr=[str(m) for m in mis_list],
+                ))
+                promoted += len(mis_list)
+
+    # ── 补充新热词 ───────────────────────────────────────
+    existing_keys: Set[str] = {
+        hw.lower().replace(" ", "") for hw in hotwords
+    }
+    for t in terms:
+        existing_keys.add(t.term.lower().replace(" ", ""))
+
+    hotwords_added = 0
+    new_list = recommendations.get("new_hotwords", [])
+    if isinstance(new_list, list):
+        for hw in new_list:
+            hw_str = str(hw)
+            key = hw_str.lower().replace(" ", "")
+            if key not in existing_keys:
+                hotwords.append(hw_str)
+                existing_keys.add(key)
+                hotwords_added += 1
+
+    return zombie_removed, promoted, hotwords_added
 
 
 def apply_feedback_to_dict(
