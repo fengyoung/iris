@@ -1,3 +1,28 @@
+## v3.19.20 (2026-07-24)
+
+ASR 反馈反向优化引擎 — feedback.jsonl 驱动词典自动进化。
+
+### 新增功能
+
+- **反馈反向优化引擎** (`feedback.py` +252/-1)：三个核心函数实现用户反馈自动学习闭环
+  - `find_zombie_rules()` — 检测从未命中的僵尸替换规则（≥50 条反馈样本触发）
+  - `build_feedback_recommendations()` — 三维度分析：淘汰僵尸规则 / LLM 发现提升为词典（阈值≥3次）/ 补充热词
+  - `apply_feedback_optimizations()` — 原地应用优化建议（移除僵尸 / 添加提升 / 追加热词）
+- **build-asr-prompt 集成** (`_wiki.py` +51)：构建 ASR Prompt 时自动运行反馈反向优化，≥50 条反馈记录时输出优化摘要，异常时不影响主流程
+- **LLM 调用失败日志增强** (`provider.py` +2)：模型调用失败/异常时增加 warning 日志便于排障
+
+### 涉及文件
+
+| 文件 | 变更 |
+|------|------|
+| `src/iris/wiki/asr/feedback.py` | +252 / -1 |
+| `src/iris/app/cli/_handlers/_wiki.py` | +51 |
+| `src/iris/wiki/asr/__init__.py` | +4（导出新函数） |
+| `src/iris/llm/provider.py` | +2（warning 日志） |
+| `tests/unit/test_asr_feedback.py` | 新增，31 用例 |
+
+---
+
 ## v3.19.19 (2026-07-23)
 
 测试覆盖全面优化 — 90 新增用例，P1 三模块接近全绿，P2 纯逻辑增强。
