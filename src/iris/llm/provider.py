@@ -107,6 +107,16 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         self._model_manager = ModelManager(config.llm["models"], config.root / "data")
         from iris.llm.usage_tracker import UsageTracker
         self._tracker = UsageTracker(config.root / "data")
+        # 熔断器：默认共享全局单例，可通过 set_circuit_breaker() 替换为独立实例
+        self._circuit_breaker = _circuit_breaker
+
+    def set_circuit_breaker(self, cb: _CircuitBreaker) -> None:
+        """替换当前实例的熔断器（用于 ASR 实时场景等需要独立熔断阈值的场景）。
+
+        调用后该 provider 的所有模型调用将使用独立的熔断器实例，
+        不再与全局 _circuit_breaker 共享状态。
+        """
+        self._circuit_breaker = cb
 
     def get_active_model_config(self, role: str) -> Dict[str, Any]:
         """获取指定角色的当前活跃模型配置（不含 api_key）。"""
@@ -137,9 +147,19 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         max_tokens: Optional[int] = None,
         max_retries: Optional[int] = None,
         extra_body: Optional[Dict[str, Any]] = None,
+        deadline: Optional[float] = None,
     ) -> Tuple[str, int, int]:
-        """按 provider 类型分发 API 调用，返回 (text, prompt_tokens, completion_tokens)。"""
+        """按 provider 类型分发 API 调用，返回 (text, prompt_tokens, completion_tokens)。
+
+        若提供 deadline（Unix 时间戳），将在剩余时间内动态截断 timeout，
+        确保单次模型调用不超出降级链的总时间预算。
+        """
         timeout = cfg.get("timeout_seconds", 60)
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise LLMProviderError("LLM 调用 deadline 已到期，跳过当前模型")
+            timeout = min(timeout, max(1, int(remaining)))
         effective_retries = max_retries if max_retries is not None else cfg.get("max_retries", 0)
         if provider_name in self.OPENAI_COMPATIBLE_PROVIDERS:
             return self._call_openai_compatible(
@@ -163,6 +183,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         max_tokens: Optional[int] = None,
         max_retries: Optional[int] = None,
         force_model: Optional[str] = None,
+        _deadline: Optional[float] = None,
     ) -> LLMResponse:
         # force_model：跳过路由，直接使用指定模型
         if force_model:
@@ -179,6 +200,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
                 api_base, api_key, model_name, request_data.prompt, provider_name, model_cfg,
                 temperature=temperature, max_tokens=max_tokens, max_retries=max_retries,
                 extra_body=request_data.extra_body,
+                deadline=_deadline,
             )
             source = (request_data.route_context.get("source") if request_data.route_context else None) or _os.environ.get("IRIS_CALL_SOURCE", "cli")
             self._tracker.record(
@@ -206,16 +228,17 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
                 pass
 
         def _try_call(api_base: str, api_key: str, model_name: str, cfg: Dict[str, Any]) -> Tuple[str, int, int]:
-            """文本 API 调用闭包，捕获 prompt / temperature / max_tokens / extra_body。"""
+            """文本 API 调用闭包，捕获 prompt / temperature / max_tokens / extra_body / deadline。"""
             return self._dispatch_provider_call(
                 api_base, api_key, model_name, request_data.prompt,
                 str(cfg["provider"]).lower(), cfg,
                 temperature=temperature, max_tokens=max_tokens, max_retries=max_retries,
                 extra_body=request_data.extra_body,
+                deadline=_deadline,
             )
 
         text, role, provider_name, model_name, api_base, pt, ct = self._fallback_loop(
-            decision, _try_call,
+            decision, _try_call, deadline=_deadline,
         )
         source = (request_data.route_context.get("source") if request_data.route_context else None) or _os.environ.get("IRIS_CALL_SOURCE", "cli")
         self._tracker.record(
@@ -271,6 +294,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         *,
         model_filter=None,
         error_label: str = "LLM",
+        deadline: Optional[float] = None,
     ):
         """共享降级循环：路由 → 遍历降级链 → 调用 call_fn → 成功返回。
 
@@ -281,6 +305,8 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
             call_fn: (api_base, api_key, model_name, config) -> str
             model_filter: 可选 (config) -> bool，多模态调用传入以跳过纯文本模型
             error_label: 错误消息中的调用类型前缀
+            deadline: 可选 Unix 时间戳，降级链总超时时间。
+                      每次模型尝试前检查，超时立即中止余下降级链。
 
         Returns:
             (text, role, provider_name, model_name, api_base_url, prompt_tokens, completion_tokens)
@@ -290,6 +316,13 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         last_error: Optional[Exception] = None
 
         for role, model_id, model_config in fallback_chain:
+            # ── deadline 检查：每次模型尝试前确认剩余时间 ──
+            if deadline is not None and time.monotonic() > deadline:
+                raise LLMProviderError(
+                    f"{error_label} 降级链总超时，已尝试: "
+                    f"{', '.join(tried_models) if tried_models else '(无)'}"
+                )
+
             if model_filter and not model_filter(model_config):
                 continue
 
@@ -307,7 +340,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
 
             api_base_url = model_config["api_base_url"]
 
-            if _circuit_breaker.is_open(model_key):
+            if self._circuit_breaker.is_open(model_key):
                 logger.warning("熔断器开路，跳过 %s（短期内连续失败次数过多）", model_key)
                 last_error = LLMProviderError(f"熔断器开路: {model_key}")
                 continue
@@ -315,7 +348,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
             try:
                 text, pt, ct = call_fn(api_base_url, api_key, model_config["model"], model_config)
 
-                _circuit_breaker.record_success(model_key)
+                self._circuit_breaker.record_success(model_key)
 
                 if role != decision.selected_role or model_id != self._model_manager.get_active_model_id(role):
                     logger.warning("模型降级: %s/%s → %s/%s",
@@ -326,12 +359,12 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
                 return text, role, str(model_config["provider"]).lower(), model_config["model"], api_base_url, pt, ct
 
             except LLMProviderError as exc:
-                _circuit_breaker.record_failure(model_key)
+                self._circuit_breaker.record_failure(model_key)
                 logger.warning("模型 %s 调用失败（尝试下一个）: %s", model_key, exc)
                 last_error = exc
                 continue
             except Exception as exc:
-                _circuit_breaker.record_failure(model_key)
+                self._circuit_breaker.record_failure(model_key)
                 logger.warning("模型 %s 调用异常（尝试下一个）: %s", model_key, exc)
                 last_error = LLMProviderError(f"模型 {model_key} 调用异常: {exc}")
                 continue

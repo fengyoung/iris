@@ -129,10 +129,28 @@ def handle_feed_list(args, bundle, _logger) -> int:
     if not chats:
         print("（未关注任何会话，请先运行 iris feed-setup）")
         return 0
+
+    # 尝试加载 OKR 文档，解析标签语义
+    from iris.feed._okr_loader import OKRLoader
+    source_dir = None
+    if hasattr(bundle, 'default_source_path'):
+        try:
+            source_dir = bundle.default_source_path
+        except Exception:
+            pass
+    if not source_dir:
+        import os
+        source_dir = os.environ.get("IRIS_WORK_DOCS_DIR", "")
+    okr_loader = OKRLoader(source_root=source_dir) if source_dir else None
+
     print(f"已关注 {len(chats)} 个会话:\n")
     for c in chats:
-        tags = ", ".join(c.okr_tags) if c.okr_tags else "—"
-        print(f"  {c.name:20s} [{c.type:6s}]  {c.mode:12s}  → {tags}")
+        tags_str = ", ".join(c.okr_tags) if c.okr_tags else "—"
+        if c.okr_tags and okr_loader:
+            resolved = okr_loader.resolve_tags(c.okr_tags)
+            descs = [f"{tag}: {desc[:40]}…" for tag, desc in resolved.items()]
+            tags_str = "\n" + "\n".join(f"                    ↳ {d}" for d in descs)
+        print(f"  {c.name:20s} [{c.type:6s}]  {c.mode:12s}  → {tags_str}")
     return 0
 
 

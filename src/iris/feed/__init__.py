@@ -31,6 +31,7 @@ from iris.feed._brief_generator import BriefGenerator
 from iris.feed._dispatcher import Dispatcher
 from iris.feed._feishu_bridge import FeishuBridge
 from iris.feed._cursor_tracker import CursorTracker
+from iris.feed._okr_loader import OKRLoader, OKRDocument
 from iris.feed._types import (
     ConvertedDoc,
     DetectedTopic,
@@ -54,6 +55,8 @@ __all__ = [
     "Dispatcher",
     "FeishuBridge",
     "CursorTracker",
+    "OKRLoader",
+    "OKRDocument",
     "ConvertedDoc",
     "DetectedTopic",
     "PipelineResult",

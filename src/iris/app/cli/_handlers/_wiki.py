@@ -724,6 +724,10 @@ def handle_asr_corrector(args, bundle, logger) -> int:
     context_expire_minutes = profile_config.get("context_expire_minutes", 10)
     context_ab = getattr(args, "context_ab", False)
 
+    # LLM 降级链总超时（从 profile 读取，默认 8000ms）
+    _llm_profile = profile_config.get("llm", {}) if isinstance(profile_config, dict) else {}
+    llm_timeout_ms = _llm_profile.get("timeout_ms", 8000) if isinstance(_llm_profile, dict) else 8000
+
     # 启动校正引擎
     corrector = AsrCorrector(
         replace_dict=replace_dict,
@@ -733,10 +737,21 @@ def handle_asr_corrector(args, bundle, logger) -> int:
         context_window_size=context_window_size,
         context_expire_minutes=context_expire_minutes,
         context_ab=context_ab,
+        llm_timeout_ms=llm_timeout_ms,
     )
 
     if provider:
         corrector.set_provider(provider)
+        # 注入 ASR 独立熔断器：更低阈值（2 次失败即熔断，30s 后半开）
+        # 实时场景不能容忍像批量任务那样连试 5 次才熔断
+        try:
+            from iris.llm.provider import _CircuitBreaker as _CB
+            _asr_breaker = _CB(threshold=2, reset_after=30.0)
+            provider.set_circuit_breaker(_asr_breaker)
+            print(f"[Iris] ASR 熔断器: threshold=2 reset=30s (独立实例)",
+                  file=sys.stderr)
+        except Exception:
+            pass  # 降级：使用 provider 默认的全局熔断器
         # 同时注入 LLMService（推荐路径：享受缓存、熔断器）
         try:
             corrector.set_llm_service(service)

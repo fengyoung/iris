@@ -82,6 +82,12 @@ previous_versions:
 
 ---
 
+## OKR 关联
+
+{okr_section}
+
+---
+
 ## 相关文档
 
 {doc_links}
@@ -185,6 +191,17 @@ class BriefGenerator:
         else:
             dec_lines = "（暂无明确决策）"
 
+        # OKR 关联
+        if topic.okr_tags:
+            okr_lines = []
+            for tag in topic.okr_tags:
+                status_icon = "✅" if topic.okr_match_strength == "strong" else "🟡"
+                okr_lines.append(f"- {status_icon} {tag}")
+            okr_section = "\n".join(okr_lines)
+            okr_section += f"\n\n匹配强度：**{topic.okr_match_strength}**"
+        else:
+            okr_section = "（未关联 OKR）"
+
         # 相关文档链接
         if related_docs:
             doc_lines = "\n".join([f"- [{d.title}]({d.relative_path})" for d in related_docs])
@@ -224,6 +241,7 @@ class BriefGenerator:
             key_status=topic.key_status or "（暂无）",
             discussion_points=dp_lines,
             decisions=dec_lines,
+            okr_section=okr_section,
             doc_links=doc_lines,
             participants=participants,
             quotes_section=quote_lines,

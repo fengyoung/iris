@@ -102,6 +102,7 @@ class LLMService:
         force_model: Optional[str] = None,
         extra_body: Optional[Dict[str, Any]] = None,
         use_cache: bool = False,
+        _deadline: Optional[float] = None,
     ) -> GenerationResult:
         """调用 LLM 生成文本。
 
@@ -114,6 +115,7 @@ class LLMService:
             force_model: 强制使用指定模型名称，跳过路由规则
             extra_body: 透传给 LLM API 的额外参数（如 thinking: disabled）
             use_cache: 显式启用缓存（非 t=0 时如需缓存可设为 True）
+            _deadline: 内部参数，降级链总超时 Unix 时间戳（实时场景限制总等待时间）
 
         Returns:
             GenerationResult：包含生成文本和调用元数据
@@ -121,8 +123,8 @@ class LLMService:
         ctx = route_context or {"input_type": "text", "task_type": "qa", "complexity": "standard"}
         ctx.setdefault("source", self._source)  # 注入来源标记（CLI / Skill）
 
-        # 缓存逻辑：temperature=0 自动缓存，或 use_cache=True 显式启用
-        _should_cache = temperature == 0 or use_cache
+        # deadline 场景不读缓存（实时场景输入不同，缓存命中率低）
+        _should_cache = (temperature == 0 or use_cache) and _deadline is None
         if _should_cache:
             hit = self._check_cache(prompt, ctx, force_model, temperature)
             if hit is not None:
@@ -139,6 +141,7 @@ class LLMService:
                 max_tokens=max_tokens,
                 max_retries=max_retries,
                 force_model=force_model,
+                _deadline=_deadline,
             )
             result = GenerationResult(
                 text=response.text,

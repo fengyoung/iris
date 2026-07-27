@@ -708,6 +708,7 @@ class AsrCorrector:
         context_window_size: int = 5,
         context_expire_minutes: int = 10,
         context_ab: bool = False,
+        llm_timeout_ms: int = 8000,
     ):
         """
         Args:
@@ -719,6 +720,8 @@ class AsrCorrector:
             context_window_size: 近期上下文滚动窗口大小（句子数）
             context_expire_minutes: 上下文过期时间（分钟），防止长时间暂停后旧语境残留
             context_ab: 开启 A/B 对比模式（每句跑两次 LLM，对比有无上下文的效果）
+            llm_timeout_ms: LLM 降级链总超时（毫秒）。实时场景限制跨模型 fallback 的最大等待时间。
+                            默认 8000ms，通过 asr_profiles.json 的 llm.timeout_ms 配置。
         """
         self._automaton = _AhoCorasick(replace_dict)
         self._prompt = llm_prompt
@@ -731,6 +734,9 @@ class AsrCorrector:
         self._context_expire_seconds = context_expire_minutes * 60
         self._recent_sentences: deque = deque(maxlen=context_window_size)
         self._context_ab = context_ab
+
+        # LLM 降级链总超时
+        self._llm_timeout_ms = llm_timeout_ms
 
         # 热键状态 — CGEventTap 系统级事件监听
         # 替代 CGEventSourceKeyState 轮询，解决右 Option 在输入法体系下不可见的问题
@@ -756,6 +762,9 @@ class AsrCorrector:
         # 代际计数器：每次 _tick 递增，LLM 任务完成时比对，
         # 代际已变说明新输入到达、光标位置已移动，放弃二次替换
         self._tick_generation = 0
+
+        # 安全关闭：Ctrl+C 后通知 in-flight LLM 线程尽早退出
+        self._shutdown_requested = threading.Event()
 
         # Prompt 热加载
         self._prompt_path = ""  # 由 CLI handler 设置
@@ -874,11 +883,13 @@ class AsrCorrector:
         return self._automaton.replace_all(text)
 
     def _correct_llm(self, text: str, dict_applied: List[str],
-                      *, force_no_context: bool = False) -> Tuple[str, List[str], int]:
+                      *, force_no_context: bool = False,
+                      _deadline_override: Optional[float] = None) -> Tuple[str, List[str], int]:
         """Step 2：LLM 校正。
 
         Args:
             force_no_context: 强制跳过上下文注入（用于 A/B 对比的无上下文基线）
+            _deadline_override: 覆盖默认 deadline（用于 A/B 基线等独立时间预算场景）
 
         Returns:
             (corrected_text, llm_specific_applied_rules, time_ms)
@@ -890,7 +901,11 @@ class AsrCorrector:
             print("[Iris] ⚠ LLM 跳过：Provider 未初始化", file=sys.stderr)
             return text, [], 0
 
-        print("[Iris] 🔮 LLM 校正中...", file=sys.stderr)
+        # 计算降级链 deadline：ASR 实时场景的总时间预算
+        deadline = _deadline_override or (time.monotonic() + self._llm_timeout_ms / 1000.0)
+
+        label = "LLM 校正" if not force_no_context else "LLM 校正(A/B基线)"
+        print(f"[Iris] 🔮 {label}中... (deadline {self._llm_timeout_ms}ms)", file=sys.stderr)
         t_start = time.monotonic()
         try:
             context_block = "" if force_no_context else self._build_context_block()
@@ -914,8 +929,11 @@ class AsrCorrector:
                     max_tokens=512,
                     max_retries=0,  # 实时场景不重试，超时直接降级词典结果
                     extra_body={"thinking": {"type": "disabled"}},
+                    _deadline=deadline,
                 )
                 response_text = result.text
+                # 记录实际使用的模型信息，用于降级可见性
+                _model_info = f"{result.provider}/{result.model}"
             else:
                 from iris.llm import LLMRequest
                 response = self._provider.generate(
@@ -930,8 +948,10 @@ class AsrCorrector:
                     temperature=0.1,
                     max_tokens=512,
                     max_retries=0,
+                    _deadline=deadline,
                 )
                 response_text = response.text if response else ""
+                _model_info = f"{response.provider}/{response.model}" if response else "?"
 
             elapsed_ms = int((time.monotonic() - t_start) * 1000)
             if response_text and len(response_text.strip()) >= 1:
@@ -940,10 +960,16 @@ class AsrCorrector:
                     print(f"[Iris] ⚠ LLM 输出疑似推理过程（{len(llm_output)}字），降级为词典结果",
                           file=sys.stderr)
                     return text, [], elapsed_ms
+                print(f"[Iris] ✅ {label}完成 ({elapsed_ms}ms, {_model_info})", file=sys.stderr)
                 return llm_output, [], elapsed_ms
         except Exception as e:
             elapsed_ms = int((time.monotonic() - t_start) * 1000)
-            print(f"[Iris] ⚠ LLM 校正失败 ({elapsed_ms}ms): {e}", file=sys.stderr)
+            error_msg = str(e)
+            if "deadline" in error_msg.lower() or "超时" in error_msg:
+                print(f"[Iris] ⚠ {label}超时 ({elapsed_ms}ms): 降级链总时间预算耗尽，保留词典结果",
+                      file=sys.stderr)
+            else:
+                print(f"[Iris] ⚠ LLM 校正失败 ({elapsed_ms}ms): {e}", file=sys.stderr)
 
         return text, [], 0
 
@@ -1060,15 +1086,21 @@ class AsrCorrector:
     def _shutdown_executor(self) -> None:
         """关闭 LLM 线程池（SIGINT 屏蔽由 run_forever 的 finally 块统一处理）。
 
-        取消 pending 任务 + shutdown executor，避免遗留到 atexit 阶段。
+        策略：
+        1. 设置 shutdown 信号，通知 in-flight 线程尽早返回
+        2. 取消尚未开始的 pending 任务
+        3. shutdown(wait=True) 等待线程完成——由于 deadline 限制降级链 ≤8s，
+           实际等待时间可控（不再出现 15 分钟僵死）
+        4. cancel_futures=True 清空队列中所有未执行任务
         """
+        self._shutdown_requested.set()
+
         # 1. 取消尚未开始执行的 pending 任务
         if self._pending_llm and not self._pending_llm.done():
             self._pending_llm.cancel()
             self._pending_llm = None
 
-        # 2. 关闭线程池
-        # cancel_futures=True: Python 3.9+，取消队列中所有等待任务
+        # 2. 关闭线程池（deadline 保证 ≤8s 内返回）
         self._llm_executor.shutdown(wait=True, cancel_futures=True)
 
     def _tick(self) -> None:
@@ -1185,10 +1217,27 @@ class AsrCorrector:
                 ab_data = None
                 ctx_sentence_count = len(self._recent_sentences)
                 if self._context_ab and ctx_sentence_count > 0:
+                    # 检查 shutdown 信号：引擎已停止则跳过 A/B，避免阻塞进程退出
+                    if self._shutdown_requested.is_set():
+                        print("[Iris] 🔬 A/B 跳过：引擎已停止", file=sys.stderr)
+                        if llm_result == snap_fast:
+                            self._record(current_text, snap_fast, llm_result,
+                                         dict_applied, llm_ms)
+                        return
+
                     print("[Iris] 🔬 A/B 对比：无上下文基线校正中...", file=sys.stderr)
-                    no_ctx_result, _, no_ctx_ms = self._correct_llm(
-                        snap_fast, dict_applied, force_no_context=True,
-                    )
+                    # A/B 基线使用独立时间预算（5s），不拖慢主流程
+                    _ab_deadline = time.monotonic() + 5.0
+                    try:
+                        no_ctx_result, _, no_ctx_ms = self._correct_llm(
+                            snap_fast, dict_applied, force_no_context=True,
+                            _deadline_override=_ab_deadline,
+                        )
+                    except Exception:
+                        print("[Iris] 🔬 A/B 基线失败，仅保留带上下文结果",
+                              file=sys.stderr)
+                        no_ctx_result = llm_result
+                        no_ctx_ms = 0
                     # 仅在代际仍有效时记录（无上下文调用期间可能有新输入到达）
                     if self._tick_generation == snap_gen:
                         ab_diff = _diff_changes(no_ctx_result, llm_result)

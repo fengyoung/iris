@@ -78,12 +78,16 @@ _TOPIC_DETECT_PROMPT = """你是一个信息分析助手。请从以下飞书群
 ## 消息来源
 多条候选消息组来自不同的飞书群聊或单聊。每组消息可能是某个话题的讨论片段。
 
+## 当前 OKR 目标
+{okr_context}
+
 ## 任务
 1. **判断**哪些消息组属于同一话题（跨群/跨聊出现需合并）
 2. **排除**无实质内容的消息组（闲聊、寒暄、重复通知等）
 3. **命名**每个话题（简洁中文标题，≤15字）
 4. **摘要**每个话题的核心内容（2-3句话）
 5. **判断**与已知历史话题的关系
+6. **匹配 OKR**：判断话题内容与哪个 OKR/KR 相关（基于语义，不要硬匹配关键词），给出匹配强度
 
 ## 输入消息
 {input_messages}
@@ -106,7 +110,12 @@ _TOPIC_DETECT_PROMPT = """你是一个信息分析助手。请从以下飞书群
     "group_indices": [0, 2],
     "is_update": false,
     "update_of": null,
-    "is_valuable": true
+    "is_valuable": true,
+    "okr_match": {{
+      "kr_id": "O2-KR3",
+      "match_strength": "strong",
+      "reason": "讨论内容与作业域原子化能力建设直接相关"
+    }}
   }}
 ]
 ```
@@ -114,6 +123,7 @@ _TOPIC_DETECT_PROMPT = """你是一个信息分析助手。请从以下飞书群
 - `is_update`: 是否是对历史话题的更新（true/false）
 - `update_of`: 如果是更新，引用的历史话题标题
 - `is_valuable`: 是否值得生成简报（无实质内容则 false）
+- `okr_match`: 匹配的 OKR/KR（kr_id 如 O1-KR1 / O2 / null 表示不匹配；match_strength 为 strong/weak/none；reason 简述匹配理由）
 
 只输出有价值的话题（is_valuable=true），不输出无价值的话题。"""
 
@@ -163,9 +173,11 @@ class TopicDetector:
         llm_service,  # LLMService
         brief_dir: Path,
         topic_config: Optional[Dict[str, Any]] = None,
+        okr_context: str = "",
     ):
         self._llm = llm_service
         self._brief_dir = brief_dir
+        self._okr_context = okr_context
         cfg = topic_config or {}
         self._window_minutes = cfg.get("time_window_minutes", 30)
         self._topic_min_messages = cfg.get("topic_min_messages", 2)
@@ -201,7 +213,7 @@ class TopicDetector:
 
         # Step 2b: LLM 聚合
         history = _load_history_topics(self._brief_dir)
-        return self._llm_detect(candidates, history)
+        return self._llm_detect(candidates, history, self._okr_context)
 
     def _simple_detect(self, candidates: List[Tuple[str, List[RawMessage]]]) -> List[DetectedTopic]:
         """简单话题检测（消息量少时不调 LLM）。"""
@@ -238,6 +250,7 @@ class TopicDetector:
         self,
         candidates: List[Tuple[str, List[RawMessage]]],
         history: List[Dict[str, Any]],
+        okr_context: str = "",
     ) -> List[DetectedTopic]:
         """调用 LLM 进行话题聚合。"""
         # 构建输入消息文本
@@ -261,6 +274,7 @@ class TopicDetector:
         prompt = _TOPIC_DETECT_PROMPT.format(
             input_messages=input_text,
             history_topics=history_text,
+            okr_context=okr_context or "（无可用的 OKR 文档）",
         )
 
         try:
@@ -333,6 +347,16 @@ class TopicDetector:
                 Quote(text=q.get("text", ""), speaker=q.get("speaker", ""), time=q.get("time", ""))
                 for q in item.get("quotes", [])[:5]
             ]
+            # OKR 匹配
+            okr_match = item.get("okr_match") or {}
+            kr_id = okr_match.get("kr_id", "")
+            match_strength: str = okr_match.get("match_strength", "none")
+            okr_tags = []
+            if kr_id:
+                okr_tags = [kr_id]
+            elif match_strength != "none":
+                # 只有强度但没具体 kr_id，按强度标记
+                pass
             topic = DetectedTopic(
                 topic_id=f"feed-{exec_date}-{idx + 1:03d}",
                 title=item.get("title", f"话题{idx + 1}"),
@@ -346,6 +370,8 @@ class TopicDetector:
                 source_chats=all_sources,
                 is_update=item.get("is_update", False),
                 previous_versions=[item["update_of"]] if item.get("update_of") else [],
+                okr_tags=okr_tags,
+                okr_match_strength=match_strength,  # type: ignore[assignment]
             )
             topics.append(topic)
         return topics

@@ -1,3 +1,40 @@
+## v3.19.22 (2026-07-27)
+
+iris-feed OKR 语义匹配 + LLM deadline 实时超时控制 + ASR 独立熔断器。
+
+### 新增功能
+
+- **OKR 语义匹配** (`src/iris/feed/_okr_loader.py`)：从 `SOURCE/01-目标管理` 解析 OKR 文档，注入话题检测 Prompt，LLM 自动匹配话题与 KR，简报模板新增「OKR 关联」章节
+- **LLM deadline 实时超时控制**：`provider.py` 新增 `deadline` 参数，降级链每次模型尝试前检查剩余时间，超出即中止；`service.py` deadline 场景跳过缓存；`set_circuit_breaker()` 支持独立熔断器实例
+- **ASR 独立熔断器 + 超时配置**：`AsrCorrector` 新增 `llm_timeout_ms` 参数（默认 8000ms），通过 `asr_profiles.json` 的 `llm.timeout_ms` 配置；ASR 实时场景使用独立熔断器（threshold=2, reset=30s）；`_shutdown_requested` 安全关闭事件
+- **feed-list OKR 标签语义化**：`feed-list` 命令展示 OKR 标签时自动解析为实际描述
+
+### 版本升级
+
+| 层 | 旧版本 | 新版本 | 理由 |
+|------|:---:|:---:|------|
+| 产品版本 | 3.19.21 | **3.19.22** | OKR 集成 + LLM/ASR 增强 |
+| 协议版本 | 3.12 | **3.12** | 未新增 CLI 命令 |
+
+### 涉及文件
+
+| 文件 | 变更 |
+|------|------|
+| `src/iris/feed/_okr_loader.py` | 新增（OKR 解析） |
+| `src/iris/feed/__init__.py` | 修改（导出 OKRLoader） |
+| `src/iris/feed/_topic_detector.py` | 修改（OKR 上下文注入 + 匹配输出） |
+| `src/iris/feed/_brief_generator.py` | 修改（OKR 关联章节） |
+| `src/iris/feed/feed_pipeline.py` | 修改（接入 OKRLoader） |
+| `src/iris/app/cli/_handlers/_feed.py` | 修改（feed-list OKR 语义化） |
+| `src/iris/llm/provider.py` | 修改（deadline 参数 + 独立熔断器） |
+| `src/iris/llm/service.py` | 修改（deadline 传播 + 缓存旁路） |
+| `src/iris/wiki/asr/corrector.py` | 修改（llm_timeout_ms + shutdown） |
+| `src/iris/app/cli/_handlers/_wiki.py` | 修改（ASR 超时配置 + 独立熔断器） |
+| `pyproject.toml` | 修改（产品版本 3.19.21→3.19.22） |
+| `CLAUDE.md` · `CHANGELOG.md` · `README.md` | 修改（文档更新） |
+
+---
+
 ## v3.19.21 (2026-07-27)
 
 信息汇聚管道 `iris-feed` — 飞书聊天记录自动挖掘话题生成简报。

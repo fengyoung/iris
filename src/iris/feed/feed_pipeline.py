@@ -23,6 +23,7 @@ from iris.feed._cursor_tracker import CursorTracker
 from iris.feed._dispatcher import Dispatcher
 from iris.feed._feishu_bridge import FeishuBridge
 from iris.feed._message_filter import MessageFilter
+from iris.feed._okr_loader import OKRLoader
 from iris.feed._topic_detector import TopicDetector
 from iris.feed._types import PipelineResult
 from iris.feed.feed_config import FeedConfig, FeedConfigManager, load_feed_config
@@ -52,6 +53,7 @@ class FeedPipeline:
         self._config_manager = FeedConfigManager(self._config_dir / "feeds.json")
         self._cursor_tracker = CursorTracker(self._data_dir)
         self._chat_fetcher = ChatFetcher(self._bridge, self._cursor_tracker)
+        self._okr_loader = OKRLoader(source_root=self._source_dir)
 
     @staticmethod
     def _resolve_source_dir(bundle) -> Path:
@@ -132,15 +134,25 @@ class FeedPipeline:
             return PipelineResult.empty("所有消息被过滤，无有效内容")
 
         # ── Step 3: 话题检测 ──
+        okr_context = self._okr_loader.load()
+        okr_prompt_context = okr_context.to_prompt_context() if okr_context else ""
         detector = TopicDetector(
             self._llm,
             brief_dir=self._source_dir / "09-工作简报",
             topic_config=config.topic_config,
+            okr_context=okr_prompt_context,
         )
         topics = detector.detect(filtered)
         logger.info("Step 3: 检测到 %d 个话题", len(topics))
         if not topics:
             return PipelineResult.empty("未检测到有价值话题")
+
+        # Step 3b: OKR 标签解析（将 kr_id 解析为实际描述）
+        if okr_context:
+            for t in topics:
+                resolved = okr_context.resolve_tags(t.okr_tags)
+                # 将 okr_tags 从 ["O1-KR1"] 扩展为 ["O1-KR1: 实际描述"]
+                t.okr_tags = [f"{tag}: {desc}" for tag, desc in resolved.items()]
 
         # ── Step 6: 简报生成 ──
         exec_date = until.strftime("%Y%m%d")

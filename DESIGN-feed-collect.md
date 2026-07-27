@@ -1,6 +1,6 @@
 # 信息汇聚管道 `iris-feed` 技术设计
 
-> 版本：v1.0 · 2026-07-24
+> 版本：v1.1 · 2026-07-27
 
 ---
 
@@ -38,8 +38,8 @@
 │  └──────────┘  └──────────┘  └────┬─────┘       │
 │                                    │              │
 │  ┌──────────┐  ┌──────────┐  ┌────▼─────┐       │
-│  │ OKR      │←│ Doc      │←│ Brief    │        │
-│  │ Matcher  │  │ Extractor│  │ Generator│       │
+│  │ OKR      │←│ Brief    │←│ Topic    │        │
+│  │ Loader   │  │ Generator│  │ Detector │        │
 │  └──────────┘  └──────────┘  └──────────┘       │
 │                                                   │
 │  ┌──────────┐  ┌──────────┐                      │
@@ -209,17 +209,13 @@ src/iris/feed/                      # 新模块
 ├── feed_config.py                  # 配置加载
 ├── _chat_fetcher.py                # 飞书消息获取
 ├── _message_filter.py              # 消息噪音过滤
-├── _topic_detector.py              # 话题检测 + 跨群聚合
-├── _okr_matcher.py                 # OKR 匹配
-├── _doc_extractor.py               # 飞书文档提取与转换
-├── _brief_generator.py             # 话题简报生成
+├── _topic_detector.py              # 话题检测 + 跨群聚合（含 OKR 匹配注入）
+├── _okr_loader.py                  # 从 SOURCE/01-目标管理 加载 OKR（v1.1 新增）
+├── _brief_generator.py             # 话题简报生成（含 OKR 关联章节）
 ├── _dispatcher.py                  # 分发（auto/confirm）
 ├── _cursor_tracker.py              # 游标追踪（增量）
 ├── _feishu_bridge.py               # 飞书接口桥接层
-├── _types.py                       # 类型定义
-└── data/
-    └── templates/
-        └── topic_brief.md.j2        # 简报模板（或直接用 Python f-string）
+└── _types.py                       # 类型定义
 ```
 
 ### 4.2 ChatFetcher — 飞书消息获取
@@ -312,14 +308,24 @@ Step 2：LLM 聚合（按需，控制 token）
   └── 产出：最终话题列表
 ```
 
-**LLM 调用设计**：
+**LLM 调用设计**（v1.1 新增：OKR 上下文注入）：
 
 ```
 Prompt 设计要点：
-- 输入：多组候选话题消息（含来源群名、发言人、时间）
-- 输出：JSON 格式的话题列表
+- 输入：多组候选话题消息（含来源群名、发言人、时间）+ 当前 OKR 目标
+- 输出：JSON 格式的话题列表（含 OKR 匹配结果）
   [
-    {"title": "...", "messages": [msg_id, ...], "summary": "...", "cross_chat": true/false}
+    {
+      "title": "...",
+      "messages": [msg_id, ...],
+      "summary": "...",
+      "cross_chat": true/false,
+      "okr_match": {
+        "kr_id": "O2-KR3",
+        "match_strength": "strong",
+        "reason": "讨论内容与...直接相关"
+      }
+    }
   ]
 - 限制：每批最多 10 组候选话题（避免过长的上下文）
 ```
@@ -352,6 +358,7 @@ class DetectedTopic:
     is_update: bool
     previous_version: str | None
     okr_tags: list[str]
+    okr_match_strength: Literal["strong", "weak", "none"]  # v1.1 新增
 
 class TopicDetector:
     def detect(
@@ -361,43 +368,90 @@ class TopicDetector:
     ) -> list[DetectedTopic]: ...
 ```
 
-### 4.5 OKRMatcher — OKR 匹配
+### 4.5 OKRLoader — OKR 加载与匹配（v1.1 更新）
 
-**文件**：`_okr_matcher.py`
+> 实际实现将 OKR 匹配合并到话题检测阶段，不再单独设 OKRMatcher 模块。
 
-**策略**：
+**文件**：`_okr_loader.py`（v1.1 新增）
 
-```
-第一轮：粗筛（关键词命中，免费）
-  ├── 从飞书 OKR API 获取当前周期的 OKR（项目名 + KR 描述）
-  ├── 构建关键词索引（项目名、KR 关键词、同义词）
-  ├── 话题摘要/消息命中关键词 → 标记候选 OKR
-  └── 产出：{"topic_id": ["AI巡检", ...]}
+**设计变更**：原始设计（v1.0）将 OKR 匹配分为独立模块 + 两轮策略（关键词粗筛 + LLM 精判）。实际实现改为：
 
-第二轮：精判（LLM 判断语义关联度）
-  ├── 仅对粗筛命中的话题执行（节省 token）
-  ├── LLM 判断话题内容与 OKR 的关联程度
-  └── 产出：强关联 / 弱关联 / 不关联
-```
+1. **OKRLoader** 纯加载层：从 `SOURCE/01-目标管理/<年份>/` 加载最新的 OKR Markdown 文件
+2. **LLM 一体检测**：在话题检测 Prompt 中注入 OKR 上下文，LLM 一次完成「话题发现 + OKR 匹配」
+3. **语义化展示**：`feed-list` 命令展示 OKR 标签时自动解析为实际描述
 
-**补充说明**：
-- `strict_match=false` 时，弱关联也保留在 `okr_tags` 中，但标记为弱关联
-- `strict_match=true` 时，仅强关联话题保留标记
-- 未匹配 OKR 但 LLM 判断为有价值的话题 → 归入"其他关注"，不丢弃
+**变更理由**：
+- 减少一次 LLM 调用（topic detection 和 OKR matching 共享同一上下文）
+- OKR 上下文让 LLM 更精准判断话题价值
+- 本地文件加载零 API 成本
 
-**关键接口**：
+**OKR 加载逻辑**：
 
 ```python
-class OKRMatcher:
-    def __init__(self, okr_config: dict):
-        self.okr_data = self._load_okr()  # 从飞书 OKR API 加载
+# 文件扫描规则
+# 1. 在 SOURCE/01-目标管理/<年份>/ 中搜索
+# 2. 文件名含「数据智能部」且不含 OP/双周/团队/个人/检查
+# 3. 按文件名日期降序取最新
+
+# 解析规则
+# 1. 去掉 frontmatter
+# 2. 提取 ## O<数字>：标题  → Objective
+# 3. 提取 ### KR<数字>：标题  → KR（含 Owner 字段）
+# 4. KR ID 拼接为 "O1-KR1" 格式
+```
+
+**话题检测 Prompt 注入**：
+
+```
+## 当前 OKR 目标
+- O1：图验技术向纵深攻坚…
+  - O1-KR1：【验成色】拍照3.0主观项检测…
+  - O1-KR2：【拓品类】多品类复用技术基座…
+
+## 任务
+6. **匹配 OKR**：判断话题内容与哪个 OKR/KR 相关，给出匹配强度
+
+## 输出格式
+"okr_match": {
+  "kr_id": "O2-KR3",
+  "match_strength": "strong",
+  "reason": "讨论内容与..."
+}
+```
+
+**关键接口**（实际实现）：
+
+```python
+@dataclass
+class KR:
+    kr_id: str          # "O1-KR1"
+    title: str          # "【验成色】拍照3.0主观项检测…"
+    short_title: str    # "【验成色】拍照3.0主观项检测"
+    owner: str = ""
+    content: str = ""   # 完整内容
+
+@dataclass  
+class Objective:
+    obj_id: str         # "O1"
+    title: str          # "图验技术向纵深攻坚…"
+    krs: Dict[str, KR]
+
+class OKRDocument:
+    objectives: Dict[str, Objective]
+    source_file: str
     
-    def match(
-        self,
-        topics: list[DetectedTopic],
-        llm_service: LLMService,
-    ) -> list[DetectedTopic]:
-        """原地修改 topic.okr_tags"""
+    def resolve_tags(self, tags: List[str]) -> Dict[str, str]:
+        """将 ["O1-KR1"] 解析为 {"O1-KR1": "【验成色】拍照3.0主观项检测…"}"""
+    
+    def to_prompt_context(self) -> str:
+        """格式化为 LLM Prompt 注入文本"""
+
+class OKRLoader:
+    def load(self) -> Optional[OKRDocument]:
+        """加载最新 OKR 文档（带内存缓存）"""
+    
+    def resolve_tags(self, tags: List[str]) -> Dict[str, str]:
+        """解析标签为实际描述"""
 ```
 
 ### 4.6 DocExtractor — 飞书文档提取与转换
@@ -528,7 +582,13 @@ previous_versions:
 
 ## 相关文档
 
-{doc_links_section}
+{doc_links}
+
+---
+
+## OKR 关联
+
+{okr_section}
 
 ---
 
@@ -727,32 +787,27 @@ class FeedPipeline:
         filtered = filter_.filter(raw_messages)
         self.logger.info("过滤后剩余 %d 条", sum(len(v) for v in filtered.values()))
         
-        # Step 3 - 话题检测 + LLM 聚合
-        detector = TopicDetector(self.bundle)
-        topics = detector.detect(filtered, self.bundle.llm_service)
-        self.logger.info("检测到 %d 个话题", len(topics))
-        
-        # Step 4 - OKR 匹配
-        if config.okr_mapping.get("enabled", True):
-            matcher = OKRMatcher(config.okr_mapping)
-            topics = matcher.match(topics, self.bundle.llm_service)
-            okr_count = sum(1 for t in topics if t.okr_tags)
-            self.logger.info("其中 %d 个话题关联了 OKR", okr_count)
-        
-        # Step 5 - 文档提取与转换
-        extractor = DocExtractor(self.bundle)
-        converted_docs = extractor.extract(
-            [m for ms in filtered.values() for m in ms]
+        # Step 3 - 话题检测 + OKR 匹配（合并一步）
+        okr_context = OKRLoader(source_root=self._source_dir).load()
+        detector = TopicDetector(
+            self.bundle.llm_service,
+            brief_dir=...,
+            okr_context=okr_context.to_prompt_context() if okr_context else "",
         )
-        self.logger.info("转换了 %d 篇文档", len(converted_docs))
+        topics = detector.detect(filtered, ...)
+        # Step 3b - OKR 标签解析（将 kr_id 展开为实际描述）
+        if okr_context:
+            for t in topics:
+                t.okr_tags = okr_context.resolve_tags(t.okr_tags)
+        self.logger.info("检测到 %d 个话题（含 OKR 匹配）", len(topics))
         
-        # Step 6 - 生成简报
+        # Step 4 - 简报生成（v1.1: 简报模板含 OKR 关联章节）
         exec_date = (args.until or datetime.now()).strftime("%Y%m%d")
         generator = BriefGenerator(self._get_brief_dir(exec_date))
         brief_files = generator.generate(topics, converted_docs, exec_date)
         self.logger.info("生成了 %d 份简报", len(brief_files))
         
-        # Step 7 - 分发
+        # Step 5 - 分发
         dispatcher = Dispatcher(self.bundle)
         result = dispatcher.dispatch(topics, brief_files)
         self.logger.info(
@@ -769,9 +824,9 @@ class FeedPipeline:
 | 异常场景 | 处理方式 |
 |---------|---------|
 | 飞书 API 超时/限流 | 重试 1 次（指数退避），跳过该会话继续处理其他会话 |
-| OKR API 不可用 | 降级，跳过 OKR 匹配阶段，话题归入"其他关注" |
+| OKR 文件不存在 | 降级，跳过 OKR 上下文注入，话题不关联 OKR 标签 |
 | 文档转换失败 | 记录日志，在简报中标记为「文档转换失败，请手动处理」 |
-| LLM 调用失败 | 降级到规则聚合（不退化为完全无话题） |
+| LLM 调用失败 | 降级到规则聚合（不退化为完全无话题）；v1.1 新增 deadline 超时控制 |
 | 某步骤局部异常 | 不中断整个 Pipeline，跳过该话题继续处理 |
 
 ### 5.3 执行日志
@@ -950,7 +1005,7 @@ class PipelineResult:
 ### Phase 2 — 功能补齐（预计 2-3 天）
 
 - `watch_singles` 单聊消息获取
-- OKR 数据加载 + 匹配
+- ~~OKR 数据加载 + 匹配~~ ✅ **v1.1 已完成**（变更为 OKRLoader + LLM 一体检测）
 - 文档链接提取与转换
 - 跨话题聚合增强
 
@@ -993,18 +1048,27 @@ class PipelineResult:
 | 5 | OKR 加载策略 | 每次 `feed-collect` **重新扫描本地**（无缓存问题，读取本地文件无 API 成本） | 用户确认 |
 | 6 | 确认卡片接收人 | 控制台输出 + CLI 交互（Phase 1），后续 bot 推送到用户飞书单聊（Phase 3） | 用户确认 |
 
-### OKR 本地加载方式
+### OKR 本地加载方式（v1.1 已实现）
+
+> 实现文件：`src/iris/feed/_okr_loader.py`
 
 ```
 SOURCE/01-目标管理/YYYY/
-  └── YYYYMMDD-{部门}-{负责人}-{周期}-OKR.md
+  └── YYYYMMDD-数据智能部-冯扬-2026年Q3-OKR.md
 ```
 
-加载逻辑：
-1. 扫描 `SOURCE/01-目标管理/<当前年份>/` 目录
-2. 按文件名日期排序，取最新的文件
-3. 如果是用户自己的 OKR（文件名含"冯扬"），优先加载
-4. 提取 O 标题 + KR 标题 + KR 描述 → 构建 OKR 匹配索引
+加载逻辑（`_find_latest_okr_file`）：
+1. 扫描 `SOURCE/01-目标管理/<年份>/` 目录（按年份降序）
+2. 文件名必须含「数据智能部」关键词
+3. 排除含 OP/双周/周报/团队/个人/检查 的无关文件
+4. 按文件名降序取最新
+
+解析逻辑（`_parse_okr_file`）：
+- 去掉 frontmatter
+- 正则提取 `## O<数字>：标题` → Objective
+- 正则提取 `### KR<数字>：标题` → KR（含 Owner）
+- KR ID 拼接为 "O1-KR1" 格式
+- 支持 `short_title`（提取 `【】` 内标记）
 
 当前最新文件：`20260715-数据智能部+质检研发-冯扬-2026年Q3-OKR.md`
 
