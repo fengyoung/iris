@@ -1,4 +1,4 @@
-# Iris 3.19.20 — 项目执行说明
+# Iris 3.19.21 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -123,8 +123,8 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.19.20 | 软件发布版本 |
-| **协议版本** | `src/iris/__init__.py` | 3.11 | CLI 命令集 / agent-spec 格式 |
+| **产品版本** | `pyproject.toml` | 3.19.21 | 软件发布版本 |
+| **协议版本** | `src/iris/__init__.py` | 3.12 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
 > 只有真正发生变化的层才递增版本号。
@@ -141,7 +141,7 @@ Python 3.9+ · OpenAI 兼容 LLM API（DeepSeek / 百炼 / Qwen）· Pydantic v2
 
 ```
 iris3/
-├── src/iris/          # 20 模块（见下）
+├── src/iris/          # 21 模块（见下）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
 ├── tests/             # 1,979 用例，113 文件
@@ -156,7 +156,7 @@ iris3/
 └── pyproject.toml · README · CLAUDE · CHANGELOG.md
 ```
 
-**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配/共享线程池）· `memory`（记忆 6 子模块：含 `session_miner.py` 会话模式挖掘）· `qa`（检索问答+图谱注入+`memory_updater.py` 双通道记忆提取）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF+BM25缓存）· `wiki`（Wiki 体系 + backlink/graph + ASR 校正引擎，最大模块；`wiki/asr/` 含 corrector/coverage/feedback/prompt_optimizer/_progress 等 10 个子模块）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估 + 引用解析）· `complex_input`（多模态三阶段：图片/PDF/DOCX/VIDEO）· `output`（格式化+DOCX）· `app/cli`（49 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py / shared.py）· `trello`（看板）。
+**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配/共享线程池）· `memory`（记忆 6 子模块：含 `session_miner.py` 会话模式挖掘）· `qa`（检索问答+图谱注入+`memory_updater.py` 双通道记忆提取）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF+BM25缓存）· `wiki`（Wiki 体系 + backlink/graph + ASR 校正引擎，最大模块；`wiki/asr/` 含 corrector/coverage/feedback/prompt_optimizer/_progress 等 10 个子模块）· `feed`（信息汇聚管道：飞书聊天记录→话题检测→简报生成，11 文件 / 9 命令）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估 + 引用解析）· `complex_input`（多模态三阶段：图片/PDF/DOCX/VIDEO）· `output`（格式化+DOCX）· `app/cli`（58 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py / shared.py）· `trello`（看板）。
 
 ---
 
@@ -168,7 +168,7 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.19.20 (2026-07-24)** — ASR 反馈反向优化引擎：`feedback.jsonl` 驱动词典自动进化（僵尸规则淘汰 + LLM 发现提升为词典 + 热词补充，≥50 条触发），`build-asr-prompt` 集成自动优化；LLM 调用失败日志增强。新增 1 测试文件 +31 用例（1,948→1,979）。v3.19.19 测试覆盖全面优化（P1 三模块接近全绿 + P2 generator 增强，+90 用例）。v3.19.18 知识库质量全面加固 + 代码质量全面加固。
+**当前 v3.19.21 (2026-07-27)** — 信息汇聚管道 `iris-feed`：新增 `src/iris/feed/` 模块（11 文件，~2,200 行），9 个 CLI 命令（`feed-setup`/`feed-list`/`feed-add`/`feed-remove`/`feed-config`/`feed-collect`/`feed-pending`/`feed-confirm`/`feed-ignore`），从飞书聊天记录自动挖掘话题生成简报归档到 SOURCE。配置管理支持交互式向导 + 命令行管理，飞书 Bot 单聊推送通道已建通。协议版本 3.11→3.12。v3.19.20 ASR 反馈反向优化引擎。
 
 > v3.19.10 (2026-07-21)：ASR 引擎全面质量加固（P0~P3 十四项）：P0 Prompt `protected_terms` 字符串截断修复 / P1 热键校验 + 超时 + 参数化 / P2 预检查 + warning + 校验 / P3 Aho-Corasick 优化 + worker 动态 + 单字符代码分档 + 重试（8 文件，+313 / -114 行）
 

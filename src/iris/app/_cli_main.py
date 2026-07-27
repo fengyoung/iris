@@ -35,6 +35,10 @@ COMMANDS = [
     # ── 委托命令 ──
     "trello", "extract-weekly-reports", "extract-travel-invoice",
     "sync-memory", "feishu-doc-convert", "chat-digest",
+    # ── 信息汇聚 ──
+    "feed-setup", "feed-list", "feed-add", "feed-remove",
+    "feed-config", "feed-collect", "feed-pending",
+    "feed-confirm", "feed-ignore",
 ]
 
 _DELEGATED_SCRIPTS = {
@@ -161,7 +165,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--group", default="", help="chat-digest 群聊名称")
     parser.add_argument("--user", default="", help="chat-digest 用户名称（单聊）")
     parser.add_argument("--range", default="", help="chat-digest 时间范围（天数或 ISO 开始~结束）")
-    parser.add_argument("--interactive", action="store_true", help="chat-digest 交互选择模式")
+    parser.add_argument("--interactive", action="store_true", help="chat-digest / feed-setup 交互选择模式")
+    # 信息汇聚 feed
+    parser.add_argument("--chat", default="", help="feed-add/remove/config/collect 群聊名或 ID")
+    parser.add_argument("--chat-type", default="group", choices=["group", "single"],
+                        help="feed-add 会话类型（group/single）")
+    parser.add_argument("--tags", default="", help="feed-add/config OKR 标签（逗号分隔）")
+    parser.add_argument("--import-mode", default="auto_import", choices=["auto_import", "confirm", "all"],
+                        help="feed-add/config/collect 导入模式")
+    parser.add_argument("--topic-id", default="", help="feed-confirm/ignore 话题 ID")
+    parser.add_argument("--all", action="store_true", dest="all_", help="feed-confirm 批量确认全部")
+    parser.add_argument("--show", action="store_true", help="feed-config 显示完整配置")
     return parser
 
 

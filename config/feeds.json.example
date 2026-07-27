@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "_comment": "这是示例配置，真实配置在 feeds.json 中（gitignored）。请勿在此文件中填写真实的群聊 ID。",
+  "watch_chats": [
+    {
+      "id": "oc_xxxxxxxxxxxxxxxxxxxxx",
+      "name": "示例群聊",
+      "type": "group",
+      "mode": "auto_import",
+      "okr_tags": ["AI巡检"]
+    }
+  ],
+  "topic_config": {
+    "default_range_days": 3,
+    "min_msg_length": 10,
+    "topic_min_messages": 2,
+    "max_topics_per_run": 30,
+    "time_window_minutes": 30
+  },
+  "okr_mapping": {
+    "enabled": true,
+    "strict_match": false
+  }
+}

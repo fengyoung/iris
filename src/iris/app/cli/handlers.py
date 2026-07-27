@@ -50,6 +50,18 @@ from iris.app.cli._handlers._content import (
     handle_process,
     _expand_file_list,
 )
+from iris.app.cli._handlers._feed import (
+    FEED_HANDLERS,
+    handle_feed_setup,
+    handle_feed_list,
+    handle_feed_add,
+    handle_feed_remove,
+    handle_feed_config,
+    handle_feed_collect,
+    handle_feed_pending,
+    handle_feed_confirm,
+    handle_feed_ignore,
+)
 from iris.app.cli._handlers._system import (
     SYSTEM_HANDLERS,
     handle_daily_start,
@@ -83,3 +95,4 @@ COMMAND_HANDLERS.update(WIKI_HANDLERS)
 COMMAND_HANDLERS.update(DATA_HANDLERS)
 COMMAND_HANDLERS.update(CONTENT_HANDLERS)
 COMMAND_HANDLERS.update(SYSTEM_HANDLERS)
+COMMAND_HANDLERS.update(FEED_HANDLERS)

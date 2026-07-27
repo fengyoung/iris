@@ -1,3 +1,55 @@
+## v3.19.21 (2026-07-27)
+
+信息汇聚管道 `iris-feed` — 飞书聊天记录自动挖掘话题生成简报。
+
+### 新增功能
+
+- **信息汇聚管道** (`src/iris/feed/`，11 文件，~2,200 行)：完整的信息汇聚 Pipeline
+  - `FeedPipeline` — 7 步编排（消息获取→噪音过滤→话题检测→简报生成→分发）
+  - `ChatFetcher` — 遍历关注会话拉取飞书消息，支持增量游标追踪
+  - `MessageFilter` — 7 条规则噪音过滤（红包/接龙/过短/系统消息/纯转发）
+  - `TopicDetector` — 两步话题检测（30min 规则窗口分割 + LLM 跨群聚合）
+  - `BriefGenerator` — 话题简报 Markdown 生成，归档到 `SOURCE/09-工作简报/YYYYMM/`
+  - `Dispatcher` — 分发器（auto_import 直接入库 / confirm 待确认队列）
+  - `FeishuBridge` — 飞书 API 桥接层（消息搜索/群聊发现/Bot 单聊推送）
+  - `CursorTracker` — 分群游标追踪（支持增量拉取）
+- **9 个 CLI 命令**：`feed-setup`（交互式配置向导，自动发现群聊）· `feed-list`/`feed-add`/`feed-remove`/`feed-config`（配置管理）· `feed-collect`（主命令：执行信息汇聚）· `feed-pending`/`feed-confirm`/`feed-ignore`（待确认话题管理）
+- **飞书 Bot 单聊推送通道**：Bot 直接发送单聊消息通知（`+messages-send --as bot --user-id`），无需建群
+- **配置体系**：`config/feeds.json`（运行时，gitignored）· `config/feeds.json.example`（版本控制示例）
+
+### 版本升级
+
+| 层 | 旧版本 | 新版本 | 理由 |
+|------|:---:|:---:|------|
+| 产品版本 | 3.19.20 | **3.19.21** | 新增 feed 模块 + CLI 命令 |
+| 协议版本 | 3.11 | **3.12** | CLI 命令集新增 9 个命令 |
+
+### 涉及文件
+
+| 文件 | 变更 |
+|------|------|
+| `src/iris/feed/__init__.py` | 新增 |
+| `src/iris/feed/_types.py` | 新增（7 类型定义） |
+| `src/iris/feed/feed_config.py` | 新增（配置加载/管理） |
+| `src/iris/feed/_feishu_bridge.py` | 新增（飞书 API 桥接） |
+| `src/iris/feed/_cursor_tracker.py` | 新增（游标追踪） |
+| `src/iris/feed/_chat_fetcher.py` | 新增（消息获取） |
+| `src/iris/feed/_message_filter.py` | 新增（噪音过滤） |
+| `src/iris/feed/_topic_detector.py` | 新增（话题检测） |
+| `src/iris/feed/_brief_generator.py` | 新增（简报生成） |
+| `src/iris/feed/_dispatcher.py` | 新增（分发） |
+| `src/iris/feed/feed_pipeline.py` | 新增（Pipeline 编排） |
+| `src/iris/app/cli/_handlers/_feed.py` | 新增（CLI 处理器） |
+| `config/feeds.json.example` | 新增（配置示例） |
+| `src/iris/app/cli/handlers.py` | 修改（注册 FEED_HANDLERS） |
+| `src/iris/app/_cli_main.py` | 修改（注册 9 命令 + CLI 参数） |
+| `src/iris/__init__.py` | 修改（协议版本 3.11→3.12） |
+| `pyproject.toml` | 修改（产品版本 3.19.20→3.19.21） |
+| `CLAUDE.md` · `CHANGELOG.md` | 修改（文档更新） |
+| `DESIGN-feed-collect.md` | 新增（技术设计文档） |
+
+---
+
 ## v3.19.20 (2026-07-24)
 
 ASR 反馈反向优化引擎 — feedback.jsonl 驱动词典自动进化。
