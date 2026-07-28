@@ -92,12 +92,14 @@ def resolve_dedup_path(bundle: ConfigBundle, config_key: str, fallback: str) -> 
 
 
 def load_dedup_index(path: Path) -> Dict[str, Any]:
-    """加载排重索引。"""
+    """加载排重索引（FileLock 保护并发读取）。"""
+    from iris.core.locks import FileLock
     if path.exists():
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            pass
+        with FileLock(path):
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                pass
     return {"version": "1.0", "items": []}
 
 

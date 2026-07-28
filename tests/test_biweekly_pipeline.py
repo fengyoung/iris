@@ -35,11 +35,11 @@ class TestResolveSourceRoot:
 
     def test_enabled_existing_path(self, tmp_path):
         """启用的数据源且路径存在时返回路径。"""
-        from iris.config.loader import ConfigBundle
+        from iris.config.loader import ConfigBundle, make_config_bundle
 
         source_dir = tmp_path / "SOURCE"
         source_dir.mkdir()
-        bundle = ConfigBundle(
+        bundle = make_config_bundle(
             root=tmp_path,
             app={},
             data_source={
@@ -54,11 +54,11 @@ class TestResolveSourceRoot:
 
     def test_disabled_source(self, tmp_path):
         """已禁用数据源返回 None。"""
-        from iris.config.loader import ConfigBundle
+        from iris.config.loader import ConfigBundle, make_config_bundle
 
         source_dir = tmp_path / "SOURCE"
         source_dir.mkdir()
-        bundle = ConfigBundle(
+        bundle = make_config_bundle(
             root=tmp_path,
             app={},
             data_source={
@@ -73,9 +73,9 @@ class TestResolveSourceRoot:
 
     def test_nonexistent_path(self, tmp_path):
         """路径不存在返回 None。"""
-        from iris.config.loader import ConfigBundle
+        from iris.config.loader import ConfigBundle, make_config_bundle
 
-        bundle = ConfigBundle(
+        bundle = make_config_bundle(
             root=tmp_path,
             app={},
             data_source={

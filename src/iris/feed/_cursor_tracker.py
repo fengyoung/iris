@@ -34,8 +34,10 @@ class CursorTracker:
 
     def _save(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self._path, "w", encoding="utf-8") as f:
-            json.dump(self._data, f, ensure_ascii=False, indent=2)
+        from iris.core.locks import FileLock
+        with FileLock(self._path):
+            from iris.utils.shared import atomic_write_json
+            atomic_write_json(self._path, self._data)
 
     def get_cursor(self, chat_id: str) -> Optional[str]:
         """获取上次消息 ID（用于增量拉取）。"""

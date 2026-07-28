@@ -556,11 +556,6 @@ def _join_url(base_url: str, suffix: str) -> str:
     return base_url.rstrip("/") + suffix
 
 
-def _is_deepseek_thinking_model(model: str) -> bool:
-    """DeepSeek v4 系列模型默认开启 thinking（CoT 推理），需显式关闭。"""
-    return "deepseek-v4" in model.lower()
-
-
 def _extract_chat_completions_text(payload: Dict[str, Any]) -> str:
     choices = payload.get("choices", [])
     if not choices:

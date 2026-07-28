@@ -109,10 +109,12 @@ def load_feed_config(config_path: Path) -> FeedConfig:
 
 
 def save_feed_config(config: FeedConfig, config_path: Path) -> None:
-    """保存配置到 JSON 文件。"""
+    """保存配置到 JSON 文件（原子写入 + FileLock 保护）。"""
     config_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(config.to_dict(), f, ensure_ascii=False, indent=2)
+    from iris.core.locks import FileLock
+    with FileLock(config_path):
+        from iris.utils.shared import atomic_write_json
+        atomic_write_json(config_path, config.to_dict())
     logger.info("配置已保存到 %s", config_path)
 
 
@@ -223,8 +225,10 @@ class FeedConfigManager:
             return json.load(f)
 
     def save_pending(self, data_dir: Path, pending: List[Dict[str, Any]]) -> None:
-        """保存待确认队列。"""
+        """保存待确认队列（原子写入 + FileLock 保护）。"""
         path = self.get_pending_queue_path(data_dir)
         data_dir.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(pending, f, ensure_ascii=False, indent=2)
+        from iris.core.locks import FileLock
+        with FileLock(path):
+            from iris.utils.shared import atomic_write_json
+            atomic_write_json(path, pending)

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import re
 import subprocess
+import time
 from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,8 +51,7 @@ class FeishuClient:
         Raises:
             FeishuClientError: 在非零退出码且无法解析 JSON 时，或重试耗尽后
         """
-        import random as _random
-        import time as _time
+
 
         cmd = [self.LARK_CLI] + args + ["--as", self._as, "--format", "json"]
         last_error = None
@@ -96,13 +97,13 @@ class FeishuClient:
             except subprocess.TimeoutExpired as e:
                 last_error = e
                 if attempt < retries - 1:
-                    _time.sleep((2 ** attempt) + _random.uniform(0, 0.5))
+                    time.sleep((2 ** attempt) + random.uniform(0, 0.5))
                     continue
             except Exception as e:
                 last_error = e
                 logger.warning("lark-cli 调用异常 (attempt %d/%d): %s", attempt + 1, retries, e)
                 if attempt < retries - 1:
-                    _time.sleep((2 ** attempt) + _random.uniform(0, 0.5))
+                    time.sleep((2 ** attempt) + random.uniform(0, 0.5))
                     continue
             finally:
                 # 确保无孤儿进程

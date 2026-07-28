@@ -105,21 +105,17 @@ class EnhancedRetriever:
     _CACHE_MAXSIZE = 32
     _CACHE_TTL = 60
 
-    def __init__(self, config: ConfigBundle):  # 渐进迁移到 ConfigBundleV2：Pydantic .app.retrieval 属性访问
+    def __init__(self, config: ConfigBundle):
         self._config = config
         self._local = LocalRetriever(config)
         self._planner = QueryPlanner()
-        # 兼容新旧两种访问方式：优先 Pydantic 属性，fallback dict 访问
+        # ConfigBundle 现已统一为 ConfigBundleV2（Pydantic v2），支持属性 + dict 双模式访问
         retrieval_cfg: dict = {}
         try:
-            from iris.config.models import ConfigBundleV2
-            if isinstance(config, ConfigBundleV2) and config.app:
-                retrieval_cfg = config.app.app.get("retrieval", {})
-        except Exception as exc:
-            logger.debug("ConfigBundleV2 retrieval 配置读取失败，回退 dict 路径: %s", exc)
-        if not retrieval_cfg:
-            retrieval_cfg = (config.app or {}).get("retrieval", {}) if isinstance(config.app, dict) else {}
-        self._retrieval_cfg = retrieval_cfg  # 统一在 __init__ 解析，search() 复用
+            retrieval_cfg = config.app.get("retrieval", {}) if config.app else {}
+        except Exception:
+            retrieval_cfg = {}
+        self._retrieval_cfg = retrieval_cfg
         extra_synonyms = retrieval_cfg.get("synonym_extensions")
         self._rewriter = QueryRewriter(extra_synonyms=extra_synonyms)
         self._llm = LLMService(config)

@@ -1,6 +1,6 @@
 [project]
 name = "iris"
-version = "3.19.22"
+version = "3.19.23"
 description = "工作知识助手 — 个人知识库与飞书团队知识库集成"
 requires-python = ">=3.9"
 license = {text = "MIT"}
@@ -58,7 +58,7 @@ exclude_lines = [
     "raise NotImplementedError",
 ]
 show_missing = true
-fail_under = 53
+fail_under = 55
 
 [tool.ruff.lint]
 ignore = ["BLE001"]
@@ -76,4 +76,3 @@ ignore = ["BLE001"]
 "src/iris/retrieval/vector_index.py" = ["E402"]
 "src/iris/wiki/_relation_extractor.py" = ["E402"]
 "src/iris/wiki/navigation.py" = ["E402"]
-"src/iris/wiki/term_extractor.py" = ["E402"]

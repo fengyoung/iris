@@ -100,22 +100,65 @@ class AccuracyVerifier:
 
     def verify(self, entries: List[ReferenceEntry],
                wiki_title: str = "",
-               wiki_content: str = "") -> List[AccuracyVerdict]:
+               wiki_content: str = "",
+               max_workers: int = 5) -> List[AccuracyVerdict]:
         """校验一组引用。
 
         对于有描述内容的引用，直接校验描述与源文档的一致性。
         对于描述为空的引用，尝试页面级抽样校验（将 Wiki 页面内容与源文档对比）。
+
+        Args:
+            max_workers: 并发 LLM 调用数（默认 5，设为 1 恢复串行）
         """
-        verdicts = []
-        for entry in entries:
-            verdict = self._verify_one(entry)
-            # 对于描述为空导致未验证的，尝试页面级校验
-            if verdict.verdict == "unverifiable" and "描述为空" in verdict.detail:
-                if wiki_content and self._has_relevant_wiki_content(wiki_content, entry):
-                    page_verdict = self._verify_page_level(entry, wiki_title, wiki_content)
-                    if page_verdict.verdict in ("consistent", "inconsistent"):
-                        verdict = page_verdict
-            verdicts.append(verdict)
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        if max_workers <= 1 or len(entries) <= 1:
+            # 串行路径（保持原有调试语义）
+            verdicts: List[AccuracyVerdict] = []
+            for entry in entries:
+                verdict = self._verify_one(entry)
+                if verdict.verdict == "unverifiable" and "描述为空" in verdict.detail:
+                    if wiki_content and self._has_relevant_wiki_content(wiki_content, entry):
+                        page_verdict = self._verify_page_level(entry, wiki_title, wiki_content)
+                        if page_verdict.verdict in ("consistent", "inconsistent"):
+                            verdict = page_verdict
+                verdicts.append(verdict)
+            return verdicts
+
+        # 并发路径：每批 max_workers 个引用同时调用 LLM
+        verdicts: List[AccuracyVerdict] = []
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_idx: dict = {}
+            for i, entry in enumerate(entries):
+                future = executor.submit(self._verify_one, entry)
+                future_to_idx[future] = i
+
+            # 按原始索引收集结果
+            results: dict[int, AccuracyVerdict] = {}
+            for future in as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                try:
+                    results[idx] = future.result()
+                except Exception as exc:
+                    import logging
+                    _logger = logging.getLogger(__name__)
+                    _logger.warning("引用校验异常 [%s]: %s", entries[idx].source_path, exc)
+                    results[idx] = AccuracyVerdict(
+                        reference=entries[idx],
+                        verdict="error",
+                        detail=f"校验异常: {exc}",
+                    )
+
+            # 按原始顺序 + 页面级校验兜底
+            for i, entry in enumerate(entries):
+                verdict = results[i]
+                if verdict.verdict == "unverifiable" and "描述为空" in verdict.detail:
+                    if wiki_content and self._has_relevant_wiki_content(wiki_content, entry):
+                        page_verdict = self._verify_page_level(entry, wiki_title, wiki_content)
+                        if page_verdict.verdict in ("consistent", "inconsistent"):
+                            verdict = page_verdict
+                verdicts.append(verdict)
+
         return verdicts
 
     def _has_relevant_wiki_content(self, wiki_content: str, entry: ReferenceEntry) -> bool:

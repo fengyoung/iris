@@ -479,11 +479,18 @@ def handle_usage_stats(args, bundle, logger) -> int:
     else:
         rows = tracker.stats(by=by, model=model_filter, since=since)
 
-    if args.pretty:
-        if not rows:
+    if not rows:
+        if args.pretty:
             print("暂无用量数据（尚未发生任何 LLM 调用，或数据库路径有误）。")
             return 0
+        _emit_output("usage-stats", {
+            "by": by, "model_filter": model_filter, "since": since,
+            "cost": show_cost, "currency": None, "unpriced_models": None,
+            "rows": [],
+        }, pretty=False)
+        return 0
 
+    if args.pretty:
         period_label = {"day": "日期", "week": "周", "month": "月份", "year": "年份"}.get(by, by)
         cost_col = f"{'估算费用':>12}" if show_cost else ""
         header = f"{period_label:<14} {'调用次数':>8} {'输入Token':>11} {'输出Token':>11} {'合计Token':>11}{cost_col}"

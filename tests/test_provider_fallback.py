@@ -54,9 +54,9 @@ class TestFallbackLoop:
 
     def _make_provider(self, tmp_path):
         from iris.llm.provider import EnvironmentConfiguredLLMProvider
-        from iris.config.loader import ConfigBundle
+        from iris.config.loader import ConfigBundle, make_config_bundle
 
-        config = ConfigBundle(
+        config = make_config_bundle(
             root=Path("/tmp"),
             app={"logging": {"log_to_file": False}, "paths": {"log_dir": "logs"}},
             data_source={},

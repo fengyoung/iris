@@ -14,7 +14,7 @@ from iris.wiki.asr.hotwords import (
     hotwords_to_terms,
     _HOTWORD_BATCH_SIZE,
 )
-from iris.wiki.term_extractor import AsrTerm
+from iris.wiki.asr import AsrTerm
 
 
 def _make_page(title, page_type, body="", summary=""):

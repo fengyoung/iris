@@ -133,10 +133,12 @@ def _fmt_process(p: Dict[str, Any]) -> str:
     lines = ["## 复杂输入处理"]
     _add_kv(lines, "查询", p.get("query", ""))
     _add_kv(lines, "是否为复杂输入", p.get("is_complex", False))
-    if p.get("stage1_output"):
-        lines.append(f"\n阶段 1（理解）：\n{p['stage1_output'][:500]}")
+    if p.get("stage1_prompt"):
+        lines.append(f"\n阶段 1（指令生成）：\n{p['stage1_prompt'][:500]}")
     if p.get("stage2_output"):
-        lines.append(f"\n阶段 2（生成）：\n{p['stage2_output'][:1000]}")
+        lines.append(f"\n阶段 2（多模态理解）：\n{p['stage2_output'][:1000]}")
+    if p.get("stage3_output"):
+        lines.append(f"\n阶段 3（整合润色）：\n{p['stage3_output'][:1000]}")
     return "\n".join(lines)
 
 

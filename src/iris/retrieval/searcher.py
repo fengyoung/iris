@@ -73,6 +73,10 @@ class LocalRetriever:
         self._chunks: List[ChunkRecord] = []
         self._loaded = False
         self._by_source: Dict[str, List[ChunkRecord]] = {}
+        # BM25 参数（可通过 app.json retrieval.bm25 配置）
+        bm25_cfg = self._config.app.get("retrieval", {}).get("bm25", {}) if self._config.app else {}
+        self._bm25_k1 = float(bm25_cfg.get("k1", _BM25_K1))
+        self._bm25_b = float(bm25_cfg.get("b", _BM25_B))
         # 全局 BM25 统计量（_ensure_loaded 后填充）
         self._total_docs: int = 0
         self._avg_doc_len: float = 0.0
@@ -90,7 +94,9 @@ class LocalRetriever:
                                           total_docs=self._total_docs,
                                           avg_doc_len=self._avg_doc_len,
                                           df=self._df,
-                                          query_plan=query_plan)
+                                          query_plan=query_plan,
+                                          bm25_k1=self._bm25_k1,
+                                          bm25_b=self._bm25_b)
             if score <= 0:
                 continue
             explanation = f"BM25 score={score:.2f}"
@@ -205,7 +211,8 @@ class LocalRetriever:
 def _score_chunk(query: str, query_tokens: List[str], chunk: ChunkRecord,
                  *, total_docs: int = 0, avg_doc_len: float = 0.0,
                  df: Dict[str, int] | None = None,
-                 query_plan: QueryPlan | None = None) -> Tuple[float, List[str]]:
+                 query_plan: QueryPlan | None = None,
+                 bm25_k1: float = _BM25_K1, bm25_b: float = _BM25_B) -> Tuple[float, List[str]]:
     title_lower = chunk.title.lower()
     section_lower = " ".join(chunk.section_path).lower()
     query_lower = query.lower().strip()
@@ -272,8 +279,8 @@ def _score_chunk(query: str, query_tokens: List[str], chunk: ChunkRecord,
             dft = df_map.get(qt, _BM25_OOV_DF)
             # 对未登录词使用平缓 IDF（等价于出现在 0 个文档中）
             idf = math.log((N - dft + 0.5) / (max(dft, 1) + 0.5) + 1.0)
-            norm = 1 - _BM25_B + _BM25_B * doc_len / avgdl
-            bm25 = idf * (tf * (_BM25_K1 + 1)) / (tf + _BM25_K1 * norm)
+            norm = 1 - bm25_b + bm25_b * doc_len / avgdl
+            bm25 = idf * (tf * (bm25_k1 + 1)) / (tf + bm25_k1 * norm)
             score += bm25
             if qt not in matched:
                 matched.append(qt)

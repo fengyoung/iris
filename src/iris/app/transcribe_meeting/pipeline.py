@@ -59,7 +59,7 @@ class TranscribeMeetingPipeline:
             source_type = "text"
 
         date_part = stem[:8] if len(stem) >= 8 and stem[:8].isdigit() else ""
-        date_part if date_part else time.strftime("%Y%m%d")
+        date_part = date_part if date_part else time.strftime("%Y%m%d")
         meeting_type, meeting_topic = self._parse_filename(stem, date_part)
         print(f"[0/3] 识别会议类型={meeting_type}, 主题={meeting_topic}", file=sys.stderr)
 

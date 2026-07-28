@@ -93,11 +93,12 @@ class PdfAdapter:
         if not path.exists():
             raise PdfAdapterError(f"PDF 文件不存在: {path}")
 
-        doc = fitz.open(str(path))
-        total_pages = len(doc)
-        errors: List[str] = []
-
+        doc = None
         try:
+            doc = fitz.open(str(path))
+            total_pages = len(doc)
+            errors: List[str] = []
+
             # ── 1. 提取全部页面文字 ──────────────────────────
             text_parts: List[str] = []
             for page_idx in range(total_pages):
@@ -145,7 +146,11 @@ class PdfAdapter:
                 error=error_msg,
             )
         finally:
-            doc.close()
+            if doc is not None:
+                try:
+                    doc.close()
+                except Exception:
+                    pass
 
     def extract_text_only(self, pdf_path: str | Path, max_chars: int = 8000) -> str:
         """仅提取 PDF 文字（不渲染图片），用于纯文本场景。
@@ -160,8 +165,9 @@ class PdfAdapter:
         import fitz
 
         path = Path(pdf_path).resolve()
-        doc = fitz.open(str(path))
+        doc = None
         try:
+            doc = fitz.open(str(path))
             parts = []
             for page_idx in range(len(doc)):
                 try:
@@ -175,4 +181,8 @@ class PdfAdapter:
                 text = text[:max_chars] + "\n\n...（文字已截断）"
             return text
         finally:
-            doc.close()
+            if doc is not None:
+                try:
+                    doc.close()
+                except Exception:
+                    pass

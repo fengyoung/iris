@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -230,7 +231,6 @@ class ChatDigester:
             start = now - timedelta(days=days)
             return start.isoformat(), now.isoformat()
         except ValueError:
-            import sys
             print(f"[chat-digest] 无法解析时间范围 '{time_range}'，使用默认 {DEFAULT_RANGE_DAYS} 天", file=sys.stderr)
             start = now - timedelta(days=DEFAULT_RANGE_DAYS)
             return start.isoformat(), now.isoformat()

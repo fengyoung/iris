@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from iris.wiki.context_loader import WikiPageInfo
-from iris.wiki.term_extractor import (
+from iris.wiki.asr import (
     AsrPromptVersion,
     AsrTerm,
     TermExtractor,

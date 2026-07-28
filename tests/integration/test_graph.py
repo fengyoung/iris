@@ -54,8 +54,8 @@ def _make_wiki_root(tmp_path: Path, label: str = "") -> Path:
 
 def _make_config_bundle(tmp_path: Path, wiki_root: Path):
     """创建最小化 ConfigBundle。"""
-    from iris.config.loader import ConfigBundle
-    return ConfigBundle(
+    from iris.config.loader import ConfigBundle, make_config_bundle
+    return make_config_bundle(
         root=tmp_path,
         app={"app": {"name": "Test"}},
         data_source={"sources": {}},

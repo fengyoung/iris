@@ -17,6 +17,10 @@ from iris.feed.feed_config import WatchChat
 logger = logging.getLogger(__name__)
 
 
+class ChatFetchError(RuntimeError):
+    """消息获取失败（网络/API错误，不同于无新消息）。"""
+
+
 class ChatFetcher:
     """飞书消息获取器。"""
 
@@ -45,12 +49,19 @@ class ChatFetcher:
             until = datetime.now()
         result: Dict[str, List[RawMessage]] = {}
 
+        fetch_errors: Dict[str, str] = {}
         for chat in chats:
-            msgs = self._fetch_one(chat, since, until, default_days)
-            if msgs:
-                result[chat.id] = msgs
-            else:
+            try:
+                msgs = self._fetch_one(chat, since, until, default_days)
+                result[chat.id] = msgs if msgs else []
+            except ChatFetchError as e:
+                logger.warning("会话 %s 获取失败，跳过: %s", chat.name, e)
+                fetch_errors[chat.id] = str(e)
                 result[chat.id] = []
+        if fetch_errors:
+            logger.warning("共 %d/%d 个会话获取失败: %s",
+                          len(fetch_errors), len(chats),
+                          ", ".join(f"{cid}: {err[:60]}" for cid, err in fetch_errors.items()))
         return result
 
     def _fetch_one(
@@ -87,7 +98,7 @@ class ChatFetcher:
             )
         except Exception as e:
             logger.error("拉取 %s 失败: %s", chat.name, e)
-            return []
+            raise ChatFetchError(f"拉取 {chat.name} 失败: {e}") from e
 
         if not raw_msgs:
             logger.info("  %s: 无新消息", chat.name)

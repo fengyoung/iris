@@ -147,7 +147,7 @@ class ModelManager:
           - "default"：来自 llm.json 的 default_model_id
         """
         model_id = self.get_active_model_id(role)
-        config = self.get_active_model_config(role)
+        config = self.get_active_model_config(role, sensitive=True)
         default_id = self._models.get(role, {}).get("default_model_id", "")
         source = "override" if self._state.get(role) and self._state.get(role) != default_id else "default"
         return {

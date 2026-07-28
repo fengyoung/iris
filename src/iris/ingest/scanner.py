@@ -270,25 +270,28 @@ def _extract_pdf_title(path: Path) -> str:
         import fitz
     except ImportError:
         return path.stem
+    doc = None
     try:
         doc = fitz.open(str(path))
-        try:
-            meta = doc.metadata
-            title = meta.get("title", "").strip()
-            if title:
-                return title
-            if len(doc) > 0:
-                page = doc[0]
-                blocks = page.get_text("text").strip().split("\n")
-                for line in blocks[:3]:
-                    line = line.strip()
-                    if line and len(line) >= 2:
-                        return line[:80]
-        finally:
-            doc.close()
+        meta = doc.metadata
+        title = meta.get("title", "").strip()
+        if title:
+            return title
+        if len(doc) > 0:
+            page = doc[0]
+            blocks = page.get_text("text").strip().split("\n")
+            for line in blocks[:3]:
+                line = line.strip()
+                if line and len(line) >= 2:
+                    return line[:80]
     except Exception:
         logger.debug("PyMuPDF 标题提取失败，使用文件名: %s", path.name)
-        pass
+    finally:
+        if doc is not None:
+            try:
+                doc.close()
+            except Exception:
+                pass
     return path.stem
 
 

@@ -52,6 +52,25 @@ def try_parse_json(text: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def extract_json_object(text: str) -> Optional[str]:
+    """括号计数提取最外层 JSON 对象（用于 LLM 响应中混有非 JSON 文本的情况）。
+
+    返回从第一个 '{' 到匹配 '}' 的子字符串，失败返回 None。
+    """
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return None
+
+
 def extract_json_from_text(text: str, key: str) -> Optional[Dict[str, Any]]:
     """从 LLM 文本响应中按正则提取 JSON 对象（包含指定 key）。
 

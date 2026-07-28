@@ -1,3 +1,51 @@
+## v3.19.23 (2026-07-28)
+
+全量代码质量加固 — P0 严重缺陷修复 + 架构债务消除 + 测试补齐 + 性能优化。
+
+### P0 严重缺陷修复（9 项）
+
+- **原子写入统一**（4 处）：`feed/_cursor_tracker.py`、`feed/feed_config.py`（×2）、`feed_config.save_pending` 改用 `atomic_write_json()` + `FileLock`
+- **读/写加锁统一**（3 处）：`memory/long_term.py`（UserProfile + Correction 双 Store）、`feishu/_shared.py` `load_dedup_index`，新增 `_load_unlocked()` 避免可重入死锁
+- **`get_active_model_info` api_key 修复**：`llm/model_manager.py` 传入 `sensitive=True`
+- **会议转录日期修复**：`app/transcribe_meeting/pipeline.py:62` 补回缺失的 `date_part =` 赋值
+- **PDF finally 块修复**（3 处）：`ingest/scanner.py`、`complex_input/pdf_adapter.py`（×2）预声明 `doc = None`
+- **向量索引防御**：`retrieval/vector_index.py` 增加 `StopIteration` 保护
+- **消息获取错误传播**：`feed/_chat_fetcher.py` 新增 `ChatFetchError` 异常，区分 API 失败与无新消息
+- **用量统计空 rows 防御**：`app/cli/_handlers/_system.py` 提前 `if not rows` 检查
+
+### P1 架构债务消除
+
+- **ASR 向后兼容存根删除**（5 文件）：`wiki/asr_formatter.py`、`asr_hotwords.py`、`asr_prompt_optimizer.py`、`asr_version.py`、`term_extractor.py`
+- **工具函数去重**：`_extract_json_object` 从 `qa/memory_updater.py` 和 `memory/session_miner.py` 统一迁移到 `utils/llm_parsing.py`
+- **ConfigBundle 迁移**：工厂函数 `ConfigBundle()` → `make_config_bundle()`，新增 `ConfigBundle = ConfigBundleV2` 类型别名
+- **`pyproject.toml` 清理**：移除已删除文件 `term_extractor.py` 的 E402 豁免
+
+### 测试与性能
+
+- **feed 包测试补齐**：新增 `tests/unit/test_feed_core.py`（16 用例），覆盖 MessageFilter / CursorTracker / PipelineResult
+- **deep_eval 并发化**：`AccuracyVerifier.verify()` 新增 `max_workers` 参数（默认 5），ThreadPoolExecutor 并行调用 LLM
+- **BM25 参数配置化**：`retrieval/searcher.py` 支持通过 `app.json` → `retrieval.bm25.{k1,b}` 配置
+- **覆盖率阈值**：`fail_under` 53 → 55（实际 56.68%）
+
+### 代码质量
+
+- **死代码删除**（2 处）：`llm/provider.py` `_is_deepseek_thinking_model`、`config/workspace.py:138`
+- **Import 规范化**（4 处）：`_feishu_bridge.py`、`_dispatcher.py`、`client.py`、`chat_digest.py` 函数体内 import 移至模块顶部
+- **Formatter key 名修复**：`output/formatter.py` `stage1_output` → `stage1_prompt`
+
+### 版本升级
+
+| 层 | 旧版本 | 新版本 | 理由 |
+|------|:---:|:---:|------|
+| 产品版本 | 3.19.22 | **3.19.23** | 全量代码质量加固 |
+| 协议版本 | 3.12 | **3.12** | 未新增/变更 CLI 命令 |
+
+### 涉及文件
+
+39 文件 · +263 / -225 行
+
+---
+
 ## v3.19.22 (2026-07-27)
 
 iris-feed OKR 语义匹配 + LLM deadline 实时超时控制 + ASR 独立熔断器。

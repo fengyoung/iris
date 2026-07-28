@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -61,7 +62,6 @@ class Dispatcher:
             # 从 frontmatter 提取 topic_id
             try:
                 content = f.read_text(encoding="utf-8")
-                import re
                 m = re.search(r'topic_id:\s*(\S+)', content)
                 if m:
                     file_map[m.group(1)] = f

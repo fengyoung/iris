@@ -23,7 +23,7 @@ class ConfigError(ValueError):
     """配置文件不合法时抛出。"""
 
 
-def ConfigBundle(
+def make_config_bundle(
     root: Path,
     app: Dict[str, Any],
     data_source: Dict[str, Any],
@@ -32,11 +32,11 @@ def ConfigBundle(
     meeting_routes: Dict[str, Any] | None = None,
     feishu_ingest: Dict[str, Any] | None = None,
 ) -> ConfigBundleV2:
-    """向后兼容的配置构造函数。
+    """从原始字典构造 ConfigBundleV2 实例。
 
-    v3.19: 旧 ConfigBundle dataclass 已删除，此工厂函数保持与旧签名的兼容。
     内部委托给 ConfigBundleV2.from_dicts()，缺失字段自动填充默认值。
-    生产代码请使用 load_config_bundle() 获取完整校验的配置。
+    生产代码推荐使用 load_config_bundle() 从文件加载完整校验配置。
+    测试代码可直接使用本函数快速构造配置。
     """
     return ConfigBundleV2.from_dicts(
         root=root,
@@ -47,6 +47,11 @@ def ConfigBundle(
         meeting_routes=meeting_routes,
         feishu_ingest_dict=feishu_ingest or {},
     )
+
+
+# 类型别名：向后兼容旧代码中的 config: ConfigBundle 类型注解
+# 运行时 ConfigBundle 等价于 ConfigBundleV2（Pydantic v2 模型）
+ConfigBundle = ConfigBundleV2
 
 
 # ---------------------------------------------------------------------------

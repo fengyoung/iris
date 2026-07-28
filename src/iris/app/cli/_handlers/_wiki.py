@@ -177,7 +177,7 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
     Phase 3: LLM Prompt 优化压缩（1 次 LLM 调用）
     """
     from iris.wiki.context_loader import WikiContextLoader
-    from iris.wiki.term_extractor import (
+    from iris.wiki.asr import (
         TermExtractor, render_asr_prompt, determine_new_version,
         load_version, save_version, format_hotwords_file,
         format_replace_dict, LLMHotwordExtractor, LLMPromptOptimizer,

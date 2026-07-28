@@ -135,8 +135,6 @@ class WorkspaceManager:
         if ws.name == "main" and not ws.source_root and not ws.wiki_root:
             return bundle  # 无自定义配置，直接返回
 
-        bundle if isinstance(bundle, dict) else None
-
         # 覆盖 data_source path
         if ws.source_root:
             try:

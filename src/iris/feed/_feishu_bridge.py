@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -148,7 +149,6 @@ class FeishuBridge:
         # 检测飞书文档链接
         doc_links = []
         has_doc = False
-        import re
         urls = re.findall(r'https?://[^\s]*feishu[^\s]*/(docx|wiki|sheet|base)/(\w+)', content)
         if urls:
             has_doc = True
@@ -159,13 +159,12 @@ class FeishuBridge:
         send_time = None
         if send_time_str:
             try:
-                from datetime import datetime as dt
-                send_time = dt.strptime(send_time_str, "%Y-%m-%d %H:%M")
+                send_time = datetime.strptime(send_time_str, "%Y-%m-%d %H:%M")
             except ValueError:
                 try:
-                    send_time = dt.fromisoformat(send_time_str.replace("Z", "+00:00"))
+                    send_time = datetime.fromisoformat(send_time_str.replace("Z", "+00:00"))
                 except (ValueError, TypeError):
-                    send_time = dt.now()
+                    send_time = datetime.now()
 
         sender = raw.get("sender", {}) or {}
         return RawMessage(

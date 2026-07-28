@@ -138,7 +138,14 @@ class VectorIndex:
             self._valid_mask = None
             return
         self._matrix_ids = list(self._data.keys())
-        dim = len(next(iter(self._data.values())).get("vector", []))
+        try:
+            first_entry = next(iter(self._data.values()))
+        except StopIteration:
+            self._matrix_cache = None
+            self._matrix_ids = []
+            self._valid_mask = None
+            return
+        dim = len(first_entry.get("vector", []))
         if dim == 0:
             logger.warning("向量索引首个向量为空，搜索功能暂时不可用。请重建索引。")
             self._matrix_cache = None

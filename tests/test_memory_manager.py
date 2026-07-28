@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from iris.config.loader import ConfigBundle
+from iris.config.loader import ConfigBundle, make_config_bundle
 from iris.memory.manager import LongTermMemoryManager
 
 
 def _make_config(tmp_path: Path) -> ConfigBundle:
-    return ConfigBundle(
+    return make_config_bundle(
         root=tmp_path,
         app={"paths": {"memory_dir": "./memory"}},
         data_source={},
@@ -231,7 +231,7 @@ class TestExportImportRoundtrip:
         # 清空当前状态（用新的临时目录）
         tmp2 = tmp_path / "new_instance"
         tmp2.mkdir()
-        config2 = ConfigBundle(root=tmp2, app={"paths": {"memory_dir": "./memory"}}, data_source={}, llm={})
+        config2 = make_config_bundle(root=tmp2, app={"paths": {"memory_dir": "./memory"}}, data_source={}, llm={})
         mgr2 = LongTermMemoryManager(config2)
 
         # 导入

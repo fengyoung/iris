@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from iris.config.loader import ConfigBundle
 from iris.memory import SessionMemoryStore, UserProfileMemoryStore, CorrectionMemoryStore
+from iris.utils.llm_parsing import extract_json_object
 
 logger = logging.getLogger(__name__)
 
@@ -197,7 +198,7 @@ class SessionPatternMiner:
             if not isinstance(data, dict):
                 return []
         except json.JSONDecodeError:
-            json_text = _extract_json_object(text)
+            json_text = extract_json_object(text)
             if json_text:
                 try:
                     data = json.loads(json_text)
@@ -287,22 +288,6 @@ class SessionPatternMiner:
             return False
 
         return False
-
-
-def _extract_json_object(text: str) -> Optional[str]:
-    """括号计数提取最外层 JSON 对象（LLM 响应中混有非 JSON 文本时的回退方案）。"""
-    start = text.find("{")
-    if start == -1:
-        return None
-    depth = 0
-    for i in range(start, len(text)):
-        if text[i] == "{":
-            depth += 1
-        elif text[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start:i + 1]
-    return None
 
 
 def _now_iso() -> str:

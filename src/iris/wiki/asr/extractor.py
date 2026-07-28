@@ -4,7 +4,7 @@
 paraformer ASR 的常见误识别映射，最终渲染为 vocotype 可用的校正系统提示词。
 
 用法:
-    from iris.wiki.term_extractor import TermExtractor, render_asr_prompt
+    from iris.wiki.asr import TermExtractor, render_asr_prompt
     from iris.wiki.context_loader import WikiContextLoader
 
     loader = WikiContextLoader(wiki_root)
@@ -49,7 +49,7 @@ if TYPE_CHECKING:
 
 # ── 向后兼容别名 ──────────────────────────────────────────
 # _is_noise_term / _clean_markup / _truncate_context 已迁移到 _term_cleaners.py
-# 保留模块级别名以兼容旧代码中的 `from iris.wiki.term_extractor import _xxx` 用法
+# 保留模块级别名以兼容旧代码中的 `from iris.wiki.asr import _xxx` 用法
 _is_noise_term = is_noise_term
 _clean_markup = clean_markup
 _truncate_context = truncate_context

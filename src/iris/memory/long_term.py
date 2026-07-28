@@ -29,17 +29,31 @@ class UserProfileMemoryStore:
         self._path = _long_term_dir(config) / "profile.json"
 
     def load(self) -> Dict[str, Any]:
+        """加载用户画像（FileLock 保护并发读取）。"""
         if not self._path.exists():
-            return {
-                "iris_persona": {},
-                "user_preferences": {"likes": [], "dislikes": [], "style_preferences": [], "notes": []},
-                "updated_at": None,
-            }
-        return json.loads(self._path.read_text(encoding="utf-8"))
+            return self._default_state()
+        with FileLock(self._path):
+            return self._load_unlocked()
+
+    def _load_unlocked(self) -> Dict[str, Any]:
+        """[内部] 不加锁读取（调用方需已持有 FileLock 或单线程场景）。"""
+        try:
+            return json.loads(self._path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("profile.json 损坏，重置: %s", e)
+            return self._default_state()
+
+    @staticmethod
+    def _default_state() -> Dict[str, Any]:
+        return {
+            "iris_persona": {},
+            "user_preferences": {"likes": [], "dislikes": [], "style_preferences": [], "notes": []},
+            "updated_at": None,
+        }
 
     def apply_text_update(self, text: str) -> List[str]:
         with FileLock(self._path):
-            state = self.load()
+            state = self._load_unlocked()
             persona = state.setdefault("iris_persona", {})
             prefs = state.setdefault("user_preferences", {"likes": [], "dislikes": [], "style_preferences": [], "notes": []})
             updates: List[str] = []
@@ -131,13 +145,23 @@ class CorrectionMemoryStore:
         self._path = _long_term_dir(config) / "corrections.json"
 
     def load(self) -> Dict[str, Any]:
+        """加载纠正规则（FileLock 保护并发读取）。"""
         if not self._path.exists():
             return {"items": {}, "updated_at": None}
-        return json.loads(self._path.read_text(encoding="utf-8"))
+        with FileLock(self._path):
+            return self._load_unlocked()
+
+    def _load_unlocked(self) -> Dict[str, Any]:
+        """[内部] 不加锁读取（调用方需已持有 FileLock 或单线程场景）。"""
+        try:
+            return json.loads(self._path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("corrections.json 损坏，重置: %s", e)
+            return {"items": {}, "updated_at": None}
 
     def apply_text_update(self, text: str) -> List[str]:
         with FileLock(self._path):
-            state = self.load()
+            state = self._load_unlocked()
             items = state.setdefault("items", {})
             updates: List[str] = []
 
@@ -217,7 +241,7 @@ class CorrectionMemoryStore:
         if not concept:
             return False
         with FileLock(self._path):
-            state = self.load()
+            state = self._load_unlocked()
             items = state.setdefault("items", {})
             if concept not in items:
                 return False

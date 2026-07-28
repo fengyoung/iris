@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 from iris.config.loader import ConfigBundle
 from iris.memory import CorrectionMemoryStore, UserProfileMemoryStore
 from iris.qa.helpers import EXPLICIT_MEMORY_RE
+from iris.utils.llm_parsing import extract_json_object
 
 logger = logging.getLogger(__name__)
 
@@ -226,7 +227,7 @@ class MemoryUpdater:
             return data
         except json.JSONDecodeError:
             # 尝试用括号计数提取最外层 JSON 对象
-            json_text = _extract_json_object(text)
+            json_text = extract_json_object(text)
             if json_text:
                 try:
                     data = json.loads(json_text)
@@ -488,22 +489,6 @@ class MemoryUpdater:
     def _resolve_mine_state_path(config: ConfigBundle) -> Path:
         data_dir = config.root / "data"
         return data_dir / _LAST_MINE_STATE_FILE
-
-
-def _extract_json_object(text: str) -> Optional[str]:
-    """括号计数提取最外层 JSON 对象（用于 LLM 响应中混有非 JSON 文本的情况）。"""
-    start = text.find("{")
-    if start == -1:
-        return None
-    depth = 0
-    for i in range(start, len(text)):
-        if text[i] == "{":
-            depth += 1
-        elif text[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start:i + 1]
-    return None
 
 
 def _now_iso() -> str:
