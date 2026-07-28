@@ -465,7 +465,7 @@ class AnalysisReportService:
                     except Exception as e:
                         d = futures[future]
                         d_name = d.get("name", f"方向{d.get('id','?')}")
-                        logger.warning("  Stage 1 过滤失败 %s: %s", d_name, e)
+                        logger.exception("  Stage 1 过滤失败 %s", d_name)
                         dir_file_map[d_name] = {
                             "direction_name": d_name,
                             "high": [], "medium": [],
@@ -484,7 +484,7 @@ class AnalysisReportService:
                             r = _filter_one(d)
                             dir_file_map[r["direction_name"]] = r
                         except Exception as e:
-                            logger.warning("  Stage 1 补跑失败 %s: %s", d_name, e)
+                            logger.exception("  Stage 1 补跑失败 %s", d_name)
                             dir_file_map[d_name] = {
                                 "direction_name": d_name,
                                 "high": [], "medium": [],
@@ -578,7 +578,7 @@ class AnalysisReportService:
                                 hk = brief_hash_keys.get(label) or self._cache.content_hash(f_data["content"], 2000)
                                 self._cache.save_brief(label, hk, brief, brief_index)
                     except Exception as e:
-                        logger.warning("  Stage 2 摘要失败 [%s]: %s", label, e)
+                        logger.exception("  Stage 2 摘要失败 [%s]", label)
             except FuturesTimeoutError:
                 logger.error("Stage 2 摘要超时（%ds），已完成 %d/%d 份", _s2_timeout, len(briefs), len(to_summarize))
 
@@ -706,7 +706,7 @@ class AnalysisReportService:
                     except Exception as e:
                         d = futures[future]
                         d_name = d.get("name", "?")
-                        logger.warning("  Stage 3 合成失败 %s: %s", d_name, e)
+                        logger.exception("  Stage 3 合成失败 %s", d_name)
                         sections[d_name] = f"## {d_name}\n\n> 战略定位待补充\n\n本期无显著进展。\n"
             except FuturesTimeoutError:
                 logger.error("Stage 3 合成超时（%ds）", _s3_timeout)

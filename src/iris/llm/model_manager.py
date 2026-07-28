@@ -84,6 +84,10 @@ class ModelManager:
         original = self._models[role]["models"][model_id]
         # 返回浅拷贝并注入 _model_id，避免修改内部状态
         config = dict(original, _model_id=model_id)
+        # 从 Pydantic SecretStr 中提取原始值（dict() 迭代返回 SecretStr 实例）
+        from pydantic import SecretStr as _SecretStr
+        if "api_key" in config and isinstance(config["api_key"], _SecretStr):
+            config["api_key"] = config["api_key"].get_secret_value()
         if not sensitive:
             config.pop("api_key", None)
         return config
@@ -188,7 +192,7 @@ class ModelManager:
                 return self._build_default_state()
             return data
         except (json.JSONDecodeError, OSError) as exc:
-            logger.warning("读取 active_model.json 失败: %s", exc)
+            logger.exception("读取 active_model.json 失败")
             return self._build_default_state()
 
     def _save_state(self) -> None:

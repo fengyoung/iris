@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.so
+
+# 虚拟环境
+venv/
+.venv/
+
+# 环境变量和敏感配置
+.env
+config/*.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 运行时数据
+data/
+work-data/
+output/
+temp/
+logs/
+*.log
+
+# 测试和覆盖率
+.pytest_cache/
+.coverage
+htmlcov/
+.benchmarks/
+
+# Git
+.git/
+.gitignore
+
+# Claude Code
+.claude/
+memory/
+
+# CI/CD
+.github/

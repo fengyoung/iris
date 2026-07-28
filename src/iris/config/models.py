@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator
 
 
 class BaseConfigModel(BaseModel):
@@ -25,12 +25,17 @@ class BaseConfigModel(BaseModel):
 
     def __getitem__(self, key: str) -> Any:
         try:
-            return getattr(self, key)
+            val = getattr(self, key)
+            return val.get_secret_value() if isinstance(val, SecretStr) else val
         except AttributeError:
             raise KeyError(key)
 
     def get(self, key: str, default: Any = None) -> Any:
-        return getattr(self, key, default)
+        try:
+            val = getattr(self, key)
+            return val.get_secret_value() if isinstance(val, SecretStr) else val
+        except AttributeError:
+            return default
 
 
 # ── App 配置 ──────────────────────────────────────────────────────
@@ -163,7 +168,7 @@ class ModelItem(BaseConfigModel):
     use_cases: List[str] = Field(default_factory=list)
     notes: str = ""
     api_base_url: str
-    api_key: str
+    api_key: SecretStr
 
     @field_validator("api_base_url")
     @classmethod
@@ -210,7 +215,7 @@ class EmbeddingConfig(BaseConfigModel):
     enabled: bool = False
     model: str = "text-embedding-v3"
     api_base_url: str = ""
-    api_key: str = ""
+    api_key: SecretStr = Field(default_factory=lambda: SecretStr(""))
     timeout_seconds: int = Field(default=30, gt=0)
     max_retries: int = Field(default=2, ge=0)
 

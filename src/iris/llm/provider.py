@@ -360,12 +360,12 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
 
             except LLMProviderError as exc:
                 self._circuit_breaker.record_failure(model_key)
-                logger.warning("模型 %s 调用失败（尝试下一个）: %s", model_key, exc)
+                logger.exception("模型 %s 调用失败（尝试下一个）", model_key)
                 last_error = exc
                 continue
             except Exception as exc:
                 self._circuit_breaker.record_failure(model_key)
-                logger.warning("模型 %s 调用异常（尝试下一个）: %s", model_key, exc)
+                logger.exception("模型 %s 调用异常（尝试下一个）", model_key)
                 last_error = LLMProviderError(f"模型 {model_key} 调用异常: {exc}")
                 continue
 

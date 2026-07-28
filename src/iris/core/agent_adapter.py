@@ -257,7 +257,7 @@ class ClaudeCodeAdapter(AgentAdapter):
             result = self._run_cli(["status"])
             return "error" not in str(result).lower()
         except Exception as exc:
-            logger.warning("Agent 健康检查失败: %s", exc)
+            logger.exception("Agent 健康检查失败")
             return False
 
     def _build_command(self, command: str, params: Dict[str, Any]) -> List[str]:

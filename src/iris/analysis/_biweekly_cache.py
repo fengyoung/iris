@@ -55,7 +55,7 @@ class BiweeklyCache:
                     logger.info("  OP 方向定义命中缓存 (%d 个方向)", len(directions))
                     return directions
         except (json.JSONDecodeError, KeyError):
-            pass
+            logger.warning("  OP 方向缓存数据损坏，废弃重跑")
         return None
 
     def save_op_directions(self, content_hash: str, directions: list) -> None:
@@ -83,7 +83,7 @@ class BiweeklyCache:
                 logger.warning("  Stage 1 缓存不完整（期望 %d 个方向，实际 %d 个），废弃重跑",
                                expected_count, dir_count)
         except (json.JSONDecodeError, KeyError):
-            pass
+            logger.warning("  Stage 1 缓存数据损坏，废弃重跑")
         return None
 
     def save_stage1_filter(self, inv_hash: str, dir_hash: str, dir_file_map: dict) -> None:
@@ -164,4 +164,4 @@ class BiweeklyCache:
                         if f.stat().st_mtime < cutoff:
                             f.unlink()
                     except OSError:
-                        pass
+                        logger.warning("  BiweeklyCache: 清理过期文件失败 %s", f.name)

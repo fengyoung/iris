@@ -8,6 +8,52 @@ import re
 from pathlib import Path
 from typing import Dict, Optional
 
+# ── 项目根目录解析 ──────────────────────────────────────────────
+# 通过 __file__ 向上遍历目录树定位项目根目录。
+# 适配 editable install (pip install -e .) 和直接从源码运行时的情况。
+# 从 src/iris/utils/paths.py 向上 4 级到达项目根。
+
+
+def _find_project_root() -> Path:
+    """通过向上查找 pyproject.toml 定位项目根目录。"""
+    candidate = Path(__file__).resolve().parent
+    for _ in range(6):  # 最多向上查找 6 级
+        if (candidate / "pyproject.toml").exists():
+            return candidate
+        candidate = candidate.parent
+    # fallback: 从 __file__ 向上 4 级（src/iris/utils/paths.py → root）
+    return Path(__file__).resolve().parent.parent.parent.parent
+
+
+_PROJECT_ROOT: Optional[Path] = None
+
+
+def get_project_root() -> Path:
+    """返回项目根目录（缓存结果）。"""
+    global _PROJECT_ROOT
+    if _PROJECT_ROOT is None:
+        _PROJECT_ROOT = _find_project_root()
+    return _PROJECT_ROOT
+
+
+def resolve_data_path(relative_path: str) -> Path:
+    """将相对于项目根目录的 data/ 路径解析为绝对路径。
+
+    用法::
+
+        >>> resolve_data_path("data/asr_feedback.jsonl")
+        Path("/path/to/iris3/data/asr_feedback.jsonl")
+
+    安全约束：relative_path 必须以 "data/" 或 "config/" 开头。
+    """
+    allowed_prefixes = ("data/", "config/", "output/")
+    if not any(relative_path.startswith(p) for p in allowed_prefixes):
+        raise ValueError(
+            f"resolve_data_path: 仅允许 data/config/output 子路径，"
+            f"收到: {relative_path!r}"
+        )
+    return get_project_root() / relative_path
+
 
 def get_agent_data_dir(data_root: Path) -> Path:
     """根据 IRIS_AGENT_ID 环境变量计算 agent 专属数据目录。

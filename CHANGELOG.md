@@ -1,3 +1,39 @@
+## v3.19.24 (2026-07-28)
+
+全量代码质量加固（第二轮）— P0 基础设施修复 + P1 安全/测试/工具链升级 + P2 日志与风格统一。
+
+### P0 基础设施修复（3 项）
+
+- **Dockerfile 修复**：调整 COPY 顺序（先 src 后 pip install），添加 libmupdf-dev 系统依赖，使用 constraints.txt 确保可复现构建；新增 `.dockerignore`
+- **CI 安全门禁**：移除 pip-audit 的 `continue-on-error: true`，安全漏洞将阻断 CI；修复 libmupdf-dev 安装吞错（`|| true`）
+- **硬编码路径消除**：新增 `resolve_data_path()` 工具函数（`utils/paths.py`），修复 `_wiki.py` 中 8 处 CWD-relative 路径为基于项目根的绝对路径
+
+### P1 安全/测试/工具链升级（4 项）
+
+- **feed 测试补齐**：新增 6 个测试文件（193 用例），覆盖 config/filter/detector/okr/brief/pipeline；单元测试 947→1,124
+- **API 密钥 SecretStr 保护**：`ModelItem.api_key` + `EmbeddingConfig.api_key` 改用 Pydantic `SecretStr`，`BaseConfigModel` 自动解包以兼容现有 dict-style 访问
+- **pre-commit 工具链升级**：ruff v0.4.0→v0.11.0；新增 8 个基础钩子（trailing-whitespace/end-of-file-fixer/check-yaml/check-json/check-toml/check-merge-conflict/detect-private-key/check-added-large-files）
+- **静默异常修复**：`_biweekly_cache.py` 3 处静默 `pass` 改为 `logger.warning`；`_biweekly_collector.py` 日期解析保留（正常 fallback 控制流）
+
+### P2 日志与风格统一（3 项）
+
+- **logger.exception 替换**：provider/model_manager/storage/agent_adapter/analysis 核心模块 10+ 处 `logger.warning`→`logger.exception`，自动包含 traceback
+- **导入风格统一**：feed/trello/complex_input 三处绝对导入→相对导入；output/utils 的 `__init__.py` 补充公共导出
+- **CI 覆盖率合并**：单元测试 + 集成测试覆盖率通过 `--cov-append` 合并；setup-python 内置 pip 缓存
+
+### 版本升级
+
+| 层 | 旧版本 | 新版本 | 理由 |
+|------|:---:|:---:|------|
+| 产品版本 | 3.19.23 | **3.19.24** | 全量代码质量加固（第二轮） |
+| 协议版本 | 3.12 | **3.12** | 未新增/变更 CLI 命令 |
+
+### 涉及文件
+
+16 文件 · +340 / -40 行
+
+---
+
 ## v3.19.23 (2026-07-28)
 
 全量代码质量加固 — P0 严重缺陷修复 + 架构债务消除 + 测试补齐 + 性能优化。

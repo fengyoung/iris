@@ -144,7 +144,7 @@ class ChunkStore:
                     inserted += 1
                 except sqlite3.Error as exc:
                     errors += 1
-                    logger.warning("ChunkStore insert 失败 chunk_id=%s: %s", chunk.get("chunk_id", "?"), exc)
+                    logger.exception("ChunkStore insert 失败 chunk_id=%s", chunk.get("chunk_id", "?"))
         return inserted, errors
 
     def delete_by_source(self, source_name: str) -> int:
@@ -158,7 +158,7 @@ class ChunkStore:
         try:
             from iris.ingest.chunker import ChunkRecord
         except ImportError as exc:
-            logger.warning("无法加载 ChunkRecord，load_all() 返回空列表: %s", exc)
+            logger.exception("无法加载 ChunkRecord，load_all() 返回空列表")
             return []
         conn = self._get_conn()
         rows = conn.execute("SELECT * FROM chunk_store ORDER BY source_name, relative_path").fetchall()
