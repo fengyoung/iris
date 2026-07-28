@@ -1,3 +1,44 @@
+## v3.19.25 (2026-07-28)
+
+iris-feed 简报质量跃升 — 两阶段 LLM 架构 + 去截断 + Prompt 重写 + 结构化输出增强。
+
+### L1 快速修复（5 项）
+
+- **讨论要点编号修正**：`_brief_generator.py` 模板讨论要点由硬编码 `1.` 改为 `enumerate` 正确编号
+- **去除消息截断**：`_topic_detector.py` 去掉 `m.content[:200]`，充分利用 deepseek-v4-flash 1M 上下文窗口，传入完整消息原文
+- **放宽输入限制**：`msgs[:10]`→`msgs[:20]`，`max_tokens` 4096→8192
+- **Prompt 增强**：Phase 2 Prompt 要求 quotes 3-5 条、discussion_points 含 `{point, detail, speaker}` 结构化字段、decisions 含 `{content, by}`
+- **简报兜底优化**：`_build_quotes_section()` 合并 LLM 输出 quotes + 原始消息采样（不足 3 条时补充），`key_status` 为空时自动从首条 discussion_point 提取
+
+### L2 两阶段 LLM 架构
+
+- **Phase 1（轻量）**：规则分割 → LLM 检测话题边界/合并跨群/命名/OKR 匹配，Prompt 精简不输出深度摘要
+- **Phase 2（深度）**：逐话题并发调用 LLM（ThreadPoolExecutor, max_workers=4），传入该话题全部消息原文，独立生成摘要/讨论要点/决策/引述
+- **架构收益**：每个话题得到独立深度分析，摘要质量显著提升；Phase 2 失败时自动兜底
+- **并发设计**：多话题 Phase 2 并行执行，延迟近似单次调用
+
+### Bug 修复
+
+- **`_extract_json` 嵌套数组误提取**：JSON 对象内含数组字段时，`{` 优先匹配先于 `[`，修复 Phase 2 输出被截断导致解析失败的问题
+
+### 测试
+
+- `test_feed_topic_detector.py` 新增 10 用例：Phase 1 集成/Phase 2 深度摘要/并发执行/兜底降级/`_extract_json` 边界/`_parse_json_safe` 安全解析
+- feed 测试 193→202，全量 2,154→2,162
+
+### 版本升级
+
+| 层 | 旧版本 | 新版本 | 理由 |
+|------|:---:|:---:|------|
+| 产品版本 | 3.19.24 | **3.19.25** | iris-feed 简报质量跃升 |
+| 协议版本 | 3.12 | **3.12** | 未新增/变更 CLI 命令 |
+
+### 涉及文件
+
+3 文件 · +675 / -255 行
+
+---
+
 ## v3.19.24 (2026-07-28)
 
 全量代码质量加固（第二轮）— P0 基础设施修复 + P1 安全/测试/工具链升级 + P2 日志与风格统一。
