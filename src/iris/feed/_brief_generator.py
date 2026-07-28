@@ -12,14 +12,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from iris.feed._types import ConvertedDoc, DetectedTopic
+from iris.feed._types import ConvertedDoc, DetectedTopic, Quote
 
 logger = logging.getLogger(__name__)
 
 
 def _sanitize_filename(title: str) -> str:
     """将话题标题转换为安全的文件名。"""
-    # 去除特殊字符，保留中文、字母、数字、空格
     cleaned = re.sub(r'[^\w\s一-鿿-]', '', title)
     cleaned = re.sub(r'\s+', '', cleaned)
     return cleaned.strip()
@@ -28,11 +27,10 @@ def _sanitize_filename(title: str) -> str:
 def _build_filename(topic: DetectedTopic, exec_date: str) -> str:
     """构建简报文件名。
 
-    格式: YYYYMMDD-简报-{标题}（from{来源}）.md
+    格式: YYYYMMDD-简报-{标题}（from飞书）.md
     """
     title_part = _sanitize_filename(topic.title)
-    source_tag = "from飞书"
-    return f"{exec_date}-简报-{title_part}（{source_tag}）.md"
+    return f"{exec_date}-简报-{title_part}（from飞书）.md"
 
 
 # ── 简报模板 ───────────────────────────────────────────────
@@ -126,7 +124,7 @@ class BriefGenerator:
         """生成简报文件。
 
         Args:
-            topics: 检测到的话题列表
+            topics: 检测到的话题列表（已完成 Phase 2 深度摘要）
             converted_docs: 转换的文档列表
             exec_date: 执行日期 YYYYMMDD
             dry_run: 仅构建内容不写磁盘
@@ -134,7 +132,6 @@ class BriefGenerator:
         Returns:
             生成的文件路径列表
         """
-        # 确保输出目录存在
         output_dir = self._source_root / "09-工作简报" / exec_date[:6]
         if not dry_run:
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -158,13 +155,12 @@ class BriefGenerator:
         filename = _build_filename(topic, exec_date)
         filepath = output_dir / filename
 
-        # 构建 frontmatter
+        # ── Frontmatter ──────────────────────────────────
         sources_yaml = "\n".join([
             f"  - type: {s.type}\n    name: {s.name}\n    msg_count: {s.msg_count}"
             for s in topic.source_chats
         ]) if topic.source_chats else "  []"
 
-        # 匹配关联文档
         related_docs = self._match_docs(topic, converted_docs)
         documents_yaml = "\n".join([
             f"  - path: {d.relative_path}\n    title: {d.title}"
@@ -175,23 +171,33 @@ class BriefGenerator:
             f"  - {v}" for v in topic.previous_versions
         ]) if topic.previous_versions else "  []"
 
-        # 来源描述
+        # ── 来源描述 ──────────────────────────────────────
         source_names = ", ".join([s.name for s in topic.source_chats]) if topic.source_chats else "飞书"
-        source_desc = f"{source_names} · {sum(s.msg_count for s in topic.source_chats)} 条消息"
+        total_msgs = sum(s.msg_count for s in topic.source_chats) if topic.source_chats else len(topic.messages)
+        source_desc = f"{source_names} · {total_msgs} 条消息"
 
-        # 讨论要点
+        # ── 讨论要点（正确编号） ───────────────────────────
         if topic.discussion_points:
-            dp_lines = "\n".join([f"1. {p}" for p in topic.discussion_points])
+            dp_lines = "\n".join(
+                [f"{i}. {p}" for i, p in enumerate(topic.discussion_points, 1)]
+            )
         else:
             dp_lines = "（暂无）"
 
-        # 决策
+        # ── 决策 ──────────────────────────────────────────
         if topic.decisions:
             dec_lines = "\n".join([f"- {d}" for d in topic.decisions])
         else:
             dec_lines = "（暂无明确决策）"
 
-        # OKR 关联
+        # ── 关键状态：优先用 LLM 输出，否则从首条讨论要点提取 ──
+        key_status = topic.key_status or ""
+        if not key_status and topic.discussion_points:
+            key_status = topic.discussion_points[0]
+        if not key_status:
+            key_status = "（暂无）"
+
+        # ── OKR 关联 ──────────────────────────────────────
         if topic.okr_tags:
             okr_lines = []
             for tag in topic.okr_tags:
@@ -202,33 +208,21 @@ class BriefGenerator:
         else:
             okr_section = "（未关联 OKR）"
 
-        # 相关文档链接
+        # ── 相关文档 ──────────────────────────────────────
         if related_docs:
             doc_lines = "\n".join([f"- [{d.title}]({d.relative_path})" for d in related_docs])
         else:
             doc_lines = "（无）"
 
-        # 参与者
+        # ── 参与者 ────────────────────────────────────────
         if topic.participants:
             participants = " · ".join(topic.participants)
         else:
             participants = "（未识别）"
 
-        # 原始消息精选
-        if topic.quotes:
-            quote_lines = "\n\n".join([
-                f'> 「{q.text}」\n> —— {q.speaker} {q.time}'
-                for q in topic.quotes[:8]
-            ])
-        else:
-            # 从 messages 中提取
-            sample = topic.messages[:5]
-            quote_lines = "\n\n".join([
-                f'> 「{m.content[:120]}」\n> —— {m.sender_name} {m.send_time.strftime("%m-%d %H:%M")}'
-                for m in sample
-            ])
+        # ── 原始消息精选（合并 LLM 输出 + 原始消息兜底）───
+        quotes_section = self._build_quotes_section(topic)
 
-        # 状态
         status = topic.okr_match_strength if topic.okr_match_strength != "none" else "unmatched"
 
         content = _BRIEF_TEMPLATE.format(
@@ -238,15 +232,17 @@ class BriefGenerator:
             source_description=source_desc,
             today=datetime.now().strftime("%Y-%m-%d"),
             summary=topic.summary or "（暂无摘要）",
-            key_status=topic.key_status or "（暂无）",
+            key_status=key_status,
             discussion_points=dp_lines,
             decisions=dec_lines,
             okr_section=okr_section,
             doc_links=doc_lines,
             participants=participants,
-            quotes_section=quote_lines,
+            quotes_section=quotes_section,
             generated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
-            source_summary=", ".join([f"{s.name} ({s.msg_count}条)" for s in topic.source_chats]) if topic.source_chats else "飞书",
+            source_summary=", ".join(
+                [f"{s.name} ({s.msg_count}条)" for s in topic.source_chats]
+            ) if topic.source_chats else "飞书",
             okr_tags_json=json.dumps(topic.okr_tags, ensure_ascii=False),
             status=status,
             sources_yaml=sources_yaml,
@@ -261,6 +257,46 @@ class BriefGenerator:
         filepath.write_text(content, encoding="utf-8")
         logger.info("简报已生成: %s", filename)
         return filepath
+
+    @staticmethod
+    def _build_quotes_section(topic: DetectedTopic) -> str:
+        """构建原始消息精选段落。
+
+        策略：
+        1. 优先使用 LLM（Phase 2）输出的 quotes
+        2. LLM quotes 不足 3 条时，从 topic.messages 中补充
+        3. 总共最多 8 条
+        """
+        all_quotes: List[Quote] = []
+
+        # 收集 LLM 输出的 quotes
+        if topic.quotes:
+            all_quotes.extend(topic.quotes)
+
+        # LLM quotes 不足时，从原始消息补充（去重：按 text 前 80 字判断）
+        if len(all_quotes) < 3 and topic.messages:
+            seen_texts = {q.text[:80] for q in all_quotes}
+            sorted_msgs = sorted(topic.messages, key=lambda m: m.send_time)
+            for m in sorted_msgs:
+                if len(all_quotes) >= 8:
+                    break
+                preview = m.content[:80]
+                if preview not in seen_texts and len(m.content.strip()) > 5:
+                    all_quotes.append(Quote(
+                        text=m.content,
+                        speaker=m.sender_name,
+                        time=m.send_time.strftime("%m-%d %H:%M"),
+                    ))
+                    seen_texts.add(preview)
+
+        if not all_quotes:
+            return "（暂无）"
+
+        quote_lines = "\n\n".join([
+            f'> 「{q.text}」\n> —— {q.speaker} {q.time}'
+            for q in all_quotes[:8]
+        ])
+        return quote_lines
 
     @staticmethod
     def _match_docs(

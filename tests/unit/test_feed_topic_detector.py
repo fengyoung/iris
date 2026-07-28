@@ -1,16 +1,18 @@
-"""feed 包单元测试 — 话题检测（规则分割 + LLM 聚合 + 历史加载）。"""
+"""feed 包单元测试 — 话题检测（规则分割 + 两阶段 LLM + 历史加载）。"""
 
 import json
 import pytest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch, MagicMock, mock_open
+from unittest.mock import patch, MagicMock, mock_open, ANY
 
 from iris.feed._topic_detector import (
     _segment_by_time,
     _build_candidate_groups,
     _load_history_topics,
     _shorten_title,
+    _extract_json,
+    _parse_json_safe,
     TopicDetector,
 )
 from iris.feed._types import RawMessage
@@ -38,6 +40,15 @@ def _make_msg(content, send_time=None, sender_name="张三", chat_id="c1", chat_
 def _make_candidates(*groups):
     """创建候选话题组列表。"""
     return [(f"群{i}", list(msgs)) for i, msgs in enumerate(groups)]
+
+
+def _make_llm_response_phase1(topics_data):
+    """构造 Phase 1 LLM 返回的 JSON 字符串。"""
+    return json.dumps(topics_data, ensure_ascii=False)
+
+def _make_llm_response_phase2(summary_data):
+    """构造 Phase 2 LLM 返回的 JSON 字符串。"""
+    return json.dumps(summary_data, ensure_ascii=False)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -295,13 +306,33 @@ class TestLoadHistoryTopics:
 # ═══════════════════════════════════════════════════════════════
 
 class TestTopicDetector:
-    """TopicDetector 主类测试（mock LLM 调用）。"""
+    """TopicDetector 主类测试（mock LLM 两阶段调用）。"""
 
     def _make_detector(self, brief_dir=None, topic_config=None, okr_context=""):
         llm = MagicMock()
         if brief_dir is None:
             brief_dir = Path("/tmp/briefs")
+        # 默认 mock：generate() 不返回任何内容，由各测试独立设置
         return TopicDetector(llm, brief_dir, topic_config=topic_config, okr_context=okr_context), llm
+
+    def _make_detector_with_phases(self, phase1_topics, phase2_summaries, brief_dir=None, topic_config=None):
+        """创建带两阶段 mock 的 detector。
+
+        phase1_topics: Phase 1 LLM 返回的话题列表
+        phase2_summaries: Phase 2 LLM 返回的摘要列表（与话题一一对应）
+        """
+        llm = MagicMock()
+        # Phase 1 返回话题列表，Phase 2 逐话题返回摘要
+        llm.generate.side_effect = [
+            MagicMock(text=_make_llm_response_phase1(phase1_topics)),
+        ] + [
+            MagicMock(text=_make_llm_response_phase2(s)) for s in phase2_summaries
+        ]
+        if brief_dir is None:
+            brief_dir = Path("/tmp/briefs")
+        return TopicDetector(llm, brief_dir, topic_config=topic_config), llm
+
+    # ── detect() 基础测试 ──
 
     def test_detect_empty_messages(self, tmp_path):
         """空消息列表应返回空列表。"""
@@ -316,7 +347,7 @@ class TestTopicDetector:
         assert result == []
 
     def test_simple_detect_low_volume(self, tmp_path):
-        """消息量少于 5 条且候选组 ≤1 时走简单检测。"""
+        """消息量 ≤3 条且候选组 ≤1 时走简单检测（不调 LLM）。"""
         detector, llm = self._make_detector(brief_dir=tmp_path)
         base = datetime(2026, 7, 28, 10, 0, 0, tzinfo=timezone.utc)
         msgs = [
@@ -324,7 +355,6 @@ class TestTopicDetector:
             _make_msg("我觉得可以用微服务架构来实现", send_time=base + timedelta(minutes=5)),
         ]
         result = detector.detect({"c1": msgs})
-        # 简单检测不应调 LLM
         assert len(result) == 1
         assert result[0].title
         llm.generate.assert_not_called()
@@ -352,103 +382,203 @@ class TestTopicDetector:
         assert "张三" in result[0].participants
         assert "李四" in result[0].participants
 
-    def test_parse_llm_response_valid_json(self, tmp_path):
-        """解析有效的 LLM JSON 输出应正确构建 DetectedTopic。"""
-        detector, _ = self._make_detector(brief_dir=tmp_path)
-        candidates = _make_candidates(
-            [_make_msg("讨论A1"), _make_msg("讨论A2")],
-            [_make_msg("讨论B1")],
-        )
-        llm_output = json.dumps([
+    # ── Phase 1 集成测试 ──
+
+    def test_phase1_detect_valid_json(self, tmp_path):
+        """Phase 1 有效 JSON 应正确构建话题结构。"""
+        base = datetime(2026, 7, 28, 10, 0, 0, tzinfo=timezone.utc)
+        msgs = [
+            _make_msg("讨论A1 - 架构设计评审开始", send_time=base),
+            _make_msg("讨论A2 - 微服务拆分方案", send_time=base + timedelta(minutes=5)),
+            _make_msg("讨论A3 - 接口规范制定", send_time=base + timedelta(minutes=10)),
+            _make_msg("讨论A4 - 部署方案讨论", send_time=base + timedelta(minutes=15)),
+            _make_msg("讨论A5 - 监控和告警", send_time=base + timedelta(minutes=20)),
+        ]
+        phase1_output = [
             {
                 "title": "架构设计评审",
-                "summary": "对系统架构进行了评审",
-                "discussion_points": ["微服务拆分", "接口规范"],
-                "participants": ["张三", "李四"],
                 "group_indices": [0],
                 "is_valuable": True,
                 "is_update": False,
-                "quotes": [
-                    {"text": "可以用微服务", "speaker": "张三", "time": "07-28 10:00"},
-                ],
+                "update_of": None,
+                "okr_match": {"kr_id": "O1-KR1", "match_strength": "strong", "reason": "架构相关"},
             }
-        ], ensure_ascii=False)
-        result = detector._parse_llm_response(llm_output, candidates)
+        ]
+        phase2_output = {
+            "summary": "团队对微服务架构进行了深入评审，确定了拆分方案和接口规范。",
+            "key_status": "方案已确定，待实施",
+            "discussion_points": [
+                {"point": "微服务拆分", "detail": "确定按业务域拆分为4个服务", "speaker": "张三"},
+            ],
+            "decisions": [{"content": "采用微服务架构", "by": "张三"}],
+            "quotes": [{"text": "用微服务架构", "speaker": "张三", "time": "07-28 10:05"}],
+        }
+        detector, llm = self._make_detector_with_phases(
+            phase1_output, [phase2_output], brief_dir=tmp_path,
+            topic_config={"skip_llm_msg_count": 0},  # 强制走 LLM 路径
+        )
+        result = detector.detect({"c1": msgs})
         assert len(result) == 1
         assert result[0].title == "架构设计评审"
-        assert "微服务拆分" in result[0].discussion_points
-        assert len(result[0].quotes) == 1
+        assert "微服务架构" in result[0].summary
+        assert result[0].okr_tags == ["O1-KR1"]
+        assert result[0].okr_match_strength == "strong"
         assert result[0].is_update is False
+        # Phase 2 应填充深度字段
+        assert len(result[0].discussion_points) == 1
+        assert len(result[0].decisions) == 1
+        assert len(result[0].quotes) == 1
 
-    def test_parse_llm_response_with_code_fence(self, tmp_path):
-        """LLM 输出含 ```json 代码块时应正确提取。"""
-        detector, _ = self._make_detector(brief_dir=tmp_path)
-        candidates = _make_candidates([_make_msg("测试内容")])
-        llm_output = "以下是我分析的结果：\n```json\n[{\"title\": \"测试话题\", \"summary\": \"摘要\", \"is_valuable\": true}]\n```\n"
-        result = detector._parse_llm_response(llm_output, candidates)
-        assert len(result) == 1
-        assert result[0].title == "测试话题"
-
-    def test_parse_llm_response_malformed(self, tmp_path):
-        """非 JSON 输出应退回简单检测。"""
-        detector, _ = self._make_detector(brief_dir=tmp_path)
-        candidates = _make_candidates(
-            [_make_msg("唯一话题的讨论消息")],
+    def test_phase1_filter_not_valuable(self, tmp_path):
+        """Phase 1 is_valuable=false 的话题应被过滤。"""
+        base = datetime(2026, 7, 28, 10, 0, 0, tzinfo=timezone.utc)
+        msgs = [
+            _make_msg(f"消息{i}", send_time=base + timedelta(minutes=i))
+            for i in range(5)
+        ]
+        phase1_output = [
+            {"title": "闲聊", "group_indices": [0], "is_valuable": False},
+            {"title": "重要话题", "group_indices": [0], "is_valuable": True,
+             "okr_match": {"kr_id": None, "match_strength": "none", "reason": ""}},
+        ]
+        phase2_output = {
+            "summary": "重要内容摘要", "key_status": "进行中",
+            "discussion_points": [], "decisions": [], "quotes": [],
+        }
+        detector, _ = self._make_detector_with_phases(
+            phase1_output, [phase2_output], brief_dir=tmp_path,
+            topic_config={"skip_llm_msg_count": 0},
         )
-        result = detector._parse_llm_response("这不是JSON格式的输出", candidates)
-        # 退回简单检测
-        assert len(result) == 1
-
-    def test_parse_llm_response_filter_not_valuable(self, tmp_path):
-        """is_valuable 为 false 的话题应被过滤。"""
-        detector, _ = self._make_detector(brief_dir=tmp_path)
-        candidates = _make_candidates([_make_msg("闲聊")])
-        llm_output = json.dumps([
-            {"title": "闲聊", "summary": "无价值", "is_valuable": False},
-            {"title": "重要话题", "summary": "有价值", "is_valuable": True, "group_indices": [0]},
-        ], ensure_ascii=False)
-        result = detector._parse_llm_response(llm_output, candidates)
+        result = detector.detect({"c1": msgs})
         assert len(result) == 1
         assert result[0].title == "重要话题"
 
-    def test_parse_llm_response_okr_match(self, tmp_path):
-        """OKR 匹配信息应正确解析到 DetectedTopic。"""
-        detector, _ = self._make_detector(brief_dir=tmp_path)
-        candidates = _make_candidates([_make_msg("OKR相关工作")])
-        llm_output = json.dumps([
-            {
-                "title": "AI巡检进展",
-                "summary": "讨论AI巡检方案",
-                "is_valuable": True,
-                "group_indices": [0],
-                "okr_match": {"kr_id": "O1-KR1", "match_strength": "strong", "reason": "直接相关"},
-            }
-        ], ensure_ascii=False)
-        result = detector._parse_llm_response(llm_output, candidates)
-        assert len(result) == 1
-        assert result[0].okr_tags == ["O1-KR1"]
-        assert result[0].okr_match_strength == "strong"
+    def test_phase1_okr_no_match(self, tmp_path):
+        """OKR 不匹配时应正确记录。"""
+        base = datetime(2026, 7, 28, 10, 0, 0, tzinfo=timezone.utc)
+        msgs = [_make_msg(f"消息{i}", send_time=base + timedelta(minutes=i)) for i in range(5)]
+        phase1_output = [
+            {"title": "一般讨论", "group_indices": [0], "is_valuable": True,
+             "okr_match": {"kr_id": None, "match_strength": "none", "reason": ""}},
+        ]
+        phase2_output = {
+            "summary": "摘要", "key_status": "", "discussion_points": [], "decisions": [], "quotes": [],
+        }
+        detector, _ = self._make_detector_with_phases(
+            phase1_output, [phase2_output], brief_dir=tmp_path,
+            topic_config={"skip_llm_msg_count": 0},
+        )
+        result = detector.detect({"c1": msgs})
+        assert result[0].okr_tags == []
+        assert result[0].okr_match_strength == "none"
 
-    def test_parse_llm_response_previous_versions(self, tmp_path):
+    def test_phase1_previous_versions(self, tmp_path):
         """is_update=True 应正确设置 previous_versions。"""
-        detector, _ = self._make_detector(brief_dir=tmp_path)
-        candidates = _make_candidates([_make_msg("更新内容")])
-        llm_output = json.dumps([
-            {
-                "title": "话题更新",
-                "summary": "这是旧话题的更新",
-                "is_valuable": True,
-                "group_indices": [0],
-                "is_update": True,
-                "update_of": "旧话题标题",
-            }
-        ], ensure_ascii=False)
-        result = detector._parse_llm_response(llm_output, candidates)
+        base = datetime(2026, 7, 28, 10, 0, 0, tzinfo=timezone.utc)
+        msgs = [_make_msg(f"更新消息{i}", send_time=base + timedelta(minutes=i)) for i in range(5)]
+        phase1_output = [
+            {"title": "话题更新", "group_indices": [0], "is_valuable": True,
+             "is_update": True, "update_of": "旧话题标题",
+             "okr_match": {"kr_id": None, "match_strength": "none", "reason": ""}},
+        ]
+        phase2_output = {
+            "summary": "更新内容摘要", "key_status": "", "discussion_points": [], "decisions": [], "quotes": [],
+        }
+        detector, _ = self._make_detector_with_phases(
+            phase1_output, [phase2_output], brief_dir=tmp_path,
+            topic_config={"skip_llm_msg_count": 0},
+        )
+        result = detector.detect({"c1": msgs})
         assert result[0].is_update is True
         assert result[0].previous_versions == ["旧话题标题"]
 
-    def test_llm_fallback_on_error(self, tmp_path):
-        """LLM 调用失败应退回简单检测。"""
+    # ── Phase 2 集成测试 ──
+
+    def test_phase2_enriches_summary(self, tmp_path):
+        """Phase 2 应正确填充摘要、关键状态等字段。"""
+        base = datetime(2026, 7, 28, 10, 0, 0, tzinfo=timezone.utc)
+        msgs = [_make_msg(f"消息{i}", send_time=base + timedelta(minutes=i)) for i in range(5)]
+        phase1_output = [
+            {"title": "测试话题", "group_indices": [0], "is_valuable": True,
+             "okr_match": {"kr_id": None, "match_strength": "none", "reason": ""}},
+        ]
+        phase2_output = {
+            "summary": "这是一段深度摘要内容，包含3-5句话的详细描述。",
+            "key_status": "已完成方案设计",
+            "discussion_points": [
+                {"point": "要点1", "detail": "详细讨论内容", "speaker": "张三"},
+                {"point": "要点2", "detail": "更多讨论", "speaker": "李四"},
+            ],
+            "decisions": [{"content": "采用方案A", "by": "张三"}],
+            "quotes": [
+                {"text": "关键引述1", "speaker": "张三", "time": "07-28 10:05"},
+                {"text": "关键引述2", "speaker": "李四", "time": "07-28 10:10"},
+                {"text": "关键引述3", "speaker": "王五", "time": "07-28 10:15"},
+            ],
+        }
+        detector, _ = self._make_detector_with_phases(
+            phase1_output, [phase2_output], brief_dir=tmp_path,
+            topic_config={"skip_llm_msg_count": 0},
+        )
+        result = detector.detect({"c1": msgs})
+        assert len(result) == 1
+        assert "深度摘要" in result[0].summary
+        assert result[0].key_status == "已完成方案设计"
+        assert len(result[0].discussion_points) == 2
+        assert len(result[0].decisions) == 1
+        assert len(result[0].quotes) == 3
+
+    def test_phase2_concurrent_execution(self, tmp_path):
+        """多个话题时 Phase 2 应并发执行（验证结果完整性）。"""
+        base = datetime(2026, 7, 28, 10, 0, 0, tzinfo=timezone.utc)
+        msgs = [_make_msg(f"消息{i}", send_time=base + timedelta(minutes=i)) for i in range(5)]
+        phase1_output = [
+            {"title": "话题A", "group_indices": [0], "is_valuable": True,
+             "okr_match": {"kr_id": None, "match_strength": "none", "reason": ""}},
+            {"title": "话题B", "group_indices": [0], "is_valuable": True,
+             "okr_match": {"kr_id": None, "match_strength": "none", "reason": ""}},
+        ]
+        # 两个话题各有一个 Phase 2 摘要
+        phase2_outputs = [
+            {"summary": "话题A摘要", "key_status": "状态A", "discussion_points": [], "decisions": [], "quotes": []},
+            {"summary": "话题B摘要", "key_status": "状态B", "discussion_points": [], "decisions": [], "quotes": []},
+        ]
+        detector, _ = self._make_detector_with_phases(
+            phase1_output, phase2_outputs, brief_dir=tmp_path,
+            topic_config={"skip_llm_msg_count": 0},
+        )
+        result = detector.detect({"c1": msgs})
+        assert len(result) == 2
+        titles = {t.title for t in result}
+        assert titles == {"话题A", "话题B"}
+        summaries = {t.summary for t in result}
+        assert summaries == {"话题A摘要", "话题B摘要"}
+
+    def test_phase2_fallback_on_error(self, tmp_path):
+        """Phase 2 LLM 调用失败时应有兜底摘要。"""
+        base = datetime(2026, 7, 28, 10, 0, 0, tzinfo=timezone.utc)
+        msgs = [_make_msg(f"测试消息内容{i}", send_time=base + timedelta(minutes=i)) for i in range(5)]
+        llm = MagicMock()
+        # Phase 1 成功，Phase 2 失败
+        llm.generate.side_effect = [
+            MagicMock(text=_make_llm_response_phase1([
+                {"title": "测试话题", "group_indices": [0], "is_valuable": True,
+                 "okr_match": {"kr_id": None, "match_strength": "none", "reason": ""}},
+            ])),
+            Exception("Phase 2 API error"),
+        ]
+        detector = TopicDetector(llm, Path("/tmp/briefs"),
+                                 topic_config={"skip_llm_msg_count": 0})
+        result = detector.detect({"c1": msgs})
+        assert len(result) == 1
+        # 兜底摘要应包含原始消息内容
+        assert len(result[0].summary) > 0
+        assert len(result[0].quotes) > 0
+
+    # ── 错误处理测试 ──
+
+    def test_llm_fallback_on_phase1_error(self, tmp_path):
+        """Phase 1 LLM 调用失败应退回简单检测。"""
         llm = MagicMock()
         llm.generate.side_effect = Exception("API error")
         brief_dir = tmp_path
@@ -463,6 +593,7 @@ class TestTopicDetector:
         detector = TopicDetector(llm, brief_dir)
         result = detector.detect({"c1": msgs})
         assert len(result) == 1  # fallback 到简单检测
+        assert len(result[0].quotes) > 0  # 兜底 quotes 来自消息
 
     def test_config_params_passed(self, tmp_path):
         """自定义 topic_config 参数应生效。"""
@@ -470,7 +601,6 @@ class TestTopicDetector:
         brief_dir = tmp_path
         config = {"time_window_minutes": 120, "topic_min_messages": 3, "max_topics_per_run": 10}
         detector = TopicDetector(llm, brief_dir, topic_config=config)
-        # 窗口扩大，消息间隔应都在窗口内
         base = datetime(2026, 7, 28, 10, 0, 0, tzinfo=timezone.utc)
         msgs = [
             _make_msg("消息1", send_time=base),
@@ -479,3 +609,79 @@ class TestTopicDetector:
         ]
         result = detector.detect({"c1": msgs})
         assert len(result) == 1
+
+    def test_phase2_skip_config(self, tmp_path):
+        """skip_llm_msg_count=100 时应触发 LLM 路径（非简单检测）。"""
+        base = datetime(2026, 7, 28, 10, 0, 0, tzinfo=timezone.utc)
+        msgs = [_make_msg(f"消息{i}", send_time=base + timedelta(minutes=i)) for i in range(5)]
+        phase1_output = [
+            {"title": "测试话题", "group_indices": [0], "is_valuable": True,
+             "okr_match": {"kr_id": None, "match_strength": "none", "reason": ""}},
+        ]
+        phase2_output = {
+            "summary": "摘要", "key_status": "", "discussion_points": [], "decisions": [], "quotes": [],
+        }
+        detector, llm = self._make_detector_with_phases(
+            phase1_output, [phase2_output], brief_dir=tmp_path,
+            topic_config={"skip_llm_msg_count": 0},
+        )
+        result = detector.detect({"c1": msgs})
+        assert len(result) == 1
+        # 应走了 LLM 路径
+        assert llm.generate.call_count >= 2  # Phase 1 + Phase 2
+
+
+# ═══════════════════════════════════════════════════════════════
+# _extract_json 测试
+# ═══════════════════════════════════════════════════════════════
+
+class TestExtractJson:
+    """JSON 提取函数测试。"""
+
+    def test_code_fence(self):
+        """含 ```json 代码块时应提取内容。"""
+        text = "分析结果：\n```json\n{\"key\": \"value\"}\n```\n"
+        result = _extract_json(text)
+        assert result is not None
+        assert "key" in result
+
+    def test_plain_array(self):
+        """纯 JSON 数组应正确提取。"""
+        text = '[{"a": 1}, {"b": 2}]'
+        result = _extract_json(text)
+        assert result is not None
+
+    def test_plain_object(self):
+        """纯 JSON 对象应正确提取。"""
+        text = '{"summary": "test", "key_status": "ok"}'
+        result = _extract_json(text)
+        assert result is not None
+        assert "summary" in result
+
+    def test_no_json(self):
+        """无 JSON 时应返回 None。"""
+        result = _extract_json("这不是 JSON 格式的输出")
+        assert result is None
+
+
+# ═══════════════════════════════════════════════════════════════
+# _parse_json_safe 测试
+# ═══════════════════════════════════════════════════════════════
+
+class TestParseJsonSafe:
+    """安全 JSON 解析测试。"""
+
+    def test_valid_json(self):
+        """有效 JSON 应正确解析。"""
+        result = _parse_json_safe('{"key": "value"}', "test")
+        assert result == {"key": "value"}
+
+    def test_invalid_json(self):
+        """无效 JSON 应返回 None。"""
+        result = _parse_json_safe("这不是 JSON", "test")
+        assert result is None
+
+    def test_empty_string(self):
+        """空字符串应返回 None。"""
+        result = _parse_json_safe("", "test")
+        assert result is None
