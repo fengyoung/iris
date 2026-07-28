@@ -12,6 +12,7 @@ from typing import Any, Dict, List
 
 from iris.llm import LLMService
 from iris.app.cli.helpers import _emit_output
+from iris.utils.paths import resolve_data_path
 
 
 # ── Wiki 命令 ────────────────────────────────────────────
@@ -318,7 +319,7 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
             # 从 profile 配置读取 max_mappings 覆盖（优先级：CLI 参数 > profile > 默认值）
             import json as _profile_json
             from pathlib import Path as _ProfilePath
-            profile_path = _ProfilePath("config/asr_profiles.json")
+            profile_path = resolve_data_path("config/asr_profiles.json")
             if profile_path.exists() and getattr(args, "max_mappings", None) is None:
                 try:
                     with open(profile_path) as _pf:
@@ -392,7 +393,7 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
 
         if voco_path.exists():
             # 备份
-            backup_dir = Path("output/vocotype-backup") / _dt.now().strftime("%Y%m%d-%H%M%S")
+            backup_dir = resolve_data_path("output") / "vocotype-backup" / _dt.now().strftime("%Y%m%d-%H%M%S")
             backup_dir.mkdir(parents=True, exist_ok=True)
             for fname in ("hotwords.txt", "postprocess.json", "ai_settings.json"):
                 src = voco_path / fname
@@ -403,7 +404,7 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
             # 部署热词（合并手动热词）
             if hotwords_file and hotwords:
                 merged = list(hotwords)
-                manual_path = Path("data/asr_manual_hotwords.txt")
+                manual_path = resolve_data_path("data/asr_manual_hotwords.txt")
                 if manual_path.exists():
                     try:
                         manual_words = [
@@ -458,7 +459,7 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
                     logger.warning("写入 postprocess.json 失败: %s", e)
 
             # 部署到 Iris data/
-            data_dir = Path("data")
+            data_dir = resolve_data_path("data")
             data_dir.mkdir(parents=True, exist_ok=True)
             if replace_dict_file:
                 shutil.copy2(replace_dict_file, str(data_dir / "asr_replace_dict.json"))
@@ -669,7 +670,7 @@ def handle_asr_corrector(args, bundle, logger) -> int:
 
     # 加载 profile 配置
     profile_config: dict = {}
-    profile_path = _Path("config/asr_profiles.json")
+    profile_path = resolve_data_path("config/asr_profiles.json")
     if profile_path.exists():
         try:
             with open(profile_path) as f:
@@ -681,7 +682,7 @@ def handle_asr_corrector(args, bundle, logger) -> int:
     # 加载替换词典
     dict_path = profile_config.get(
         "replace_dict",
-        str(_Path("data/asr_replace_dict.json")),
+        str(resolve_data_path("data/asr_replace_dict.json")),
     )
     replace_dict: dict = {}
     if _Path(dict_path).exists():
@@ -699,7 +700,7 @@ def handle_asr_corrector(args, bundle, logger) -> int:
     # 加载 LLM Prompt
     prompt_path = profile_config.get(
         "llm_prompt",
-        str(_Path("data/asr_prompt.md")),
+        str(resolve_data_path("data/asr_prompt.md")),
     )
     llm_prompt = ""
     if _Path(prompt_path).exists():
@@ -717,7 +718,7 @@ def handle_asr_corrector(args, bundle, logger) -> int:
             mode = "fast"
 
     # 反馈路径
-    feedback_path = str(_Path("data/asr_feedback.jsonl"))
+    feedback_path = str(resolve_data_path("data/asr_feedback.jsonl"))
 
     # 近期上下文配置
     context_window_size = profile_config.get("context_window_size", 5)
@@ -801,7 +802,7 @@ def handle_asr_report(args, bundle, logger) -> int:
         mode="manual",
         corrections_applied=[f"[手动] {raw_text}→{correct_text}"],
     )
-    save_correction(record, "data/asr_feedback.jsonl")
+    save_correction(record, str(resolve_data_path("data/asr_feedback.jsonl")))
 
     result = {"ok": True, "raw": raw_text, "corrected": correct_text}
     _emit_output("asr-report", result, pretty=args.pretty)

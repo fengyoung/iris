@@ -1,10 +1,10 @@
-# Iris 3.19.23
+# Iris 3.19.24
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
 
-**v3.19.23** — 全量代码质量加固：P0 严重缺陷修复 9 项 + P1 架构债务消除 + feed 包测试补齐 + deep_eval 并发化 + BM25 配置化。v3.19.22 iris-feed OKR 语义匹配。
+**v3.19.24** — 全量代码质量加固（第二轮）：P0 Dockerfile/CI/路径修复 + P1 feed 测试 +177/SecretStr/pre-commit 升级 + P2 logger.exception/导入统一/CI 覆盖率合并。v3.19.23 全量代码质量加固（第一轮）。
 
 **v3.19.18** — 知识库质量全面加固 + 代码质量全面加固：wiki-pipeline 已有页面检测修复（0%→85%）、知识图谱 LLM 语义关系提取（+986 边）、断链清零（11→0）、零出链清零（27→0）、向量索引构建（9,019 条）、LLM 用量追踪体系完善（embedding 纳入 + CLI/Skill 来源标记）；P0 静默异常修复、P1 DRY 消除、P2 工程增强（pip-audit / constraints.txt / git tag 发布流程）、P3 测试精化（单元测试 526→794）+ lint 清零。13 + 11 文件。全量 1,858→1,948 测试通过。
 
@@ -100,7 +100,7 @@ SOURCE/                     LLM-WIKI/
 - macOS Keychain（可选密钥存储）
 - PyMuPDF / python-docx（PDF/DOCX 处理）
 - ffmpeg（视频抽帧/抽音轨，视频处理必需）+ openai-whisper（音轨转写，可选）
-- 1,753 个单元测试（100 个测试文件），覆盖率 60%+（仅统计 Iris 自身 LLM 调用）
+- 2,154 个测试用例（119 个测试文件），覆盖率 60%+（仅统计 Iris 自身 LLM 调用）
 
 ## 开发环境
 
@@ -156,7 +156,7 @@ iris3/
 │       └── asr/         #   ASR 提示词子系统（术语提取/热词/Prompt优化/版本管理）
 ├── scripts/            # CLI 入口 + 委托脚本
 ├── templates/          # Prompt / Wiki 模板
-├── tests/              # 1,753 用例（100 文件）
+├── tests/              # 2,154 用例（119 文件）
 │   ├── unit/           #   纯逻辑单元测试（419 用例）
 │   └── integration/    #   集成测试（1,334 用例）
 ├── config/             # *.json gitignored，*.example 版本控制
@@ -170,6 +170,7 @@ iris3/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.19.24** | 2026-07-28 | 全量质量加固第二轮：P0 Dockerfile/CI/路径 + P1 feed +177/SecretStr/pre-commit + P2 logger.exception/导入统一/覆盖率合并（16 文件） |
 | **v3.19.23** | 2026-07-28 | 全量代码质量加固：P0 修复 9 项 / ASR 存根删除 / 工具去重 / ConfigBundle 迁移 / feed 测试 +16 / deep_eval 并发化 / BM25 可配置 / 死代码清理（27 文件/+263/-225） |
 | **v3.19.22** | 2026-07-27 | iris-feed OKR 语义匹配 + LLM deadline 实时超时控制 + ASR 独立熔断器（9 文件/199 行） |
 | **v3.19.21** | 2026-07-27 | 信息汇聚管道 iris-feed：飞书聊天→话题检测→简报生成（11 文件/9 CLI/飞书 Bot 推送），协议版本 3.11→3.12 |

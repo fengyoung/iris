@@ -21,11 +21,15 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+          cache-dependency-path: |
+            constraints.txt
+            pyproject.toml
 
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq libmupdf-dev 2>/dev/null || true
+          sudo apt-get install -y -qq libmupdf-dev
 
       - name: Install Python dependencies
         run: |
@@ -39,13 +43,12 @@ jobs:
         run: |
           pip install pip-audit
           pip-audit
-        continue-on-error: true
 
       - name: Unit tests
-        run: pytest tests/ -m unit -x --tb=short -q
+        run: pytest tests/ -m unit --cov=src/iris --cov-append --cov-report= -x --tb=short -q
 
       - name: Integration tests + coverage
-        run: pytest tests/ -m integration --cov=src/iris --cov-report=term --cov-report=xml -x --tb=short
+        run: pytest tests/ -m integration --cov=src/iris --cov-append --cov-report=term --cov-report=xml -x --tb=short
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

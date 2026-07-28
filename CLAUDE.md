@@ -1,4 +1,4 @@
-# Iris 3.19.23 — 项目执行说明
+# Iris 3.19.24 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~27,000 行 / 149 文件 / 23 模块 · CLI 49 命令 · 单元测试 1,858（102 文件）· 覆盖率 60%+ · 9 个项目级 Skill · Wiki 219 页 · 知识图谱节点 219 / 关系边 2,161（wikilink 1,175 + LLM 986，NetworkX 引擎） · 数据源 743 文档 / 9,019 Chunk · 向量索引 9,019 条（text-embedding-v3 / 1,024 维） · LLM 用量追踪（SQLite WAL + embedding 纳入 + CLI/Skill 来源标记） · LLM 响应缓存（内存 LRU 驱逐）· embedding 向量缓存（LRU + TTL 600s）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（LLM 深度提取 + 会话模式挖掘 + 全自治生命周期，`memory_updater.py` + `session_miner.py`，双通道架构）· 多 Agent 并发安全（FileLock 推广 + SQLite WAL + Agent 记忆隔离 `IRIS_AGENT_ID` + 进程注册表 `ProcessRegistry`）· ASR 实时校正引擎（剪贴板监听 + Aho-Corasick + LLM 编辑助手，`_clipboard_io.py` + `_text_detector.py` 拆分，替换词典热加载 + 手动热词合并）· ASR 反馈反向优化引擎（feedback.jsonl 驱动词典自动进化，僵尸规则淘汰 + LLM 发现提升 + 热词补充）· ASR 独立熔断器 + 超时配置 · LLM deadline 实时超时控制 · Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听 · CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit 安全审计 · constraints.txt 可复现构建 · ASR Pipeline 交互式进度输出。
+~32,000 行 / 149 文件 / 23 模块 · CLI 49 命令 · 单元测试 2,154（119 文件）· 覆盖率 60%+ · 10 个项目级 Skill · Wiki 219 页 · 知识图谱节点 219 / 关系边 2,161（wikilink 1,175 + LLM 986，NetworkX 引擎） · 数据源 743 文档 / 9,019 Chunk · 向量索引 9,019 条（text-embedding-v3 / 1,024 维） · LLM 用量追踪（SQLite WAL + embedding 纳入 + CLI/Skill 来源标记） · LLM 响应缓存（内存 LRU 驱逐）· embedding 向量缓存（LRU + TTL 600s）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（LLM 深度提取 + 会话模式挖掘 + 全自治生命周期，`memory_updater.py` + `session_miner.py`，双通道架构）· 多 Agent 并发安全（FileLock 推广 + SQLite WAL + Agent 记忆隔离 `IRIS_AGENT_ID` + 进程注册表 `ProcessRegistry`）· ASR 实时校正引擎（剪贴板监听 + Aho-Corasick + LLM 编辑助手，`_clipboard_io.py` + `_text_detector.py` 拆分，替换词典热加载 + 手动热词合并）· ASR 反馈反向优化引擎（feedback.jsonl 驱动词典自动进化，僵尸规则淘汰 + LLM 发现提升 + 热词补充）· ASR 独立熔断器 + 超时配置 · LLM deadline 实时超时控制 · Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听 · CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit 安全审计 · constraints.txt 可复现构建 · ASR Pipeline 交互式进度输出。
 
 ### 关键路径
 
@@ -120,7 +120,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.19.23 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.19.24 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.12 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -141,7 +141,7 @@ iris3/
 ├── src/iris/          # 21 模块（见下）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
-├── tests/             # 1,979 用例，113 文件
+├── tests/             # 2,154 用例，119 文件
 │   ├── unit/          #   纯逻辑单元测试（419 用例，0.5s）
 │   └── integration/   #   集成测试（1,334 用例）
 ├── config/            # *.json gitignored，*.example 版本控制
@@ -165,9 +165,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.19.23 (2026-07-28)** — 全量代码质量加固：P0 严重缺陷修复 9 项（原子写入/读锁统一/PDF finally 块/表达式丢弃等）+ P1 架构债务消除（ASR 5 兼容存根删除/工具函数去重/ConfigBundle→ConfigBundleV2 类型别名）+ feed 包新测试 16 用例 + deep_eval LLM 调用并发化 + BM25 参数配置化 + 死代码清理 + import 规范化。协议版本 3.12。27 源文件 +263/-225 行。
+**当前 v3.19.24 (2026-07-28)** — 全量代码质量加固（第二轮）：P0 项 Dockerfile 修复/CI 安全门禁/硬编码路径消除 3 项 + P1 项 feed 测试补齐 +177 用例/SecretStr API 密钥保护/pre-commit 工具链升级（ruff v0.11 + 8 基础钩子）/静默异常修复 4 项 + P2 项 logger.exception 替换/导入风格统一/CI 覆盖率合并 3 项。测试 1,977→2,154。协议版本 3.12。16 文件。
 
-**v3.19.22 (2026-07-27)** — iris-feed OKR 语义匹配：`_okr_loader.py` 从 `SOURCE/01-目标管理` 解析 OKR 文档，注入话题检测 Prompt 自动匹配 KR，简报模板新增「OKR 关联」章节；LLM deadline 实时超时控制（降级链超时中止 + 独立熔断器实例）；ASR 独立熔断器（threshold=2, reset=30s）+ `llm_timeout_ms` 超时配置。协议版本 3.12。v3.19.21 信息汇聚管道 iris-feed。
+**v3.19.23 (2026-07-28)** — 全量代码质量加固（第一轮）：P0 严重缺陷修复 9 项（原子写入/读锁统一/PDF finally 块/表达式丢弃等）+ P1 架构债务消除（ASR 5 兼容存根删除/工具函数去重/ConfigBundle→ConfigBundleV2 类型别名）+ feed 包新测试 16 用例 + deep_eval LLM 调用并发化 + BM25 参数配置化 + 死代码清理 + import 规范化。协议版本 3.12。27 源文件 +263/-225 行。
 
 > v3.19.10 (2026-07-21)：ASR 引擎全面质量加固（P0~P3 十四项）：P0 Prompt `protected_terms` 字符串截断修复 / P1 热键校验 + 超时 + 参数化 / P2 预检查 + warning + 校验 / P3 Aho-Corasick 优化 + worker 动态 + 单字符代码分档 + 重试（8 文件，+313 / -114 行）
 

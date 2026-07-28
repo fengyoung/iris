@@ -1,10 +1,10 @@
 """Iris Trello 集成模块。"""
 
-from iris.trello.client import TrelloClient, TrelloClientError
-from iris.trello.models import TrelloBoard, TrelloCard, TrelloLabel, TrelloList, TrelloOverview
-from iris.trello.service import TrelloService
-from iris.trello.llm import TrelloLLM
-from iris.trello.formatter import format_trello_payload
+from .client import TrelloClient, TrelloClientError
+from .models import TrelloBoard, TrelloCard, TrelloLabel, TrelloList, TrelloOverview
+from .service import TrelloService
+from .llm import TrelloLLM
+from .formatter import format_trello_payload
 
 __all__ = [
     "TrelloClient",

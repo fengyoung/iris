@@ -16,23 +16,23 @@
   CursorTracker   — 游标追踪（增量）
 """
 
-from iris.feed.feed_pipeline import FeedPipeline
-from iris.feed.feed_config import (
+from .feed_pipeline import FeedPipeline
+from .feed_config import (
     FeedConfig,
     FeedConfigManager,
     WatchChat,
     load_feed_config,
     save_feed_config,
 )
-from iris.feed._chat_fetcher import ChatFetcher
-from iris.feed._message_filter import MessageFilter
-from iris.feed._topic_detector import TopicDetector
-from iris.feed._brief_generator import BriefGenerator
-from iris.feed._dispatcher import Dispatcher
-from iris.feed._feishu_bridge import FeishuBridge
-from iris.feed._cursor_tracker import CursorTracker
-from iris.feed._okr_loader import OKRLoader, OKRDocument
-from iris.feed._types import (
+from ._chat_fetcher import ChatFetcher
+from ._message_filter import MessageFilter
+from ._topic_detector import TopicDetector
+from ._brief_generator import BriefGenerator
+from ._dispatcher import Dispatcher
+from ._feishu_bridge import FeishuBridge
+from ._cursor_tracker import CursorTracker
+from ._okr_loader import OKRLoader, OKRDocument
+from ._types import (
     ConvertedDoc,
     DetectedTopic,
     PipelineResult,
