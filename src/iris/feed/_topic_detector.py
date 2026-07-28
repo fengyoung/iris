@@ -262,6 +262,11 @@ class TopicDetector:
             input_lines.append("")
         input_text = "\n".join(input_lines)
 
+        # 如果输入消息过长，截断（保留最近的消息）
+        max_input_chars = 8000
+        if len(input_text) > max_input_chars:
+            input_text = "…（部分较老消息已截断）\n" + input_text[-max_input_chars:]
+
         # 历史话题
         if history:
             history_text = "\n".join([
@@ -282,7 +287,7 @@ class TopicDetector:
                 prompt,
                 route_context={"input_type": "text", "task_type": "analysis", "complexity": "standard"},
                 temperature=0.3,
-                max_tokens=4096,
+                max_tokens=8192,
                 extra_body={"thinking": {"type": "disabled"}},
             )
             topics = self._parse_llm_response(result.text, candidates)
