@@ -2,6 +2,12 @@
 
 iris-feed 简报质量跃升 — 两阶段 LLM 架构 + 去截断 + Prompt 重写 + 结构化输出增强。
 
+### 合并 0728-beta
+
+- **输入截断保护**：`_topic_detector.py` 新增 `_fill_fallback_summary` 兜底方法，Phase 2 失败时从原始消息生成简单摘要
+- **清理死代码**：移除已废弃的 `_llm_detect` / `_parse_llm_response` 方法（已被 Phase 1/2 架构替代）
+- **max_tokens 统一提升至 8192**：Phase 1 和 Phase 2 均使用 8192 max_tokens
+
 ### L1 快速修复（5 项）
 
 - **讨论要点编号修正**：`_brief_generator.py` 模板讨论要点由硬编码 `1.` 改为 `enumerate` 正确编号
