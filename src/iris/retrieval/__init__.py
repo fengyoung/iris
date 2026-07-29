@@ -4,7 +4,7 @@ from .embedder import EmbedderError, TextEmbedder, build_embedder_from_config
 from .enhanced import EnhancedRetrievalResult, EnhancedRetriever, QueryRewriter, RewrittenQuery
 from .planner import LLMQueryPlanner, QueryPlan, QueryPlanner
 from .searcher import LocalRetriever, RetrievalHit, RetrievalResult
-from .vector_index import VectorIndex, build_vector_index
+from .vector_index import VectorIndex, VectorIndexModelMismatchError, build_vector_index
 
 __all__ = [
     "EmbedderError",
@@ -20,6 +20,7 @@ __all__ = [
     "RewrittenQuery",
     "TextEmbedder",
     "VectorIndex",
+    "VectorIndexModelMismatchError",
     "build_embedder_from_config",
     "build_vector_index",
 ]

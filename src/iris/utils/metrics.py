@@ -105,6 +105,13 @@ class MetricsExporter:
         from iris.wiki.context_loader import WikiContextLoader
         from iris.wiki.discovery_utils import is_wiki_stale
 
+        # 源文档 hash 索引：有 source_fingerprint 的页面按源文档变化精准判定
+        try:
+            from iris.ingest.chunker import MarkdownChunker
+            hash_index = MarkdownChunker.load_hash_index(self._config)
+        except Exception:
+            hash_index = {}
+
         loader = WikiContextLoader(self._wiki_root)
         pages = loader.load_pages()
         by_type: Dict[str, int] = {}
@@ -112,7 +119,7 @@ class MetricsExporter:
         for p in pages:
             by_type[p.page_type] = by_type.get(p.page_type, 0) + 1
             try:
-                if is_wiki_stale(p.path):
+                if is_wiki_stale(p.path, hash_index=hash_index):
                     stale_count += 1
             except Exception as exc:
                 logger.warning("Wiki 过期检查失败: %s (%s)", p.path, exc)

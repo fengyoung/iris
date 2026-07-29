@@ -68,6 +68,7 @@ from iris.app.cli._handlers._system import (
     _compute_daily_usage_summary,
     _daily_scan_and_chunk,
     _daily_vector_index,
+    _daily_reminders,
     _auto_discover_wiki_for_daily,
     _daily_wiki_maintenance,
     handle_diagnose,
@@ -87,6 +88,7 @@ from iris.app.cli._handlers._system import (
     handle_secrets_delete,
     handle_usage_stats,
     handle_metrics_export,
+    handle_reminders,
 )
 
 # 聚合所有命令处理器（向后兼容：_cli_main.py 直接 import COMMAND_HANDLERS）

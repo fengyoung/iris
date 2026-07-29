@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -16,6 +15,10 @@ import numpy as np
 _VECTORS_NPY = "vectors.npy"
 _IDS_JSON = "ids.json"
 _META_JSON = "meta.json"
+
+
+class VectorIndexModelMismatchError(RuntimeError):
+    """embedder 模型与已有索引不一致：新旧向量空间不可混用，拒绝增量写入。"""
 
 
 class VectorIndex:
@@ -195,19 +198,26 @@ class VectorIndex:
 
 
 def build_vector_index(source_name: str, chunks: list, embedder, index_path: Path,
-                       *, existing_index: Optional[VectorIndex] = None) -> VectorIndex:
+                       *, existing_index: Optional[VectorIndex] = None,
+                       force_rebuild: bool = False) -> VectorIndex:
     index = existing_index or VectorIndex(index_path)
     if not index.is_loaded():
         index.load()
     current_model = getattr(embedder, "model", "")
-    if current_model:
+    if force_rebuild:
+        # 全量重建：丢弃旧向量（同时清理已删除文档的残留 chunk），重新嵌入全部 chunk
+        logger.info("向量索引 %s 全量重建（embedder 模型 %s）", source_name, current_model or "unknown")
+        index = VectorIndex(index_path)
+    elif current_model:
         loaded_model = index._loaded_embedder_model
         if loaded_model and loaded_model != current_model:
-            logger.warning(
-                "向量索引 embedder 模型已变更（%s → %s），旧向量将继续使用，"
-                "建议执行 build-vector-index --force-rebuild 完整重建。",
-                loaded_model, current_model,
-            )
+            # 硬失败：混用两个模型的向量空间会使余弦相似度失去意义，
+            # 静默带病运行比报错更危险。
+            raise VectorIndexModelMismatchError(
+                f"向量索引 embedder 模型已变更（{loaded_model} → {current_model}），"
+                "新旧向量空间不可混用，已拒绝增量写入。"
+                "请执行 build-vector-index --force-rebuild 完整重建。")
+    if current_model:
         index.set_embedder_model(current_model)
     to_embed: List[Tuple[str, str]] = []
     for chunk in chunks:
@@ -215,6 +225,8 @@ def build_vector_index(source_name: str, chunks: list, embedder, index_path: Pat
         if not index.exists(chunk_id):
             to_embed.append((chunk_id, chunk.content_preview))
     if not to_embed:
+        if force_rebuild:
+            index.save()  # 即使无新 chunk 也覆盖旧文件，确保强制重建生效
         return index
     batch_size = 10
     for i in range(0, len(to_embed), batch_size):

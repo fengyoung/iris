@@ -78,6 +78,8 @@ IRIS_CAPABILITIES: List[AgentCapability] = [
                     input_schema={}, output_schema={}, tags=["system", "maintenance"]),
     AgentCapability(name="check-config", description="配置检查", command="check-config",
                     input_schema={}, output_schema={}, tags=["system", "read-only"]),
+    AgentCapability(name="reminders", description="主动提醒：栏目断供/成员周报缺失/项目停滞（零 LLM）", command="reminders",
+                    input_schema={}, output_schema={}, tags=["system", "read-only"]),
     # ── 工具 ──
     AgentCapability(name="process", description="图文混合双阶段处理", command="process",
                     input_schema={"query": {"type": "string"}, "image": {"type": "string"}},

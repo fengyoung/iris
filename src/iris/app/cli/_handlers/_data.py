@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from typing import Any, Dict
 
 from iris.llm.router import ModelRouter
@@ -112,7 +110,7 @@ def handle_ask(args, bundle, logger) -> int:
 
 def handle_build_vector_index(args, bundle, logger) -> int:
     from iris.retrieval.embedder import EmbedderError, build_embedder_from_config
-    from iris.retrieval.vector_index import VectorIndex, build_vector_index
+    from iris.retrieval.vector_index import VectorIndex, VectorIndexModelMismatchError, build_vector_index
 
     emb_cfg = bundle.llm.get("embedding", {})
     if not emb_cfg.get("enabled", False):
@@ -139,8 +137,11 @@ def handle_build_vector_index(args, bundle, logger) -> int:
         existing = VectorIndex(index_path)
         existing.load()
         try:
-            idx = build_vector_index(source_name, chunks, embedder, index_path, existing_index=existing)
+            idx = build_vector_index(source_name, chunks, embedder, index_path, existing_index=existing,
+                                     force_rebuild=getattr(args, "force_rebuild", False))
             results.append({"source": source_name, "status": "ok", "indexed": idx.size()})
+        except VectorIndexModelMismatchError as exc:
+            results.append({"source": source_name, "status": "model_mismatch", "reason": str(exc)})
         except EmbedderError as exc:
             results.append({"source": source_name, "status": "error", "reason": str(exc)})
     _emit_output(args.command, {"results": results}, pretty=args.pretty)

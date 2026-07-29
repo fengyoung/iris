@@ -235,8 +235,21 @@ def normalized_key(title: str) -> str:
     return re.sub(r"[^A-Za-z0-9一-鿿]", "", title).lower()
 
 
-def is_wiki_stale(wiki_path: Path) -> bool:
-    """检查 Wiki 页面是否超过陈腐阈值（默认 30 天），需要重新生成。"""
+def is_wiki_stale(wiki_path: Path, *, hash_index: Optional[Dict[str, Dict[str, str]]] = None) -> bool:
+    """检查 Wiki 页面是否过时。
+
+    优先按源文档指纹判定：frontmatter 的 source_fingerprint 中任一源文档
+    hash 已变化（或文档已删除）→ 过时；全部未变 → 新鲜（不再重生成，省 LLM 成本）。
+    无指纹（旧页面）或未提供 hash_index 时，兜底按生成天数判定（默认 30 天）。
+    """
+    if hash_index:
+        fingerprint = parse_wiki_source_fingerprint(str(wiki_path))
+        if fingerprint:
+            for rel_path, digest in fingerprint.items():
+                current = (hash_index.get(rel_path) or {}).get("hash", "")
+                if not current or not current.startswith(digest):
+                    return True
+            return False
     from ._constants import STALE_DAYS_THRESHOLD
     generated_at = parse_wiki_generated_at(str(wiki_path))
     if generated_at is None:
@@ -257,3 +270,62 @@ def parse_wiki_generated_at(wiki_path: str) -> Optional[datetime]:
         return datetime.fromisoformat(match.group(1).strip())
     except (ValueError, TypeError):
         return None
+
+
+# ── 源文档指纹（source_fingerprint）────────────────────────────
+# frontmatter 格式：
+#   source_fingerprint:
+#     - "05-会议纪要/2026-07/xxx.md@a1b2c3d4e5f6"
+# 记录页面生成时引用的源文档及其内容 hash 前缀，
+# 供 is_wiki_stale 做「源文档变化 → 页面过时」的精准判定。
+
+_FINGERPRINT_BLOCK_RE = re.compile(r"^source_fingerprint:[ \t]*\n((?:[ \t]+-[ \t]+.*\n?)*)", re.MULTILINE)
+
+
+def render_source_fingerprint(fingerprint: Dict[str, str]) -> str:
+    """渲染 frontmatter 指纹段（relative_path → hash 前缀），路径排序保证幂等。"""
+    if not fingerprint:
+        return ""
+    lines = ["source_fingerprint:"]
+    for rel_path in sorted(fingerprint):
+        lines.append(f'  - "{rel_path}@{fingerprint[rel_path]}"')
+    return "\n".join(lines)
+
+
+def strip_source_fingerprint(markdown: str) -> str:
+    """移除 frontmatter 中已有的 source_fingerprint 段。"""
+    return _FINGERPRINT_BLOCK_RE.sub("", markdown)
+
+
+def inject_source_fingerprint(markdown: str, fingerprint: Dict[str, str]) -> str:
+    """将源文档指纹注入 frontmatter（幂等：已有指纹段先移除再写入）。
+
+    无 frontmatter 时原样返回，不阻塞页面写出。
+    """
+    if not fingerprint:
+        return markdown
+    stripped = strip_source_fingerprint(markdown)
+    match = re.match(r"^---[ \t]*\n(.*?)\n---", stripped, re.DOTALL)
+    if not match:
+        return markdown
+    block = render_source_fingerprint(fingerprint)
+    new_front = match.group(1).rstrip("\n") + "\n" + block
+    return stripped[:match.start(1)] + new_front + stripped[match.end(1):]
+
+
+def parse_wiki_source_fingerprint(wiki_path: str) -> Dict[str, str]:
+    """从 Wiki 页面读取 source_fingerprint（relative_path → hash 前缀）。"""
+    try:
+        content = Path(wiki_path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return {}
+    match = _FINGERPRINT_BLOCK_RE.search(content)
+    if not match:
+        return {}
+    fingerprint: Dict[str, str] = {}
+    for line in match.group(1).splitlines():
+        item = line.strip().lstrip("-").strip().strip('"').strip("'")
+        rel_path, sep, digest = item.rpartition("@")
+        if sep and rel_path and digest:
+            fingerprint[rel_path] = digest
+    return fingerprint

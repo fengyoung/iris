@@ -1,5 +1,5 @@
 {
-  "version": "3.2",
+  "version": "3.3",
   "default_source": "main_source",
   "sources": {
     "main_source": {
@@ -25,6 +25,7 @@
     "store_file_hash": true,
     "store_mtime": true,
     "max_chunk_chars": 1200,
-    "max_preview_chars": 180
+    "max_preview_chars": 180,
+    "chunk_overlap_chars": 150
   }
 }

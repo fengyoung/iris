@@ -135,6 +135,12 @@ class CandidateDiscovery:
         wiki_root = Path(self._config.wiki["wiki_root"])
         if not wiki_root.exists():
             return candidates
+        # 加载源文档 hash 索引（一次），供 source_fingerprint 精准过时判定
+        try:
+            from iris.ingest.chunker import MarkdownChunker
+            hash_index = MarkdownChunker.load_hash_index(self._config)
+        except Exception:
+            hash_index = {}
         checked = []
         for item in candidates:
             wiki_path = self._find_wiki_path(item)
@@ -142,7 +148,7 @@ class CandidateDiscovery:
                 item = CandidateItem(title=item.title, page_type=item.page_type, query=item.query,
                                      score=item.score, evidence_count=item.evidence_count,
                                      sample_paths=item.sample_paths, rationale=item.rationale,
-                                     has_wiki=True, wiki_stale=is_wiki_stale(wiki_path),
+                                     has_wiki=True, wiki_stale=is_wiki_stale(wiki_path, hash_index=hash_index),
                                      wiki_path=str(wiki_path))
             checked.append(item)
         return checked

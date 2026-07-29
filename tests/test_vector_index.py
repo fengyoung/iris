@@ -3,12 +3,30 @@
 from __future__ import annotations
 
 import json
-import numpy as np
-from pathlib import Path
 
 import pytest
 
-from iris.retrieval.vector_index import VectorIndex
+from iris.retrieval.vector_index import (
+    VectorIndex,
+    VectorIndexModelMismatchError,
+    build_vector_index,
+)
+
+
+class _FakeEmbedder:
+    """测试用假 embedder：固定维度，无网络调用。"""
+
+    def __init__(self, model: str = "model-a"):
+        self.model = model
+
+    def embed(self, texts):
+        return [[float(len(t) % 7) + 0.1, 1.0] for t in texts]
+
+
+class _FakeChunk:
+    def __init__(self, chunk_id: str, preview: str = "预览文本"):
+        self.chunk_id = chunk_id
+        self.content_preview = preview
 
 
 class TestVectorIndexInit:
@@ -134,3 +152,43 @@ class TestVectorIndexSearch:
         assert len(results) == 1
         # score is the second element
         assert results[0][1] > 0.99
+
+
+class TestBuildVectorIndexModelGuard:
+    def _build_initial(self, tmp_path, model="model-a"):
+        path = tmp_path / "vi.json"
+        chunks = [_FakeChunk("c1"), _FakeChunk("c2")]
+        return build_vector_index("src", chunks, _FakeEmbedder(model), path), path
+
+    def test_same_model_incremental_ok(self, tmp_path):
+        idx, path = self._build_initial(tmp_path)
+        chunks = [_FakeChunk("c1"), _FakeChunk("c2"), _FakeChunk("c3")]
+        idx2 = build_vector_index("src", chunks, _FakeEmbedder("model-a"), path)
+        assert idx2.size() == 3
+
+    def test_model_mismatch_raises(self, tmp_path):
+        _, path = self._build_initial(tmp_path, model="model-a")
+        chunks = [_FakeChunk("c3")]
+        with pytest.raises(VectorIndexModelMismatchError):
+            build_vector_index("src", chunks, _FakeEmbedder("model-b"), path)
+
+    def test_model_mismatch_message_actionable(self, tmp_path):
+        _, path = self._build_initial(tmp_path, model="model-a")
+        with pytest.raises(VectorIndexModelMismatchError, match="force-rebuild"):
+            build_vector_index("src", [_FakeChunk("c3")], _FakeEmbedder("model-b"), path)
+
+    def test_force_rebuild_switches_model(self, tmp_path):
+        _, path = self._build_initial(tmp_path, model="model-a")
+        chunks = [_FakeChunk("c1"), _FakeChunk("c9")]
+        idx = build_vector_index("src", chunks, _FakeEmbedder("model-b"), path, force_rebuild=True)
+        # 全量重建：仅保留本次 chunks，旧的 c2 被清理
+        assert idx.size() == 2
+        assert idx.exists("c9")
+        assert not idx.exists("c2")
+
+    def test_force_rebuild_persists_new_model(self, tmp_path):
+        _, path = self._build_initial(tmp_path, model="model-a")
+        build_vector_index("src", [_FakeChunk("c1")], _FakeEmbedder("model-b"), path, force_rebuild=True)
+        # 重新加载后模型记录应为新模型，后续同模型增量不再报错
+        idx = build_vector_index("src", [_FakeChunk("c2")], _FakeEmbedder("model-b"), path)
+        assert idx.size() == 2

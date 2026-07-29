@@ -1,3 +1,57 @@
+## v3.19.26 (2026-07-29)
+
+检索质量与知识库时效性四项优化 — chunk 重叠 + source_fingerprint 指纹追踪 + 向量索引模型守卫 + 主动提醒引擎。
+
+### 1. chunk 切块重叠（检索召回质量）
+
+- `_split_content` 新增 `overlap_chars` 参数：相邻 segment 之间携带上一段末尾内容（从句子边界起），跨段落承接信息（前提在上段末尾、结论在下段开头）不再丢失
+- 新增 `_overlap_tail` / `_apply_overlap` 纯函数；`IngestionConfig` 新增 `chunk_overlap_chars`（默认 150，`data_source.json` 可配）
+- 重叠取自原始上一块而非扩展后内容，避免级联膨胀
+
+### 2. Wiki source_fingerprint 源文档指纹追踪（增量编译闭环）
+
+- 页面 frontmatter 新增 `source_fingerprint` 段：记录生成时引用的源文档 relative_path + hash 前 12 位（`discovery_utils` 新增 render/strip/inject/parse 四个函数）
+- `build_page` / `_update_page_with_content` 生成与增量更新时自动注入/刷新指纹
+- `is_wiki_stale` 重写：有指纹页面按「任一源文档 hash 变化或删除 → 过时」精准判定；源文档未变则不再按 30 天轮转重生成（省 LLM 成本）；无指纹旧页面兜底按天数
+- `discover-wiki`（`_check_existing_wiki`）与 `metrics-export`（stale_pages 统计）接入 hash 索引
+- **配套修复**：`write_hash_index` 已有条目 hash 永不更新的 bug（`if rp not in index` → hash 变化时刷新条目）
+
+### 3. 向量索引 embedder 模型守卫 + --force-rebuild
+
+- 模型不匹配从「warning + 旧向量继续混用」改为**硬失败**：抛 `VectorIndexModelMismatchError`（混用两个模型的向量空间使余弦相似度失去意义，静默带病运行比报错更危险）
+- 新增 CLI 参数 `--force-rebuild`：全量重建向量索引（此前日志提示该参数但它并不存在），同时清理已删除文档的残留向量
+- daily-start 的 `_daily_vector_index` 单独捕获返回 `status: model_mismatch`，不阻断维护链
+
+### 4. 主动提醒引擎（新增 `reminders` 命令）
+
+- 新模块 `analysis/reminders.py`（`ReminderEngine`）：基于文件名 YYYYMMDD 日期 + mtime，零 LLM 成本检测三类信号：
+  - **栏目断供**（category_inactive）：SOURCE 分类目录超阈值无更新（默认 30 天，会议纪要/周报类收紧至 10-14 天）
+  - **成员周报缺失**（weekly_report_missing）：活跃成员（45 天窗口内）周报断档 ≥14 天
+  - **项目停滞**（project_stalled）：项目 Wiki 页 source_fingerprint 引用源文档全部 ≥21 天未更新
+- daily-start 集成为第 8 步（静默失败）；`--pretty` 输出按类型分组；阈值 `app.json` 的 `reminders` 段可配
+
+### 顺带修复（3 处预存问题）
+
+- **PDF 切块 0 chunk**：`_chunk_document` 为生成器函数，PDF 分支 `return _chunk_pdf_document(...)` 的返回值被生成器协议丢弃 → 改为普通函数返回可迭代对象（默认配置只扫 `*.md` 故未暴露）
+- **`AppConfig` 未声明字段被 Pydantic 丢弃**：`retrieval` / `organization` 段静默失效，`app.json` 中 RRF 权重配置从未生效 → 显式声明 `retrieval` / `organization` / `reminders` 三字段
+- **hash 索引条目不更新**（见第 2 项配套修复）
+
+### 测试
+
+- 新增 `test_source_fingerprint.py`（17 用例）+ `test_reminders.py`（19 用例）
+- `test_chunker_pure.py` +13（重叠）、`test_vector_index.py` +5（模型守卫/强制重建）
+- 合计 +54 用例
+
+### 版本升级
+
+| 层 | 旧版本 | 新版本 | 理由 |
+|------|:---:|:---:|------|
+| 产品版本 | 3.19.25 | **3.19.26** | 四项能力优化 + 3 处修复 |
+| 协议版本 | 3.12 | **3.13** | 新增 reminders 命令 + --force-rebuild 参数 |
+| 数据版本 | app 3.3 / data_source 3.2 | **app 3.4 / data_source 3.3** | 新增 reminders 段 / chunk_overlap_chars 字段 |
+
+---
+
 ## v3.19.25 (2026-07-28)
 
 iris-feed 简报质量跃升 — 两阶段 LLM 架构 + 去截断 + Prompt 重写 + 结构化输出增强。

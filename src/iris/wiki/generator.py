@@ -16,11 +16,11 @@ from iris.retrieval.searcher import LocalRetriever
 from iris.utils.logging import IrisLogger
 from iris.utils.template_loader import load_template as _load_template_file
 
-from .searcher import WikiSearcher, FRONTMATTER_RE
+from .searcher import WikiSearcher
 from ._constants import (
-    get_display_name, get_wiki_dir, get_wiki_prefix,
-    get_dir_map, get_prefix_map, get_display_name_map,
+    get_display_name, get_dir_map, get_prefix_map, get_display_name_map,
 )
+from .discovery_utils import inject_source_fingerprint
 from ._wiki_io import slugify_title as _slugify_title
 
 logger = logging.getLogger(__name__)
@@ -90,6 +90,8 @@ class WikiGenerator:
         # LLM 生成
         markdown = self._generate_markdown(page_type=page_type, title=title, query=query,
                                            evidence=evidence_text, related=related)
+        # 注入源文档指纹：记录本次引用的源文档 hash，供过时判定精准触发
+        markdown = inject_source_fingerprint(markdown, self._build_source_fingerprint(result.hits))
 
         draft = WikiPageDraft(page_type=page_type, title=title, slug=slug,
                               output_path=str(output_path), markdown=markdown)
@@ -154,6 +156,29 @@ class WikiGenerator:
             lines.append(f"   内容：{hit.content_preview[:300]}")
             lines.append("")
         return "\n".join(lines)
+
+    def _build_source_fingerprint(self, hits) -> Dict[str, str]:
+        """从检索命中构建源文档指纹（relative_path → 文档 hash 前 12 位）。
+
+        取证据上限与 _format_evidence 一致（前 8 条）。hash 索引缺失时
+        返回空 dict，页面照常生成（仅退化为按天数判定过时）。
+        """
+        if not hits:
+            return {}
+        try:
+            from iris.ingest.chunker import MarkdownChunker
+            hash_index = MarkdownChunker.load_hash_index(self._config)
+        except Exception:
+            return {}
+        fingerprint: Dict[str, str] = {}
+        for hit in hits[:8]:
+            rel_path = hit.relative_path
+            if rel_path in fingerprint:
+                continue
+            digest = (hash_index.get(rel_path) or {}).get("hash", "")
+            if digest:
+                fingerprint[rel_path] = digest[:12]
+        return fingerprint
 
     def _compute_related_pages(self, title: str, query: str, *, exclude_slug: str = "") -> str:
         if not self._wiki_searcher:
@@ -723,6 +748,9 @@ sources:
         if validated != new_content:
             self._logger.log("wiki_update_validation", {"title": title, "action": validated})
             new_content = validated
+
+        # 刷新源文档指纹（LLM 可能丢弃或保留旧指纹，统一以本次检索为准）
+        new_content = inject_source_fingerprint(new_content, self._build_source_fingerprint(result.hits))
 
         if new_content.strip() == existing_content.strip():
             return {"status": "no_changes", "title": title, "path": str(path)}

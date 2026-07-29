@@ -40,7 +40,7 @@ python3 scripts/run_cli.py --call-source skill wiki-pipeline --limit 20
 
 并向用户解释关键信息：
 - **评分**：基于路径权重和证据数量的综合得分
-- **已有 Wiki**：如果已存在，会标注是否过期（超过 30 天未更新即为过期）
+- **已有 Wiki**：如果已存在，会标注是否过期（优先按 source_fingerprint 判定：任一引用源文档变化即过期；无指纹的旧页面按超过 30 天未更新兜底）
 - **页面类型**：domain / concept / project / person 四种
 
 **步骤 3：用户选择**

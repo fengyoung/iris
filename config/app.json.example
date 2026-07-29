@@ -1,5 +1,5 @@
 {
-  "version": "3.3",
+  "version": "3.4",
   "app": {
     "name": "Iris",
     "env": "local",
@@ -64,6 +64,19 @@
     "level": "info",
     "log_to_file": true,
     "record_model_routing": true
+  },
+  "reminders": {
+    "category_inactive_days": 30,
+    "category_overrides": {
+      "05-会议纪要": 14,
+      "06-我的周报": 10,
+      "07-成员周报": 10
+    },
+    "weekly_roster_window_days": 45,
+    "weekly_report_gap_days": 14,
+    "project_stall_days": 21,
+    "max_signals_per_type": 15,
+    "_note": "主动提醒引擎（reminders 命令 + daily-start 集成，零 LLM 成本）。category_inactive_days: SOURCE 分类目录无更新告警阈值（天），category_overrides 按目录名覆盖；weekly_roster_window_days: 成员周报活跃窗口（超出视为离开统计范围）；weekly_report_gap_days: 周报断档告警阈值；project_stall_days: 项目 Wiki 引用源文档全部超期的停滞阈值；max_signals_per_type: 每类信号数量上限。"
   },
   "safety": {
     "protect_read_only_sources": true,

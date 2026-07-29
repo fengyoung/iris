@@ -1,8 +1,10 @@
-# Iris 3.19.25
+# Iris 3.19.26
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
+
+**v3.19.26** — 检索与知识库时效性四项优化：chunk 切块重叠（150 字）+ Wiki source_fingerprint 源文档指纹追踪（过时判定精准化）+ 向量索引模型不匹配硬失败与 `--force-rebuild` + 主动提醒引擎 `reminders`（栏目断供/周报缺失/项目停滞，零 LLM 成本）。顺带修复 PDF 切块 0 chunk、hash 索引不更新、RRF 配置未生效三处预存问题。协议版本 3.13。
 
 **v3.19.25** — iris-feed 简报质量跃升：两阶段 LLM 架构 + 去截断 + Prompt 重写 + 结构化输出增强。合并 0728-beta：输入截断保护 + 死代码清理。
 
@@ -64,6 +66,7 @@ python scripts/run_cli.py daily-start
 | 人物 | `enrich-persons` | 飞书通讯录自动补充人物 Wiki 的部门/邮箱信息 |
 | 工具 | `process`, `trello`, `extract-weekly-reports`, `extract-travel-invoice` | 富媒体处理（图片/PDF/DOCX/视频）/ 看板 / 周报提取 / 行程单报销 |
 | 用量 | `usage-stats [--by day/week/month/year] [--cost]` | LLM 调用/token 消耗统计（分模型 + 汇总，多粒度聚合，可选成本估算） |
+| 提醒 | `reminders` | 主动提醒：栏目断供 / 成员周报缺失 / 项目停滞（零 LLM 成本，daily-start 已集成） |
 | 系统 | `daily-start`, `check-config`, `status`, `diagnose` | 日常维护（含图谱增量刷新）/ 配置检查 |
 | ASR 校正 | `asr-corrector`, `asr-audit`, `asr-report` | vocotype 实时语音转写纠错润色（[使用指南](docs/asr-corrector-usage.md)） |
 
@@ -170,6 +173,7 @@ iris3/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.19.26** | 2026-07-29 | 检索与时效性四项优化：chunk 重叠 / Wiki source_fingerprint 指纹追踪 / 向量索引模型守卫 + --force-rebuild / 主动提醒引擎 reminders；修复 PDF 切块 0 chunk、hash 索引不更新、RRF 配置未生效。协议版本 3.13，+54 测试 |
 | **v3.19.25** | 2026-07-28 | iris-feed 简报质量跃升：两阶段 LLM + 去截断 + Prompt 重写 + 结构化输出增强。合并 0728-beta：输入截断保护 + 死代码清理（7 文件/+725/-268） |
 | **v3.19.24** | 2026-07-28 | 全量质量加固第二轮：P0 Dockerfile/CI/路径 + P1 feed +177/SecretStr/pre-commit + P2 logger.exception/导入统一/覆盖率合并（16 文件） |
 | **v3.19.23** | 2026-07-28 | 全量代码质量加固：P0 修复 9 项 / ASR 存根删除 / 工具去重 / ConfigBundle 迁移 / feed 测试 +16 / deep_eval 并发化 / BM25 可配置 / 死代码清理（27 文件/+263/-225） |

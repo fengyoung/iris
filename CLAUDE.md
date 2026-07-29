@@ -1,4 +1,4 @@
-# Iris 3.19.25 — 项目执行说明
+# Iris 3.19.26 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -120,8 +120,8 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.19.25 | 软件发布版本 |
-| **协议版本** | `src/iris/__init__.py` | 3.12 | CLI 命令集 / agent-spec 格式 |
+| **产品版本** | `pyproject.toml` | 3.19.26 | 软件发布版本 |
+| **协议版本** | `src/iris/__init__.py` | 3.13 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
 > 只有真正发生变化的层才递增版本号。
@@ -165,7 +165,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.19.25 (2026-07-28)** — iris-feed 简报质量跃升：两阶段 LLM 架构（Phase 1 检测+合并+OKR / Phase 2 逐话题并发深度摘要），去掉消息截断利用 1M 上下文，Prompt 重写提升讨论要点/引述/决策结构化输出，`_extract_json` 嵌套数组误提取 bug 修复，简报模板编号修正+引述合并兜底。合并 0728-beta：输入截断保护 + `_fill_fallback_summary` 兜底 + 移除 `_llm_detect`/`_parse_llm_response` 死代码。测试 2,154→2,162。协议版本 3.12。7 文件 +725/-268 行。
+**当前 v3.19.26 (2026-07-29)** — 检索与知识库时效性四项优化：① chunk 切块重叠（`chunk_overlap_chars` 默认 150，跨段落承接信息不再丢失）；② Wiki `source_fingerprint` 源文档指纹追踪（frontmatter 记录引用源 hash，过时判定从「按天数猜」变「源文档变化精准触发」，天数阈值降为无指纹旧页面的兜底）；③ 向量索引 embedder 模型不匹配硬失败 + `--force-rebuild` 全量重建参数（此前仅 warning 且提示的参数不存在，旧向量带病混用）；④ 主动提醒引擎 `reminders` 命令 + daily-start 集成（栏目断供/成员周报缺失/项目停滞三类信号，零 LLM 成本，阈值 `app.json.reminders` 可配）。顺带修复：`_chunk_document` 生成器 return 值被丢弃导致 PDF 文档 0 chunk、`write_hash_index` 已有条目 hash 永不更新、`AppConfig` 未声明 `retrieval`/`organization` 字段导致 app.json 中 RRF 权重配置从未生效。协议版本 3.12→3.13（新增 reminders 命令）。测试 +54。
+
+**v3.19.25 (2026-07-28)** — iris-feed 简报质量跃升：两阶段 LLM 架构（Phase 1 检测+合并+OKR / Phase 2 逐话题并发深度摘要），去掉消息截断利用 1M 上下文，Prompt 重写提升讨论要点/引述/决策结构化输出，`_extract_json` 嵌套数组误提取 bug 修复，简报模板编号修正+引述合并兜底。合并 0728-beta：输入截断保护 + `_fill_fallback_summary` 兜底 + 移除 `_llm_detect`/`_parse_llm_response` 死代码。测试 2,154→2,162。协议版本 3.12。7 文件 +725/-268 行。
 
 **v3.19.24 (2026-07-28)** — 全量代码质量加固（第二轮）：P0 项 Dockerfile 修复/CI 安全门禁/硬编码路径消除 3 项 + P1 项 feed 测试补齐 +177 用例/SecretStr API 密钥保护/pre-commit 工具链升级（ruff v0.11 + 8 基础钩子）/静默异常修复 4 项 + P2 项 logger.exception 替换/导入风格统一/CI 覆盖率合并 3 项。测试 1,977→2,154。协议版本 3.12。16 文件。
 

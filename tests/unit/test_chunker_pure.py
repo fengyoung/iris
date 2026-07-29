@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
 
 from iris.ingest.chunker import (
     _split_content,
     _split_hard,
+    _overlap_tail,
+    _apply_overlap,
     _build_token_freq,
     _build_structural_tags,
     ChunkRecord,
@@ -78,6 +79,85 @@ class TestSplitHard:
         result = _split_hard("", max_chunk_chars=100)
         # 空字符串：返回空列表或含空字符串的列表
         assert isinstance(result, list)
+
+
+# ─────────────────────────────────────────────────────────────
+# _overlap_tail / _apply_overlap（chunk 重叠）
+# ─────────────────────────────────────────────────────────────
+
+class TestOverlapTail:
+    def test_zero_overlap_returns_empty(self):
+        assert _overlap_tail("一些内容。", 0) == ""
+
+    def test_empty_text_returns_empty(self):
+        assert _overlap_tail("", 100) == ""
+
+    def test_short_text_full_tail(self):
+        # 文本短于 overlap 且无句边界：全文返回
+        assert _overlap_tail("短文本", 100) == "短文本"
+
+    def test_starts_at_sentence_boundary(self):
+        # 尾部应从句子边界之后开始，避免半句
+        text = "第一句话很长很长。第二句话是结尾。"
+        tail = _overlap_tail(text, 12)
+        assert not tail.startswith("长")
+        assert tail.endswith("第二句话是结尾。")
+
+    def test_tail_no_longer_than_overlap(self):
+        text = "内容" * 200
+        tail = _overlap_tail(text, 50)
+        assert len(tail) <= 50
+
+
+class TestApplyOverlap:
+    def test_single_chunk_unchanged(self):
+        chunks = ["唯一的块"]
+        assert _apply_overlap(chunks, 100) == chunks
+
+    def test_zero_overlap_unchanged(self):
+        chunks = ["块一。", "块二。"]
+        assert _apply_overlap(chunks, 0) == chunks
+
+    def test_second_chunk_gets_prefix(self):
+        chunks = ["前提是系统必须先扩容。", "结论：按计划执行。"]
+        result = _apply_overlap(chunks, 30)
+        assert result[0] == chunks[0]
+        assert "扩容" in result[1]
+        assert result[1].endswith("结论：按计划执行。")
+
+    def test_overlap_uses_original_not_extended(self):
+        # 重叠取自原始上一块，不含上一块自己获得的前缀（避免级联膨胀）
+        chunks = ["A句子一。A句子二。", "B句子一。B句子二。", "C句子。"]
+        result = _apply_overlap(chunks, 10)
+        assert "A句子" not in result[2]
+
+    def test_chunk_count_preserved(self):
+        chunks = [f"第{i}块内容。" for i in range(5)]
+        result = _apply_overlap(chunks, 20)
+        assert len(result) == len(chunks)
+
+
+class TestSplitContentOverlap:
+    def test_split_with_overlap_carries_context(self):
+        para1 = "关于扩容的前提条件说明。" * 4
+        para2 = "最终结论在此段给出。" * 4
+        content = para1 + "\n\n" + para2
+        result = _split_content(content, max_chunk_chars=len(para1) + 2, overlap_chars=20)
+        assert len(result) >= 2
+        # 第二块应携带第一块尾部内容
+        assert "前提条件说明。" in result[1]
+
+    def test_no_overlap_param_defaults_to_zero(self):
+        # 兼容性：不传 overlap_chars 行为与旧版一致
+        para1 = "第一段内容。" * 5
+        para2 = "第二段内容。" * 5
+        content = para1 + "\n\n" + para2
+        old = _split_content(content, max_chunk_chars=len(para1) + 2)
+        assert "第一段" not in old[-1] or len(old) == 1
+
+    def test_short_content_ignores_overlap(self):
+        content = "短内容"
+        assert _split_content(content, max_chunk_chars=200, overlap_chars=50) == [content]
 
 
 # ─────────────────────────────────────────────────────────────

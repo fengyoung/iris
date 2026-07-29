@@ -98,6 +98,7 @@ class MarkdownChunker:
         ingestion = config.data_source.get("ingestion", {})
         self._max_chunk_chars = safe_int(ingestion.get("max_chunk_chars", 1200), 1200)
         self._max_preview_chars = safe_int(ingestion.get("max_preview_chars", 180), 180)
+        self._chunk_overlap_chars = safe_int(ingestion.get("chunk_overlap_chars", 150), 150)
         self._metadata_dir = config.root / "data" / "metadata"
 
     def build_default_source_chunks(self, *, incremental: bool = False) -> ChunkSummary:
@@ -142,7 +143,8 @@ class MarkdownChunker:
                 reused_documents += 1
                 continue
             all_chunks.extend(_chunk_document(document, max_chunk_chars=self._max_chunk_chars,
-                                              max_preview_chars=self._max_preview_chars))
+                                              max_preview_chars=self._max_preview_chars,
+                                              overlap_chars=self._chunk_overlap_chars))
             rebuilt_documents += 1
             rebuilt_paths.append(document.relative_path)
 
@@ -190,7 +192,10 @@ class MarkdownChunker:
                     logger.warning("数据解析失败: %s", exc)
             for chunk in summary.chunks:
                 rp = chunk.relative_path
-                if rp not in index:
+                entry = index.get(rp)
+                # 新路径 或 文档内容已变化（hash 不同）→ 刷新条目，
+                # 供 Wiki source_fingerprint 过时判定使用
+                if entry is None or entry.get("hash") != chunk.document_hash:
                     index[rp] = {"hash": chunk.document_hash, "modified_at": scan_modified.get(rp, summary.scanned_at)}
             index_path.write_text(json.dumps(index, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
         return index_path
@@ -220,7 +225,8 @@ class MarkdownChunker:
         return grouped
 
 
-def _chunk_pdf_document(document: DocumentRecord, *, max_chunk_chars: int, max_preview_chars: int) -> Iterable[ChunkRecord]:
+def _chunk_pdf_document(document: DocumentRecord, *, max_chunk_chars: int, max_preview_chars: int,
+                        overlap_chars: int = 0) -> Iterable[ChunkRecord]:
     """提取 PDF 文本并直接切块（无需临时文件）。"""
     try:
         from iris.ingest.pdf_extractor import PDFExtractor
@@ -229,22 +235,30 @@ def _chunk_pdf_document(document: DocumentRecord, *, max_chunk_chars: int, max_p
     except Exception:
         return []
     yield from _chunk_lines(markdown_text.splitlines(), document,
-                            max_chunk_chars=max_chunk_chars, max_preview_chars=max_preview_chars)
+                            max_chunk_chars=max_chunk_chars, max_preview_chars=max_preview_chars,
+                            overlap_chars=overlap_chars)
 
 
-def _chunk_document(document: DocumentRecord, *, max_chunk_chars: int, max_preview_chars: int) -> Iterable[ChunkRecord]:
+def _chunk_document(document: DocumentRecord, *, max_chunk_chars: int, max_preview_chars: int,
+                    overlap_chars: int = 0) -> Iterable[ChunkRecord]:
+    # 注意：本函数必须是普通函数（返回可迭代对象）而非生成器。
+    # 若含 yield，PDF 分支的 `return _chunk_pdf_document(...)` 返回值会被生成器
+    # 协议丢弃，导致 PDF 文档产出 0 个 chunk。
     path = Path(document.path)
     if path.suffix.lower() == ".pdf":
-        return _chunk_pdf_document(document, max_chunk_chars=max_chunk_chars, max_preview_chars=max_preview_chars)
+        return _chunk_pdf_document(document, max_chunk_chars=max_chunk_chars, max_preview_chars=max_preview_chars,
+                                   overlap_chars=overlap_chars)
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except UnicodeDecodeError:
         return []
-    yield from _chunk_lines(lines, document, max_chunk_chars=max_chunk_chars, max_preview_chars=max_preview_chars)
+    return _chunk_lines(lines, document, max_chunk_chars=max_chunk_chars, max_preview_chars=max_preview_chars,
+                        overlap_chars=overlap_chars)
 
 
 def _chunk_lines(lines: List[str], document: DocumentRecord, *,
-                 max_chunk_chars: int, max_preview_chars: int) -> Iterable[ChunkRecord]:
+                 max_chunk_chars: int, max_preview_chars: int,
+                 overlap_chars: int = 0) -> Iterable[ChunkRecord]:
     """核心切块逻辑：接收行列表 + 文档元数据，产出 ChunkRecord。
 
     供 _chunk_document（文件路径）和 _chunk_pdf_document（内存文本）共享。
@@ -297,7 +311,8 @@ def _chunk_lines(lines: List[str], document: DocumentRecord, *,
     chunk_index = 0
     built: List[ChunkRecord] = []
     for section in sections:
-        segments = _split_content(section["content"], max_chunk_chars=max_chunk_chars)
+        segments = _split_content(section["content"], max_chunk_chars=max_chunk_chars,
+                                  overlap_chars=overlap_chars)
         for segment_offset, segment in enumerate(segments, start=1):
             chunk_index += 1
             preview = " ".join(segment.split())[:max_preview_chars]
@@ -317,13 +332,13 @@ def _chunk_lines(lines: List[str], document: DocumentRecord, *,
     return built
 
 
-def _split_content(content: str, *, max_chunk_chars: int) -> List[str]:
+def _split_content(content: str, *, max_chunk_chars: int, overlap_chars: int = 0) -> List[str]:
     normalized = content.strip()
     if len(normalized) <= max_chunk_chars:
         return [normalized]
     paragraphs = [part.strip() for part in re.split(r"\n\s*\n", normalized) if part.strip()]
     if len(paragraphs) <= 1:
-        return _split_hard(normalized, max_chunk_chars=max_chunk_chars)
+        return _apply_overlap(_split_hard(normalized, max_chunk_chars=max_chunk_chars), overlap_chars)
     chunks: List[str] = []
     current = []
     current_len = 0
@@ -344,7 +359,32 @@ def _split_content(content: str, *, max_chunk_chars: int) -> List[str]:
             split_chunks.extend(_split_hard(chunk, max_chunk_chars=max_chunk_chars))
         else:
             split_chunks.append(chunk)
-    return split_chunks
+    return _apply_overlap(split_chunks, overlap_chars)
+
+
+def _overlap_tail(text: str, overlap_chars: int) -> str:
+    """取文本末尾 overlap_chars 字符作为重叠前缀，尽量从句子边界开始，避免半句。"""
+    if overlap_chars <= 0 or not text:
+        return ""
+    tail = text[-overlap_chars:]
+    match = re.search(r"[。！？.!?\n]", tail)
+    if match and match.end() < len(tail):
+        tail = tail[match.end():]
+    return tail.strip()
+
+
+def _apply_overlap(chunks: List[str], overlap_chars: int) -> List[str]:
+    """为相邻 segment 添加重叠：每个后续 segment 前置上一段末尾内容，
+
+    保留跨段落的承接信息（前提在上段末尾、结论在下段开头的场景）。
+    """
+    if overlap_chars <= 0 or len(chunks) <= 1:
+        return chunks
+    result = [chunks[0]]
+    for prev, cur in zip(chunks, chunks[1:]):
+        tail = _overlap_tail(prev, overlap_chars)
+        result.append(f"{tail}\n{cur}" if tail else cur)
+    return result
 
 
 def _split_hard(content: str, *, max_chunk_chars: int) -> List[str]:

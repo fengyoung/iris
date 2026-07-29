@@ -387,6 +387,36 @@ def _fmt_daily_start(p: Dict[str, Any]) -> str:
     total_chunks = sum(c.get("chunk_count", 0) for c in (chunks_list if isinstance(chunks_list, list) else []))
     lines.append(f"扫描文档数：{total_docs}")
     lines.append(f"Chunk 数：{total_chunks}")
+    reminders = p.get("reminders", {})
+    if isinstance(reminders, dict) and reminders.get("signal_count", 0) > 0:
+        lines.append("")
+        lines.append(_fmt_reminders(reminders))
+    return "\n".join(lines)
+
+
+_REMINDER_TYPE_NAMES = {
+    "category_inactive": "栏目断供",
+    "weekly_report_missing": "周报缺失",
+    "project_stalled": "项目停滞",
+}
+
+
+def _fmt_reminders(p: Dict[str, Any]) -> str:
+    lines = ["## 主动提醒"]
+    if p.get("status") == "skipped":
+        lines.append(f"  ⏭ 已跳过：{p.get('reason', '')}")
+        return "\n".join(lines)
+    if p.get("status") == "error":
+        lines.append(f"  ❌ 采集失败：{p.get('reason', '')}")
+        return "\n".join(lines)
+    signals = p.get("signals", [])
+    if not signals:
+        lines.append("  ✅ 无异常信号")
+        return "\n".join(lines)
+    lines.append(f"  ⚠️ 共 {len(signals)} 条信号")
+    for s in signals:
+        type_name = _REMINDER_TYPE_NAMES.get(s.get("type", ""), s.get("type", ""))
+        lines.append(f"  - [{type_name}] {s.get('detail', '')}")
     return "\n".join(lines)
 
 
@@ -426,6 +456,7 @@ _FORMATTERS: Dict[str, Any] = {
     "wiki-pipeline": _fmt_wiki_pipeline,
     "wiki-lint": _fmt_wiki_lint,
     "build-asr-prompt": _fmt_build_asr_prompt,
+    "reminders": _fmt_reminders,
     "diagnose": _fmt_diagnose,
     "status": _fmt_status,
     "agent-spec": _fmt_agent_spec,

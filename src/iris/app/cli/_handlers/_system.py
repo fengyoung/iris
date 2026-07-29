@@ -60,6 +60,9 @@ def handle_daily_start(args, bundle, logger) -> int:
     # 7. ASR 审计（纯本地，零 LLM 成本；无产物时静默跳过）
     asr_audit_result = _daily_asr_audit(bundle)
 
+    # 8. 主动提醒（栏目断供/周报缺失/项目停滞，零 LLM 成本）
+    reminders_result = _daily_reminders(bundle)
+
     payload = {"memory_sync": {"scanned": sync_result.get("scanned", 0), "skipped": sync_result.get("skipped", 0),
                                 "corrections_added": sync_result.get("corrections_added", 0)},
                "memory_maintenance": maintenance_report,
@@ -73,7 +76,8 @@ def handle_daily_start(args, bundle, logger) -> int:
                "wiki_update": wiki_update_result,
                "person_enrich": person_enrich_result,
                "usage_summary": usage_summary,
-               "asr_audit": asr_audit_result}
+               "asr_audit": asr_audit_result,
+               "reminders": reminders_result}
     _emit_output(args.command, payload, pretty=args.pretty)
     return 0
 
@@ -149,7 +153,7 @@ def _daily_vector_index(bundle) -> dict:
         embedder = build_embedder_from_config(bundle.llm, data_dir=bundle.root / "data")
         if not embedder:
             return {"status": "skipped", "reason": "embedder_not_configured"}
-        from iris.retrieval.vector_index import VectorIndex, build_vector_index
+        from iris.retrieval.vector_index import VectorIndex, VectorIndexModelMismatchError, build_vector_index
         ds_name = (bundle.data_source or {}).get("default_source", "main_source")
         summary_path = bundle.root / "data" / "metadata" / f"{ds_name}_chunk_summary.json"
         if not summary_path.exists():
@@ -160,7 +164,10 @@ def _daily_vector_index(bundle) -> dict:
         index_path = bundle.root / "data" / "metadata" / f"{ds_name}_vector_index"
         existing = VectorIndex(index_path)
         existing.load()
-        idx = build_vector_index(ds_name, vi_chunks, embedder, index_path, existing_index=existing)
+        try:
+            idx = build_vector_index(ds_name, vi_chunks, embedder, index_path, existing_index=existing)
+        except VectorIndexModelMismatchError as exc:
+            return {"status": "model_mismatch", "reason": str(exc)}
         return {"status": "ok", "indexed": idx.size()}
     except Exception as exc:
         return {"status": "error", "reason": str(exc)}
@@ -235,7 +242,7 @@ def _daily_asr_audit(bundle) -> dict:
     """
     try:
         from pathlib import Path
-        from iris.wiki.asr.coverage import analyze_coverage, render_coverage_text
+        from iris.wiki.asr.coverage import analyze_coverage
         from iris.wiki.context_loader import WikiContextLoader
 
         if not bundle.wiki or not bundle.wiki.get("wiki_root"):
@@ -563,6 +570,27 @@ def handle_metrics_export(args, bundle, logger) -> int:
     return 0
 
 
+# ── 主动提醒 ─────────────────────────────────────────────
+
+
+def handle_reminders(args, bundle, logger) -> int:
+    """主动提醒：栏目断供 / 成员周报缺失 / 项目停滞（零 LLM 成本）。"""
+    from iris.analysis.reminders import ReminderEngine
+    payload = ReminderEngine(bundle).collect()
+    logger.log("reminders", {"signal_count": payload.get("signal_count", 0)})
+    _emit_output(args.command, payload, pretty=args.pretty)
+    return 0
+
+
+def _daily_reminders(bundle) -> dict:
+    """daily-start 集成：主动提醒信号采集（静默失败）。"""
+    try:
+        from iris.analysis.reminders import ReminderEngine
+        return ReminderEngine(bundle).collect()
+    except Exception as exc:
+        return {"status": "error", "reason": str(exc), "signal_count": 0, "signals": []}
+
+
 # ── 命令映射 ─────────────────────────────────────────────
 
 SYSTEM_HANDLERS = {
@@ -584,4 +612,5 @@ SYSTEM_HANDLERS = {
     "secrets-delete": handle_secrets_delete,
     "usage-stats": handle_usage_stats,
     "metrics-export": handle_metrics_export,
+    "reminders": handle_reminders,
 }

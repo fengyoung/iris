@@ -97,6 +97,11 @@ class AppConfig(BaseConfigModel):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     safety: SafetyConfig = Field(default_factory=SafetyConfig)
     biweekly_report: Dict[str, Any] = Field(default_factory=dict)
+    # 注意：Pydantic 默认丢弃未声明字段（extra="ignore"），app.json 中的段
+    # 必须在此声明才能被 config.app.get(...) 读到。
+    retrieval: Dict[str, Any] = Field(default_factory=dict)
+    organization: Dict[str, Any] = Field(default_factory=dict)
+    reminders: Dict[str, Any] = Field(default_factory=dict)
 
 
 # ── 数据源配置 ────────────────────────────────────────────────────
@@ -128,6 +133,7 @@ class IngestionConfig(BaseConfigModel):
     store_mtime: bool = True
     max_chunk_chars: int = Field(default=1200, gt=0)
     max_preview_chars: int = Field(default=180, gt=0)
+    chunk_overlap_chars: int = Field(default=150, ge=0)
 
 
 class DataSourceConfig(BaseConfigModel):

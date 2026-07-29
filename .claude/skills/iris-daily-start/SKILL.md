@@ -1,7 +1,7 @@
 ---
 name: iris-daily-start
-version: 1.0.0
-description: Iris 每日启动维护 — 记忆同步、扫描切块、向量索引、Wiki 自动更新、知识图谱刷新、LLM 用量概要。当用户需要执行日常维护、启动知识库更新、查看 LLM 用量时使用。
+version: 1.1.0
+description: Iris 每日启动维护 — 记忆同步、扫描切块、向量索引、Wiki 自动更新、知识图谱刷新、LLM 用量概要、主动提醒。当用户需要执行日常维护、启动知识库更新、查看 LLM 用量、检查知识库异常信号时使用。
 metadata:
   requires:
     bins: ["python3"]
@@ -10,7 +10,7 @@ metadata:
 
 # Iris 每日启动维护
 
-一键执行 Iris 知识库的完整日常维护管道，涵盖记忆、索引、Wiki、图谱、用量五大模块。
+一键执行 Iris 知识库的完整日常维护管道，涵盖记忆、索引、Wiki、图谱、用量、提醒六大模块。
 
 ## 执行命令
 
@@ -24,7 +24,7 @@ python3 scripts/run_cli.py --call-source skill daily-start
 python3 scripts/run_cli.py --call-source skill daily-start --pretty
 ```
 
-## 管道流程（5 步）
+## 管道流程（6 步）
 
 ```
 1. 记忆同步与维护
@@ -33,11 +33,13 @@ python3 scripts/run_cli.py --call-source skill daily-start --pretty
 
 2. 扫描 + 切块 + 向量索引
    ├── MarkdownScanner 扫描所有启用数据源
-   ├── MarkdownChunker 增量切块（复用未变化的文档）
-   └── 向量索引增量更新（仅当 embedding 启用时）
+   ├── MarkdownChunker 增量切块（复用未变化的文档，相邻块 150 字重叠）
+   └── 向量索引增量更新（仅当 embedding 启用时；模型变更时返回
+       model_mismatch，需手动执行 build-vector-index --force-rebuild）
 
 3. Wiki 自动维护
-   ├── 自动发现候选主题（基于新增/变更文档数）
+   ├── 自动发现候选主题（基于新增/变更文档数；过时判定优先按
+   │   source_fingerprint 源文档指纹，源文档未变不重生成）
    ├── WikiGenerator.update_all_pages() 增量更新已有页面
    ├── PersonEnricher 飞书通讯录补充人物信息
    └── 知识图谱增量刷新（节点 + wikilink 边，零 LLM 成本）
@@ -49,6 +51,11 @@ python3 scripts/run_cli.py --call-source skill daily-start --pretty
 5. LLM 用量概要
    ├── 今日 / 本周 / 本月调用次数与 token 汇总
    └── 预算预警（超过 monthly_token_limit 时告警）
+
+6. 主动提醒（零 LLM 成本）
+   ├── 栏目断供：SOURCE 分类目录超阈值无更新（默认 30 天，周报/会议类 10-14 天）
+   ├── 周报缺失：活跃成员周报断档 ≥14 天
+   └── 项目停滞：项目 Wiki 引用的源文档全部 ≥21 天未更新
 ```
 
 ## 使用场景
@@ -80,6 +87,10 @@ python3 scripts/run_cli.py --call-source skill daily-start --pretty
 - `wiki_discover.candidates` — 自动发现的 Wiki 候选数（有候选时建议后续跑 iris-wiki）
 - `wiki_update.status` — Wiki 增量更新是否成功
 - `usage_summary.budget_warning` — 如果出现，说明本月 token 已超预算
+- `vector_index.status` — 为 `model_mismatch` 时表示 embedding 模型已变更，
+  需手动执行 `build-vector-index --force-rebuild` 全量重建
+- `reminders.signals` — 主动提醒信号列表（栏目断供/周报缺失/项目停滞），
+  有信号时应向用户逐条汇报
 
 ## 关键路径
 

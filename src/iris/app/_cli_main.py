@@ -31,6 +31,7 @@ COMMANDS = [
     "graph-query",
     "usage-stats",
     "metrics-export",
+    "reminders",
     "watch",
     # ── 委托命令 ──
     "trello", "extract-weekly-reports", "extract-travel-invoice",
@@ -63,6 +64,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--summary-only", action="store_true", help="仅输出摘要")
     parser.add_argument("--write-summary", action="store_true", help="写入摘要到 data/metadata")
     parser.add_argument("--incremental", action="store_true", help="增量扫描/构建（仅处理变更文件）")
+    parser.add_argument("--force-rebuild", action="store_true",
+                        help="build-vector-index 全量重建向量索引（丢弃旧向量重新嵌入，embedding 模型变更后必须执行）")
     # 记忆系统
     parser.add_argument("--memory-type", default="all", choices=["all", "profile", "corrections"], help="memory-list 类型")
     parser.add_argument("--concept", default="", help="memory-delete 概念名")
