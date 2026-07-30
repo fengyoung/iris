@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~32,000 行 / 151 文件 / 25 模块 · CLI 49 命令 · 单元测试 2,507（129 文件）· 覆盖率 62%+ · 10 个项目级 Skill · Wiki 221 页 · 知识图谱节点 219 / 关系边 2,161（wikilink 1,175 + LLM 986，NetworkX 引擎） · 数据源 776 文档 / 9,019 Chunk · 向量索引 9,019 条（text-embedding-v3 / 1,024 维） · YAML frontmatter 标准化注入（4 管道 + `core/frontmatter.py` 统一工具）· wikilink 自动注入引擎（`wiki/wikilink_injector.py`，零 LLM 成本，基于 Wiki 标题索引）· LLM 用量追踪（SQLite WAL + embedding 纳入 + CLI/Skill 来源标记） · LLM 响应缓存（内存 LRU 驱逐）· embedding 向量缓存（LRU + TTL 600s）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（LLM 深度提取 + 会话模式挖掘 + 全自治生命周期，`memory_updater.py` + `session_miner.py`，双通道架构）· 多 Agent 并发安全（FileLock 推广 + SQLite WAL + Agent 记忆隔离 `IRIS_AGENT_ID` + 进程注册表 `ProcessRegistry`）· ASR 实时校正引擎（剪贴板监听 + Aho-Corasick + LLM 编辑助手，`_clipboard_io.py` + `_text_detector.py` 拆分，替换词典热加载 + 手动热词合并）· ASR 反馈反向优化引擎（feedback.jsonl 驱动词典自动进化，僵尸规则淘汰 + LLM 发现提升 + 热词补充）· ASR 独立熔断器 + 超时配置 · LLM deadline 实时超时控制 · Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听 · CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit 安全审计 · constraints.txt 可复现构建 · ASR Pipeline 交互式进度输出。
+~32,000 行 / 153 文件 / 25 模块 · CLI 49 命令 · 单元测试 2,561（133 文件）· 覆盖率 62%+ · 10 个项目级 Skill · Wiki 221 页 · 知识图谱节点 219 / 关系边 2,161（wikilink 1,175 + LLM 986，NetworkX 引擎） · 数据源 776 文档 / 9,019 Chunk · 向量索引 9,019 条（text-embedding-v3 / 1,024 维） · YAML frontmatter 标准化注入（4 管道 + `core/frontmatter.py` 统一工具）· wikilink 自动注入引擎（`wiki/wikilink_injector.py`，零 LLM 成本，基于 Wiki 标题索引）· LLM 用量追踪（SQLite WAL + embedding 纳入 + CLI/Skill 来源标记） · LLM 响应缓存（内存 LRU 驱逐）· embedding 向量缓存（LRU + TTL 600s）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（LLM 深度提取 + 会话模式挖掘 + 全自治生命周期，`memory_updater.py` + `session_miner.py`，双通道架构）· 多 Agent 并发安全（FileLock 推广 + SQLite WAL + Agent 记忆隔离 `IRIS_AGENT_ID` + 进程注册表 `ProcessRegistry`）· ASR 实时校正引擎（剪贴板监听 + Aho-Corasick + LLM 编辑助手，`_clipboard_io.py` + `_text_detector.py` 拆分，替换词典热加载 + 手动热词合并）· ASR 反馈反向优化引擎（feedback.jsonl 驱动词典自动进化，僵尸规则淘汰 + LLM 发现提升 + 热词补充）· ASR 独立熔断器 + 超时配置 · LLM deadline 实时超时控制 · Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听 · CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit 安全审计 · constraints.txt 可复现构建 · ASR Pipeline 交互式进度输出。
 
 ### 关键路径
 
@@ -141,7 +141,7 @@ iris3/
 ├── src/iris/          # 21 模块（见下）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
-├── tests/             # 2,507 用例，129 文件
+├── tests/             # 2,561 用例，133 文件
 │   ├── unit/          #   纯逻辑单元测试（419 用例，0.5s）
 │   └── integration/   #   集成测试（1,334 用例）
 ├── config/            # *.json gitignored，*.example 版本控制

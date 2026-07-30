@@ -1,8 +1,10 @@
-# Iris 3.20.1
+# Iris 3.20.2
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
+
+**v3.20.2** — SOURCE 文档质量系统性提升：YAML frontmatter 标准化（新增 `core/frontmatter.py`，4 个 CLI 管道注入元数据）+ wikilink 自动注入引擎（新增 `wiki/wikilink_injector.py`，零 LLM 成本）+ 成员周报 Prompt 增强 + 质量门禁。测试覆盖率系统提升 59.87% → 62.82%（+253 用例，9 个新测试文件）。测试合计 2,561 用例。协议版本 3.14（不变）。
 
 **v3.20.1** — deep_eval 配置路径改进：chunk 摘要文件路径由硬编码 `main_source_chunk_summary.json` 改为根据 `default_source` 动态加载，便于多数据源切换。协议版本 3.14（不变）。
 
