@@ -92,6 +92,24 @@ SOURCE 文档质量系统性提升 + 测试覆盖率提升 — 双线合并。
 
 ---
 
+## v3.20.1 (2026-07-30)
+
+deep_eval 数据源 chunk 摘要路径配置化。
+
+### 改进
+
+- `DeepEvaluator` 初始化时，chunk 摘要文件路径由硬编码 `main_source_chunk_summary.json` 改为根据 `config.data_source.default_source` 动态加载，便于多数据源切换
+
+### 版本升级
+
+| 层 | 旧版本 | 新版本 | 理由 |
+|------|:---:|:---:|------|
+| 产品版本 | 3.20.0 | **3.20.1** | deep_eval 配置路径改进 |
+| 协议版本 | 3.14 | 3.14（不变） | 无 CLI 变更 |
+| 数据版本 | feeds.json v1 | feeds.json v1（不变） | 无配置变更 |
+
+---
+
 ## v3.20.0 (2026-07-30)
 
 iris-feed 文档提取 — 信息汇聚管道新增飞书文档自动转换与关联。
@@ -137,24 +155,6 @@ iris-feed 文档提取 — 信息汇聚管道新增飞书文档自动转换与�
 | `app/cli/_handlers/_feed.py` | +12 / -3 | 参数透传 + 输出统计 |
 | `.claude/skills/iris-feed/SKILL.md` | +16 / -5 | 文档提取功能说明 |
 | `tests/unit/test_feed_doc_extractor.py` | +432 | 新测试（37 用例） |
-
----
-
-## v3.20.1 (2026-07-30)
-
-deep_eval 数据源 chunk 摘要路径配置化。
-
-### 改进
-
-- `DeepEvaluator` 初始化时，chunk 摘要文件路径由硬编码 `main_source_chunk_summary.json` 改为根据 `config.data_source.default_source` 动态加载，便于多数据源切换
-
-### 版本升级
-
-| 层 | 旧版本 | 新版本 | 理由 |
-|------|:---:|:---:|------|
-| 产品版本 | 3.20.0 | **3.20.1** | deep_eval 配置路径改进 |
-| 协议版本 | 3.14 | 3.14（不变） | 无 CLI 变更 |
-| 数据版本 | feeds.json v1 | feeds.json v1（不变） | 无配置变更 |
 
 ---
 
