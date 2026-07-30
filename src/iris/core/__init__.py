@@ -1,5 +1,13 @@
-"""核心抽象层——数据类型、锁、写入守卫、存储层。"""
+"""核心抽象层——数据类型、锁、写入守卫、存储层、frontmatter 工具。"""
 
+from .frontmatter import (  # noqa: E402
+    DOC_TYPES,
+    build_frontmatter,
+    get_frontmatter_field,
+    has_frontmatter,
+    inject_frontmatter,
+    parse_frontmatter,
+)
 from .llm_types import LLMRequest, LLMResponse  # 从 protocols 迁移，消除 Any 类型标注
 from .locks import FileLock, FileLockError
 from .thread_pool import shared_pool
@@ -21,6 +29,7 @@ except ImportError:
         pass
 
 __all__ = [
+    "DOC_TYPES",
     "LLMRequest",
     "LLMResponse",
     "FileLock",
@@ -29,6 +38,11 @@ __all__ = [
     "resolve_allowed_paths",
     "safe_write_text",
     "validate_write_path",
+    "build_frontmatter",
+    "get_frontmatter_field",
+    "has_frontmatter",
+    "inject_frontmatter",
+    "parse_frontmatter",
     "ChunkStore",
     "StorageError",
     "shared_pool",

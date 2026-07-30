@@ -117,6 +117,38 @@ class FeishuDocConverter:
         content = processed.get("content")
         if content is None:
             return {"status": "error", "url": url, "token": token, "error": "内容处理结果缺少 content 字段"}
+
+        # ── 注入 wikilink 交叉引用 ──────────────────────
+        try:
+            _wiki_root = None
+            if self._bundle.wiki:
+                _wiki_root = Path(self._bundle.wiki["wiki_root"]).resolve()
+            if _wiki_root and _wiki_root.exists():
+                from iris.wiki.wikilink_injector import WikilinkInjector
+                _injector = WikilinkInjector(_wiki_root)
+                content = _injector.inject(content)
+        except Exception:
+            pass  # wikilink 注入失败不应阻塞文档转换
+
+        # ── 注入 frontmatter ──────────────────────────────
+        try:
+            from iris.core.frontmatter import inject_frontmatter
+            _fm_display_date = date_str if len(date_str) >= 8 else datetime.now().strftime("%Y-%m-%d")
+            if len(_fm_display_date) == 8 and _fm_display_date.isdigit():
+                _fm_display_date = f"{_fm_display_date[:4]}-{_fm_display_date[4:6]}-{_fm_display_date[6:8]}"
+            _fm_fields = {
+                "title": title,
+                "date": _fm_display_date,
+                "type": "飞书文档",
+                "author": author or "",
+                "source_url": url,
+                "doc_token": token,
+                "route": route or "",
+            }
+            content = inject_frontmatter(content, _fm_fields)
+        except Exception:
+            pass  # frontmatter 注入失败不应阻塞文档转换
+
         try:
             safe_write_text(output_path, content, self._bundle,
                             allow_existing_outside=True)

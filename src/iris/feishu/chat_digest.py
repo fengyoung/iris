@@ -133,10 +133,12 @@ class ChatDigester:
             logger.error("AI 提炼意外失败 [%s]: %s", target_name, e, exc_info=True)
             return {"status": "error", "error": f"AI 提炼失败: {e}"}
 
-        # 8. 生成输出
+        # 8. 生成输出（含 frontmatter + wikilink 注入）
+        _wiki_root = self._resolve_wiki_root_safe()
         output_md = self._build_markdown(extracted, target_name, target_type,
                                           identifier, time_start, time_end,
-                                          len(raw_messages), now_iso())
+                                          len(raw_messages), now_iso(),
+                                          wiki_root=_wiki_root)
         topic = extracted.get("topic", target_name)
         date_str = datetime.now(_TZ).strftime("%Y%m%d")
         clean_topic = sanitize_title(topic)
@@ -371,10 +373,30 @@ SUMMARY:
     def _build_markdown(extracted: Dict[str, Any], target_name: str,
                          target_type: str, chat_id: str,
                          time_start: str, time_end: str,
-                         msg_count: int, now_iso: str) -> str:
+                         msg_count: int, now_iso: str,
+                         wiki_root: Optional[Path] = None) -> str:
+        from iris.core.frontmatter import inject_frontmatter
+
         src_label = "群聊" if target_type == "group" else "单聊"
+        topic = extracted.get("topic", target_name)
+        today = now_iso[:10] if len(now_iso) >= 10 else now_iso
+
+        # ── 构建 frontmatter ──────────────────────────────
+        _fm_fields = {
+            "title": f"对话记录提取 - {topic}",
+            "date": today,
+            "type": "对话提取",
+            "source_chat": target_name,
+            "chat_id": chat_id,
+            "chat_type": target_type,
+            "message_count": msg_count,
+            "time_start": time_start,
+            "time_end": time_end,
+            "extracted_at": now_iso,
+        }
+
         lines = [
-            f"# 对话记录提取 - {extracted.get('topic', target_name)}",
+            f"# 对话记录提取 - {topic}",
             "",
             "## 文档信息",
             f"- 提取时间：{now_iso}",
@@ -422,7 +444,22 @@ SUMMARY:
             f"*由 Iris chat-digest 于 {now_iso} 提取*",
             f"*聊天数据来源：飞书{src_label}「{target_name}」*",
         ])
-        return "\n".join(lines)
+        body = "\n".join(lines)
+
+        # ── 注入 wikilink（在 frontmatter 之前，避免污染 YAML）──
+        if wiki_root and wiki_root.exists():
+            try:
+                from iris.wiki.wikilink_injector import WikilinkInjector
+                _injector = WikilinkInjector(wiki_root)
+                body = _injector.inject(body)
+            except Exception:
+                pass
+
+        # ── 注入 frontmatter ──────────────────────────────
+        try:
+            return inject_frontmatter(body, _fm_fields)
+        except Exception:
+            return body  # 降级：返回无 frontmatter 的正文
 
     def _classify(self, extracted: Dict[str, Any]) -> str:
         has_decisions = bool(extracted.get("decisions"))
@@ -434,6 +471,13 @@ SUMMARY:
         if self._bundle.wiki:
             return Path(self._bundle.wiki["wiki_root"]).resolve()
         raise ValueError("Wiki 配置缺失：请在 config/wiki.json 中设置 wiki_root")
+
+    def _resolve_wiki_root_safe(self) -> Optional[Path]:
+        """安全获取 wiki_root，返回 None 而非抛异常。"""
+        try:
+            return self._resolve_wiki_root()
+        except (ValueError, KeyError):
+            return None
 
     def _load_wiki_context(self) -> str:
         from iris.wiki.context_loader import WikiContextLoader

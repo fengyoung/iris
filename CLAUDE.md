@@ -1,4 +1,4 @@
-# Iris 3.20.1 — 项目执行说明
+# Iris 3.20.2 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~32,000 行 / 149 文件 / 23 模块 · CLI 49 命令 · 单元测试 2,154（119 文件）· 覆盖率 60%+ · 10 个项目级 Skill · Wiki 219 页 · 知识图谱节点 219 / 关系边 2,161（wikilink 1,175 + LLM 986，NetworkX 引擎） · 数据源 743 文档 / 9,019 Chunk · 向量索引 9,019 条（text-embedding-v3 / 1,024 维） · LLM 用量追踪（SQLite WAL + embedding 纳入 + CLI/Skill 来源标记） · LLM 响应缓存（内存 LRU 驱逐）· embedding 向量缓存（LRU + TTL 600s）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（LLM 深度提取 + 会话模式挖掘 + 全自治生命周期，`memory_updater.py` + `session_miner.py`，双通道架构）· 多 Agent 并发安全（FileLock 推广 + SQLite WAL + Agent 记忆隔离 `IRIS_AGENT_ID` + 进程注册表 `ProcessRegistry`）· ASR 实时校正引擎（剪贴板监听 + Aho-Corasick + LLM 编辑助手，`_clipboard_io.py` + `_text_detector.py` 拆分，替换词典热加载 + 手动热词合并）· ASR 反馈反向优化引擎（feedback.jsonl 驱动词典自动进化，僵尸规则淘汰 + LLM 发现提升 + 热词补充）· ASR 独立熔断器 + 超时配置 · LLM deadline 实时超时控制 · Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听 · CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit 安全审计 · constraints.txt 可复现构建 · ASR Pipeline 交互式进度输出。
+~32,000 行 / 151 文件 / 25 模块 · CLI 49 命令 · 单元测试 2,307（121 文件）· 覆盖率 60%+ · 10 个项目级 Skill · Wiki 221 页 · 知识图谱节点 219 / 关系边 2,161（wikilink 1,175 + LLM 986，NetworkX 引擎） · 数据源 776 文档 / 9,019 Chunk · 向量索引 9,019 条（text-embedding-v3 / 1,024 维） · YAML frontmatter 标准化注入（4 管道 + `core/frontmatter.py` 统一工具）· wikilink 自动注入引擎（`wiki/wikilink_injector.py`，零 LLM 成本，基于 Wiki 标题索引）· LLM 用量追踪（SQLite WAL + embedding 纳入 + CLI/Skill 来源标记） · LLM 响应缓存（内存 LRU 驱逐）· embedding 向量缓存（LRU + TTL 600s）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（LLM 深度提取 + 会话模式挖掘 + 全自治生命周期，`memory_updater.py` + `session_miner.py`，双通道架构）· 多 Agent 并发安全（FileLock 推广 + SQLite WAL + Agent 记忆隔离 `IRIS_AGENT_ID` + 进程注册表 `ProcessRegistry`）· ASR 实时校正引擎（剪贴板监听 + Aho-Corasick + LLM 编辑助手，`_clipboard_io.py` + `_text_detector.py` 拆分，替换词典热加载 + 手动热词合并）· ASR 反馈反向优化引擎（feedback.jsonl 驱动词典自动进化，僵尸规则淘汰 + LLM 发现提升 + 热词补充）· ASR 独立熔断器 + 超时配置 · LLM deadline 实时超时控制 · Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听 · CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit 安全审计 · constraints.txt 可复现构建 · ASR Pipeline 交互式进度输出。
 
 ### 关键路径
 
@@ -165,7 +165,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.20.1 (2026-07-30)** — deep_eval 配置路径改进：chunk 摘要文件路径由硬编码 `main_source_chunk_summary.json` 改为根据 `config.data_source.default_source` 动态加载，便于多数据源切换。协议版本 3.14（不变）。产品版本 3.20.0→3.20.1。
+**当前 v3.20.2 (2026-07-30)** — SOURCE 文档质量系统性提升：① YAML frontmatter 标准化（新增 `core/frontmatter.py` 统一工具模块，`build_frontmatter` / `inject_frontmatter` / `parse_frontmatter`，4 个 CLI 管道输出全部注入 frontmatter 元数据）；② wikilink 自动注入引擎（新增 `wiki/wikilink_injector.py`，基于 Wiki 标题索引 + 保护区屏蔽机制，零 LLM 成本，4 管道集成）；③ 成员周报 Prompt 增强（4 段落结构 + 量化指标要求 + 项目上下文注入）；④ 周报质量门禁（`check_quality`，不合格标记 `ai_quality: low`，不阻塞写入）。测试 +54（2,307 用例）。协议版本 3.14（不变）。产品版本 3.20.1→3.20.2。
+
+**v3.20.1 (2026-07-30)** — deep_eval 配置路径改进：chunk 摘要文件路径由硬编码 `main_source_chunk_summary.json` 改为根据 `config.data_source.default_source` 动态加载，便于多数据源切换。协议版本 3.14（不变）。产品版本 3.20.0→3.20.1。
 
 **v3.20.0 (2026-07-30)** — iris-feed 文档提取（Step 5）：新模块 `_doc_extractor.py`（199 行），从话题消息中自动收集飞书文档链接（docx/wiki/sheet/base），调用 `FeishuDocConverter` 转换为本地 Markdown 并关联到简报，支持跨次排重。配置项 `extract_docs` / `doc_extract_max`，新增 CLI 参数 `--no-extract-docs`。测试 +37（2,254 用例）。协议版本 3.13→3.14（新增 `--no-extract-docs` 参数）。产品版本 3.19.26→3.20.0。
 

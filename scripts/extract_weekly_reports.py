@@ -951,17 +951,23 @@ class AIReportProcessor:
         self._template = prompt_template
 
     def _build_prompt(
-        self, content: str, subject: str, sender_name: str, has_images: bool = False
+        self, content: str, subject: str, sender_name: str,
+        has_images: bool = False, project_context: str = "",
     ) -> str:
         """用模板构建 prompt。"""
         truncated = content[:8000] if content else ""
         if has_images:
             truncated = content[:4000] if content else ""
 
+        ctx_block = ""
+        if project_context:
+            ctx_block = f"## 已知项目上下文\n\n发件人关联的项目名称（请尽量使用以下标准名称指代项目）：\n\n{project_context}"
+
         return self._template.format(
             sender_name=sender_name,
             subject=subject,
             content=truncated or "[邮件正文内容为空或极少，主要内容可能在图片中]",
+            project_context=ctx_block,
         )
 
     def _call_llm(self, prompt: str, use_advanced: bool = False) -> Optional[str]:
@@ -987,8 +993,13 @@ class AIReportProcessor:
             print(f"      LLM 调用失败: {e}")
             return None
 
-    def process_email(self, email_data: Dict) -> Dict:
-        """处理单封邮件：选择合适的模型，提取结构化周报。"""
+    def process_email(self, email_data: Dict, project_context: str = "") -> Dict:
+        """处理单封邮件：选择合适的模型，提取结构化周报。
+
+        Args:
+            email_data: 邮件数据字典
+            project_context: 已知项目上下文（如关联项目名称列表），注入 Prompt 提升术语识别
+        """
         extracted = email_data.get("extracted", {})
         content = extracted.get("content", "")
         needs_advanced = extracted.get("needs_advanced_model", False)
@@ -1003,18 +1014,21 @@ class AIReportProcessor:
 
         if needs_advanced:
             print(f"         使用 adv_model...")
-            prompt = self._build_prompt(content, subject, sender_name, has_images=True)
+            prompt = self._build_prompt(content, subject, sender_name, has_images=True,
+                                        project_context=project_context)
             result = self._call_llm(prompt, use_advanced=True)
             model_used = "advanced"
             # 高级模型失败时回退基础模型
             if not result and content:
                 print(f"         adv_model 失败，回退 base_model...")
-                prompt = self._build_prompt(content, subject, sender_name)
+                prompt = self._build_prompt(content, subject, sender_name,
+                                            project_context=project_context)
                 result = self._call_llm(prompt, use_advanced=False)
                 model_used = "base"
         else:
             print(f"         使用 base_model...")
-            prompt = self._build_prompt(content, subject, sender_name)
+            prompt = self._build_prompt(content, subject, sender_name,
+                                        project_context=project_context)
             result = self._call_llm(prompt, use_advanced=False)
 
         email_data["ai_processed"] = result is not None
@@ -1037,10 +1051,12 @@ class AIReportProcessor:
 class WeeklyReportMarkdownGenerator:
     """生成格式化的周报 Markdown 文件。"""
 
-    def __init__(self, output_dir: str, filename_format: str, file_overwrite: bool = False):
+    def __init__(self, output_dir: str, filename_format: str,
+                 file_overwrite: bool = False, wiki_root: str = ""):
         self.output_dir = os.path.expanduser(output_dir)
         self.filename_format = filename_format
         self.file_overwrite = file_overwrite
+        self.wiki_root = wiki_root
         os.makedirs(self.output_dir, exist_ok=True)
 
     @staticmethod
@@ -1082,8 +1098,17 @@ class WeeklyReportMarkdownGenerator:
             filename = name[:200 - len(ext)] + ext
         return filename
 
-    def generate_content(self, email_data: Dict) -> str:
-        """生成邮件的 Markdown 内容。"""
+    def generate_content(self, email_data: Dict, week: int = 0,
+                         wiki_root: str = "") -> str:
+        """生成邮件的 Markdown 内容（含 YAML frontmatter + wikilink 注入）。
+
+        Args:
+            email_data: 邮件数据字典
+            week: ISO 周数（0 表示未知）
+            wiki_root: Wiki 根目录路径（用于 wikilink 注入）
+        """
+        from iris.core.frontmatter import inject_frontmatter
+
         sender_name = email_data.get("sender_name", "Unknown")
         from_info = email_data.get("from", {})
         from_email = from_info.get("mail_address") or from_info.get("email", "")
@@ -1094,6 +1119,7 @@ class WeeklyReportMarkdownGenerator:
         elif not isinstance(date, datetime):
             date = datetime.now()
         date_str = date.strftime("%Y年%m月%d日")
+        date_iso = date.strftime("%Y-%m-%d")
 
         ai_content = email_data.get("ai_content", "")
         extracted = email_data.get("extracted", {})
@@ -1104,6 +1130,19 @@ class WeeklyReportMarkdownGenerator:
         ai_model = email_data.get("ai_model_used", "")
         has_images = extracted.get("has_images", False)
 
+        # ── 构建 frontmatter ──────────────────────────────
+        _fm_fields = {
+            "title": f"周报 - {sender_name}",
+            "author": sender_name,
+            "date": date_iso,
+            "type": "成员周报",
+            "email": from_email,
+            "week": f"w{week:02d}" if week else "",
+            "ai_processed": ai_processed,
+            "ai_model": ai_model if ai_processed else "",
+        }
+
+        lines: list = []
         lines = [
             f"# 周报 - {sender_name} - {date_str}",
             "",
@@ -1131,7 +1170,56 @@ class WeeklyReportMarkdownGenerator:
         lines.append(content if content else "*未能提取到有效内容*")
         lines.append("")
 
-        return "\n".join(lines)
+        body = "\n".join(lines)
+
+        # ── 注入 wikilink（在 frontmatter 之前，避免污染 YAML）──
+        if wiki_root:
+            try:
+                _wr = Path(wiki_root)
+                if _wr.exists():
+                    from iris.wiki.wikilink_injector import WikilinkInjector
+                    _injector = WikilinkInjector(_wr)
+                    body = _injector.inject(body)
+            except Exception:
+                pass
+
+        # ── 注入 frontmatter ──────────────────────────────
+        try:
+            return inject_frontmatter(body, _fm_fields)
+        except Exception:
+            return body  # 降级：返回无 frontmatter 的正文
+
+    @staticmethod
+    def check_quality(content: str) -> Tuple[str, str]:
+        """检查周报内容质量，返回 (等级, 原因)。
+
+        等级：``good`` / ``low`` / ``empty``
+
+        检查规则：
+        1. AI 提炼仅含 "未能提取到有效内容" → empty
+        2. 去除 markdown 标记后纯文本 < 100 字符 → low
+        3. 缺少 "本周工作总结" 章节 → low
+        4. 其他情况 → good
+        """
+        # 规则 1: 空内容
+        if "未能提取到有效内容" in content or "未找到匹配的周报" in content:
+            return ("empty", "未能提取到有效内容")
+
+        # 去除 frontmatter 和 markdown 标记
+        import re as _re
+        plain = _re.sub(r'---.*?---', '', content, flags=_re.DOTALL)
+        plain = _re.sub(r'[#*>\-|`~\[\]()!]', '', plain)
+        plain = _re.sub(r'\s+', '', plain)
+
+        # 规则 2: 纯文本太短
+        if len(plain) < 100:
+            return ("low", f"内容过短（纯文本 {len(plain)} 字符）")
+
+        # 规则 3: 缺少核心章节
+        if "本周工作总结" not in content and "本周工作" not in content:
+            return ("low", "缺少「本周工作总结」章节")
+
+        return ("good", "")
 
     def save_markdown(self, email_data: Dict) -> str:
         """保存邮件为 Markdown 文件。"""
@@ -1153,7 +1241,26 @@ class WeeklyReportMarkdownGenerator:
                 counter += 1
             filepath = f"{base}_{counter}{ext}"
 
-        content = self.generate_content(email_data)
+        _, report_week = self.get_report_week_info(date)
+        # wikilink 注入在 generate_content 内部完成（frontmatter 之前）
+        content = self.generate_content(email_data, week=report_week,
+                                        wiki_root=self.wiki_root)
+
+        # ── 质量门禁 ────────────────────────────────────
+        quality_level, quality_reason = self.check_quality(content)
+        if quality_level != "good":
+            # 将质量标记注入 frontmatter
+            try:
+                from iris.core.frontmatter import parse_frontmatter, inject_frontmatter
+                _fm, _body = parse_frontmatter(content)
+                _fm["ai_quality"] = quality_level
+                if quality_reason:
+                    _fm["ai_quality_reason"] = quality_reason
+                content = inject_frontmatter(_body, _fm)
+                print(f"      ⚠️ 质量门禁 [{quality_level}]: {quality_reason}")
+            except Exception:
+                pass  # 质量门禁失败不应阻塞写入
+
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
 
@@ -1188,6 +1295,8 @@ def cmd_run(args: argparse.Namespace) -> None:
     print()
 
     # ── Step 1: 初始化 LLM Provider ───────────────────
+    bundle = None
+    wiki_root = ""
     if not args.skip_ai:
         try:
             bundle = load_config_bundle(PROJECT_ROOT)
@@ -1202,6 +1311,15 @@ def cmd_run(args: argparse.Namespace) -> None:
     else:
         ai_processor = None
         print("⏭️  跳过 AI 处理（--skip-ai）")
+
+    # 加载 wiki_root（用于 wikilink 注入）
+    if bundle is None:
+        try:
+            bundle = load_config_bundle(PROJECT_ROOT)
+        except Exception:
+            pass
+    if bundle and bundle.wiki:
+        wiki_root = bundle.wiki.get("wiki_root", "")
 
     # ── Step 2: 扫描邮箱 ─────────────────────────────
     print()
@@ -1243,6 +1361,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         output_dir=config.output_dir,
         filename_format=config.filename_format,
         file_overwrite=config.file_overwrite,
+        wiki_root=wiki_root,
     )
 
     generated_files = []

@@ -106,6 +106,36 @@ class TranscribeMeetingPipeline:
             route_name = route_result.get("route", "05-会议纪要")
             print(f"     📂 路由归档: {route_name} ← {route_result.get('reason', '')}", file=sys.stderr)
 
+        # ── 注入 wikilink 交叉引用 ──────────────────────
+        try:
+            from iris.wiki.wikilink_injector import WikilinkInjector
+            if self._wiki_root.exists():
+                _injector = WikilinkInjector(self._wiki_root)
+                minutes = _injector.inject(minutes)
+        except Exception:
+            pass  # wikilink 注入失败不应阻塞纪要生成
+
+        # ── 注入 frontmatter 元数据 ──────────────────────
+        try:
+            from iris.core.frontmatter import inject_frontmatter
+            _fm_fields = {
+                "title": f"会议纪要 - {meeting_topic}" if meeting_topic else f"会议纪要 - {meeting_type}",
+                "date": meeting_date,
+                "type": "会议纪要",
+                "meeting_type": meeting_type or "",
+                "duration": duration or "",
+                "source": source_filename,
+                "generated": time.strftime("%Y-%m-%d"),
+                "route": route_result.get("route", "") if route_result else "",
+            }
+            # 尝试从 LLM 输出中提取参会人员
+            _participants = self._extract_participants(minutes)
+            if _participants:
+                _fm_fields["participants"] = _participants
+            minutes = inject_frontmatter(minutes, _fm_fields)
+        except Exception:
+            pass  # frontmatter 注入失败不应阻塞纪要生成
+
         if output_path:
             out = Path(output_path).resolve()
         else:
@@ -171,6 +201,24 @@ class TranscribeMeetingPipeline:
         if hours > 0:
             return f"{hours}小时{minutes}分"
         return f"{minutes}分"
+
+    @staticmethod
+    def _extract_participants(minutes: str) -> str:
+        """从 LLM 会议纪要输出中提取参会人员列表。
+
+        匹配 ``## 参会人员`` 节后的文本行，提取逗号/顿号分隔的姓名。
+        返回顿号分隔的姓名串，无法提取时返回空字符串。
+        """
+        m = re.search(r'##\s*参会人员\s*\n+(.*?)(?:\n##|\n#|\Z)', minutes, re.DOTALL)
+        if not m:
+            return ""
+        block = m.group(1).strip()
+        # 移除列表标记 "- " 或 "* "
+        block = re.sub(r'^[-*]\s+', '', block, flags=re.MULTILINE)
+        # 按逗号、顿号、换行拆分
+        parts = re.split(r'[,，、\n]+', block)
+        names = [p.strip() for p in parts if p.strip() and len(p.strip()) <= 10]
+        return "、".join(names) if names else ""
 
     def _resolve_source_dir(self) -> Path:
         """解析 SOURCE/05-会议纪要/ 输出目录。"""
