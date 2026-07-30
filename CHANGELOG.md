@@ -46,6 +46,24 @@ iris-feed 文档提取 — 信息汇聚管道新增飞书文档自动转换与�
 
 ---
 
+## v3.20.1 (2026-07-30)
+
+deep_eval 数据源 chunk 摘要路径配置化。
+
+### 改进
+
+- `DeepEvaluator` 初始化时，chunk 摘要文件路径由硬编码 `main_source_chunk_summary.json` 改为根据 `config.data_source.default_source` 动态加载，便于多数据源切换
+
+### 版本升级
+
+| 层 | 旧版本 | 新版本 | 理由 |
+|------|:---:|:---:|------|
+| 产品版本 | 3.20.0 | **3.20.1** | deep_eval 配置路径改进 |
+| 协议版本 | 3.14 | 3.14（不变） | 无 CLI 变更 |
+| 数据版本 | feeds.json v1 | feeds.json v1（不变） | 无配置变更 |
+
+---
+
 ## v3.19.26 (2026-07-29)
 
 检索质量与知识库时效性四项优化 — chunk 重叠 + source_fingerprint 指纹追踪 + 向量索引模型守卫 + 主动提醒引擎。
