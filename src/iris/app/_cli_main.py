@@ -179,6 +179,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--topic-id", default="", help="feed-confirm/ignore 话题 ID")
     parser.add_argument("--all", action="store_true", dest="all_", help="feed-confirm 批量确认全部")
     parser.add_argument("--show", action="store_true", help="feed-config 显示完整配置")
+    parser.add_argument("--no-extract-docs", action="store_true",
+                        help="feed-collect 跳过飞书文档提取")
     return parser
 
 

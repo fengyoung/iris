@@ -4,8 +4,8 @@
   Step 1 - 消息获取
   Step 2 - 噪音过滤
   Step 3 - 话题检测
-  Step 4 - OKR 匹配（Phase 2）
-  Step 5 - 文档提取（Phase 2）
+  Step 4 - OKR 标签解析
+  Step 5 - 文档提取（飞书文档链接 → 本地 Markdown）
   Step 6 - 简报生成
   Step 7 - 分发
 """
@@ -21,6 +21,7 @@ from iris.feed._chat_fetcher import ChatFetcher
 from iris.feed._brief_generator import BriefGenerator
 from iris.feed._cursor_tracker import CursorTracker
 from iris.feed._dispatcher import Dispatcher
+from iris.feed._doc_extractor import DocExtractor
 from iris.feed._feishu_bridge import FeishuBridge
 from iris.feed._message_filter import MessageFilter
 from iris.feed._okr_loader import OKRLoader
@@ -47,6 +48,7 @@ class FeedPipeline:
         self._data_dir = self._root / "data"
         self._source_dir = source_dir or self._resolve_source_dir(bundle)
         self._llm = llm_service
+        self._bundle = bundle
 
         # 初始化各组件
         self._bridge = FeishuBridge()
@@ -84,6 +86,7 @@ class FeedPipeline:
         dry_run: bool = False,
         send_notifications: bool = False,
         import_mode: Optional[str] = None,
+        extract_docs: Optional[bool] = None,
     ) -> PipelineResult:
         """执行一次完整的信息汇聚。
 
@@ -94,6 +97,7 @@ class FeedPipeline:
             dry_run: 仅预览，不实际写入
             send_notifications: 是否发送飞书确认通知
             import_mode: 覆盖导入模式（'auto_import' | 'confirm'），None 使用各会话配置
+            extract_docs: 是否提取飞书文档（None 使用 topic_config 配置）
 
         Returns:
             PipelineResult
@@ -154,10 +158,22 @@ class FeedPipeline:
                 # 将 okr_tags 从 ["O1-KR1"] 扩展为 ["O1-KR1: 实际描述"]
                 t.okr_tags = [f"{tag}: {desc}" for tag, desc in resolved.items()]
 
+        # ── Step 5: 文档提取 ──
+        do_extract = extract_docs
+        if do_extract is None:
+            do_extract = config.topic_config.get("extract_docs", True)
+        converted_docs: list = []
+        if do_extract:
+            doc_extractor = DocExtractor(self._source_dir, self._bundle)
+            doc_max = config.topic_config.get("doc_extract_max", 10)
+            converted_docs = doc_extractor.extract(topics, dry_run=dry_run, max_docs=doc_max)
+        else:
+            logger.info("Step 5: 文档提取已禁用，跳过")
+
         # ── Step 6: 简报生成 ──
         exec_date = until.strftime("%Y%m%d")
         generator = BriefGenerator(self._source_dir)
-        brief_files = generator.generate(topics, [], exec_date, dry_run=dry_run)
+        brief_files = generator.generate(topics, converted_docs, exec_date, dry_run=dry_run)
         logger.info("Step 6: 生成了 %d 份简报", len(brief_files))
 
         if dry_run:
@@ -167,6 +183,7 @@ class FeedPipeline:
                 filtered_count=filtered_count,
                 topics=topics,
                 brief_files=brief_files,
+                converted_docs=converted_docs,
             )
 
         # ── Step 7: 分发 ──
@@ -184,6 +201,7 @@ class FeedPipeline:
             filtered_count=filtered_count,
             topics=topics,
             brief_files=brief_files,
+            converted_docs=converted_docs,
             auto_imported=dispatch_result.auto_imported,
             pending=dispatch_result.pending,
         )

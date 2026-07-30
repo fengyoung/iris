@@ -108,6 +108,8 @@ def _save_and_finish(wc_list: list, config_path: Path) -> int:
             "topic_min_messages": 2,
             "max_topics_per_run": 30,
             "time_window_minutes": 30,
+            "extract_docs": True,
+            "doc_extract_max": 10,
         },
         "okr_mapping": {"enabled": True, "strict_match": False},
     }
@@ -286,6 +288,7 @@ def handle_feed_collect(args, bundle, _logger) -> int:
 
     dry_run = getattr(args, "dry_run", False)
     import_mode_raw = getattr(args, "import_mode", "") or ""
+    no_extract_docs = getattr(args, "no_extract_docs", False)
 
     # 解析导入模式：'auto_import' / 'confirm' 覆盖所有会话；其他值（如 '' 或 'all'）使用各会话配置
     import_mode_override = None
@@ -299,6 +302,7 @@ def handle_feed_collect(args, bundle, _logger) -> int:
         dry_run=dry_run,
         send_notifications=send_notifications,
         import_mode=import_mode_override,
+        extract_docs=False if no_extract_docs else None,
     )
 
     if result.empty_reason:
@@ -309,6 +313,10 @@ def handle_feed_collect(args, bundle, _logger) -> int:
     print(f"  获取消息: {result.fetched_count} 条")
     print(f"  过滤后:   {result.filtered_count} 条")
     print(f"  检测话题: {len(result.topics)} 个")
+    if no_extract_docs:
+        print(f"  提取文档: （已跳过）")
+    else:
+        print(f"  提取文档: {len(result.converted_docs)} 份")
     print(f"  生成简报: {len(result.brief_files)} 份")
 
     if result.auto_imported:
@@ -323,6 +331,10 @@ def handle_feed_collect(args, bundle, _logger) -> int:
             tags = ",".join(t.okr_tags) if t.okr_tags else "—"
             print(f"  [{tags}] {t.title}")
             print(f"    {t.summary[:100]}...")
+        if result.converted_docs:
+            print(f"\n📄 发现 {len(result.converted_docs)} 个飞书文档链接（执行时将自动转换）")
+            for doc in result.converted_docs:
+                print(f"  • {doc.original_url}")
         print("\n（--dry-run 模式，未实际写入）")
 
     return 0

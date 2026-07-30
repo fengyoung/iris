@@ -1,3 +1,51 @@
+## v3.20.0 (2026-07-30)
+
+iris-feed 文档提取 — 信息汇聚管道新增飞书文档自动转换与关联。
+
+### iris-feed 文档提取（Step 5）
+
+- 新模块 `feed/_doc_extractor.py`（`DocExtractor`）：从话题消息中收集飞书文档链接（docx/wiki/sheet/base），调用 `FeishuDocConverter` 转换为本地 Markdown，输出 `ConvertedDoc` 列表供简报关联
+- **URL 检测**：正则匹配 `feishu.cn` 四类文档链接，单次 run 内 `set` 去重，跨次排重复用 `FeishuDocConverter` 的 `dedup_index`
+- **执行时机**：插入 Pipeline Step 5（话题检测之后、简报生成之前），仅处理有文档链接的话题（零链接直接跳过，零 API 成本）
+- **简报关联**：`BriefGenerator.generate()` 不再接收空列表，转换后的文档通过相对路径出现在简报「相关文档」段落
+- **dry-run 支持**：预览模式返回占位 `ConvertedDoc`（仅含 URL），不实际调用飞书 API
+- **失败隔离**：每个文档独立 try/except，转换失败或权限不足不影响其他文档和后续步骤
+
+### 配置扩展
+
+- `feeds.json` 的 `topic_config` 新增两项：
+  - `extract_docs`（bool，默认 true）：是否启用文档提取
+  - `doc_extract_max`（int，默认 10）：单次最多转换文档数（0 不限制）
+- 新增 CLI 参数 `--no-extract-docs`：`feed-collect` 跳过文档提取
+- `handle_feed_collect` 输出新增文档提取统计行（`--no-extract-docs` 时显示「已跳过」）
+- `PipelineResult.converted_docs` 补齐（此前始终为空）
+
+### 测试
+
+- 新增 `test_feed_doc_extractor.py`（37 用例）：URL 提取 10 / 模式匹配 9 / URL 收集 4 / 提取器主流程 14（含 dry-run、成功、排重、失败、异常、max_docs 截断、混合场景）
+- 已有 feed 测试 226 用例零回归
+
+### 版本升级
+
+| 层 | 旧版本 | 新版本 | 理由 |
+|------|:---:|:---:|------|
+| 产品版本 | 3.19.26 | **3.20.0** | 新增 iris-feed 文档提取功能 |
+| 协议版本 | 3.13 | **3.14** | 新增 `--no-extract-docs` CLI 参数 |
+| 数据版本 | feeds.json v1 | feeds.json v1（不变） | `topic_config` 新增可选字段，向后兼容 |
+
+| 文件 | 行数变化 | 说明 |
+|------|:--:|------|
+| `feed/_doc_extractor.py` | +199 | 新模块 |
+| `feed/feed_pipeline.py` | +18 / -8 | Step 5 接入 + bundle 存储 |
+| `feed/feed_config.py` | +2 / -0 | 默认配置项 |
+| `feed/__init__.py` | +2 / -0 | 导出 |
+| `app/_cli_main.py` | +2 / -0 | `--no-extract-docs` |
+| `app/cli/_handlers/_feed.py` | +12 / -3 | 参数透传 + 输出统计 |
+| `.claude/skills/iris-feed/SKILL.md` | +16 / -5 | 文档提取功能说明 |
+| `tests/unit/test_feed_doc_extractor.py` | +432 | 新测试（37 用例） |
+
+---
+
 ## v3.19.26 (2026-07-29)
 
 检索质量与知识库时效性四项优化 — chunk 重叠 + source_fingerprint 指纹追踪 + 向量索引模型守卫 + 主动提醒引擎。

@@ -31,6 +31,7 @@ from ._brief_generator import BriefGenerator
 from ._dispatcher import Dispatcher
 from ._feishu_bridge import FeishuBridge
 from ._cursor_tracker import CursorTracker
+from ._doc_extractor import DocExtractor
 from ._okr_loader import OKRLoader, OKRDocument
 from ._types import (
     ConvertedDoc,
@@ -55,6 +56,7 @@ __all__ = [
     "Dispatcher",
     "FeishuBridge",
     "CursorTracker",
+    "DocExtractor",
     "OKRLoader",
     "OKRDocument",
     "ConvertedDoc",

@@ -1,7 +1,7 @@
 ---
 name: iris-feed
 version: 1.0.0
-description: Iris 信息汇聚 — 从飞书群聊/单聊自动挖掘有价值话题，生成简报归档到知识库。读入飞书消息提取话题，配合 OKR 语义匹配产出结构化简报。当用户需要获取群聊讨论简报、关注话题进展、自动汇聚飞书信息时使用。
+description: Iris 信息汇聚 — 从飞书群聊/单聊自动挖掘有价值话题，提取关联的飞书文档，配合 OKR 语义匹配产出结构化简报并归档。当用户需要获取群聊讨论简报、关注话题进展、自动汇聚飞书信息时使用。
 metadata:
   requires:
     bins: ["python3"]
@@ -10,7 +10,7 @@ metadata:
 
 # Iris 信息汇聚
 
-从飞书群聊/单聊中自动挖掘有价值的讨论话题，通过 LLM 做话题聚合和 OKR 语义匹配，生成结构化简报归档到 `SOURCE/09-工作简报/`。
+从飞书群聊/单聊中自动挖掘有价值的讨论话题，通过 LLM 做话题聚合和 OKR 语义匹配，自动提取消息中引用的飞书文档（docx/wiki/sheet/base），生成结构化简报归档到 `SOURCE/09-工作简报/`。
 
 涉及 9 个 CLI 命令，核心工作流分为**配置→汇聚→管理**三个阶段。
 
@@ -71,8 +71,9 @@ python3 scripts/run_cli.py --call-source skill feed-collect --chat "<群名>" --
 
 预览输出包含：
 - 📊 获取/过滤/检测的统计数据
+- 📄 发现的可提取飞书文档链接
 - 📋 每个话题的标题、摘要、来源、**OKR 语义匹配结果**
-- 不会实际写入磁盘
+- 不会实际写入磁盘，也不会实际转换文档
 
 ### 确认后执行
 
@@ -82,10 +83,17 @@ python3 scripts/run_cli.py --call-source skill feed-collect --chat "<群名>" --
 python3 scripts/run_cli.py --call-source skill feed-collect --since 2026-07-20
 ```
 
+如需跳过文档提取（仅生成简报）：
+
+```bash
+python3 scripts/run_cli.py --call-source skill feed-collect --no-extract-docs
+```
+
 ### 结果
 
 - `auto_import` 的群聊话题 → 自动入库到 `SOURCE/09-工作简报/YYYYMM/`
 - `confirm` 的群聊话题 → 暂存待确认队列
+- 消息中的飞书文档链接 → 自动转换为本地 Markdown 并智能路由到 SOURCE 对应子目录，简报中关联引用
 
 ---
 
@@ -142,11 +150,29 @@ python3 scripts/run_cli.py --call-source skill feed-remove --chat "<群名>"
 ### 场景 B：用户说「看看最近有什么讨论」
 
 1. **先预览**：`feed-collect --dry-run --since <自动推算的时间范围>`
-2. **展示话题概览**：按 OKR 匹配维度排序展示
+2. **展示话题概览**：按 OKR 匹配维度排序展示，**标注每个话题关联的飞书文档链接**
 3. **询问是否入库或调整**：
    - 用户觉得有价值 → 执行实际 collect
+   - 用户想跳过文档提取 → 加 `--no-extract-docs`
    - 用户想扩大时间范围 → 重新 dry-run
    - 用户想改某个群的模式 → feed-config
+
+**展示格式**（dry-run 输出示例）：
+
+```
+📊 最近 3 天发现 4 个话题：
+
+1. [O2-KR1] AI巡检模型准召优化方案讨论
+   来源: 数据智能部群 · 23条消息
+   📄 关联文档: AI巡检模型优化方案 (feishu docx)
+   OKR: ✅ strong
+
+2. [O1-KR1] 拍照3.0主观项检测效果复盘
+   来源: 质检算法群 · 15条消息
+   （无关联文档）
+
+📄 发现 1 个飞书文档链接，执行时将自动转换。
+```
 
 ### 场景 C：用户说「提取近 N 天简报」
 
@@ -218,3 +244,6 @@ IRIS Feed 会从 `SOURCE/01-目标管理/` 中加载最新 OKR 文档，在话�
 | 话题不合适（误报） | 用 `feed-ignore` 忽略，重新 collect |
 | 飞书 API 限流 | 自动重试，日志告警 |
 | OKR 文档缺失 | 降级处理，话题检测和简报不依赖 OKR |
+| 文档转换失败（权限不足） | 跳过该文档，warn 日志，其他文档和简报不受影响；提示用户手动 `feishu-doc-convert` |
+| 文档转换失败（内容为空） | 同上，跳过 |
+| 文档已被转换过 | 自动排重跳过，复用已有本地文件，简报关联已有路径 |

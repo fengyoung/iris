@@ -65,6 +65,8 @@ class FeedConfig:
             "topic_min_messages": 2,
             "max_topics_per_run": 30,
             "time_window_minutes": 30,
+            "extract_docs": True,
+            "doc_extract_max": 10,
         }
         self.okr_mapping = okr_mapping or {
             "enabled": True,
@@ -140,6 +142,8 @@ def write_example_config(config_path: Path) -> None:
             "topic_min_messages": 2,
             "max_topics_per_run": 30,
             "time_window_minutes": 30,
+            "extract_docs": True,
+            "doc_extract_max": 10,
         },
         "okr_mapping": {
             "enabled": True,
