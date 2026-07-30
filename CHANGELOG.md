@@ -1,3 +1,45 @@
+## v3.20.2 (2026-07-30)
+
+测试覆盖率系统提升 — 新增 253 个单元测试，覆盖率 59.87% → 62.82%。
+
+### 测试补全（9 个新测试文件，+253 用例）
+
+**Tier 1 — 纯函数单元测试：**
+
+- `tests/unit/test_chunker_extended.py`（53 用例）：`_extract_fields` 全新覆盖、`_chunk_lines` 12 场景、`ChunkSlim.from_dict` / `ChunkSummary.to_dict` 数据类序列化、`_split_content` / `_split_hard` / `_overlap_tail` / `_apply_overlap` / `_build_token_freq` / `_build_structural_tags` 增强边界测试
+- `tests/unit/test_formatter_extended.py`（58 用例）：`_add_kv` + 全部 35 个 `_fmt_*` 格式化函数分支覆盖、`format_payload` 全部注册命令无崩溃验证、`_fmt_reminders` 5 信号类型覆盖、`_fmt_wiki_lint` 质量/链接/索引/内容四大段全覆盖
+- `tests/unit/test_asr_hotwords_extended.py`（27 用例）：`_is_valid_hotword` 14 边界条件、`_clean_text_term` 控制字符/标点/括号清理、`_build_hotwords_prompt` 结构验证、`_parse_hotwords_response` 嵌套 JSON/非字典跳/空 term
+- `tests/unit/test_embedder_extended.py`（18 用例）：`_cache_key` 确定性、LRU 驱逐验证、`_infer_provider` 四大供应商识别、`_extract_vectors` 缺失字段/非列表容错
+- `tests/unit/test_lifecycle_extended.py`（30 用例）：`merge` 6 策略分支（新概念/同值/新覆盖/keep_both/profile 合并/空概念跳过）、`restore_archived` 单恢复/全恢复/不存在、`clear_archive` 空/有数据、`maintenance` 端到端、`_load_archive` 缺失/损坏 JSON、`_now_iso` / `_parse_iso` 纯函数
+
+**Tier 2 — Mock 隔离测试：**
+
+- `tests/unit/test_memory_updater_extended.py`（24 用例）：`IMPLICIT_CORRECTION_RE` 6 匹配模式、`_should_deep_analyze` 5 触发条件、`_parse_llm_response` 6 JSON 格式、`_auto_resolve_conflict` LLM 确认/正则裁决/无冲突/稳定确认、`_apply_extracted` likes/dislikes/styles/notes/corrections 全路径 + 空提取/空概念跳过
+- `tests/unit/test_feishu_bridge.py`（16 用例）：`_run_lark_cli` 成功/非零退出/超时/无效 JSON、`raw_to_message` 文本消息/文档链接/wiki+sheet/无发送者/ISO 时间、`get_display_name` 有名/匿名/空字典
+
+**Tier 3 — 核心模块全新覆盖：**
+
+- `tests/unit/test_memory_cache.py`（15 用例）：LRU 驱逐/访问刷新/更新移动、TTL 过期、stats 命中率、线程安全/非线程安全、str/list/dict 泛型
+- `tests/unit/test_agent_adapter.py`（12 用例）：`AgentCapability` 构造/冻结、`IRIS_CAPABILITIES` 完整校验（非空/必填字段/名称唯一/命令唯一/核心能力/标签无笔误）
+
+### 版本升级
+
+| 层 | 旧版本 | 新版本 | 理由 |
+|------|:---:|:---:|------|
+| 产品版本 | 3.20.1 | **3.20.2** | 测试覆盖率系统提升（+253 用例） |
+| 协议版本 | 3.14 | 3.14（不变） | 无 CLI 变更 |
+| 数据版本 | — | —（不变） | 无配置变更 |
+
+### 统计
+
+| 指标 | 优化前 | 优化后 | 变化 |
+|------|:---:|:---:|:---:|
+| 测试用例数 | 2,254 | **2,507** | +253 |
+| 测试文件数 | 120 | **129** | +9 |
+| 代码覆盖率 | 59.87% | **62.82%** | +2.95% |
+
+---
+
 ## v3.20.0 (2026-07-30)
 
 iris-feed 文档提取 — 信息汇聚管道新增飞书文档自动转换与关联。
