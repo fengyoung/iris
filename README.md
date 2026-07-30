@@ -1,8 +1,10 @@
-# Iris 3.20.0
+# Iris 3.20.1
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
+
+**v3.20.1** — deep_eval 配置路径改进：chunk 摘要文件路径由硬编码 `main_source_chunk_summary.json` 改为根据 `default_source` 动态加载，便于多数据源切换。协议版本 3.14（不变）。
 
 **v3.20.0** — iris-feed 文档提取（Step 5）：从话题消息中自动收集飞书文档链接，调用 FeishuDocConverter 转换为本地 Markdown，简报中关联引用。新增 `--no-extract-docs` 参数。新模块 `_doc_extractor.py`（199 行）+ 37 测试用例。协议版本 3.14。
 
@@ -175,6 +177,7 @@ iris3/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.20.1** | 2026-07-30 | deep_eval chunk 摘要路径配置化：`main_source` 硬编码改为 `default_source` 动态加载。协议版本 3.14（不变） |
 | **v3.20.0** | 2026-07-30 | iris-feed 文档提取（Step 5）：飞书文档链接自动转换为本地 Markdown 并关联到简报，+37 测试。协议版本 3.14 |
 | **v3.19.26** | 2026-07-29 | 检索与时效性四项优化：chunk 重叠 / Wiki source_fingerprint 指纹追踪 / 向量索引模型守卫 + --force-rebuild / 主动提醒引擎 reminders；修复 PDF 切块 0 chunk、hash 索引不更新、RRF 配置未生效。协议版本 3.13，+54 测试 |
 | **v3.19.25** | 2026-07-28 | iris-feed 简报质量跃升：两阶段 LLM + 去截断 + Prompt 重写 + 结构化输出增强。合并 0728-beta：输入截断保护 + 死代码清理（7 文件/+725/-268） |
