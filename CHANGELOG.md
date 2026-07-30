@@ -1,72 +1,94 @@
 ## v3.20.2 (2026-07-30)
 
-SOURCE 文档质量系统性提升 — YAML frontmatter 标准化 + wikilink 自动注入 + 周报 Prompt 增强 + 质量门禁。
+SOURCE 文档质量系统性提升 + 测试覆盖率提升 — 双线合并。
 
-### 1. YAML frontmatter 标准化（核心基础设施）
+### Part A：frontmatter 标准化 + wikilink 自动注入 + 周报优化
 
-- 新增 `core/frontmatter.py`（~230 行）：`build_frontmatter` / `inject_frontmatter` / `parse_frontmatter` / `get_frontmatter_field` / `has_frontmatter` 五个公开函数，11 种 `DOC_TYPES` 常量
-- YAML 规范合规：保留字检测（true/false/null/yes/no/on/off/~/.inf/.nan）、数字形式字符串检测（"123"/"3.14"/"1e6"/"0x1A" 等）、双引号转义、多行 block scalar 渲染、BOM 兼容
-- `inject_frontmatter` 幂等安全（已有 frontmatter 时跳过），失败不影响文档生成
-- `parse_frontmatter` 兼容 `wiki/searcher.py` 原有 API，统一 `core/__init__.py` 导出
+**1. YAML frontmatter 标准化（核心基础设施）**
 
-### 2. 四个 CLI 管道 frontmatter 注入
+- 新增 `core/frontmatter.py`（~244 行）：`build_frontmatter` / `inject_frontmatter` / `parse_frontmatter` / `get_frontmatter_field` / `has_frontmatter` 五个公开函数，11 种 `DOC_TYPES` 常量
+- YAML 规范合规：保留字检测、数字形式字符串检测、双引号转义、多行 block scalar 渲染、BOM 兼容
+- `inject_frontmatter` 幂等安全，失败不影响文档生成
 
-| 管道 | 文件 | 字段 |
-|------|------|------|
-| `transcribe-meeting` | `pipeline.py` | title, date, type, meeting_type, duration, source, participants, generated, route |
-| `extract-weekly-reports` | `extract_weekly_reports.py` | title, author, date, type, email, week, ai_processed, ai_model |
-| `chat-digest` | `chat_digest.py` | title, date, type, source_chat, chat_id, chat_type, message_count, time_start, time_end, extracted_at |
-| `feishu-doc-convert` | `doc_convert.py` | title, date, type, author, source_url, doc_token, route |
+**2. 四个 CLI 管道 frontmatter 注入**
 
-所有管道遵循统一顺序：wikilink 注入 → frontmatter 注入 → `safe_write_text`，每步独立 try/except 降级。
+| 管道 | 字段 |
+|------|------|
+| `transcribe-meeting` | title, date, type, meeting_type, duration, source, participants, generated, route |
+| `extract-weekly-reports` | title, author, date, type, email, week, ai_processed, ai_model |
+| `chat-digest` | title, date, type, source_chat, chat_id, chat_type, message_count, time_start, time_end, extracted_at |
+| `feishu-doc-convert` | title, date, type, author, source_url, doc_token, route |
 
-### 3. wikilink 自动注入引擎（零 LLM 成本）
+统一顺序：wikilink 注入 → frontmatter 注入 → `safe_write_text`，每步独立 try/except 降级。
 
-- 新增 `wiki/wikilink_injector.py`（~340 行）：`WikilinkInjector` 类，初始化时扫描 Wiki 目录构建 `title → relative_path` 索引（4 类型目录，~220 页）
-- **注入逻辑**：按标题长度降序匹配 → 首次出现替换为 `[[target]]` → 仅匹配正文（跳过代码块、已有链接、URL、图片、frontmatter）
-- **嵌套防护**：`_find_safe` 跳过 `\x01...\x02` 标记区域，防止短标题匹配到之前注入的 wikilink 路径内部
-- **保护区屏蔽**：`_find_protected_regions` 7 类正则 + `_merge_regions` 合并重叠 + `_mask_regions`/`_unmask_regions` 占位替换
-- `refresh()` 支持 Wiki 更新后重新扫描（`build-wiki-nav`/`daily-start` 集成）
-- 四个管道全部集成，WikilinkInjector 构造失败 / inject 异常均不阻塞文档生成
+**3. wikilink 自动注入引擎（零 LLM 成本）**
 
-### 4. 成员周报 Prompt 增强
+- 新增 `wiki/wikilink_injector.py`（~339 行）：初始化时扫描 Wiki 目录构建 `title → relative_path` 索引
+- 注入逻辑 + 嵌套防护（`_find_safe`）+ 保护区屏蔽（7 类正则），4 管道集成
 
-- 模板 `weekly_report_extract.md` 重构为 4 段落结构：本周工作总结（按项目/方向分组 + 量化指标）→ 关键指标/数据 → 问题与风险 → 下周计划
-- 新增 `[原文信息不足]` 标注机制，禁止 AI 编造
-- `_build_prompt` 支持 `project_context` 参数，注入发件人关联的 Wiki 项目名称以提升术语识别准确率
+**4. 成员周报 Prompt 增强** — 4 段落结构 + 量化指标要求 + 项目上下文注入
 
-### 5. 周报质量门禁
+**5. 周报质量门禁** — `check_quality` 三级判定，不合格标记 `ai_quality: low`，不阻塞写入
 
-- 新增 `check_quality` 静态方法（`empty` / `low` / `good` 三级判定）
-- 规则：内容空/纯文本 <100 字符/缺少「本周工作总结」章节
-- 不通过时在 frontmatter 标记 `ai_quality: low` + `ai_quality_reason`，CLI 输出 warning，但不阻塞写入
+### Part B：测试覆盖率系统提升
+
+新增 253 个单元测试（9 个新文件），覆盖率 59.87% → 62.82%。
+
+| Tier | 文件 | 用例 | 覆盖模块 |
+|------|------|:---:|------|
+| 1 纯函数 | `test_chunker_extended.py` | 53 | `_extract_fields` / `_chunk_lines` / `_split_content` 等 |
+| | `test_formatter_extended.py` | 58 | 35 个 `_fmt_*` + `_add_kv` + `format_payload` |
+| | `test_asr_hotwords_extended.py` | 27 | `_is_valid_hotword` / `_parse_hotwords_response` |
+| | `test_embedder_extended.py` | 18 | `_cache_key` / LRU / `_infer_provider` |
+| | `test_lifecycle_extended.py` | 30 | `merge` 6 策略 / `restore_archived` / `maintenance` |
+| 2 Mock | `test_memory_updater_extended.py` | 24 | `_should_deep_analyze` / `_auto_resolve_conflict` |
+| | `test_feishu_bridge.py` | 16 | `_run_lark_cli` / `raw_to_message` / `get_display_name` |
+| 3 核心 | `test_memory_cache.py` | 15 | LRU 驱逐 / TTL 过期 / stats / 线程安全 |
+| | `test_agent_adapter.py` | 12 | `AgentCapability` / `IRIS_CAPABILITIES` 校验 |
 
 ### 测试
 
-- 新增 `test_frontmatter.py`（31 用例）：build/inject/parse/has/get 函数全覆盖 + YAML 规范边界（保留字/数字/多行/引号/BOM）
-- 新增 `test_wikilink_injector.py`（23 用例）：索引构建/注入（人/项目/首次出现/跳过已有链接/代码块/行内代码/URL/md链接/排除/嵌套防护/空内容）+ 辅助方法（文件名提取/_merge_regions/_find_safe）
+- Part A：新增 `test_frontmatter.py`（31 用例）+ `test_wikilink_injector.py`（23 用例）
+- Part B：新增 9 个测试文件（253 用例）
 - 已有 2,253 用例零回归
 
 ### 版本升级
 
 | 层 | 旧版本 | 新版本 | 理由 |
 |------|:---:|:---:|------|
-| 产品版本 | 3.20.1 | **3.20.2** | frontmatter 标准化 + wikilink 注入 + Prompt 增强 |
+| 产品版本 | 3.20.1 | **3.20.2** | frontmatter 标准化 + wikilink 注入 + 测试覆盖率提升 |
 | 协议版本 | 3.14 | 3.14（不变） | 无新增 CLI 命令 |
 | 数据版本 | 不变 | 不变 | 无配置 Schema 变更 |
 
+### 统计
+
+| 指标 | 优化前 | 优化后 | 变化 |
+|------|:---:|:---:|:---:|
+| 测试用例数 | 2,254 | **2,561** | +307 |
+| 测试文件数 | 120 | **131** | +11 |
+| 代码覆盖率 | 59.87% | **62.82%** | +2.95% |
+
 | 文件 | 行数变化 | 说明 |
 |------|:--:|------|
-| `core/frontmatter.py` | +244 | 新模块 |
-| `wiki/wikilink_injector.py` | +339 | 新模块 |
-| `core/__init__.py` | +16 / -2 | 导出 |
-| `app/transcribe_meeting/pipeline.py` | +53 / -3 | frontmatter + wikilink + 参会人提取 |
-| `feishu/chat_digest.py` | +51 / -6 | frontmatter + wikilink + `_resolve_wiki_root_safe` |
-| `feishu/doc_convert.py` | +31 / -0 | frontmatter + wikilink |
-| `scripts/extract_weekly_reports.py` | +134 / -24 | frontmatter + wikilink + prompt + quality gate + wiki_root 参数 |
-| `templates/prompt/weekly_report_extract.md` | +25 / -13 | 4 段落结构 Prompt |
-| `tests/unit/test_frontmatter.py` | +273 | 新测试（31 用例） |
-| `tests/unit/test_wikilink_injector.py` | +293 | 新测试（23 用例） |
+| `core/frontmatter.py` | +244 | 新模块（Part A） |
+| `wiki/wikilink_injector.py` | +339 | 新模块（Part A） |
+| `core/__init__.py` | +16 / -2 | 导出（Part A） |
+| `app/transcribe_meeting/pipeline.py` | +53 / -3 | frontmatter + wikilink（Part A） |
+| `feishu/chat_digest.py` | +51 / -6 | frontmatter + wikilink（Part A） |
+| `feishu/doc_convert.py` | +31 | frontmatter + wikilink（Part A） |
+| `scripts/extract_weekly_reports.py` | +134 / -24 | frontmatter + wikilink + prompt + quality gate（Part A） |
+| `templates/prompt/weekly_report_extract.md` | +25 / -13 | 4 段落 Prompt（Part A） |
+| `tests/unit/test_frontmatter.py` | +273 | 新测试 31 用例（Part A） |
+| `tests/unit/test_wikilink_injector.py` | +293 | 新测试 23 用例（Part A） |
+| `tests/unit/test_chunker_extended.py` | ~+530 | 53 用例（Part B） |
+| `tests/unit/test_formatter_extended.py` | ~+580 | 58 用例（Part B） |
+| `tests/unit/test_asr_hotwords_extended.py` | ~+270 | 27 用例（Part B） |
+| `tests/unit/test_embedder_extended.py` | ~+180 | 18 用例（Part B） |
+| `tests/unit/test_lifecycle_extended.py` | ~+300 | 30 用例（Part B） |
+| `tests/unit/test_memory_updater_extended.py` | ~+240 | 24 用例（Part B） |
+| `tests/unit/test_feishu_bridge.py` | ~+160 | 16 用例（Part B） |
+| `tests/unit/test_memory_cache.py` | ~+150 | 15 用例（Part B） |
+| `tests/unit/test_agent_adapter.py` | ~+120 | 12 用例（Part B） |
 
 ---
 
