@@ -434,8 +434,10 @@ class DeepEvaluator:
 
         # 初始化源定位器（iris3: 主数据源 chunk 摘要）
         data_root = Path(config.root) / "data" / "metadata"
+        # 使用 default_source 对应的 chunk 摘要（main_source 为通用 fallback）
+        default_source = config.data_source.get("default_source", "main_source")
         chunk_summary_paths = [
-            str(data_root / "main_source_chunk_summary.json"),
+            str(data_root / f"{default_source}_chunk_summary.json"),
         ]
         self._locator = SourceLocator(chunk_summary_paths)
 
