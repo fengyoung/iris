@@ -1,3 +1,36 @@
+## v3.22.0 (2026-08-02)
+
+合并 0802-alpha → main — 开源信息泄露治理全库脱敏（40+ 文件）。
+
+### 1. 敏感默认值配置化（生产代码）
+
+- **`IRIS_BOT_USER_ID` 真实 open_id 改环境变量**（`feed/_feishu_bridge.py` / `feed/_dispatcher.py` / `feed/feed_pipeline.py`）：未配置时跳过飞书 Bot 推送（不再硬编码真实 open_id）。
+- **团队名单与 `dept_op_keyword` 默认值清空**（`analysis/_biweekly_collector.py` / `feed/_okr_loader.py` / `feed/feed_config.py`）：`_DEFAULT_TEAM_OKR_NAMES` 与 `dept_op_keyword` 默认空，改由 `app.json` 的 `app.biweekly_report.team_okr_patterns` / `dept_op_keyword` 配置驱动；显式写 `null` 时按空串处理（null 防御，修复脱敏引入的崩溃缺陷）。
+- `core/frontmatter_batch.py` / `wiki/asr/*` / `wiki/wikilink_injector.py`：内部业务词与示例泛化。
+
+### 2. 全库泛化（文档与模板）
+
+- **真实人名 → 通用占位**：冯扬/卞凯/李嘉晨等 11 人姓名替换为「本人/团队成员/负责人」等通用表述。
+- **企业邮箱 → `example.com`**：`zhuanzhuan.com` 域名全库替换。
+- **真实 OKR/项目名/业务指标 → 通用词**：图验技术/拍照3.0/XRay/台球杆/直检率等替换为「图像验证技术/硬件检测/直检率指标」等（`templates/prompt/biweekly_*.md` / `misreadings.md` / `generate_person.txt`）。
+- **Skill 文档重写**：iris-okr-check KR 检索词表、iris-feed dry-run 示例、iris-wiki 示例整体替换。
+- **DESIGN-feed-collect.md / CHANGELOG.md 二次脱敏**：历史条目中残留的飞书 ID/群名/成员数/内部项目名（zz-algo-plat 等）清理。
+
+### 3. 测试断言同步（61 文件）
+
+- 真实人名/邮箱/OKR 断言 → 通用占位断言；新增 `test_feed_okr_loader.py` 配置驱动用例（72 行变更）。
+
+### 4. 合并冲突解决（1 处）
+
+- `.claude/skills/iris-okr-check/SKILL.md`：合并保留 main 侧「01-目标管理 按年归档 `YYYY/` 子目录」路径修复 + alpha 侧「冯扬→本人姓名」泛化，两侧意图均保留。
+
+### 版本升级
+
+| 层 | 旧版本 | 新版本 | 理由 |
+|------|:---:|:---:|------|
+| 产品版本 | 3.21.1 | **3.22.0** | 安全治理 feature 合入（敏感配置化 + 全库脱敏） |
+| 协议版本 | 3.15 | 3.15（不变） | 无新增 CLI 命令 |
+
 ## v3.21.1 (2026-08-02)
 
 SOURCE 归档适配全面修复 — 双周报文件名日期前缀 + 递归查找修复 + Skill 文档 SOURCE 路径更新。

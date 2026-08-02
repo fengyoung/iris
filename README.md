@@ -1,8 +1,10 @@
-# Iris 3.21.1
+# Iris 3.22.0
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
+
+**v3.22.0** — 合并 0802-alpha → main，开源信息泄露治理全库脱敏：`IRIS_BOT_USER_ID` 真实 open_id 改环境变量（未配置跳过飞书推送）+ 团队名单与 `dept_op_keyword` 默认值清空（app.json 配置驱动，null 防御）+ 真实人名/企业邮箱/OKR/项目名/业务指标全库泛化（生产代码 + 模板 + Skill + 文档二次脱敏）+ 测试断言同步（61 文件）。协议版本 3.15（不变）。
 
 **v3.21.1** — SOURCE 归档适配全面修复：双周报文件名改为日期前缀（正确归档到 `YYYY/` 子目录）+ 会议纪要刷新脚本递归查找 + 风格源文件递归查找 + feed 简报使用 `resolve_source_archive_path` + 移除 pipeline 扁平路径死代码 + 5 个 Skill 文档 SOURCE 路径更新（iris-okr-check/iris-feed/iris-report/iris-feishu-import/iris-meeting）。协议版本 3.15（不变）。
 
@@ -183,6 +185,8 @@ iris3/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.22.0** | 2026-08-02 | 合并 0802-alpha：开源信息泄露治理全库脱敏 — 真实 open_id 配置化 / 团队名单与 dept_op_keyword 默认值清空（app.json 驱动，null 防御）/ 人名·邮箱·OKR·项目名·业务指标全库泛化 / 测试断言同步（61 文件）。协议版本 3.15（不变） |
+| **v3.21.1** | 2026-08-02 | SOURCE 归档适配修复：双周报日期前缀 + 会议纪要/风格源递归查找 + feed 简报 `resolve_source_archive_path` + 死代码清理 + 5 Skill 路径更新（18 处）。协议版本 3.15（不变） |
 | **v3.21.0** | 2026-08-02 | 批量 frontmatter 补全命令 `frontmatter-batch`（正则+LLM+wikilink+备份恢复，9 类目录字段映射）+ wikilink 注入收敛 + 周报按月归档 + 双周报 frontmatter 注入，+65 测试。协议版本 3.15 |
 | **v3.20.1** | 2026-07-30 | deep_eval chunk 摘要路径配置化：`main_source` 硬编码改为 `default_source` 动态加载。协议版本 3.14（不变） |
 | **v3.20.0** | 2026-07-30 | iris-feed 文档提取（Step 5）：飞书文档链接自动转换为本地 Markdown 并关联到简报，+37 测试。协议版本 3.14 |

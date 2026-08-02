@@ -1,4 +1,4 @@
-# Iris 3.21.1 — 项目执行说明
+# Iris 3.22.0 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~32,000 行 / 153 文件 / 25 模块 · CLI 50 命令 · 单元测试 2,626（134 文件）· 覆盖率 62%+ · 10 个项目级 Skill · Wiki 221 页 · 知识图谱节点 219 / 关系边 2,161（wikilink 1,175 + LLM 986） · 数据源 776 文档 / 9,019 Chunk（text-embedding-v3 / 1,024 维）
+~32,000 行 / 153 文件 / 25 模块 · CLI 50 命令 · 单元测试 2,612（130 文件）· 覆盖率 62%+ · 10 个项目级 Skill · Wiki 221 页 · 知识图谱节点 219 / 关系边 2,161（wikilink 1,175 + LLM 986） · 数据源 776 文档 / 9,019 Chunk（text-embedding-v3 / 1,024 维）
 
 **近期新增能力**：YAML frontmatter 标准化注入（`core/frontmatter.py`）· 批量 frontmatter 补全（`core/frontmatter_batch.py`，正则+LLM+wikilink+备份恢复）· wikilink 自动注入引擎（`wiki/wikilink_injector.py`，零 LLM 成本）· LLM 用量追踪（SQLite WAL + embedding 纳入）· LLM 响应缓存 + embedding 向量缓存（LRU + TTL）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（`memory_updater.py` + `session_miner.py`，双通道架构）· 多 Agent 并发安全（FileLock + SQLite WAL + Agent 隔离）· ASR 实时校正引擎（Aho-Corasick + LLM 编辑助手 + 反馈反向优化）· CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit · constraints.txt 可复现构建
 
@@ -122,7 +122,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.21.1 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.22.0 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.15 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -143,9 +143,9 @@ iris3/
 ├── src/iris/          # 25 模块（见下）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
-├── tests/             # 2,626 用例，134 文件
-│   ├── unit/          #   纯逻辑单元测试（419 用例，0.5s）
-│   └── integration/   #   集成测试（1,334 用例）
+├── tests/             # 2,612 用例，130 文件
+│   ├── unit/          #   纯逻辑单元测试（1,577 用例，<10s）
+│   └── integration/   #   集成测试（1,035 用例）
 ├── config/            # *.json gitignored，*.example 版本控制
 ├── data/              # 运行时数据（全 gitignore）
 ├── .claude/skills/    # 项目级 Skill（9 个）
@@ -167,7 +167,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.21.1 (2026-08-02)** — SOURCE 归档适配全面修复：① 双周报文件名改为日期前缀（`YYYYMMDD-` 前缀），`resolve_source_archive_path` 正则正确匹配→归档到 `06-我的周报/YYYY/`；② `refresh_meeting_minutes` 非递归查找修复（`find_source_matches`→`rglob`），已归档会议纪要可正确备份/去重；③ `_stage0b_load_style` 风格源文件递归查找修复（`rglob`→扁平→找到 `YYYY/` 下文件）；④ feed 简报生成使用 `resolve_source_archive_path` 替代硬编码 YYYYMM；⑤ 移除 `transcribe_meeting/pipeline.py` 两个扁平路径死函数；⑥ 5 个 Skill 文档 SOURCE 路径更新（iris-okr-check / iris-feed / iris-report / iris-feishu-import / iris-meeting 共 18 处）。附加：`extract_weekly_reports.py` `_resolve_output_dir` 文档一致性注释。协议版本 3.15（不变）。产品版本 3.21.0→3.21.1。
+**当前 v3.22.0 (2026-08-02)** — 合并 0802-alpha → main，开源信息泄露治理全库脱敏（40+ 文件）：① 生产代码 — `IRIS_BOT_USER_ID` 真实 open_id 改环境变量（未配置时跳过飞书推送）；团队名单与 `dept_op_keyword` 默认值清空，改由 app.json 配置驱动（附 null 防御）；② 全库泛化 — 真实人名（11 人）→ 通用占位、`zhuanzhuan.com` 企业邮箱 → `example.com`、真实 OKR/项目名/业务指标（图验技术/拍照3.0/XRay/直检率等）→ 通用词；③ 模板与 Skill — biweekly prompt 真实 OKR 示例、iris-okr-check KR 检索词表、iris-feed dry-run 示例重写；④ DESIGN/CHANGELOG 反向泄露条目二次脱敏；⑤ 测试断言同步更新（61 文件）。合并冲突 1 处（iris-okr-check SKILL.md：归档路径修复 + 人名泛化双保留）。验证：2,612 测试全通过。协议版本 3.15（不变）。产品版本 3.21.1→3.22.0。
+
+**v3.21.1 (2026-08-02)** — SOURCE 归档适配全面修复：① 双周报文件名改为日期前缀（`YYYYMMDD-` 前缀），`resolve_source_archive_path` 正则正确匹配→归档到 `06-我的周报/YYYY/`；② `refresh_meeting_minutes` 非递归查找修复（`find_source_matches`→`rglob`），已归档会议纪要可正确备份/去重；③ `_stage0b_load_style` 风格源文件递归查找修复（`rglob`→扁平→找到 `YYYY/` 下文件）；④ feed 简报生成使用 `resolve_source_archive_path` 替代硬编码 YYYYMM；⑤ 移除 `transcribe_meeting/pipeline.py` 两个扁平路径死函数；⑥ 5 个 Skill 文档 SOURCE 路径更新（iris-okr-check / iris-feed / iris-report / iris-feishu-import / iris-meeting 共 18 处）。附加：`extract_weekly_reports.py` `_resolve_output_dir` 文档一致性注释。协议版本 3.15（不变）。产品版本 3.21.0→3.21.1。
 
 **v3.21.0 (2026-08-02)** — SOURCE 元数据工程：① 新增 `frontmatter-batch` 批量补全命令（新模块 `core/frontmatter_batch.py` ~610 行 — 正则快速通道零 LLM 成本 + LLM 深度通道按 9 类目录字段映射 + wikilink 可选注入 + 自动备份/一键恢复 + 幂等跳过）；② wikilink 注入收敛 — 从 4 个管道（doc-convert/chat-digest/transcribe-meeting/extract-weekly-reports）移除，统一由 frontmatter-batch 按需注入；③ 周报按月归档 — `extract-weekly-reports` 输出自动归入 YYYYMM 月份子目录；④ 双周报 frontmatter 注入（title/date/type/period/author）+ analysis `period` 字段。测试 +65（2,626 用例 / 134 文件）。协议版本 3.14→3.15（新增 frontmatter-batch 命令）。产品版本 3.20.2→3.21.0。
 
