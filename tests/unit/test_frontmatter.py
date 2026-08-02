@@ -246,7 +246,7 @@ class TestNeedsQuotingNumbers:
     def test_normal_text_not_quoted(self):
         """普通文本不需要引号。"""
         assert self._needs_q("hello") is False
-        assert self._needs_q("冯扬") is False
+        assert self._needs_q("张三") is False
 
 
 class TestDocTypes:

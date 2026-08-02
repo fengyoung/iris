@@ -57,7 +57,7 @@ class TestShouldDeepAnalyze:
 
     def test_normal_question_returns_true(self):
         u = self._make_updater()
-        result = u._should_deep_analyze("请问搜索推荐的召回率如何优化？", "可以通过以下方式优化...")
+        result = u._should_deep_analyze("请问数据仓库的召回率如何优化？", "可以通过以下方式优化...")
         assert result is True
 
     def test_boundary_length(self):

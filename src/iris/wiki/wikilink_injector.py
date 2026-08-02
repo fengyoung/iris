@@ -211,8 +211,8 @@ class WikilinkInjector:
         """从文件名中去掉类型前缀（如 ``项目-``、``人物-``）。
 
         Example:
-            "项目-XRay手机拆修检测项目" → "XRay手机拆修检测项目"
-            "人物-冯扬" → "冯扬"
+            "项目-X光手机拆修检测项目" → "X光手机拆修检测项目"
+            "人物-张三" → "张三"
         """
         for prefix in ["领域-", "概念-", "项目-", "人物-"]:
             if stem.startswith(prefix):

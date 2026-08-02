@@ -75,16 +75,16 @@ config/
   "watch_chats": [
     {
       "id": "oc_xxxxxxxxxxxxxxxxxxxxx",
-      "name": "数据智能部群",
+      "name": "部门交流群",
       "type": "group",
       "mode": "auto_import",
-      "okr_tags": ["AI巡检", "搜推体验"]
+      "okr_tags": ["智能巡检", "推荐体验"]
     }
   ],
   "watch_singles": [
     {
       "id": "ou_xxxxxxxxxxxxxxxxxxxxx",
-      "name": "冯扬-李嘉晨",
+      "name": "张三-王五",
       "mode": "confirm",
       "okr_tags": null
     }
@@ -131,23 +131,23 @@ iris feed-add --chat "联系人" --type single --mode confirm
 Step 1/4：发现可关注的群聊
 正在拉取你可用的群聊列表...
 
-  [1] 数据智能部群       (成员 23)
-  [2] 搜推体验项目群     (成员 15)
-  [3] AI Sparks          (成员 42)
-  [4] 质检研发组         (成员 8)
+  [1] 部门交流群       (成员 N)
+  [2] 项目协作群     (成员 N)
+  [3] AI 火花组          (成员 N)
+  [4] 研发项目组         (成员 N)
   ...
 
 选择要关注的群聊（可多选，逗号分隔）: 1,2,4
 
 Step 2/4：配置每个群聊的导入模式
-  数据智能部群 → 模式 (auto/confirm) [auto]:
-  搜推体验项目群 → 模式 (auto/confirm) [auto]: confirm
-  质检研发组 → 模式 (auto/confirm) [auto]:
+  部门交流群 → 模式 (auto/confirm) [auto]:
+  项目协作群 → 模式 (auto/confirm) [auto]: confirm
+  研发项目组 → 模式 (auto/confirm) [auto]:
 
 Step 3/4：关联 OKR 标签（可选）
-  数据智能部群 → OKR 标签（逗号分隔，留空跳过）: AI巡检,搜推体验
-  搜推体验项目群 → OKR 标签:
-  质检研发组 → OKR 标签: 质检研发
+  部门交流群 → OKR 标签（逗号分隔，留空跳过）: 智能巡检,推荐体验
+  项目协作群 → OKR 标签:
+  研发项目组 → OKR 标签: 测试研发
 
 Step 4/4：配置话题检测参数
   默认时间范围（天）[3]:
@@ -390,7 +390,7 @@ class TopicDetector:
 ```python
 # 文件扫描规则
 # 1. 在 SOURCE/01-目标管理/<年份>/ 中搜索
-# 2. 文件名含「数据智能部」且不含 OP/双周/团队/个人/检查
+# 2. 文件名含「数据部门」且不含 OP/双周/团队/个人/检查
 # 3. 按文件名日期降序取最新
 
 # 解析规则
@@ -404,9 +404,9 @@ class TopicDetector:
 
 ```
 ## 当前 OKR 目标
-- O1：图验技术向纵深攻坚…
-  - O1-KR1：【验成色】拍照3.0主观项检测…
-  - O1-KR2：【拓品类】多品类复用技术基座…
+- O1：智能质检技术升级…
+  - O1-KR1：【质量】影像3.0主观项检测…
+  - O1-KR2：【扩展】多品类复用技术基座…
 
 ## 任务
 6. **匹配 OKR**：判断话题内容与哪个 OKR/KR 相关，给出匹配强度
@@ -425,15 +425,15 @@ class TopicDetector:
 @dataclass
 class KR:
     kr_id: str          # "O1-KR1"
-    title: str          # "【验成色】拍照3.0主观项检测…"
-    short_title: str    # "【验成色】拍照3.0主观项检测"
+    title: str          # "【质量】影像3.0主观项检测…"
+    short_title: str    # "【质量】影像3.0主观项检测"
     owner: str = ""
     content: str = ""   # 完整内容
 
 @dataclass  
 class Objective:
     obj_id: str         # "O1"
-    title: str          # "图验技术向纵深攻坚…"
+    title: str          # "智能质检技术升级…"
     krs: Dict[str, KR]
 
 class OKRDocument:
@@ -441,7 +441,7 @@ class OKRDocument:
     source_file: str
     
     def resolve_tags(self, tags: List[str]) -> Dict[str, str]:
-        """将 ["O1-KR1"] 解析为 {"O1-KR1": "【验成色】拍照3.0主观项检测…"}"""
+        """将 ["O1-KR1"] 解析为 {"O1-KR1": "【质量】影像3.0主观项检测…"}"""
     
     def to_prompt_context(self) -> str:
         """格式化为 LLM Prompt 注入文本"""
@@ -648,9 +648,9 @@ class Dispatcher:
 [
   {
     "topic_id": "feed-20260724-001",
-    "title": "AI巡检准召双80目标策略",
+    "title": "智能巡检准召目标策略",
     "summary": "...",
-    "sources": ["数据智能部群", "冯扬-李嘉晨"],
+    "sources": ["部门交流群", "张三-王五"],
     "brief_path": "...",
     "created": "2026-07-24T10:00:00",
     "status": "pending"
@@ -660,24 +660,24 @@ class Dispatcher:
 
 ### 飞书卡片推送
 
-确认卡片由 **Iris bot 直接发送到你的飞书单聊**（通过 `--as bot --user-id "ou_8ba922165924047c2369c6a43dc699b2"`），API 自动建立 bot↔用户 P2P 通道。
+确认卡片由 **Iris bot 直接发送到你的飞书单聊**（通过 `--as bot --user-id "ou_xxxxxxxxxxxxxxxxxxxxxxxxx"`），API 自动建立 bot↔用户 P2P 通道。
 
 ```
 ┌──────────────────────────────────┐
 │ 📋 新话题待确认                   │
 │                                  │
-│ 【AI巡检准召双80目标策略】        │
-│ 来源：数据智能部群 + 冯扬-李嘉晨  │
+│ 【智能巡检准召目标策略】        │
+│ 来源：部门交流群 + 张三-王五  │
 │ 消息数：17 条 · 关联 2 个 OKR    │
 │                                  │
-│ 摘要：李嘉晨提出准召第二阶段      │
+│ 摘要：王五提出准召第二阶段      │
 │ 验证方案…                        │
 │                                  │
 │ [✅ 确认入库] [👁️ 看原文] [✕ 忽略] │
 └──────────────────────────────────┘
 ```
 
-**实现**：`lark-cli im +messages-send --as bot --user-id "ou_8ba922165924047c2369c6a43dc699b2" --markdown "..."`
+**实现**：`lark-cli im +messages-send --as bot --user-id "ou_xxxxxxxxxxxxxxxxxxxxxxxxx" --markdown "..."`
 
 **`feed-confirm` / `feed-ignore` 命令**：
 
@@ -855,8 +855,8 @@ SOURCE/09-工作简报/YYYYMM/
 ## 话题清单
 | 话题 | OKR 关联 | 消息数 | 来源 | 状态 |
 |------|---------|:------:|------|:----:|
-| AI巡检准召双80 | AI巡检 | 17 | 2 个会话 | ✅ |
-| Meta评测框架 | — | 8 | 1 个会话 | 👁️ |
+| 智能巡检准召目标 | 智能巡检 | 17 | 2 个会话 | ✅ |
+| 评测框架 | — | 8 | 1 个会话 | 👁️ |
 ```
 
 ---
@@ -1043,7 +1043,7 @@ class PipelineResult:
 |:-:|------|------|------|
 | 1 | 消息搜索 API | **`lark-cli im +messages-search`**，支持 `--chat-id` + `--start/--end`(ISO 8601 含时区) + 分页 `--page-size`/`--page-token` | 2026-07-24 实测验证通过 |
 | 2 | 群聊发现 API | **`lark-cli im +chat-search`**（按名称搜索）和 **`+chat-list`**（列出用户群聊列表） | 实测验证通过 |
-| 3 | Bot 发送消息 | **已建立推送通道**：私密群「Iris 信息汇聚」(`oc_dd5bf72831c0174ad179d909b10a6788`)，bot+用户两人。Phase 3 直接往此群发确认卡片。Phase 1 先用控制台输出 + CLI 确认 | 2026-07-24 实测 `+chat-create --as bot` 建群 + `+messages-send --as bot` 成功 |
+| 3 | Bot 发送消息 | **已建立推送通道**：私密群「Iris 信息汇聚」(`oc_xxxxxxxxxxxxxxxxxxxxxxx`)，bot+用户两人。Phase 3 直接往此群发确认卡片。Phase 1 先用控制台输出 + CLI 确认 | 2026-07-24 实测 `+chat-create --as bot` 建群 + `+messages-send --as bot` 成功 |
 | 4 | OKR 数据来源 | **从本地 SOURCE 读取**：`SOURCE/01-目标管理/<年份>/` 下的最新 OKR 文件（按文件名日期排序取最新） | 用户确认 |
 | 5 | OKR 加载策略 | 每次 `feed-collect` **重新扫描本地**（无缓存问题，读取本地文件无 API 成本） | 用户确认 |
 | 6 | 确认卡片接收人 | 控制台输出 + CLI 交互（Phase 1），后续 bot 推送到用户飞书单聊（Phase 3） | 用户确认 |
@@ -1054,12 +1054,12 @@ class PipelineResult:
 
 ```
 SOURCE/01-目标管理/YYYY/
-  └── YYYYMMDD-数据智能部-冯扬-2026年Q3-OKR.md
+  └── YYYYMMDD-数据部门-张三-2026年Q3-OKR.md
 ```
 
 加载逻辑（`_find_latest_okr_file`）：
 1. 扫描 `SOURCE/01-目标管理/<年份>/` 目录（按年份降序）
-2. 文件名必须含「数据智能部」关键词
+2. 文件名必须含「数据部门」关键词
 3. 排除含 OP/双周/周报/团队/个人/检查 的无关文件
 4. 按文件名降序取最新
 
@@ -1070,7 +1070,7 @@ SOURCE/01-目标管理/YYYY/
 - KR ID 拼接为 "O1-KR1" 格式
 - 支持 `short_title`（提取 `【】` 内标记）
 
-当前最新文件：`20260715-数据智能部+质检研发-冯扬-2026年Q3-OKR.md`
+当前最新文件：`20260715-数据部门+测试研发-张三-2026年Q3-OKR.md`
 
 ### 待后续关注
 

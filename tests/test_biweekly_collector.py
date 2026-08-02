@@ -83,10 +83,10 @@ class TestLoadOpDocument:
         op_dir = src / "01-目标管理"
         op_dir.mkdir(parents=True)
         # 团队 OKR（应被排除）
-        (op_dir / "20260701-数据智能部-质检研发-张三-OKR.md").write_text(
+        (op_dir / "20260701-数据部门-测试研发-张三-OKR.md").write_text(
             "团队OKR内容", encoding="utf-8")
         # 部门级 OP（应被选中）
-        (op_dir / "20260701-数据智能部-OP规划.md").write_text(
+        (op_dir / "20260701-数据部门-OP规划.md").write_text(
             "部门OP内容", encoding="utf-8")
         bundle = _make_bundle(tmp_path, source_dir=src)
         c = BiweeklyCollector(bundle)
@@ -99,10 +99,10 @@ class TestLoadOpDocument:
         op_dir = src / "01-目标管理"
         op_dir.mkdir(parents=True)
         # 自定义 team_okr_patterns
-        biweekly_cfg = {"team_okr_patterns": ["测试团队"], "dept_op_keyword": "数据智能部"}
-        (op_dir / "20260701-数据智能部-测试团队-李四-OKR.md").write_text(
+        biweekly_cfg = {"team_okr_patterns": ["测试团队"], "dept_op_keyword": "数据部门"}
+        (op_dir / "20260701-数据部门-测试团队-李四-OKR.md").write_text(
             "团队OKR", encoding="utf-8")
-        (op_dir / "20260701-数据智能部-年度规划.md").write_text(
+        (op_dir / "20260701-数据部门-年度规划.md").write_text(
             "年度规划", encoding="utf-8")
         bundle = _make_bundle(tmp_path, source_dir=src, biweekly_cfg=biweekly_cfg)
         c = BiweeklyCollector(bundle)
@@ -115,15 +115,18 @@ class TestLoadOpDocument:
         src = tmp_path / "SOURCE"
         op_dir = src / "01-目标管理"
         op_dir.mkdir(parents=True)
-        # 无部门关键词，只有普通文件
+        # 配置了部门关键词，但目录中只有不含关键词的普通文件
         (op_dir / "20260701-其他团队-OP.md").write_text("兜底内容", encoding="utf-8")
-        bundle = _make_bundle(tmp_path, source_dir=src)
+        bundle = _make_bundle(
+            tmp_path, source_dir=src,
+            biweekly_cfg={"dept_op_keyword": "数据部门"},
+        )
         c = BiweeklyCollector(bundle)
         with caplog.at_level(logging.WARNING):
             result = c.load_op_document()
         assert result == "兜底内容"
         # fallback 时应有 warning 提示
-        assert any("兜底" in r.message or "数据智能部" in r.message
+        assert any("兜底" in r.message or "部门级 OP" in r.message
                    for r in caplog.records if r.levelno >= logging.WARNING)
 
     def test_custom_dept_op_keyword(self, tmp_path):
@@ -132,7 +135,7 @@ class TestLoadOpDocument:
         op_dir = src / "01-目标管理"
         op_dir.mkdir(parents=True)
         biweekly_cfg = {"dept_op_keyword": "AI研发部", "team_okr_patterns": []}
-        (op_dir / "20260701-数据智能部-OP.md").write_text("旧部门", encoding="utf-8")
+        (op_dir / "20260701-数据部门-OP.md").write_text("旧部门", encoding="utf-8")
         (op_dir / "20260701-AI研发部-OP.md").write_text("新部门", encoding="utf-8")
         bundle = _make_bundle(tmp_path, source_dir=src, biweekly_cfg=biweekly_cfg)
         c = BiweeklyCollector(bundle)
@@ -223,8 +226,8 @@ class TestBuildCitationLabel:
         assert label == "项目讨论-项目Alpha检测-0702"
 
     def test_discussion(self):
-        label = BiweeklyCollector._build_citation_label("20260701-内部讨论-质检自动化.md", "讨论思考")
-        assert label == "内部讨论-质检自动化-0701"
+        label = BiweeklyCollector._build_citation_label("20260701-内部讨论-智能质检.md", "讨论思考")
+        assert label == "内部讨论-智能质检-0701"
 
     def test_fallback_dir(self):
         label = BiweeklyCollector._build_citation_label("20260701-未知文件.md", "其他目录")

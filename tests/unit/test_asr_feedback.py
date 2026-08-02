@@ -218,25 +218,25 @@ class TestFindZombieRules:
     def test_ignores_llm_discoveries(self):
         """LLM 发现的修正不计入词典命中统计。"""
         terms = [
-            AsrTerm(term="搜推", category="project", context="",
-                    mis_asr=["搜推工程"]),
+            AsrTerm(term="数据湖", category="project", context="",
+                    mis_asr=["数据湖工程"]),
         ]
         # 只有 [LLM] 标记的修正，没有词典命中
         corrections = [
-            AsrCorrection(corrections_applied=["[LLM] 搜推工程→搜推"])
+            AsrCorrection(corrections_applied=["[LLM] 数据湖工程→数据湖"])
             for _ in range(60)
         ]
         zombies = find_zombie_rules(corrections, terms, min_samples=50)
-        # "搜推工程→搜推" 前面带 [LLM] 前缀，不算词典命中，应标记为僵尸
+        # "数据湖工程→数据湖" 前面带 [LLM] 前缀，不算词典命中，应标记为僵尸
         assert len(zombies) == 1
-        assert zombies[0][0] == "搜推工程"
+        assert zombies[0][0] == "数据湖工程"
 
 
 class TestBuildFeedbackRecommendations:
     def _make_terms(self):
         return [
-            AsrTerm(term="搜推", category="project", context="",
-                    mis_asr=["收推", "搜推工程"]),
+            AsrTerm(term="数据湖", category="project", context="",
+                    mis_asr=["数据糊", "数据湖工程"]),
             AsrTerm(term="剪切板", category="concept", context="",
                     mis_asr=["检测板"]),
         ]
@@ -246,14 +246,14 @@ class TestBuildFeedbackRecommendations:
         corrections = []
         for i in range(n):
             applied = []
-            # 每条记录都命中"收推→搜推"（词典）
-            applied.append("收推→搜推")
+            # 每条记录都命中"数据糊→数据湖"（词典）
+            applied.append("数据糊→数据湖")
             # 部分记录有 LLM 发现
             if i % 10 == 0:
                 applied.append("[LLM] 检策板→剪切板")
             # 部分记录有另一个 LLM 发现
             if i % 5 == 0:
-                applied.append("[LLM] 周推→搜推")
+                applied.append("[LLM] 数据胡→数据湖")
             corrections.append(AsrCorrection(
                 corrections_applied=applied,
                 fast_corrected="fast",
@@ -270,18 +270,18 @@ class TestBuildFeedbackRecommendations:
         )
 
         assert recs["total_corrections"] == 100
-        assert recs["dict_hit_count"] == 100  # 每条记录都有"收推→搜推"
+        assert recs["dict_hit_count"] == 100  # 每条记录都有"数据糊→数据湖"
         assert recs["total_rules"] == 3
 
-        # 僵尸规则："搜推工程→搜推"和"检测板→剪切板"从未被触发
+        # 僵尸规则："数据湖工程→数据湖"和"检测板→剪切板"从未被触发
         assert recs["zombie_count"] == 2
 
-        # LLM 发现 "周推→搜推" 出现 20 次 (i%5==0, n=100)
+        # LLM 发现 "数据胡→数据湖" 出现 20 次 (i%5==0, n=100)
         # "检策板→剪切板" 出现 10 次 (i%10==0)
         # 都 ≥ promote_threshold=3，应被提升
         promote = recs["promote_to_dict"]
-        assert "搜推" in promote
-        assert "周推" in promote["搜推"]
+        assert "数据湖" in promote
+        assert "数据胡" in promote["数据湖"]
         assert "剪切板" in promote
         assert "检策板" in promote["剪切板"]
 
@@ -303,31 +303,31 @@ class TestBuildFeedbackRecommendations:
         corrections = []
         for i in range(60):
             corrections.append(AsrCorrection(
-                corrections_applied=["[LLM] 寿推→搜推"],
-                fast_corrected="寿推",
-                full_corrected="搜推",  # ≠ fast → LLM 做了修正
+                corrections_applied=["[LLM] 数据虎→数据湖"],
+                fast_corrected="数据虎",
+                full_corrected="数据湖",  # ≠ fast → LLM 做了修正
             ))
         recs = build_feedback_recommendations(
             corrections, terms, hotwords,
             min_samples=50, promote_threshold=3,
         )
-        # "搜推"在 LLM 中被纠正了 60 次(>2)，且不在现有热词/term 中 → 应建议补充
+        # "数据湖"在 LLM 中被纠正了 60 次(>2)，且不在现有热词/term 中 → 应建议补充
         assert len(recs["new_hotwords"]) >= 1
-        assert any("搜推" in hw for hw in recs["new_hotwords"])
+        assert any("数据湖" in hw for hw in recs["new_hotwords"])
 
 
 class TestApplyFeedbackOptimizations:
     def test_zombie_removal(self):
         """僵尸规则应从 terms 的 mis_asr 中移除。"""
         terms = [
-            AsrTerm(term="搜推", category="project", context="",
-                    mis_asr=["收推", "搜推工程", "周推"]),
+            AsrTerm(term="数据湖", category="project", context="",
+                    mis_asr=["数据糊", "数据湖工程", "数据胡"]),
         ]
         hotwords: list = []
         recs = {
             "zombie_rules": [
-                ("搜推工程", "搜推", "project"),
-                ("周推", "搜推", "project"),
+                ("数据湖工程", "数据湖", "project"),
+                ("数据胡", "数据湖", "project"),
             ],
             "promote_to_dict": {},
             "new_hotwords": [],
@@ -339,20 +339,20 @@ class TestApplyFeedbackOptimizations:
         assert removed == 2
         assert promoted == 0
         assert added == 0
-        # "收推" 保留，"搜推工程"和"周推"被移除
-        assert terms[0].mis_asr == ["收推"]
+        # "数据糊" 保留，"数据湖工程"和"数据胡"被移除
+        assert terms[0].mis_asr == ["数据糊"]
 
     def test_promote_llm_discoveries(self):
         """LLM 发现应提升为词典规则。"""
         terms = [
-            AsrTerm(term="搜推", category="project", context="",
-                    mis_asr=["收推"]),
+            AsrTerm(term="数据湖", category="project", context="",
+                    mis_asr=["数据糊"]),
         ]
         hotwords: list = []
         recs = {
             "zombie_rules": [],
             "promote_to_dict": {
-                "搜推": ["周推", "寿推"],
+                "数据湖": ["数据胡", "数据虎"],
             },
             "new_hotwords": [],
         }
@@ -362,8 +362,8 @@ class TestApplyFeedbackOptimizations:
         )
         assert removed == 0
         assert promoted == 2
-        assert "周推" in terms[0].mis_asr
-        assert "寿推" in terms[0].mis_asr
+        assert "数据胡" in terms[0].mis_asr
+        assert "数据虎" in terms[0].mis_asr
 
     def test_promote_new_term(self):
         """不存在的 term 应自动创建。"""
@@ -392,26 +392,26 @@ class TestApplyFeedbackOptimizations:
         recs = {
             "zombie_rules": [],
             "promote_to_dict": {},
-            "new_hotwords": ["搜推", "剪切板"],
+            "new_hotwords": ["数据湖", "剪切板"],
         }
 
         removed, promoted, added = apply_feedback_optimizations(
             terms, hotwords, recs,
         )
         assert added == 2
-        assert "搜推" in hotwords
+        assert "数据湖" in hotwords
         assert "剪切板" in hotwords
 
     def test_hotwords_dedup_with_terms(self):
         """已在 terms 中的词不重复加入热词。"""
         terms = [
-            AsrTerm(term="搜推", category="project", context="", mis_asr=[]),
+            AsrTerm(term="数据湖", category="project", context="", mis_asr=[]),
         ]
         hotwords: list = []
         recs = {
             "zombie_rules": [],
             "promote_to_dict": {},
-            "new_hotwords": ["搜推"],
+            "new_hotwords": ["数据湖"],
         }
 
         removed, promoted, added = apply_feedback_optimizations(
@@ -422,13 +422,13 @@ class TestApplyFeedbackOptimizations:
     def test_combined_optimization(self):
         """综合场景：淘汰 + 提升 + 补热词。"""
         terms = [
-            AsrTerm(term="搜推", category="project", context="",
-                    mis_asr=["收推", "搜推工程"]),
+            AsrTerm(term="数据湖", category="project", context="",
+                    mis_asr=["数据糊", "数据湖工程"]),
         ]
         hotwords = ["已有词"]
         recs = {
-            "zombie_rules": [("搜推工程", "搜推", "project")],
-            "promote_to_dict": {"搜推": ["周推"]},
+            "zombie_rules": [("数据湖工程", "数据湖", "project")],
+            "promote_to_dict": {"数据湖": ["数据胡"]},
             "new_hotwords": ["新热词"],
         }
 
@@ -438,5 +438,5 @@ class TestApplyFeedbackOptimizations:
         assert removed == 1
         assert promoted == 1
         assert added == 1
-        assert terms[0].mis_asr == ["收推", "周推"]  # 移除搜推工程，加入周推
+        assert terms[0].mis_asr == ["数据糊", "数据胡"]  # 移除数据湖工程，加入数据胡
         assert "新热词" in hotwords

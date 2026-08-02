@@ -24,7 +24,7 @@ from iris.feed._dispatcher import Dispatcher
 from iris.feed._doc_extractor import DocExtractor
 from iris.feed._feishu_bridge import FeishuBridge
 from iris.feed._message_filter import MessageFilter
-from iris.feed._okr_loader import OKRLoader
+from iris.feed._okr_loader import OKRLoader, extract_dept_keyword
 from iris.feed._topic_detector import TopicDetector
 from iris.feed._types import PipelineResult
 from iris.feed.feed_config import FeedConfig, FeedConfigManager, load_feed_config
@@ -55,7 +55,10 @@ class FeedPipeline:
         self._config_manager = FeedConfigManager(self._config_dir / "feeds.json")
         self._cursor_tracker = CursorTracker(self._data_dir)
         self._chat_fetcher = ChatFetcher(self._bridge, self._cursor_tracker)
-        self._okr_loader = OKRLoader(source_root=self._source_dir)
+        self._okr_loader = OKRLoader(
+            source_root=self._source_dir,
+            dept_keyword=extract_dept_keyword(bundle),
+        )
 
     @staticmethod
     def _resolve_source_dir(bundle) -> Path:

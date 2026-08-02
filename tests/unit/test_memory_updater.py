@@ -71,7 +71,7 @@ class TestMemoryUpdater:
     def test_question_with_no_correction_pattern_does_nothing(self):
         """不匹配任何纠正模式的普通问题不触发任何更新。"""
         updater, profile, correction = self._make_updater()
-        result = updater.apply_updates("搜索推荐的最新算法是什么")
+        result = updater.apply_updates("数据仓库的最新算法是什么")
         assert result == []
         correction.apply_text_update.assert_not_called()
         profile.apply_text_update.assert_not_called()

@@ -33,8 +33,8 @@ class TestWatchChat:
 
     def test_create_with_tags(self):
         """创建带 okr_tags 的 WatchChat 实例。"""
-        c = WatchChat(id="oc_yyy", name="技术群", type="group", mode="confirm", okr_tags=["AI巡检", "搜推"])
-        assert c.okr_tags == ["AI巡检", "搜推"]
+        c = WatchChat(id="oc_yyy", name="技术群", type="group", mode="confirm", okr_tags=["模型优化", "推荐效果"])
+        assert c.okr_tags == ["模型优化", "推荐效果"]
 
     def test_create_none_tags(self):
         """okr_tags 传入 None 应转为空列表。"""
@@ -188,7 +188,7 @@ class TestWriteExampleConfig:
         data = json.loads(config_path.read_text(encoding="utf-8"))
         assert data["version"] == 1
         assert len(data["watch_chats"]) == 1
-        assert data["watch_chats"][0]["name"] == "数据智能部群"
+        assert data["watch_chats"][0]["name"] == "示例群A"
         assert data["watch_chats"][0]["mode"] == "auto_import"
 
     def test_write_creates_parent_dir(self, tmp_path):

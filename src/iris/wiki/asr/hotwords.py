@@ -93,7 +93,7 @@ def _build_hotwords_prompt(batch: List[WikiPageInfo], domain_context: str = "") 
 3. **技术术语**：算法名、框架名、技术栈（中文 + 英文）
 4. **英文缩写**：DNN、OCR、MMoE、BERT、BM25、H200 等专有缩写
 5. **品牌/产品名**：公司自有品牌、外部产品名（如 Qwen、阿里云、豆包）等
-6. **中英混排**：含版本号或字母的词组（如 Model-v2、iPhone16、Node2Vec 等）
+6. **中英混排**：含版本号或字母的词组（如 Model-v2、手机16、Node2Vec 等）
 7. **业务术语**：行业专有表达、流程名词、定级/评估类术语等
 
 ## 质量要求

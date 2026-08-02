@@ -58,7 +58,7 @@ def _extract_date(text: str) -> tuple[str, str] | None:
 
     支持格式（按优先级）：
       - YYYYMMDD-xxx           (标准前缀)
-      - xxx-YYYYMMDD           (后缀，如 双周报-w01-冯扬-20260104)
+      - xxx-YYYYMMDD           (后缀，如 双周报-w01-张三-20260104)
       - YYYYMMDD_xxx           (下划线分隔)
       - 文件名中任意位置 8 位数字
     """

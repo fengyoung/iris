@@ -23,22 +23,22 @@ class TestAhoCorasick:
     def test_longest_match_first(self):
         """最长匹配优先：避免短模式先覆盖长模式。"""
         ac = _AhoCorasick({
-            "搜推": "搜索推荐",
-            "搜推工程": "搜索推荐工程",
+            "数据湖": "数据仓库",
+            "数据湖工程": "数据仓库工程",
         })
-        result, applied = ac.replace_all("搜推工程团队")
-        # 应该先匹配 "搜推工程"（更长），而非 "搜推"
-        assert "搜索推荐工程" in result
-        assert "搜索推荐搜索推荐" not in result  # 防止双重匹配
+        result, applied = ac.replace_all("数据湖工程团队")
+        # 应该先匹配 "数据湖工程"（更长），而非 "数据湖"
+        assert "数据仓库工程" in result
+        assert "数据仓库数据仓库" not in result  # 防止双重匹配
 
     def test_multiple_replacements(self):
         ac = _AhoCorasick({
-            "汪瑞": "汪蕊",
+            "李雷": "李蕾",
             "检测板": "剪切板",
             "智能画检测": "智能化检测",
         })
-        result, applied = ac.replace_all("汪瑞在检测板上做智能画检测")
-        assert "汪蕊" in result
+        result, applied = ac.replace_all("李雷在检测板上做智能画检测")
+        assert "李蕾" in result
         assert "剪切板" in result
         assert "智能化检测" in result
 
@@ -66,7 +66,7 @@ class TestAsrTextDetection:
         assert _is_asr_text("我写到检测板里头")
 
     def test_valid_medium_text(self):
-        assert _is_asr_text("我们今天讨论一下搜索推荐的算法优化方案")
+        assert _is_asr_text("我们今天讨论一下数据仓库的算法优化方案")
 
     def test_too_short(self):
         assert not _is_asr_text("好")

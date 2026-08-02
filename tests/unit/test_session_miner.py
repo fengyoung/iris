@@ -19,17 +19,17 @@ def _sample_session_data():
             "ASR 校正的准确率怎么看？",
             "双周报的格式能改吗？",
             "ASR 热词怎么添加？",
-            "帮我查一下 AI 巡检的目标",
+            "帮我查一下 智能巡检的目标",
             "ASR 的 Aho-Corasick 算法原理？",
         ],
         "recent_topics": [
             "ASR 校正引擎", "双周报格式", "ASR 热词",
-            "AI 巡检", "ASR 算法",
+            "智能巡检", "ASR 算法",
         ],
         "topic_threads": {
             "ASR 校正引擎": {"count": 5, "last_question": "ASR 的 Aho-Corasick 算法原理？", "last_mode": "local"},
             "双周报格式": {"count": 2, "last_question": "双周报的格式能改吗？", "last_mode": "local"},
-            "AI 巡检": {"count": 1, "last_question": "帮我查一下 AI 巡检的目标", "last_mode": "local"},
+            "智能巡检": {"count": 1, "last_question": "帮我查一下 智能巡检的目标", "last_mode": "local"},
         },
         "recent_summary": "最近问题集中在 ASR 校正引擎的使用和配置",
     }
@@ -85,7 +85,7 @@ class TestParseMineResponse:
                 {"pattern": "喜欢简短回答", "evidence": "多次要求精简", "confidence": 0.8}
             ],
             "new_facts": [
-                {"fact": "用户是数据智能部负责人", "category": "工作背景"}
+                {"fact": "用户是数据部门负责人", "category": "工作背景"}
             ],
             "confidence": 0.8,
         }
@@ -118,7 +118,7 @@ class TestPromote:
         miner = _dummy_miner_with_paths(tmp_path)
         discovery = {
             "type": "recurring_theme",
-            "theme": "AI 巡检",
+            "theme": "智能巡检",
             "count": 5,
             "suggest_wiki": True,
             "suggest_note": True,
@@ -127,7 +127,7 @@ class TestPromote:
         prefs: dict = miner._profile_memory.load().setdefault("user_preferences", {})
         changed = miner._apply_promotion(discovery, prefs)
         assert changed is True
-        assert any("AI 巡检" in n for n in prefs.get("notes", []))
+        assert any("智能巡检" in n for n in prefs.get("notes", []))
         assert any("建议创建 Wiki" in n for n in prefs.get("notes", []))
 
     def test_promote_preference_to_styles(self, tmp_path):
@@ -150,7 +150,7 @@ class TestPromote:
         miner = _dummy_miner_with_paths(tmp_path)
         discovery = {
             "type": "new_fact",
-            "fact": "用户负责数据智能部",
+            "fact": "用户负责数据部门",
             "category": "工作背景",
             "confidence": 0.75,
         }
@@ -158,7 +158,7 @@ class TestPromote:
         changed = miner._apply_promotion(discovery, prefs)
         assert changed is True
         notes = prefs.get("notes", [])
-        assert any("用户负责数据智能部" in n for n in notes)
+        assert any("用户负责数据部门" in n for n in notes)
 
     def test_duplicate_theme_not_promoted(self, tmp_path):
         from iris.memory.session_miner import SessionPatternMiner

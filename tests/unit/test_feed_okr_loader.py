@@ -23,9 +23,9 @@ class TestKR:
 
     def test_create_basic(self):
         """创建基本 KR 实例。"""
-        kr = KR(kr_id="O1-KR1", title="【验成色】拍照3.0主观项检测", short_title="【验成色】")
+        kr = KR(kr_id="O1-KR1", title="【质量】影像3.0主观项检测", short_title="【质量】")
         assert kr.kr_id == "O1-KR1"
-        assert kr.title == "【验成色】拍照3.0主观项检测"
+        assert kr.title == "【质量】影像3.0主观项检测"
         assert kr.owner == ""
 
     def test_create_with_owner(self):
@@ -44,9 +44,9 @@ class TestObjective:
 
     def test_create_basic(self):
         """创建基本 Objective 实例。"""
-        obj = Objective(obj_id="O1", title="图验技术向纵深攻坚")
+        obj = Objective(obj_id="O1", title="智能质检技术升级")
         assert obj.obj_id == "O1"
-        assert obj.title == "图验技术向纵深攻坚"
+        assert obj.title == "智能质检技术升级"
         assert obj.krs == {}
 
     def test_create_with_krs(self):
@@ -65,11 +65,11 @@ class TestOKRDocument:
     """OKRDocument 查询方法测试。"""
 
     def _make_doc(self):
-        kr1 = KR(kr_id="O1-KR1", title="【验成色】拍照3.0主观项检测", short_title="【验成色】")
-        kr2 = KR(kr_id="O1-KR2", title="【AI巡检】完成准召双90%", short_title="【AI巡检】")
-        kr3 = KR(kr_id="O2-KR1", title="搜推体验优化", short_title="搜推体验优化")
-        obj1 = Objective(obj_id="O1", title="图验技术向纵深攻坚", krs={"O1-KR1": kr1, "O1-KR2": kr2})
-        obj2 = Objective(obj_id="O2", title="搜推体验保障", krs={"O2-KR1": kr3})
+        kr1 = KR(kr_id="O1-KR1", title="【质量】影像3.0主观项检测", short_title="【质量】")
+        kr2 = KR(kr_id="O1-KR2", title="【智能巡检】完成准召达标", short_title="【智能巡检】")
+        kr3 = KR(kr_id="O2-KR1", title="推荐体验优化", short_title="推荐体验优化")
+        obj1 = Objective(obj_id="O1", title="智能质检技术升级", krs={"O1-KR1": kr1, "O1-KR2": kr2})
+        obj2 = Objective(obj_id="O2", title="推荐体验保障", krs={"O2-KR1": kr3})
         doc = OKRDocument(objectives={"O1": obj1, "O2": obj2}, source_file="2026-Q3-OKR.md")
         return doc
 
@@ -79,7 +79,7 @@ class TestOKRDocument:
         kr = doc.get_kr("O1-KR1")
         assert kr is not None
         assert kr.kr_id == "O1-KR1"
-        assert "拍照" in kr.title
+        assert "影像" in kr.title
 
     def test_get_kr_not_found(self):
         """不存在的标签应返回 None。"""
@@ -95,21 +95,21 @@ class TestOKRDocument:
         """resolve_tags 对 KR 标签应返回 KR 标题。"""
         doc = self._make_doc()
         result = doc.resolve_tags(["O1-KR1"])
-        assert result == {"O1-KR1": "【验成色】拍照3.0主观项检测"}
+        assert result == {"O1-KR1": "【质量】影像3.0主观项检测"}
 
     def test_resolve_tags_objective(self):
         """resolve_tags 对 Objective 标签应返回 O 标题。"""
         doc = self._make_doc()
         result = doc.resolve_tags(["O1"])
-        assert result == {"O1": "图验技术向纵深攻坚"}
+        assert result == {"O1": "智能质检技术升级"}
 
     def test_resolve_tags_multiple(self):
         """resolve_tags 支持多个标签同时解析。"""
         doc = self._make_doc()
         result = doc.resolve_tags(["O1-KR1", "O2"])
         assert len(result) == 2
-        assert "拍照" in result["O1-KR1"]
-        assert "搜推" in result["O2"]
+        assert "影像" in result["O1-KR1"]
+        assert "推荐" in result["O2"]
 
     def test_resolve_tags_unknown(self):
         """未知标签应被忽略（不在结果中）。"""
@@ -129,8 +129,8 @@ class TestOKRDocument:
         doc = self._make_doc()
         ctx = doc.to_prompt_context()
         assert "O1" in ctx
-        assert "图验技术向纵深攻坚" in ctx
-        assert "AI巡检" in ctx
+        assert "智能质检技术升级" in ctx
+        assert "智能巡检" in ctx
 
     def test_to_prompt_context_empty(self):
         """空文档应返回默认占位文本。"""
@@ -156,26 +156,34 @@ class TestFindLatestOKRFile:
         tm_dir = tmp_path / "01-目标管理" / "2026"
         tm_dir.mkdir(parents=True)
         # 创建非 OKR 文件
-        (tm_dir / "数据智能部-双周-0728.md").write_text("# 双周报", encoding="utf-8")
-        (tm_dir / "数据智能部-OP-0728.md").write_text("# OP", encoding="utf-8")
+        (tm_dir / "数据部门-双周-0728.md").write_text("# 双周报", encoding="utf-8")
+        (tm_dir / "数据部门-OP-0728.md").write_text("# OP", encoding="utf-8")
         result = _find_latest_okr_file(tmp_path)
         assert result is None
 
     def test_no_dept_keyword(self, tmp_path):
-        """文件名不含「数据智能部」应跳过。"""
+        """配置 dept_keyword 时，文件名不含该关键词应跳过。"""
+        tm_dir = tmp_path / "01-目标管理" / "2026"
+        tm_dir.mkdir(parents=True)
+        (tm_dir / "其他部门-OKR.md").write_text("# 内容", encoding="utf-8")
+        result = _find_latest_okr_file(tmp_path, dept_keyword="数据部门")
+        assert result is None
+
+    def test_no_keyword_filters_nothing(self, tmp_path):
+        """未配置 dept_keyword（空=不过滤）时，任意文件名均可入选。"""
         tm_dir = tmp_path / "01-目标管理" / "2026"
         tm_dir.mkdir(parents=True)
         (tm_dir / "其他部门-OKR.md").write_text("# 内容", encoding="utf-8")
         result = _find_latest_okr_file(tmp_path)
-        assert result is None
+        assert result is not None
 
     def test_find_latest_file(self, tmp_path):
         """应返回最新的 OKR 文件。"""
         tm_dir = tmp_path / "01-目标管理" / "2026"
         tm_dir.mkdir(parents=True)
-        old_file = tm_dir / "数据智能部-2026-Q2-OKR.md"
+        old_file = tm_dir / "数据部门-2026-Q2-OKR.md"
         old_file.write_text("# Q2 OKR", encoding="utf-8")
-        new_file = tm_dir / "数据智能部-2026-Q3-OKR.md"
+        new_file = tm_dir / "数据部门-2026-Q3-OKR.md"
         new_file.write_text("# Q3 OKR", encoding="utf-8")
         result = _find_latest_okr_file(tmp_path)
         assert result is not None
@@ -185,8 +193,8 @@ class TestFindLatestOKRFile:
         """按年份目录降序优先取最新年份。"""
         (tmp_path / "01-目标管理" / "2025").mkdir(parents=True)
         (tmp_path / "01-目标管理" / "2026").mkdir(parents=True)
-        (tmp_path / "01-目标管理" / "2025" / "数据智能部-OKR.md").write_text("# 2025", encoding="utf-8")
-        (tmp_path / "01-目标管理" / "2026" / "数据智能部-OKR.md").write_text("# 2026", encoding="utf-8")
+        (tmp_path / "01-目标管理" / "2025" / "数据部门-OKR.md").write_text("# 2025", encoding="utf-8")
+        (tmp_path / "01-目标管理" / "2026" / "数据部门-OKR.md").write_text("# 2026", encoding="utf-8")
         result = _find_latest_okr_file(tmp_path)
         assert result is not None
         assert "2026" in str(result.parent)
@@ -201,7 +209,7 @@ class TestParseOKRFile:
 
     def test_parse_normal(self, tmp_path):
         """标准格式的 OKR 文件应正确解析。"""
-        content = """## O1：图验技术向纵深攻坚
+        content = """## O1：智能质检技术升级
 
 ### KR1：拍照质检准确率提升
 
@@ -209,9 +217,9 @@ class TestParseOKRFile:
 
 这是 KR 的完整描述内容
 
-### KR2：AI巡检准召双90%
+### KR2：智能巡检准召达标
 
-## O2：搜推体验优化
+## O2：推荐体验优化
 
 ### KR1：首页推荐精度提升
 
@@ -223,7 +231,7 @@ class TestParseOKRFile:
         assert len(doc.objectives) == 2
         assert "O1" in doc.objectives
         assert "O2" in doc.objectives
-        assert doc.objectives["O1"].title == "图验技术向纵深攻坚"
+        assert doc.objectives["O1"].title == "智能质检技术升级"
         assert len(doc.objectives["O1"].krs) == 2
         assert doc.objectives["O1"].krs["O1-KR1"].title == "拍照质检准确率提升"
         assert doc.objectives["O1"].krs["O1-KR1"].owner == "张三"
@@ -257,14 +265,14 @@ type: okr
         """含【】括号的 KR 标题应正确提取 short_title。"""
         content = """## O1：目标
 
-### KR1：【验成色】拍照3.0主观项检测，支撑iPhone全入仓战略
+### KR1：【质量】影像3.0主观项检测，支撑手机全入仓战略
 """
         filepath = tmp_path / "OKR.md"
         filepath.write_text(content, encoding="utf-8")
         doc = _parse_okr_file(filepath)
         kr = doc.objectives["O1"].krs["O1-KR1"]
-        assert kr.short_title == "【验成色】"
-        assert "iPhone" in kr.title
+        assert kr.short_title == "【质量】"
+        assert "手机" in kr.title
 
     def test_parse_kr_before_obj(self, tmp_path):
         """KR 出现在 Objective 之前应被忽略（日志警告）。"""
@@ -331,7 +339,7 @@ class TestOKRLoader:
     def test_set_source_root_clears_cache(self, tmp_path):
         """set_source_root 应清空缓存。"""
         (tmp_path / "01-目标管理" / "2026").mkdir(parents=True)
-        okr_file = tmp_path / "01-目标管理" / "2026" / "数据智能部-2026-Q3-OKR.md"
+        okr_file = tmp_path / "01-目标管理" / "2026" / "数据部门-2026-Q3-OKR.md"
         okr_file.write_text("## O1：目标\n\n### KR1：结果\n", encoding="utf-8")
         loader = OKRLoader(source_root=tmp_path)
         doc = loader.load()

@@ -566,7 +566,7 @@ class FrontmatterBatchProcessor:
                 name = m2.group(1).strip()
                 if name and 2 <= len(name) <= 10 and not name.startswith("参会"):
                     names.append(name)
-            # 匹配「冯扬、万涛」顿号分隔格式（非列表行）
+            # 匹配「张三、赵六」顿号分隔格式（非列表行）
             if not names and "、" in line and not stripped.startswith(("#", "-", "|", "*")):
                 for part in line.split("、"):
                     part = part.strip().rstrip(",")
@@ -584,7 +584,7 @@ class FrontmatterBatchProcessor:
         m = re.search(r"发件人[：:]\s*(\S+)", raw)
         if m:
             return m.group(1).split("<")[0].strip()
-        # 从文件名推断: 20260725-周报-w30-万涛.md
+        # 从文件名推断: 20260725-周报-w30-赵六.md
         parts = file_path.stem.split("-")
         if len(parts) >= 4:
             return parts[-1]

@@ -33,7 +33,7 @@ class TestExtractDateFromPath:
 
     def test_discussion(self):
         """讨论思考格式。"""
-        d = BiweeklyCollector._extract_date_from_path("20260701-内部讨论-质检执行智能化.md")
+        d = BiweeklyCollector._extract_date_from_path("20260701-内部讨论-质检流程智能化.md")
         assert d == datetime(2026, 7, 1)
 
     def test_no_date(self):
@@ -122,8 +122,8 @@ class TestExtractPersonFromFilename:
 
     def test_fallback_dash_format(self):
         """fallback: 尝试横线后两字中文。"""
-        name = BiweeklyCollector._extract_person_from_filename("周报-刘备.md")
-        assert name == "刘备"
+        name = BiweeklyCollector._extract_person_from_filename("周报-王强.md")
+        assert name == "王强"
 
 
 # ── 引用标签构建 ──────────────────────────────────────────
@@ -150,7 +150,7 @@ class TestBuildCitationLabel:
     def test_discussion(self):
         """讨论思考保留完整描述。"""
         label = BiweeklyCollector._build_citation_label(
-            "20260701-内部讨论-质检执行智能化.md", "讨论思考")
+            "20260701-内部讨论-质检流程智能化.md", "讨论思考")
         assert "内部讨论" in label
         assert "质检" in label
         assert "0701" in label

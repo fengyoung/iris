@@ -20,7 +20,7 @@ class TestParseLLMResponse:
             "new_dislikes": ["冗长解释"],
             "new_styles": ["先结论后分析"],
             "new_corrections": [{"concept": "QBR", "preferred": "季度业务回顾"}],
-            "new_notes": ["用户在推进 AI 巡检项目"],
+            "new_notes": ["用户在推进 智能巡检项目"],
             "confidence": 0.85,
         }
         result = updater._parse_llm_response(json.dumps(payload, ensure_ascii=False))
@@ -89,7 +89,7 @@ class TestShouldDeepAnalyze:
     def test_normal_question_triggers(self):
         from iris.qa.memory_updater import MemoryUpdater
         updater = _dummy_updater()
-        assert updater._should_deep_analyze("帮我分析一下这个季度 AI 巡检的数据趋势", "详细回答...") is True
+        assert updater._should_deep_analyze("帮我分析一下这个季度 智能巡检的数据趋势", "详细回答...") is True
 
 
 # ── 测试：正则快速通道 ──────────────────────────────────────

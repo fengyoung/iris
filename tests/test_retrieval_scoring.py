@@ -25,7 +25,7 @@ class TestBm25FullContent:
                 self.section_path = []
                 self.source_name = "test"
 
-        long_text = "项目Beta 项目 里程碑 iPhone 全量 标准化 拍摄 " * 20  # ~160 词
+        long_text = "项目Beta 项目 里程碑 手机 全量 标准化 拍摄 " * 20  # ~160 词
         short_preview = "项目Beta 项目"  # 仅 2 词
 
         chunk = FakeChunk(content=long_text, content_preview=short_preview)
@@ -41,11 +41,11 @@ class TestBm25FullContent:
 
     def test_score_chunk_uses_full_content(self):
         """_score_chunk 内部使用 chunk.content。"""
-        query = "拍照 标准化 iPhone"
+        query = "拍照 标准化 手机"
         query_tokens = tokenize(query)
 
         class FakeChunk:
-            content = "项目Beta 项目涉及 iPhone 全量标准化拍摄流程 " * 10
+            content = "项目Beta 项目涉及 手机 全量标准化拍摄流程 " * 10
             content_preview = "项目Beta 项目"
             title = "项目Beta 项目"
             section_path = []
@@ -63,15 +63,15 @@ class TestBm25FullContent:
 
     def test_tf_differs_between_content_and_preview(self):
         """同一个词在 content 和 content_preview 中的 TF 不同。"""
-        text = "iPhone iPhone iPhone 拍照"  # "iPhone" 出现 3 次
-        preview = "iPhone 拍照"  # "iPhone" 出现 1 次
+        text = "手机 手机 手机 拍照"  # "手机" 出现 3 次
+        preview = "手机 拍照"  # "手机" 出现 1 次
 
         full_tokens = tokenize(text)
         preview_tokens = tokenize(preview)
 
         from collections import Counter
-        full_tf = Counter(full_tokens).get("iphone", 0)
-        preview_tf = Counter(preview_tokens).get("iphone", 0)
+        full_tf = Counter(full_tokens).get("手机", 0)
+        preview_tf = Counter(preview_tokens).get("手机", 0)
 
         assert full_tf > preview_tf, \
             f"content TF({full_tf})应大于 preview TF({preview_tf})"
@@ -86,7 +86,7 @@ class TestQaTokenBudget:
         """中英混排文本 token 估算不同于 len()。"""
         text_cn = "这是一个中文测试句子用于验证token估算"
         text_en = "This is an English test sentence for token estimation"
-        text_mixed = "项目Beta iPhone 全量 标准化 拍摄 SOP 4步法"
+        text_mixed = "项目Beta 手机 全量 标准化 拍摄 SOP 4步法"
 
         cn_estimate = estimate_tokens(text_cn)
         en_estimate = estimate_tokens(text_en)

@@ -127,4 +127,7 @@ class Dispatcher:
 处理方式：
 - `iris feed-confirm {item['topic_id']}` 确认入库
 - `iris feed-ignore {item['topic_id']}` 忽略"""
-        self._bridge.send_markdown_to_user(IRIS_BOT_USER_ID, md)
+        if IRIS_BOT_USER_ID:
+            self._bridge.send_markdown_to_user(IRIS_BOT_USER_ID, md)
+        else:
+            logger.info("未配置 IRIS_BOT_USER_ID，跳过飞书确认通知（话题仍已暂存待确认）")

@@ -22,10 +22,10 @@ class TestPickInferenceExamples:
         assert "张三" in result
 
     def test_uses_mis_asr_from_projects(self):
-        projects = [_make_term("图验平台", "project", ["图眼平台"])]
+        projects = [_make_term("质检平台", "project", ["图眼平台"])]
         result = LLMPromptOptimizer._pick_inference_examples([], projects)
         assert "图眼平台" in result
-        assert "图验平台" in result
+        assert "质检平台" in result
 
     def test_falls_back_when_no_mis_asr(self):
         persons = [_make_term("李四", "person")]  # 无 mis_asr
@@ -79,16 +79,16 @@ class TestRenderV2:
 
     def test_protected_terms_include_projects_and_concepts(self):
         terms = [
-            _make_term("图验3.0", "project"),
+            _make_term("质检3.0", "project"),
             _make_term("BM25", "concept"),
         ]
         result = LLMPromptOptimizer._render_v2([], terms)
-        assert "图验3.0" in result or "BM25" in result
+        assert "质检3.0" in result or "BM25" in result
 
     def test_top_persons_appear_in_result(self):
-        terms = [_make_term("冯扬", "person"), _make_term("李雷", "person")]
+        terms = [_make_term("张三", "person"), _make_term("李雷", "person")]
         result = LLMPromptOptimizer._render_v2([], terms)
-        assert "冯扬" in result
+        assert "张三" in result
         assert "李雷" in result
 
     def test_domain_context_injected(self):
