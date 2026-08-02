@@ -132,13 +132,17 @@ class BriefGenerator:
         Returns:
             生成的文件路径列表
         """
-        output_dir = self._source_root / "09-工作简报" / exec_date[:6]
-        if not dry_run:
-            output_dir.mkdir(parents=True, exist_ok=True)
-
         files = []
         for topic in topics:
-            path = self._generate_one(topic, converted_docs, exec_date, output_dir, dry_run=dry_run)
+            filename = _build_filename(topic, exec_date)
+            if dry_run:
+                # dry-run 不创建目录，手动拼路径
+                filepath = self._source_root / "09-工作简报" / exec_date[:6] / filename
+            else:
+                from iris.utils.paths import resolve_source_archive_path
+                filepath = resolve_source_archive_path(
+                    self._source_root, "09-工作简报", filename)
+            path = self._generate_one(topic, converted_docs, exec_date, filepath, dry_run=dry_run)
             if path:
                 files.append(path)
         return files
@@ -148,12 +152,11 @@ class BriefGenerator:
         topic: DetectedTopic,
         converted_docs: List[ConvertedDoc],
         exec_date: str,
-        output_dir: Path,
+        filepath: Path,
         dry_run: bool = False,
     ) -> Optional[Path]:
         """生成单篇简报。"""
-        filename = _build_filename(topic, exec_date)
-        filepath = output_dir / filename
+        filename = filepath.name
 
         # ── Frontmatter ──────────────────────────────────
         sources_yaml = "\n".join([

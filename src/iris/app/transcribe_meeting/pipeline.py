@@ -211,18 +211,6 @@ class TranscribeMeetingPipeline:
         names = [p.strip() for p in parts if p.strip() and len(p.strip()) <= 10]
         return "、".join(names) if names else ""
 
-    def _resolve_source_dir(self) -> Path:
-        """解析 SOURCE/05-会议纪要/ 输出目录。"""
-        data_source = self._bundle.data_source
-        sources = data_source.get("sources", {})
-        for cfg in sources.values():
-            if cfg.get("enabled") and cfg.get("path"):
-                src_root = Path(cfg["path"]).resolve()
-                if src_root.exists():
-                    meeting_dir = src_root / "05-会议纪要"
-                    return meeting_dir
-        return self._temp_dir
-
     # ── 纪要路由 ────────────────────────────────────────────────
 
     def _load_routing_config(self) -> Dict[str, Any]:
@@ -310,19 +298,6 @@ FILENAME: <文件名>"""
                         result[key] = val
                     break
         return result
-
-    def _resolve_routed_source_dir(self, route_target: str) -> Path:
-        """根据路由目标确定 SOURCE 子目录路径。"""
-        data_source = self._bundle.data_source
-        sources = data_source.get("sources", {})
-        for cfg in sources.values():
-            if cfg.get("enabled") and cfg.get("path"):
-                src_root = Path(cfg["path"]).resolve()
-                if src_root.exists():
-                    target_dir = src_root / route_target
-                    target_dir.mkdir(parents=True, exist_ok=True)
-                    return target_dir
-        return self._temp_dir
 
     def _resolve_routed_output(self, route_result: Dict[str, str], input_stem: str) -> Path:
         """根据路由结果生成输出文件路径（含归档子目录）。"""

@@ -10,7 +10,7 @@ metadata:
 
 # Iris 信息汇聚
 
-从飞书群聊/单聊中自动挖掘有价值的讨论话题，通过 LLM 做话题聚合和 OKR 语义匹配，自动提取消息中引用的飞书文档（docx/wiki/sheet/base），生成结构化简报归档到 `SOURCE/09-工作简报/`。
+从飞书群聊/单聊中自动挖掘有价值的讨论话题，通过 LLM 做话题聚合和 OKR 语义匹配，自动提取消息中引用的飞书文档（docx/wiki/sheet/base），生成结构化简报归档到 `SOURCE/09-工作简报/YYYYMM/`（按月归档）。
 
 涉及 9 个 CLI 命令，核心工作流分为**配置→汇聚→管理**三个阶段。
 
@@ -50,7 +50,7 @@ python3 scripts/run_cli.py --call-source skill feed-add --chat "<联系人名>" 
 python3 scripts/run_cli.py --call-source skill feed-list
 ```
 
-会展示每个群聊的导入模式、OKR 标签及从 `SOURCE/01-目标管理/` 解析出的实际 KR 描述。
+会展示每个群聊的导入模式、OKR 标签及从 `SOURCE/01-目标管理/YYYY/`（按年归档）解析出的实际 KR 描述。
 
 ---
 
@@ -223,7 +223,7 @@ python3 scripts/run_cli.py --call-source skill feed-remove --chat "<群名>"
 
 ## OKR 语义匹配说明
 
-IRIS Feed 会从 `SOURCE/01-目标管理/` 中加载最新 OKR 文档，在话题检测时将实际 KR 描述注入 LLM Prompt。
+IRIS Feed 会从 `SOURCE/01-目标管理/YYYY/`（按年归档）中加载最新 OKR 文档，在话题检测时将实际 KR 描述注入 LLM Prompt。
 
 - LLM 基于**语义理解**判断话题与哪个 KR 相关（非关键词硬匹配）
 - 输出匹配强度：`strong` / `weak` / `none`

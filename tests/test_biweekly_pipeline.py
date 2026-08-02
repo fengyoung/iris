@@ -259,7 +259,7 @@ class TestBiweeklyFilename:
 
         today = datetime(2026, 7, 7)  # 周二 → ISO week 28
         filename = _build_biweekly_filename(FakeBundle(), today)
-        assert filename.startswith("双周报-w")
+        assert filename.startswith("20260707-双周报-w")
         assert "团队成员J" in filename
         assert "20260707" in filename
 

@@ -18,8 +18,9 @@ from iris.utils.paths import resolve_source_root as _resolve_data_source_root
 
 
 def _build_biweekly_filename(bundle, today: datetime) -> str:
-    """生成双周报文件名：双周报-w{week}-{author}-{date}.md。
+    """生成双周报文件名：{YYYYMMDD}-双周报-w{week}-{author}.md。
 
+    日期前缀供 resolve_source_archive_path 识别归档子目录（06-我的周报 按年归档）。
     周一生成时，周数归属上周（如 W27 而非 W28）。
     """
     cfg = bundle.app.get("biweekly_report", {})
@@ -30,7 +31,7 @@ def _build_biweekly_filename(bundle, today: datetime) -> str:
         report_week_date = today
     _, week, _ = report_week_date.isocalendar()
     date_str = today.strftime("%Y%m%d")
-    return f"双周报-w{week:02d}-{author}-{date_str}.md" if author else f"双周报-w{week:02d}-{date_str}.md"
+    return f"{date_str}-双周报-w{week:02d}-{author}.md" if author else f"{date_str}-双周报-w{week:02d}.md"
 
 
 # ── 分析报告 ────────────────────────────────────────────

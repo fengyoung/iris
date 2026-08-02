@@ -49,7 +49,7 @@ python3 scripts/run_cli.py --call-source skill build-biweekly-report [选项]
 
 **选项**：
 - `--query "<补充说明>"`：额外的重点关注内容
-- `--to-source`：归档到 `SOURCE/06-我的周报/`
+- `--to-source`：归档到 `SOURCE/06-我的周报/YYYY/`（按年归档）
 - `--output-file <路径>`：手动指定输出路径
 
 ## Claude 的工作流程
@@ -121,10 +121,10 @@ python3 scripts/run_cli.py --call-source skill build-biweekly-report --to-source
 ```
 
 **选项：**
-- `--to-source`：归档到 `SOURCE/06-我的周报/`（默认推荐）
+- `--to-source`：归档到 `SOURCE/06-我的周报/YYYY/`（按年归档）（默认推荐）
 - `--output-file <路径>`：手动指定输出路径
 - `--query "<补充说明>"`：额外的重点关注内容
-- `--style-from <文件名>`：从指定历史双周报学习写作风格
+- `--style-from <文件名>`：从指定历史双周报学习写作风格（在 `06-我的周报/YYYY/` 中递归查找）
 - `--dry-run`：预览模式，仅展示文件清单和方向匹配，不调用 LLM
 
 **步骤 3：展示摘要并提醒修订**
@@ -133,12 +133,12 @@ python3 scripts/run_cli.py --call-source skill build-biweekly-report --to-source
 1. 报告标题和时间周期
 2. 每个方向的关键进展摘要（1-2 条）
 3. 数据源文件统计（共 N 份文件）
-4. 提醒用户报告已保存到 `SOURCE/06-我的周报/`，建议人工审阅修订
+4. 提醒用户报告已保存到 `SOURCE/06-我的周报/YYYY/`（按年归档），建议人工审阅修订
 
 **流水线说明：**
 
 双周报生成采用五阶段流水线：
-1. **OP 解析**：从 `01-目标管理/` 提取战略方向定义（缓存）
+1. **OP 解析**：从 `01-目标管理/YYYY/`（按年归档）提取战略方向定义（缓存）
 2. **文件过滤**：LLM 按方向语义判定文件相关性
 3. **深度摘要**：高相关文件全文摘要（缓存）
 4. **方向合成**：每方向独立合成章节，含战略分析 + 多期去重
@@ -150,7 +150,7 @@ python3 scripts/run_cli.py --call-source skill build-biweekly-report --to-source
 |------|------|
 | 标准生成 | `python3 scripts/run_cli.py --call-source skill build-biweekly-report --to-source` |
 | 预览检查 | `python3 scripts/run_cli.py --call-source skill build-biweekly-report --dry-run` |
-| 指定风格 | `python3 scripts/run_cli.py --call-source skill build-biweekly-report --to-source --style-from 双周报-w25-20260621.md` |
+| 指定风格 | `python3 scripts/run_cli.py --call-source skill build-biweekly-report --to-source --style-from 20260621-双周报-w25-冯扬.md`（风格文件在 `06-我的周报/YYYY/` 子目录中，系统自动递归查找）|
 | 手动输出 | `python3 scripts/run_cli.py --call-source skill build-biweekly-report --output-file output/双周报.md` |
 
 ## 常见场景

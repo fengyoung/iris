@@ -1213,8 +1213,9 @@ class WeeklyReportMarkdownGenerator:
     def _resolve_output_dir(self, email_date: datetime) -> str:
         """根据邮件日期解析月份子目录，不存在则自动创建。
 
-        SOURCE/07-成员周报 已改为按月归档（YYYYMM 子目录），此方法
-        确保新生成的周报文件自动归入正确的月份目录。
+        SOURCE/07-成员周报 已改为按月归档（YYYYMM 子目录，与
+        config/source_archive.json 中 monthly 模式保持一致），
+        此方法确保新生成的周报文件自动归入正确的月份目录。
         """
         month_dir = email_date.strftime("%Y%m")
         month_path = os.path.join(self.output_dir, month_dir)

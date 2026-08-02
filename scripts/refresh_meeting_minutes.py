@@ -152,14 +152,8 @@ class MeetingMinutesRefresher:
         return files
 
     def find_source_matches(self, stem: str) -> List[Path]:
-        """在 SOURCE 所有子目录中查找匹配的 .md 文件。"""
-        matches = []
-        for subdir in self._source_root.iterdir():
-            if subdir.is_dir() and not subdir.is_symlink():
-                candidate = subdir / f"{stem}.md"
-                if candidate.exists():
-                    matches.append(candidate)
-        return matches
+        """在 SOURCE 全部子目录中递归查找匹配的 .md 文件（含 YYYYMM/YYYY 归档子目录）。"""
+        return sorted(self._source_root.rglob(f"{stem}.md"))
 
     # ── 备份 ──────────────────────────────────────────────────────
     def backup_existing(self, stem: str, old_paths: List[Path]) -> List[Path]:

@@ -1,8 +1,10 @@
-# Iris 3.21.0
+# Iris 3.21.1
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
+
+**v3.21.1** — SOURCE 归档适配全面修复：双周报文件名改为日期前缀（正确归档到 `YYYY/` 子目录）+ 会议纪要刷新脚本递归查找 + 风格源文件递归查找 + feed 简报使用 `resolve_source_archive_path` + 移除 pipeline 扁平路径死代码 + 5 个 Skill 文档 SOURCE 路径更新（iris-okr-check/iris-feed/iris-report/iris-feishu-import/iris-meeting）。协议版本 3.15（不变）。
 
 **v3.21.0** — SOURCE 元数据工程：新增 `frontmatter-batch` 批量补全命令（新模块 `core/frontmatter_batch.py`，正则快速通道 + LLM 深度通道 + wikilink 可选注入 + 备份恢复，9 类目录字段映射）+ wikilink 注入收敛（4 管道移除，统一由批量命令按需注入）+ 周报按月归档（YYYYMM 子目录）+ 双周报 frontmatter 注入。测试 +65（合计 2,626 用例）。协议版本 3.14→3.15（新增 frontmatter-batch 命令）。
 

@@ -1,3 +1,37 @@
+## v3.21.1 (2026-08-02)
+
+SOURCE 归档适配全面修复 — 双周报文件名日期前缀 + 递归查找修复 + Skill 文档 SOURCE 路径更新。
+
+### 1. Bug 修复（3 项）
+
+- **双周报文件名改为日期前缀**（`cli/_handlers/_content.py`）：`_build_biweekly_filename()` 生成 `{YYYYMMDD}-双周报-w{week}-{author}.md`（日期前缀），`resolve_source_archive_path` 正则 `re.match(r"(\d{4})(\d{2})\d{2}-")` 正确匹配 → 双周报归档到 `06-我的周报/YYYY/` 而非 flat。联动：`_biweekly_collector.py` glob 更新为 `rglob("*双周报-*.md")`（兼容新旧格式）；测试断言同步更新。
+- **会议纪要刷新脚本递归查找**（`scripts/refresh_meeting_minutes.py`）：`find_source_matches()` 从一层 `iterdir` 改为 `rglob`，已归档到 `05-会议纪要/YYYYMM/` 的纪要可正确备份/去重。
+- **风格源文件递归查找**（`analysis/service.py`）：`_stage0b_load_style()` 从扁平 `source_root / "06-我的周报" / style_from` 改为 `report_dir.rglob(style_from)`，`YYYY/` 子目录中的历史双周报可被找到并用作风格参考。
+
+### 2. 脆弱点加固（2 项）
+
+- **feed 简报生成**（`feed/_brief_generator.py`）：`generate()` 使用 `resolve_source_archive_path(self._source_root, "09-工作简报", filename)` 替代硬编码 `exec_date[:6]`，配置驱动；dry-run 保留手动路径避免 mkdir。
+- **成员周报提取**（`scripts/extract_weekly_reports.py`）：`_resolve_output_dir` 文档更新，注释与 `config/source_archive.json` 一致性。
+
+### 3. 死代码清理
+
+- 移除 `transcribe_meeting/pipeline.py` 中 `_resolve_source_dir` 和 `_resolve_routed_source_dir` 两个扁平路径函数（零调用者，若复用会写出错）。
+
+### 4. Skill 文档 SOURCE 路径更新（5 文件 / 18 处）
+
+- **iris-okr-check**：OKR 来源/输出/查找路径加 `YYYY/`；5 个数据源目录表加归档子目录列（`06-我的周报/YYYY/`、`05-会议纪要/YYYYMM/`、…）
+- **iris-feed**：`09-工作简报/YYYYMM/`、`01-目标管理/YYYY/`
+- **iris-report**：`06-我的周报/YYYY/`、`01-目标管理/YYYY/`；`--style-from` 示例更新
+- **iris-feishu-import**：路由表追加 `YYYYMM/` / `YYYY/` 归档子目录列
+- **iris-meeting**：路由表追加归档子目录列
+
+### 版本升级
+
+| 层 | 旧版本 | 新版本 | 理由 |
+|------|:---:|:---:|------|
+| 产品版本 | 3.21.0 | **3.21.1** | 3 项 Bug 修复 + 2 项加固 + 死代码清理 + Skill 文档更新 |
+| 协议版本 | 3.15 | 3.15（不变） | 无新增 CLI 命令 |
+
 ## v3.21.0 (2026-08-02)
 
 批量 frontmatter 补全命令 + wikilink 注入收敛 + 周报按月归档 — SOURCE 文档元数据工程。

@@ -131,7 +131,7 @@ class BiweeklyCollector:
         cutoff = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - \
                  timedelta(days=since_days)
         results: list[dict] = []
-        for f in sorted(report_dir.rglob("双周报-*.md"), reverse=True):
+        for f in sorted(report_dir.rglob("*双周报-*.md"), reverse=True):
             date_match = re.search(r'(\d{8})', f.name)
             if not date_match:
                 continue

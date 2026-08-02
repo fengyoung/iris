@@ -309,7 +309,12 @@ class AnalysisReportService:
             if not style_source.is_absolute():
                 source_root = _resolve_source_root(self._config)
                 if source_root:
-                    style_source = source_root / "06-我的周报" / style_from
+                    report_dir = source_root / "06-我的周报"
+                    if report_dir.exists():
+                        # 递归搜索 YYYY/ 子目录（按年归档）以及遗留的扁平文件
+                        matches = sorted(report_dir.rglob(style_from))
+                        if matches:
+                            style_source = matches[0]
             if not style_source.exists():
                 logger.warning("  风格源文件不存在: %s，回退", style_from)
                 cached = self._cache.load_style_guide()

@@ -1,4 +1,4 @@
-# Iris 3.21.0 — 项目执行说明
+# Iris 3.21.1 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -122,7 +122,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.21.0 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.21.1 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.15 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -167,7 +167,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.21.0 (2026-08-02)** — SOURCE 元数据工程：① 新增 `frontmatter-batch` 批量补全命令（新模块 `core/frontmatter_batch.py` ~610 行 — 正则快速通道零 LLM 成本 + LLM 深度通道按 9 类目录字段映射 + wikilink 可选注入 + 自动备份/一键恢复 + 幂等跳过）；② wikilink 注入收敛 — 从 4 个管道（doc-convert/chat-digest/transcribe-meeting/extract-weekly-reports）移除，统一由 frontmatter-batch 按需注入；③ 周报按月归档 — `extract-weekly-reports` 输出自动归入 YYYYMM 月份子目录；④ 双周报 frontmatter 注入（title/date/type/period/author）+ analysis `period` 字段。测试 +65（2,626 用例 / 134 文件）。协议版本 3.14→3.15（新增 frontmatter-batch 命令）。产品版本 3.20.2→3.21.0。
+**当前 v3.21.1 (2026-08-02)** — SOURCE 归档适配全面修复：① 双周报文件名改为日期前缀（`YYYYMMDD-` 前缀），`resolve_source_archive_path` 正则正确匹配→归档到 `06-我的周报/YYYY/`；② `refresh_meeting_minutes` 非递归查找修复（`find_source_matches`→`rglob`），已归档会议纪要可正确备份/去重；③ `_stage0b_load_style` 风格源文件递归查找修复（`rglob`→扁平→找到 `YYYY/` 下文件）；④ feed 简报生成使用 `resolve_source_archive_path` 替代硬编码 YYYYMM；⑤ 移除 `transcribe_meeting/pipeline.py` 两个扁平路径死函数；⑥ 5 个 Skill 文档 SOURCE 路径更新（iris-okr-check / iris-feed / iris-report / iris-feishu-import / iris-meeting 共 18 处）。附加：`extract_weekly_reports.py` `_resolve_output_dir` 文档一致性注释。协议版本 3.15（不变）。产品版本 3.21.0→3.21.1。
+
+**v3.21.0 (2026-08-02)** — SOURCE 元数据工程：① 新增 `frontmatter-batch` 批量补全命令（新模块 `core/frontmatter_batch.py` ~610 行 — 正则快速通道零 LLM 成本 + LLM 深度通道按 9 类目录字段映射 + wikilink 可选注入 + 自动备份/一键恢复 + 幂等跳过）；② wikilink 注入收敛 — 从 4 个管道（doc-convert/chat-digest/transcribe-meeting/extract-weekly-reports）移除，统一由 frontmatter-batch 按需注入；③ 周报按月归档 — `extract-weekly-reports` 输出自动归入 YYYYMM 月份子目录；④ 双周报 frontmatter 注入（title/date/type/period/author）+ analysis `period` 字段。测试 +65（2,626 用例 / 134 文件）。协议版本 3.14→3.15（新增 frontmatter-batch 命令）。产品版本 3.20.2→3.21.0。
 
 **v3.20.2 (2026-07-30)** — 双线合并：① SOURCE 文档质量系统性提升 — YAML frontmatter 标准化（新增 `core/frontmatter.py` 统一工具模块，4 个 CLI 管道输出全部注入 frontmatter 元数据）、wikilink 自动注入引擎（新增 `wiki/wikilink_injector.py`，零 LLM 成本，4 管道集成）、成员周报 Prompt 增强（4 段落结构 + 量化指标要求 + 项目上下文注入）、周报质量门禁（`check_quality`，三级判定，不阻塞写入），测试 +54；② 测试覆盖率系统提升 — 新增 253 个单元测试（9 个新文件），覆盖率 59.87% → 62.82%，覆盖 chunker/formatter/hotwords/lifecycle/embedder/memory_updater/session_miner/feishu_bridge/agent_adapter 等模块。协议版本 3.14（不变）。产品版本 3.20.1→3.20.2。
 
