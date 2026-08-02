@@ -152,6 +152,15 @@ class TestRunLarkCli:
 
 
 class TestIrisBotUserId:
-    def test_constant_exists(self):
-        assert IRIS_BOT_USER_ID.startswith("ou_")
-        assert len(IRIS_BOT_USER_ID) > 10
+    def test_default_empty(self):
+        """未配置 IRIS_BOT_USER_ID 时默认空串（跳过飞书推送）。"""
+        assert IRIS_BOT_USER_ID == ""
+
+    def test_reads_from_env(self, monkeypatch):
+        """配置 IRIS_BOT_USER_ID 环境变量后应读取该值。"""
+        monkeypatch.setenv("IRIS_BOT_USER_ID", "ou_0123456789abcdef01234567")
+        import importlib
+        import iris.feed._feishu_bridge as fb
+        module = importlib.reload(fb)
+        assert module.IRIS_BOT_USER_ID.startswith("ou_")
+        assert len(module.IRIS_BOT_USER_ID) > 10

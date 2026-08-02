@@ -981,7 +981,7 @@ ASR 引擎全面质量加固 — P0 字符串截断 + P1 正确性 + P2 健壮�
 
 ### P1 改进（内容质量提升，6 项）
 
-- **Stage 3 约束重构**：`max_items` 硬约束 → 子方向全覆盖 + 每子方向 ≤3 条 + 每条 ~50 字精简。解决 3 子方向抢 4 条配额导致验真假被合并的问题
+- **Stage 3 约束重构**：`max_items` 硬约束 → 子方向全覆盖 + 每子方向 ≤3 条 + 每条 ~50 字精简。解决 3 子方向抢 4 条配额导致真伪检测被合并的问题
 - **Stage 3 brief 优先级排序**：按 Stage 1 分发（high/medium/low）+ owner 匹配计算优先级，确保高质量 brief 优先进入 LLM 上下文
 - **Stage 4b 审查维度扩展**：新增子方向覆盖完整性检查（维度 4），条目数量规则改为每子方向 ≤3 条，审查项 10→11 重新编号
 - **Stage 2 方向上下文增强**：注入子方向名称/责任人/目标信息 + `relevant_directions` 合并 Stage 1 分发，避免跨方向内容遗漏
@@ -1093,7 +1093,7 @@ ASR 校正引擎加固 — max_mappings 配置化、替换词典热加载、手�
 
 ### 修复
 
-- **`_biweekly_collector.py` OP 文档选择**：`load_op_document()` 曾误取个人/团队 OKR（如卞凯 OKR），改为按「数据智能部」关键词正选 + 正则排除 `-团队名-人名-OKR` 模式
+- **`_biweekly_collector.py` OP 文档选择**：`load_op_document()` 曾误取个人/团队 OKR（如李四 OKR），改为按「数据部门」关键词正选 + 正则排除 `-团队名-人名-OKR` 模式
 - **`loader.py` 占位符误报**：`_warn_unresolved_placeholders` 在 `resolve_path_vars` 之前执行，导致 `${IRIS_PROJECT_ROOT}` 等路径占位符误报
 
 ### 改进
@@ -1465,7 +1465,7 @@ ASR 实时校正引擎 — 从离线配置编译器升级为 vocotype 实时校�
 ### 源码脱敏
 
 - `src/iris/evaluation/deep_eval.py`：两处硬编码内部服务名称替换为通用描述
-- `src/iris/llm/provider.py`：内部算法平台代号 `zz-algo-plat` → `custom-algo-platform`
+- `src/iris/llm/provider.py`：内部算法平台代号（原名含内部标识）→ `custom-algo-platform`
 - `src/iris/wiki/discovery_rules.py`：`HIGH_VALUE_TOPIC_HINTS` 业务方向特征泛化，`STOPWORDS` 移除残留学号/内部词
 - `src/iris/wiki/graph.py` / `backlink.py`：文档字符串示例中的内部项目名替换为通用占位符
 - `templates/prompt/biweekly_stage3_direction.md`：错误示范中的内部业务术语替换
@@ -2035,7 +2035,7 @@ SOURCE 结构优化：新增「工作简报」栏目 + bug 修复。
 ### 开源脱敏（未发布随 3.11.14 批量提交）
 
 **源码脱敏：**
-- `src/iris/analysis/service.py`：`_SUB_AREA_KEYWORDS` 字典清空，移除 11 个硬编码内部业务子领域词条（某检测项目 / 图像采集3.0 / 图像验证 / 视频审核 / 在线评估 / 工作流 / 消费品类 / 二手商品 / 兴趣品类 / 推荐 / 搜索），改为用户自定义注释说明；移除注释中员工姓名
+- `src/iris/analysis/service.py`：`_SUB_AREA_KEYWORDS` 字典清空，移除 11 个硬编码内部业务子领域词条（11 个内部业务子领域词条，内容含公司业务信息，此处不列原文），改为用户自定义注释说明；移除注释中员工姓名
 - `src/iris/wiki/navigation.py`：`EXTERNAL_CONCEPT_PATTERNS` 从 15 个业务特定正则缩减为 2 个通用示例，添加用户自定义说明
 - `src/iris/wiki/term_extractor.py`、`src/iris/analysis/_biweekly_types.py`：移除注释/文档字符串中的员工姓名与内部项目代号
 - `templates/prompt/biweekly_stage3_direction.md`、`biweekly_stage1_filter.md`：示例中的内部项目代号替换为通用占位符
@@ -2060,7 +2060,7 @@ SOURCE 结构优化：新增「工作简报」栏目 + bug 修复。
 ### 开源脱敏全面清理
 
 **源码脱敏：**
-- `src/iris/analysis/service.py`：`_SUB_AREA_KEYWORDS` 字典清空，移除 11 个硬编码内部业务子领域词条（某检测项目 / 图像采集3.0 / 图像验证 / 视频审核 / 在线评估 / 工作流 / 消费品类 / 二手商品 / 兴趣品类 / 推荐 / 搜索），改为用户自定义注释说明；移除注释中员工姓名
+- `src/iris/analysis/service.py`：`_SUB_AREA_KEYWORDS` 字典清空，移除 11 个硬编码内部业务子领域词条（11 个内部业务子领域词条，内容含公司业务信息，此处不列原文），改为用户自定义注释说明；移除注释中员工姓名
 - `src/iris/wiki/navigation.py`：`EXTERNAL_CONCEPT_PATTERNS` 从 15 个业务特定正则缩减为 2 个通用示例，添加用户自定义说明
 - `src/iris/wiki/term_extractor.py`、`src/iris/analysis/_biweekly_types.py`：移除注释/文档字符串中的员工姓名与内部项目代号
 - `templates/prompt/biweekly_stage3_direction.md`、`biweekly_stage1_filter.md`：示例中的内部项目代号替换为通用占位符
@@ -2068,7 +2068,7 @@ SOURCE 结构优化：新增「工作简报」栏目 + bug 修复。
 
 **测试数据脱敏（9 个测试文件）：**
 - 员工真实姓名（团队成员A / 团队成员B / 团队成员C / 团队成员D / 团队成员E / 团队成员F 等）→ 张三 / 李四 / 王小明 / 王五 / 赵六
-- 内部项目代号（某检测项目 / 图像采集3.0 / 图像验证 / 视频审核 / 在线评估）→ 项目Alpha / Beta / Gamma / Delta / Epsilon
+- 内部项目代号（5 个内部项目代号）→ 项目Alpha / Beta / Gamma / Delta / Epsilon
 - 企业邮箱（`*@example.com`）→ `*@example.com`
 
 **Git 追踪清理：**
@@ -2127,7 +2127,7 @@ SOURCE 结构优化：新增「工作简报」栏目 + bug 修复。
 
 ### extract-weekly-reports 扫描漏人修复 + 测试补全（384 → 397 测试）
 
-**问题**：白名单 12 人本周实际 10 人提交周报，`extract-weekly-reports` CLI 仅扫到 3 人，静默漏掉 7 人（团队成员B、刘备、团队成员A、团队成员G、团队成员D、团队成员H、团队成员I）。根因 `LarkMailScanner.scan_triage` 走「folder + time_range」list 路径，这些成员的周报带 `IMPORTANT` 标签、散落在 priority/自定义文件夹并落在 list 首屏 50 封之外，list 路径捞不到；search 路径（`--query`，跨全文件夹）可一次命中。
+**问题**：白名单 12 人本周实际 10 人提交周报，`extract-weekly-reports` CLI 仅扫到 3 人，静默漏掉 7 人（团队成员B、团队成员X、团队成员A、团队成员G、团队成员D、团队成员H、团队成员I）。根因 `LarkMailScanner.scan_triage` 走「folder + time_range」list 路径，这些成员的周报带 `IMPORTANT` 标签、散落在 priority/自定义文件夹并落在 list 首屏 50 封之外，list 路径捞不到；search 路径（`--query`，跨全文件夹）可一次命中。
 
 **修复（`scripts/extract_weekly_reports.py` + `config/weekly_report.json`）：**
 - `scan_triage` 新增 `query` 参数：非空时走跨全文件夹 search 路径（追加 `--query`，filter 仅带 `time_range` 不带 folder）；为空保持旧 folder-list 行为（向后兼容）
@@ -2149,7 +2149,7 @@ SOURCE 结构优化：新增「工作简报」栏目 + bug 修复。
 - S3: `discovery_rules.py` 脱敏 — `LOW_VALUE_TITLES` 移除含真实员工姓名的条目，`STOPWORDS` 移除内部品牌词 `exampleorg`
 - S4: LLM Prompt 业务域配置化 — 新建 `wiki/_constants.build_domain_context(app_config)`；`term_extractor` / `asr_hotwords` / `asr_prompt_optimizer` 三处 Prompt 中的公司名/部门名/业务域改从 `config/app.json organization` 字段注入；`handlers.py` 统一构建 `domain_context` 传入；`app.json.example` 新增 `organization` 和 `retrieval` 配置段
 - S5: 日志截断敏感内容 — `_sanitize_log_payload`：`markdown` 字段截断至前 200 字，`blocks` 只保留 `relative_path` 和 `score`
-- S6: ASR Prompt 示例脱敏 — `asr_hotwords.py` / `term_extractor.py` / `asr_prompt_optimizer.py` 输出格式示例中的真实员工姓名（团队成员J、团队成员E）和项目名（图像采集3.0、质检自动化）替换为通用占位；`biweekly_stage3_direction.md` 反例示范脱敏；`biweekly_stage4_assemble.md` 移除 LLM 无法执行的条件签名指令
+- S6: ASR Prompt 示例脱敏 — `asr_hotwords.py` / `term_extractor.py` / `asr_prompt_optimizer.py` 输出格式示例中的真实员工姓名（团队成员J、团队成员E）和项目名（两个内部项目代号）替换为通用占位；`biweekly_stage3_direction.md` 反例示范脱敏；`biweekly_stage4_assemble.md` 移除 LLM 无法执行的条件签名指令
 
 **工程质量：**
 - Q1: `EnhancedRetriever._cache` 线程安全 — 新增 `threading.Lock`，`_cache_get`/`_cache_set` 加锁，修复 `update_all_pages` 并发场景下的竞态

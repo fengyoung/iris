@@ -50,7 +50,7 @@ class TestCollectDirectionConcepts:
     def test_sub_areas_with_bracket_prefix(self):
         """带 【】前缀的子领域名，只取括号后部分。"""
         direction = {
-            "sub_areas": [{"name": "1.1 【验功能】搜索召回"}],
+            "sub_areas": [{"name": "1.1 【功能】搜索召回"}],
         }
         result = _collect_direction_concepts(direction)
         assert len(result) == 1

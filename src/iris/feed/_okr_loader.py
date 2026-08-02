@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 class KR:
     """单个关键结果。"""
     kr_id: str          # "O1-KR1"
-    title: str          # "【验成色】拍照3.0主观项检测，支撑iPhone全入仓战略…"
-    short_title: str    # "【验成色】拍照3.0主观项检测"
+    title: str          # "【质量】自动质检模型优化，支撑新品全量入仓…"
+    short_title: str    # "【质量】自动质检模型优化"
     owner: str = ""
     content: str = ""   # 完整内容（含描述、KP 表格等）
 
@@ -28,7 +28,7 @@ class KR:
 class Objective:
     """单个目标。"""
     obj_id: str         # "O1"
-    title: str          # "图验技术向纵深攻坚…"
+    title: str          # "智能质检技术升级…"
     content: str = ""   # 完整内容（含方向描述等）
     krs: Dict[str, KR] = field(default_factory=dict)
 
@@ -51,8 +51,8 @@ class OKRDocument:
         """将标签列表解析为 {标签: 实际描述} 映射。
 
         Example:
-            ["O1"] → {"O1": "图验技术向纵深攻坚…"}
-            ["O1-KR1"] → {"O1-KR1": "【验成色】拍照3.0主观项检测…"}
+            ["O1"] → {"O1": "智能质检技术升级…"}
+            ["O1-KR1"] → {"O1-KR1": "【质量】自动质检模型优化…"}
             ["O1"] → 包含该 Objective 下所有 KR 描述
         """
         result: Dict[str, str] = {}
@@ -82,12 +82,13 @@ class OKRDocument:
 # ── 解析器 ────────────────────────────────────────────────
 
 
-def _find_latest_okr_file(source_root: Path) -> Optional[Path]:
+def _find_latest_okr_file(source_root: Path, dept_keyword: str = "") -> Optional[Path]:
     """在 SOURCE/01-目标管理 中查找最新的部门级 OKR 文件。
 
     规则：
     - 目录按年分（2026/ 2027/ …）
-    - 文件名含「数据智能部」且不含「OP」「双周」「团队」「个人」等关键词
+    - 文件名含部门关键词（dept_keyword，空=不过滤；生产环境从 app.biweekly_report.dept_op_keyword 配置）
+    - 不含「OP」「双周」「周报」「团队」「个人」「检查」等关键词
     - 按嵌入日期降序取最新
     """
     tm_dir = source_root / "01-目标管理"
@@ -101,8 +102,8 @@ def _find_latest_okr_file(source_root: Path) -> Optional[Path]:
             continue
         for f in year_dir.glob("*.md"):
             fname = f.name
-            # 必须包含部门关键词
-            if "数据智能部" not in fname:
+            # 部门关键词过滤（为空则不过滤）
+            if dept_keyword and dept_keyword not in fname:
                 continue
             # 排除非 OKR 文件
             if any(kw in fname for kw in ("OP", "双周", "周报", "团队", "个人", "检查")):
@@ -110,11 +111,27 @@ def _find_latest_okr_file(source_root: Path) -> Optional[Path]:
             candidates.append(f)
 
     if not candidates:
-        logger.warning("未找到数据智能部的 OKR 文档")
+        logger.warning("未找到符合条件的 OKR 文档")
         return None
 
     candidates.sort(reverse=True)  # 文件名含日期，降序取最新
     return candidates[0]
+
+
+def extract_dept_keyword(bundle) -> str:
+    """从配置 bundle 提取部门关键词（app.biweekly_report.dept_op_keyword）。
+
+    兼容两种 bundle 形态：旧式 Dict 访问（ConfigBundle）与类型安全的 ConfigBundleV2。
+    """
+    app_cfg = getattr(bundle, "app", None)
+    if app_cfg is None:
+        return ""
+    if isinstance(app_cfg, dict):
+        biweekly = app_cfg.get("biweekly_report", {}) or {}
+    else:
+        biweekly = getattr(app_cfg, "biweekly_report", None) or {}
+    # 防御：配置显式写 null 时按空串处理（空=不筛选）
+    return biweekly.get("dept_op_keyword", "") or ""
 
 
 def _parse_okr_file(filepath: Path) -> OKRDocument:
@@ -211,10 +228,11 @@ def _parse_okr_file(filepath: Path) -> OKRDocument:
 class OKRLoader:
     """OKR 加载器 — 从 SOURCE/01-目标管理 加载并缓存。"""
 
-    def __init__(self, source_root: Optional[Path] = None):
+    def __init__(self, source_root: Optional[Path] = None, dept_keyword: str = ""):
         if source_root is not None and not isinstance(source_root, Path):
             source_root = Path(source_root)
         self._source_root = source_root
+        self._dept_keyword = dept_keyword
         self._cached: Optional[OKRDocument] = None
 
     def set_source_root(self, source_root: Path) -> None:
@@ -232,7 +250,7 @@ class OKRLoader:
             logger.warning("未设置 SOURCE 根目录，跳过 OKR 加载")
             return None
 
-        filepath = _find_latest_okr_file(self._source_root)
+        filepath = _find_latest_okr_file(self._source_root, self._dept_keyword)
         if not filepath:
             return None
 

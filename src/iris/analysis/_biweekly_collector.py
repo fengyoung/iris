@@ -28,11 +28,8 @@ class BiweeklyCollector:
     # ── OP 文档 ────────────────────────────────────────────────
 
     # 默认团队名单：文件名含「-团队名-人名-OKR」时排除（避免误取个人/团队 OKR）
-    # 可通过 app.biweekly_report.team_okr_patterns 配置覆盖
-    _DEFAULT_TEAM_OKR_NAMES = [
-        "智能引擎组", "质检研发", "图验算法", "搜索推荐部", "价格策略",
-        "大模型算法组", "推荐算法", "搜索算法", "搜推工程", "硬件专项", "软硬一体",
-    ]
+    # 生产环境请在 app.json 的 app.biweekly_report.team_okr_patterns 中配置实际团队名单
+    _DEFAULT_TEAM_OKR_NAMES: list[str] = []
 
     def _build_team_okr_pattern(self) -> re.Pattern:
         """根据配置动态构建团队 OKR 排除正则。"""
@@ -48,7 +45,7 @@ class BiweeklyCollector:
         """加载 SOURCE/01-目标管理/ 中最新的部门级 OP/OKR 规划文档（内存缓存）。
 
         按文件名中嵌入的 YYYYMMDD 日期降序排列，优先级：
-        1. 含「数据智能部」且非个人/团队 OKR 的文件（部门级 OP/OKR）
+        1. 含部门关键词（app.biweekly_report.dept_op_keyword，默认空=不筛选）且非个人/团队 OKR 的文件
         2. 目录中第一个可用文件（兜底，记录 warning）
         """
         if self._op_text_cache is not None:
@@ -56,7 +53,8 @@ class BiweeklyCollector:
 
         team_okr_re = self._build_team_okr_pattern()
         biweekly_cfg = self._config.app.get("biweekly_report", {})
-        dept_keyword = biweekly_cfg.get("dept_op_keyword", "数据智能部")
+        # 防御：配置显式写 null 时按空串处理（空=不筛选）
+        dept_keyword = biweekly_cfg.get("dept_op_keyword", "") or ""
 
         sources = self._config.data_source.get("sources", {})
         for cfg in sources.values():

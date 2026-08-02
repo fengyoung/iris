@@ -31,11 +31,11 @@ class TestNoiseDetection:
         assert is_noise
 
     def test_valid_hotword_passes(self):
-        is_noise, reason = _is_noise_word("汪蕊")
+        is_noise, reason = _is_noise_word("李蕾")
         assert not is_noise
 
     def test_short_valid_name_passes(self):
-        is_noise, reason = _is_noise_word("搜推")
+        is_noise, reason = _is_noise_word("数据湖")
         assert not is_noise
 
     def test_sentence_fragment_is_noise(self):
@@ -104,8 +104,8 @@ class TestDictQuality:
         terms = [
             AsrTerm(term="张三", category="person", context="",
                     mis_asr=["张山", "章三"]),
-            AsrTerm(term="搜推", category="concept", context="",
-                    mis_asr=["搜索推荐"]),
+            AsrTerm(term="数据湖", category="concept", context="",
+                    mis_asr=["数据仓库"]),
         ]
         report = analyze_dict_quality(terms)
         assert "person" in report.category_distribution

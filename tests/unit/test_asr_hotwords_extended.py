@@ -112,7 +112,7 @@ class TestBuildHotwordsPrompt:
 
     def test_includes_domain_context(self):
         pages = [_make_page("页", "concept")]
-        ctx = "这是一个搜索推荐领域。"
+        ctx = "这是一个数据仓库领域。"
         prompt = _build_hotwords_prompt(pages, domain_context=ctx)
         assert ctx in prompt
 

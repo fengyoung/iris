@@ -211,8 +211,8 @@ class TestConceptBoundaries:
             "id": 1,
             "name": "方向一",
             "sub_areas": [
-                {"name": "1.1 【验功能】项目Alpha检测", "owner": "李四", "goal": "测试"},
-                {"name": "1.2 【验成色】项目Beta", "owner": "李四", "goal": "测试"},
+                {"name": "1.1 【功能】项目Alpha检测", "owner": "李四", "goal": "测试"},
+                {"name": "1.2 【质量】项目Beta", "owner": "李四", "goal": "测试"},
             ]
         }
         concepts = _collect_direction_concepts(direction)

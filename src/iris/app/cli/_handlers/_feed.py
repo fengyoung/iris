@@ -133,7 +133,7 @@ def handle_feed_list(args, bundle, _logger) -> int:
         return 0
 
     # 尝试加载 OKR 文档，解析标签语义
-    from iris.feed._okr_loader import OKRLoader
+    from iris.feed._okr_loader import OKRLoader, extract_dept_keyword
     source_dir = None
     if hasattr(bundle, 'default_source_path'):
         try:
@@ -143,7 +143,10 @@ def handle_feed_list(args, bundle, _logger) -> int:
     if not source_dir:
         import os
         source_dir = os.environ.get("IRIS_WORK_DOCS_DIR", "")
-    okr_loader = OKRLoader(source_root=source_dir) if source_dir else None
+    okr_loader = (
+        OKRLoader(source_root=source_dir, dept_keyword=extract_dept_keyword(bundle))
+        if source_dir else None
+    )
 
     print(f"已关注 {len(chats)} 个会话:\n")
     for c in chats:

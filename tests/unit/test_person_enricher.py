@@ -25,9 +25,9 @@ class TestEnrichResult:
     def test_full_fields(self):
         r = EnrichResult(
             name="张三", status="updated",
-            department="数据智能部", email="zhangsan@example.com",
+            department="数据部门", email="zhangsan@example.com",
         )
-        assert r.department == "数据智能部"
+        assert r.department == "数据部门"
 
 
 class TestEnrichSummary:
@@ -74,10 +74,10 @@ class TestFrontmatterParsing:
 
     def test_parse_basic_frontmatter(self):
         from iris.wiki.searcher import parse_frontmatter
-        content = "---\ntitle: 张三\ndepartment: 数据智能部\n---\n正文内容"
+        content = "---\ntitle: 张三\ndepartment: 数据部门\n---\n正文内容"
         fm, body = parse_frontmatter(content)
         assert fm["title"] == "张三"
-        assert fm["department"] == "数据智能部"
+        assert fm["department"] == "数据部门"
         assert "正文内容" in body
 
     def test_parse_empty_frontmatter(self):

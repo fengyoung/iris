@@ -57,8 +57,8 @@
     "data_sources": ["成员周报", "会议纪要", "讨论思考", "方案报告"],
     "lookback_days": 14,
     "dedup_window_days": 35,
-    "dept_op_keyword": "数据智能部",
-    "_note": "author_name 用于生成文件名（如 双周报-w25-张三-20260621.md）；author_info 用于 prompt 角色定义；report_author 用于报告末尾署名（留空则不追加署名行）。data_sources 控制扫描的目录（成员周报/会议纪要/讨论思考/方案报告），可增减。lookback_days 控制数据源时间窗口（默认14天）。dedup_window_days 控制历史报告去重窗口（默认35天，覆盖当月+上月最后一期）。dept_op_keyword: 部门级 OP 文档的文件名关键词（默认'数据智能部'）。team_okr_patterns（可选）: 个人/团队 OKR 文件名中的团队标识列表（用于排除误取），不配置此项则使用内置默认列表；显式配置 [] 可完全禁用排除过滤。"
+    "dept_op_keyword": "",
+    "_note": "author_name 用于生成文件名（如 双周报-w25-张三-20260621.md）；author_info 用于 prompt 角色定义；report_author 用于报告末尾署名（留空则不追加署名行）。data_sources 控制扫描的目录（成员周报/会议纪要/讨论思考/方案报告），可增减。lookback_days 控制数据源时间窗口（默认14天）。dedup_window_days 控制历史报告去重窗口（默认35天，覆盖当月+上月最后一期）。dept_op_keyword: 部门级 OP 文档的文件名关键词（默认空=不筛选，生产环境请配置实际部门关键词）。team_okr_patterns（可选）: 个人/团队 OKR 文件名中的团队标识列表（用于排除误取），不配置此项则默认空列表（不排除）；显式配置 [] 可完全禁用排除过滤。"
   },
   "logging": {
     "level": "info",

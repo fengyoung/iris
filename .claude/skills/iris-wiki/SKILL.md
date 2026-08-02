@@ -49,7 +49,7 @@ python3 scripts/run_cli.py --call-source skill wiki-pipeline --limit 20
 - 「全部生成」
 - 「只生成 person 类型的」
 - 「生成 1、3、5 号」
-- 「跳过陈峰相关的」
+- 「跳过郑十相关的」
 
 **步骤 4：标记并生成**
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import subprocess
 from datetime import datetime
@@ -16,8 +17,9 @@ from iris.feed._types import RawMessage
 
 logger = logging.getLogger(__name__)
 
-# Iris bot 通道
-IRIS_BOT_USER_ID = "ou_8ba922165924047c2369c6a43dc699b2"
+# Iris bot 通道：生产环境通过环境变量 IRIS_BOT_USER_ID 配置接收消息的用户 open_id
+# （例：在 .env 中设置 IRIS_BOT_USER_ID=ou_xxxx）；未配置时跳过飞书推送。
+IRIS_BOT_USER_ID = os.environ.get("IRIS_BOT_USER_ID", "")
 
 
 def _run_lark_cli(args: List[str], timeout: int = 30) -> Dict[str, Any]:

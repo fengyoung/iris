@@ -20,7 +20,7 @@ def _collect_direction_concepts(direction: dict) -> list:
     for sa in direction.get("sub_areas", []):
         name = sa.get("name", "")
         if name:
-            # 取子领域名的核心部分（去掉编号前缀如 "1.1 【验功能】"）
+            # 取子领域名的核心部分（去掉编号前缀如 "1.1 【功能】"）
             core = name.split("】", 1)[-1] if "】" in name else name.split(" ", 1)[-1] if " " in name else name
             concepts.append(core.strip())
     return concepts
@@ -270,8 +270,8 @@ def _parse_owner_list(owner_field) -> list[str]:
     """归一化 owner 字段为字符串列表。
 
     兼容两种格式：
-    - 旧格式（字符串斜线分隔）："甄琰/卞凯/刘备" → ["甄琰", "卞凯", "刘备"]
-    - 新格式（JSON 数组）：["甄琰", "卞凯"] → ["甄琰", "卞凯"]
+    - 旧格式（字符串斜线分隔）："孙七/李四/王强" → ["孙七", "李四", "王强"]
+    - 新格式（JSON 数组）：["孙七", "李四"] → ["孙七", "李四"]
     """
     if isinstance(owner_field, list):
         return [str(o).strip() for o in owner_field if str(o).strip()]

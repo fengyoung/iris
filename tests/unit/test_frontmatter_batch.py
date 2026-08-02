@@ -52,7 +52,7 @@ class TestExtractDateFromFilename:
 
     def test_no_date_prefix(self):
         assert FrontmatterBatchProcessor._extract_date_from_filename(
-            "双周报-w01-冯扬.md"
+            "双周报-w01-张三.md"
         ) is None
 
     def test_too_short(self):
@@ -70,15 +70,15 @@ class TestExtractTitle:
         assert FrontmatterBatchProcessor._extract_title("正文没有标题") == ""
 
     def test_h1_after_blank_lines(self):
-        content = "\n\n# 周报 - 万涛\n\n内容"
-        assert FrontmatterBatchProcessor._extract_title(content) == "周报 - 万涛"
+        content = "\n\n# 周报 - 赵六\n\n内容"
+        assert FrontmatterBatchProcessor._extract_title(content) == "周报 - 赵六"
 
 
 class TestExtractPeriod:
     """我的周报周期提取。"""
 
     def test_chinese_colon(self):
-        content = "*时间周期：2026.04.13～2026.04.26*\n\n## 图验技术"
+        content = "*时间周期：2026.04.13～2026.04.26*\n\n## 智能质检技术"
         assert FrontmatterBatchProcessor._extract_period(content) == "2026.04.13～2026.04.26"
 
     def test_english_colon(self):
@@ -98,16 +98,16 @@ class TestExtractParticipants:
 
     def test_bold_format(self):
         content = """## 参会人员
-- **冯扬**（数据智能部，主持人）
-- **刘备**（大模型算法组）
-- **刘天悦**（算法团队）"""
+- **张三**（数据部门，主持人）
+- **王强**（大模型算法组）
+- **周八**（算法团队）"""
         names = FrontmatterBatchProcessor._extract_participants(content)
-        assert "冯扬" in names
-        assert "刘备" in names
-        assert "刘天悦" in names
+        assert "张三" in names
+        assert "王强" in names
+        assert "周八" in names
 
     def test_inline_chinese_comma(self):
-        content = "冯扬、万涛、刘备、卞凯"
+        content = "张三、赵六、王强、李四"
         # 注意：非列表行顿号分隔在 _extract_participants 中有处理
         # 但逻辑限制非 #/-/| 开头的行才走顿号解析
         names = FrontmatterBatchProcessor._extract_participants(content)
@@ -119,25 +119,25 @@ class TestExtractWeeklyAuthor:
     """周报作者提取。"""
 
     def test_from_sender_line(self):
-        content = "## 邮件信息\n- **发件人**: 万涛 <wantao@zhuanzhuan.com>"
+        content = "## 邮件信息\n- **发件人**: 赵六 <zhangsan@example.com>"
         assert FrontmatterBatchProcessor._extract_weekly_author(
-            content, Path("/tmp/20260725-周报-w30-万涛.md")
-        ) == "万涛"
+            content, Path("/tmp/20260725-周报-w30-赵六.md")
+        ) == "赵六"
 
     def test_fallback_to_filename(self):
         content = "## 无邮件信息\n正文"
         result = FrontmatterBatchProcessor._extract_weekly_author(
-            content, Path("/tmp/20260725-周报-w30-甄琰.md")
+            content, Path("/tmp/20260725-周报-w30-孙七.md")
         )
-        assert result == "甄琰"
+        assert result == "孙七"
 
 
 class TestExtractWeeklyEmail:
     """周报邮箱提取。"""
 
     def test_angle_bracket_format(self):
-        content = "**发件人**: 甄琰 <zhenyan@zhuanzhuan.com>"
-        assert FrontmatterBatchProcessor._extract_weekly_email(content) == "zhenyan@zhuanzhuan.com"
+        content = "**发件人**: 孙七 <lisi@example.com>"
+        assert FrontmatterBatchProcessor._extract_weekly_email(content) == "lisi@example.com"
 
     def test_no_email(self):
         assert FrontmatterBatchProcessor._extract_weekly_email("无邮箱") == ""
@@ -160,7 +160,7 @@ class TestInferCategory:
         assert FrontmatterBatchProcessor._infer_category(p) == "05-会议纪要"
 
     def test_member_weekly(self):
-        p = Path("/SOURCE/07-成员周报/20260725-周报-w30-万涛.md")
+        p = Path("/SOURCE/07-成员周报/20260725-周报-w30-赵六.md")
         assert FrontmatterBatchProcessor._infer_category(p) == "07-成员周报"
 
     def test_unknown_category(self):
@@ -202,19 +202,19 @@ class TestExtractByRegex:
 
     def test_weekly_report_regex(self):
         raw = (
-            "# 周报 - 万涛 - 2026年07月25日\n\n"
+            "# 周报 - 赵六 - 2026年07月25日\n\n"
             "## 邮件信息\n\n"
-            "- **发件人**: 万涛 <wantao@zhuanzhuan.com>\n"
+            "- **发件人**: 赵六 <zhangsan@example.com>\n"
             "- **日期**: 2026年07月25日\n"
         )
-        file_path = Path("/SOURCE/07-成员周报/20260725-周报-w30-万涛.md")
+        file_path = Path("/SOURCE/07-成员周报/20260725-周报-w30-赵六.md")
         processor = FrontmatterBatchProcessor(llm=None, wiki_root="")
         fields = processor._extract_by_regex(raw, file_path, "07-成员周报")
 
         assert fields["type"] == "成员周报"
         assert fields["date"] == "2026-07-25"
-        assert fields["author"] == "万涛"
-        assert fields["email"] == "wantao@zhuanzhuan.com"
+        assert fields["author"] == "赵六"
+        assert fields["email"] == "zhangsan@example.com"
 
     def test_okr_type(self):
         raw = "# OKR 双周逐项检查记录"

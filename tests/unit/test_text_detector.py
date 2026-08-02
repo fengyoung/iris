@@ -100,7 +100,7 @@ class TestIsAsrTextChineseRatio:
         assert _is_asr_text(text) is False
 
     def test_sufficient_ratio_passes(self):
-        text = "我们讨论一下 AI 在搜索推荐的应用场景"
+        text = "我们讨论一下 AI 在数据仓库的应用场景"
         assert _is_asr_text(text) is True
 
     def test_all_chinese_passes(self):
@@ -108,7 +108,7 @@ class TestIsAsrTextChineseRatio:
 
     def test_custom_ratio(self):
         # 默认 30% 满足，但自定义 80% 不满足
-        text = "我们的 AI team 搜索推荐"
+        text = "我们的 AI team 数据仓库"
         assert _is_asr_text(text, min_chinese_ratio=0.8) is False
 
 
@@ -183,7 +183,7 @@ class TestIsAsrTextValid:
         assert _is_asr_text("我写到检测板里头") is True
 
     def test_medium_valid_asr(self):
-        assert _is_asr_text("我们今天讨论一下搜索推荐的算法优化方案") is True
+        assert _is_asr_text("我们今天讨论一下数据仓库的算法优化方案") is True
 
     def test_asr_with_digits(self):
         assert _is_asr_text("2024年我们完成了50个项目") is True
@@ -192,4 +192,4 @@ class TestIsAsrTextValid:
         assert _is_asr_text("讨论了方案，包括算法优化。") is True
 
     def test_chinese_with_english_word(self):
-        assert _is_asr_text("我们的 AI 团队搜索推荐应用") is True
+        assert _is_asr_text("我们的 AI 团队数据仓库应用") is True

@@ -25,7 +25,7 @@ from iris.analysis.service import (
 SAMPLE_REPORT = """
 *时间周期：2026.06.08～2026.06.21*
 
-## 质检"标准+工艺"智能化
+## 质检流程智能化
 
 > 战略定位
 
@@ -33,20 +33,20 @@ SAMPLE_REPORT = """
 
 **关键进展：**
 
-- 项目Alpha检测安卓机型覆盖达151款，整体检出率约4.7%。（来源：张三周报-0608）
-- 项目Beta分析精度一致性经历三阶段爬坡达91%。（来源：李四周报-0613）
-- 项目Gamma全场景直检率首次突破35.8%。（来源：李四周报-0613）
+- 项目Alpha检测安卓机型覆盖百余款，整体检出率约5%。（来源：张三周报-0608）
+- 项目Beta分析精度一致性经历三阶段爬坡达90%+。（来源：李四周报-0613）
+- 项目Gamma全场景通过率首次突破30%+。（来源：李四周报-0613）
 
-## 搜索推荐
+## 搜索推荐体验
 
 > 提升多品类搜索体验
 
-搜索推荐方向战略分析内容。
+搜索推荐体验方向战略分析内容。
 
 **关键进展：**
 
-- LLM-based相关性全量上线，长尾品类整体支付提袋率+24.37%。（来源：王五周报）
-- 首页流量调控全量，低价商品曝光占比+10.31%。（来源：赵六周报）
+- LLM-based相关性全量上线，长尾品类整体支付转化率+20%。（来源：王五周报）
+- 首页流量调控全量，低价商品曝光占比+10%。（来源：赵六周报）
 """
 
 
@@ -55,14 +55,14 @@ class TestExtractDirectionSection:
 
     def test_extract_standard_direction(self):
         """提取标准方向章节。"""
-        content = _extract_direction_section(SAMPLE_REPORT, "质检\"标准+工艺\"智能化")
+        content = _extract_direction_section(SAMPLE_REPORT, "质检流程智能化")
         assert "项目Alpha检测" in content
         assert "项目Beta" in content
         assert "关键进展" in content
 
     def test_extract_second_direction(self):
         """提取第二个方向章节。"""
-        content = _extract_direction_section(SAMPLE_REPORT, "搜索推荐")
+        content = _extract_direction_section(SAMPLE_REPORT, "搜索推荐体验")
         assert "LLM-based" in content
         assert "长尾品类" in content
 
@@ -74,19 +74,19 @@ class TestExtractDirectionSection:
     def test_extract_with_colon_prefix(self):
         """带「方向N：」前缀的匹配。"""
         report = """
-## 方向一：质检"标准+工艺"智能化
+## 方向一：质检流程智能化
 
 > test
 
 content
 """
-        content = _extract_direction_section(report, "方向一：质检\"标准+工艺\"智能化")
+        content = _extract_direction_section(report, "方向一：质检流程智能化")
         assert "content" in content
 
     def test_section_boundary(self):
         """提取在下一个 ## 标题处停止。"""
-        content = _extract_direction_section(SAMPLE_REPORT, "质检\"标准+工艺\"智能化")
-        # 不应包含搜索推荐方向的内容
+        content = _extract_direction_section(SAMPLE_REPORT, "质检流程智能化")
+        # 不应包含搜索推荐体验方向的内容
         assert "LLM-based" not in content
         assert "长尾品类" not in content
 
@@ -143,10 +143,10 @@ class TestExtractKeyBullets:
 
 FAKE_DIRECTION = {
     "id": 1,
-    "name": "质检\"标准+工艺\"智能化",
-    "strategic_quote": "构建验功能、验成色、验真假的质检能力",
+    "name": "质检流程智能化",
+    "strategic_quote": "构建功能检测、质量检测、真伪检测的质检能力",
     "scope_summary": "覆盖项目Alpha、项目Beta、项目Gamma",
-    "key_indicators": ["检出率", "直检率"],
+    "key_indicators": ["检出率", "通过率"],
     "sub_areas": [],
 }
 
@@ -168,8 +168,8 @@ class TestBuildMultiReportDedupText:
             "content": SAMPLE_REPORT,
         }]
         result = _build_multi_report_dedup_text(reports, [FAKE_DIRECTION])
-        assert "质检\"标准+工艺\"智能化" in result
-        dedup_text = result["质检\"标准+工艺\"智能化"]
+        assert "质检流程智能化" in result
+        dedup_text = result["质检流程智能化"]
         assert "w25" in dedup_text
         assert "2026.06.21" in dedup_text
 
@@ -190,7 +190,7 @@ class TestBuildMultiReportDedupText:
             },
         ]
         result = _build_multi_report_dedup_text(reports, [FAKE_DIRECTION])
-        dedup_text = result.get("质检\"标准+工艺\"智能化", "")
+        dedup_text = result.get("质检流程智能化", "")
         assert "w25" in dedup_text
         assert "w23" in dedup_text
 
@@ -217,12 +217,12 @@ class TestExtractPreviousDirectionSections:
     def test_extract_all_directions(self):
         """提取所有方向章节。"""
         directions = [
-            {"name": "质检\"标准+工艺\"智能化"},
-            {"name": "搜索推荐"},
+            {"name": "质检流程智能化"},
+            {"name": "搜索推荐体验"},
         ]
         result = _extract_previous_direction_sections(SAMPLE_REPORT, directions)
-        assert "质检\"标准+工艺\"智能化" in result
-        assert "搜索推荐" in result
+        assert "质检流程智能化" in result
+        assert "搜索推荐体验" in result
 
     def test_empty_report(self):
         """空报告返回空 dict。"""

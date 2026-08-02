@@ -60,7 +60,7 @@ class TestSanitizeFilename:
 
     def test_normal_chinese(self):
         """正常中文标题不产生变化。"""
-        assert _sanitize_filename("AI巡检方案") == "AI巡检方案"
+        assert _sanitize_filename("智能巡检方案") == "智能巡检方案"
 
     def test_special_chars_removed(self):
         """特殊字符应被去除。"""
@@ -93,10 +93,10 @@ class TestBuildFilename:
 
     def test_normal(self):
         """标准文件名格式。"""
-        topic = _make_topic(title="AI巡检方案")
+        topic = _make_topic(title="智能巡检方案")
         name = _build_filename(topic, "20260728")
         assert "20260728" in name
-        assert "AI巡检方案" in name
+        assert "智能巡检方案" in name
         assert "简报" in name
         assert "from飞书" in name
         assert name.endswith(".md")
@@ -204,8 +204,8 @@ class TestBriefGenerator:
         """含 OKR 标签的话题应生成 OKR 关联章节。"""
         gen = BriefGenerator(tmp_path)
         topic = _make_topic(
-            title="AI巡检进展",
-            okr_tags=["O1-KR1: 【验成色】拍照3.0"],
+            title="智能巡检进展",
+            okr_tags=["O1-KR1: 【质量】影像3.0"],
             okr_match_strength="strong",
         )
         files = gen.generate([topic], [], "20260728")

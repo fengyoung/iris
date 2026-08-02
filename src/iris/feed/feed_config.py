@@ -130,10 +130,10 @@ def write_example_config(config_path: Path) -> None:
         "watch_chats": [
             {
                 "id": "oc_xxxxxxxxxxxxxxxxxxxxx",
-                "name": "数据智能部群",
+                "name": "示例群A",
                 "type": "group",
                 "mode": "auto_import",
-                "okr_tags": ["AI巡检", "搜推体验"],
+                "okr_tags": ["模型优化", "推荐效果"],
             }
         ],
         "topic_config": {

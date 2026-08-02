@@ -167,7 +167,7 @@ class TestBuildMultiReportDedup:
 
 class TestCollectDirectionConcepts:
     def test_strips_bracket_prefix(self):
-        direction = {"sub_areas": [{"name": "1.1 【验功能】搜索召回"}]}
+        direction = {"sub_areas": [{"name": "1.1 【功能】搜索召回"}]}
         concepts = svc._collect_direction_concepts(direction)
         assert concepts == ["搜索召回"]
 
