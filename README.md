@@ -1,8 +1,10 @@
-# Iris 3.20.2
+# Iris 3.21.0
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
+
+**v3.21.0** — SOURCE 元数据工程：新增 `frontmatter-batch` 批量补全命令（新模块 `core/frontmatter_batch.py`，正则快速通道 + LLM 深度通道 + wikilink 可选注入 + 备份恢复，9 类目录字段映射）+ wikilink 注入收敛（4 管道移除，统一由批量命令按需注入）+ 周报按月归档（YYYYMM 子目录）+ 双周报 frontmatter 注入。测试 +65（合计 2,626 用例）。协议版本 3.14→3.15（新增 frontmatter-batch 命令）。
 
 **v3.20.2** — SOURCE 文档质量系统性提升：YAML frontmatter 标准化（新增 `core/frontmatter.py`，4 个 CLI 管道注入元数据）+ wikilink 自动注入引擎（新增 `wiki/wikilink_injector.py`，零 LLM 成本）+ 成员周报 Prompt 增强 + 质量门禁。测试覆盖率系统提升 59.87% → 62.82%（+253 用例，9 个新测试文件）。测试合计 2,561 用例。协议版本 3.14（不变）。
 
@@ -60,7 +62,7 @@ python scripts/run_cli.py daily-start
 
 | 类别 | 命令 | 说明 |
 |------|------|------|
-| 数据管道 | `scan-source`, `build-chunks`, `build-vector-index` | 文档扫描 / 切块 / 向量索引 |
+| 数据管道 | `scan-source`, `build-chunks`, `build-vector-index`, `frontmatter-batch` | 文档扫描 / 切块 / 向量索引 / 批量补全 YAML frontmatter（正则+LLM+wikilink+备份恢复） |
 | 检索问答 | `search`, `ask` | 混合检索（BM25 全文 + 向量）+ LLM 问答（支持图文输入，图谱增强） |
 | Wiki | `discover-wiki`, `build-wiki`, `wiki-update` | 发现 / 生成 / 增量更新 |
 | 知识图谱 | `build-graph [--full] [--page]`, `graph-query --op ...` | 实体节点 + wikilink 边 + LLM 关系提取，增量更新；邻居/相关/路径/孤页/桥接/密度查询 |
@@ -109,7 +111,7 @@ SOURCE/                     LLM-WIKI/
 - macOS Keychain（可选密钥存储）
 - PyMuPDF / python-docx（PDF/DOCX 处理）
 - ffmpeg（视频抽帧/抽音轨，视频处理必需）+ openai-whisper（音轨转写，可选）
-- 2,154 个测试用例（119 个测试文件），覆盖率 60%+（仅统计 Iris 自身 LLM 调用）
+- 2,626 个测试用例（134 个测试文件），覆盖率 62%+（仅统计 Iris 自身 LLM 调用）
 
 ## 开发环境
 
@@ -179,6 +181,7 @@ iris3/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.21.0** | 2026-08-02 | 批量 frontmatter 补全命令 `frontmatter-batch`（正则+LLM+wikilink+备份恢复，9 类目录字段映射）+ wikilink 注入收敛 + 周报按月归档 + 双周报 frontmatter 注入，+65 测试。协议版本 3.15 |
 | **v3.20.1** | 2026-07-30 | deep_eval chunk 摘要路径配置化：`main_source` 硬编码改为 `default_source` 动态加载。协议版本 3.14（不变） |
 | **v3.20.0** | 2026-07-30 | iris-feed 文档提取（Step 5）：飞书文档链接自动转换为本地 Markdown 并关联到简报，+37 测试。协议版本 3.14 |
 | **v3.19.26** | 2026-07-29 | 检索与时效性四项优化：chunk 重叠 / Wiki source_fingerprint 指纹追踪 / 向量索引模型守卫 + --force-rebuild / 主动提醒引擎 reminders；修复 PDF 切块 0 chunk、hash 索引不更新、RRF 配置未生效。协议版本 3.13，+54 测试 |

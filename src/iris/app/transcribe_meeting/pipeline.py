@@ -106,15 +106,6 @@ class TranscribeMeetingPipeline:
             route_name = route_result.get("route", "05-会议纪要")
             print(f"     📂 路由归档: {route_name} ← {route_result.get('reason', '')}", file=sys.stderr)
 
-        # ── 注入 wikilink 交叉引用 ──────────────────────
-        try:
-            from iris.wiki.wikilink_injector import WikilinkInjector
-            if self._wiki_root.exists():
-                _injector = WikilinkInjector(self._wiki_root)
-                minutes = _injector.inject(minutes)
-        except Exception:
-            pass  # wikilink 注入失败不应阻塞纪要生成
-
         # ── 注入 frontmatter 元数据 ──────────────────────
         try:
             from iris.core.frontmatter import inject_frontmatter

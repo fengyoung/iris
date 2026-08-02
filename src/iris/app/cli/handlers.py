@@ -62,6 +62,10 @@ from iris.app.cli._handlers._feed import (
     handle_feed_confirm,
     handle_feed_ignore,
 )
+from iris.app.cli._handlers._frontmatter import (
+    FRONTMATTER_HANDLERS,
+    handle_frontmatter_batch,
+)
 from iris.app.cli._handlers._system import (
     SYSTEM_HANDLERS,
     handle_daily_start,
@@ -98,3 +102,4 @@ COMMAND_HANDLERS.update(DATA_HANDLERS)
 COMMAND_HANDLERS.update(CONTENT_HANDLERS)
 COMMAND_HANDLERS.update(SYSTEM_HANDLERS)
 COMMAND_HANDLERS.update(FEED_HANDLERS)
+COMMAND_HANDLERS.update(FRONTMATTER_HANDLERS)

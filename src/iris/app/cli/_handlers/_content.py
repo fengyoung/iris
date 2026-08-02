@@ -125,6 +125,20 @@ def handle_build_biweekly_report(args, bundle, logger) -> int:
             footer = f"\n\n---\n> This report was written by Iris and revised by {report_author}."
             if not markdown.endswith(footer.strip()):
                 markdown += footer
+        # ── 注入 frontmatter ──────────────────────────────
+        try:
+            from iris.core.frontmatter import inject_frontmatter
+            period = (result.llm or {}).get("period", "")
+            _fm_fields = {
+                "title": f"双周报 - {report_author}" if report_author else "双周报",
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "type": "我的周报",
+                "period": period,
+                "author": report_author,
+            }
+            markdown = inject_frontmatter(markdown, _fm_fields)
+        except Exception:
+            pass  # frontmatter 注入失败不阻塞双周报生成
         path.write_text(markdown, encoding="utf-8")
         payload["output_file"] = str(path)
 

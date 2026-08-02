@@ -1,3 +1,46 @@
+## v3.21.0 (2026-08-02)
+
+批量 frontmatter 补全命令 + wikilink 注入收敛 + 周报按月归档 — SOURCE 文档元数据工程。
+
+### 1. 新增 `frontmatter-batch` 命令（批量 frontmatter 补全）
+
+- 新模块 `core/frontmatter_batch.py`（~610 行）：对 SOURCE 目录下 Markdown 文档批量注入 YAML frontmatter
+  - **正则快速通道（零 LLM 成本）**：date（文件名 YYYYMMDD 前缀）/ title（首个 `#` 标题）/ type（9 类目录映射）/ updated，周报作者/邮箱、我的周报 period、会议 participants 等目录特有字段按正则提取
+  - **LLM 深度通道**：按 9 类目录字段映射（`CATEGORY_FIELDS`，01~09 各配专属字段）提取 author / participants / period / source_url / version 等，`temperature=0` 输出严格 JSON，字段不覆盖已有值
+  - **wikilink 注入（可选）**：懒初始化 `WikilinkInjector`，注入 `[[wikilink]]` 交叉链接
+  - **备份/恢复**：处理前自动备份至 `SOURCE/_frontmatter_backup/{ts}/`，支持 `--list-backups` / `--restore` 一键回滚
+  - **幂等安全**：已有 frontmatter 默认跳过（`--force` 覆盖）
+- 新 handler `app/cli/_handlers/_frontmatter.py`；参数：`--source-dir`（可多次指定，默认全部 9 目录）/ `--no-llm` / `--no-wikilink` / `--no-backup` / `--list-backups` / `--restore` / `--dry-run` / `--force`
+- 协议版本 3.14 → 3.15（新增 CLI 命令）
+
+### 2. wikilink 注入收敛
+
+从 4 个管道（`feishu-doc-convert` / `chat-digest` / `transcribe-meeting` / `extract-weekly-reports`）移除 wikilink 注入，统一由 `frontmatter-batch` 按需注入 — 管道输出专注 frontmatter 元数据，交叉链接走批量命令，减少管道耦合与重复代码。
+
+### 3. 周报按月归档
+
+`extract-weekly-reports` 输出自动归入 `YYYYMM` 月份子目录（`_resolve_output_dir`，不存在自动创建），对齐 SOURCE 月度归档策略。
+
+### 4. 双周报 frontmatter 注入
+
+`build-biweekly-report` 输出注入 title / date / type / period / author；`analysis` 服务新增 `period` 字段回传。
+
+### 5. 测试
+
+- 新增 `test_frontmatter_batch.py`（65 用例）：CATEGORY_FIELDS 目录映射 / 正则提取（日期/标题/作者/邮箱/period/参会人）/ LLM JSON 解析（代码块剥离与 JSON 区间截取）/ 幂等跳过 / 备份与恢复 / 类别目录推断
+- 已有 2,561 用例零回归，总计 2,626 用例 / 134 文件
+
+### 6. 文档
+
+- CLAUDE.md「当前规模」重构（超长能力列表拆为独立段落）+ 历史版本摘要压缩（v3.19.10 ~ v3.19.24 摘要并入一行，完整历史见 CHANGELOG）
+
+### 版本升级
+
+| 层 | 旧版本 | 新版本 | 理由 |
+|------|:---:|:---:|------|
+| 产品版本 | 3.20.2 | **3.21.0** | frontmatter-batch 新命令 + wikilink 收敛 + 周报按月归档 + 双周报 frontmatter |
+| 协议版本 | 3.14 | **3.15** | 新增 frontmatter-batch CLI 命令 |
+
 ## v3.20.2 (2026-07-30)
 
 SOURCE 文档质量系统性提升 + 测试覆盖率提升 — 双线合并。

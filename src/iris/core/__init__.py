@@ -8,6 +8,12 @@ from .frontmatter import (  # noqa: E402
     inject_frontmatter,
     parse_frontmatter,
 )
+from .frontmatter_batch import (  # noqa: E402
+    BatchConfig,
+    BatchResult,
+    FileResult,
+    FrontmatterBatchProcessor,
+)
 from .llm_types import LLMRequest, LLMResponse  # 从 protocols 迁移，消除 Any 类型标注
 from .locks import FileLock, FileLockError
 from .thread_pool import shared_pool
@@ -43,6 +49,10 @@ __all__ = [
     "has_frontmatter",
     "inject_frontmatter",
     "parse_frontmatter",
+    "BatchConfig",
+    "BatchResult",
+    "FileResult",
+    "FrontmatterBatchProcessor",
     "ChunkStore",
     "StorageError",
     "shared_pool",

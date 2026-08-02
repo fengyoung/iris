@@ -446,15 +446,6 @@ SUMMARY:
         ])
         body = "\n".join(lines)
 
-        # ── 注入 wikilink（在 frontmatter 之前，避免污染 YAML）──
-        if wiki_root and wiki_root.exists():
-            try:
-                from iris.wiki.wikilink_injector import WikilinkInjector
-                _injector = WikilinkInjector(wiki_root)
-                body = _injector.inject(body)
-            except Exception:
-                pass
-
         # ── 注入 frontmatter ──────────────────────────────
         try:
             return inject_frontmatter(body, _fm_fields)

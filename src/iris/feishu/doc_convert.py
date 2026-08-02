@@ -118,18 +118,6 @@ class FeishuDocConverter:
         if content is None:
             return {"status": "error", "url": url, "token": token, "error": "内容处理结果缺少 content 字段"}
 
-        # ── 注入 wikilink 交叉引用 ──────────────────────
-        try:
-            _wiki_root = None
-            if self._bundle.wiki:
-                _wiki_root = Path(self._bundle.wiki["wiki_root"]).resolve()
-            if _wiki_root and _wiki_root.exists():
-                from iris.wiki.wikilink_injector import WikilinkInjector
-                _injector = WikilinkInjector(_wiki_root)
-                content = _injector.inject(content)
-        except Exception:
-            pass  # wikilink 注入失败不应阻塞文档转换
-
         # ── 注入 frontmatter ──────────────────────────────
         try:
             from iris.core.frontmatter import inject_frontmatter

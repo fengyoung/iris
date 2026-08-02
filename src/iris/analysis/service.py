@@ -254,6 +254,7 @@ class AnalysisReportService:
                 "file_count": len(files),
                 "brief_count": len(file_briefs),
                 "direction_count": len(directions),
+                "period": period,
             }
             result = ReportResponse(query=query, mode="llm", markdown=markdown,
                                      blocks=[], structured={}, llm=llm_payload)

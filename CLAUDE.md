@@ -1,4 +1,4 @@
-# Iris 3.20.2 — 项目执行说明
+# Iris 3.21.0 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -9,7 +9,9 @@
 
 ### 当前规模
 
-~32,000 行 / 153 文件 / 25 模块 · CLI 49 命令 · 单元测试 2,561（133 文件）· 覆盖率 62%+ · 10 个项目级 Skill · Wiki 221 页 · 知识图谱节点 219 / 关系边 2,161（wikilink 1,175 + LLM 986，NetworkX 引擎） · 数据源 776 文档 / 9,019 Chunk · 向量索引 9,019 条（text-embedding-v3 / 1,024 维） · YAML frontmatter 标准化注入（4 管道 + `core/frontmatter.py` 统一工具）· wikilink 自动注入引擎（`wiki/wikilink_injector.py`，零 LLM 成本，基于 Wiki 标题索引）· LLM 用量追踪（SQLite WAL + embedding 纳入 + CLI/Skill 来源标记） · LLM 响应缓存（内存 LRU 驱逐）· embedding 向量缓存（LRU + TTL 600s）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（LLM 深度提取 + 会话模式挖掘 + 全自治生命周期，`memory_updater.py` + `session_miner.py`，双通道架构）· 多 Agent 并发安全（FileLock 推广 + SQLite WAL + Agent 记忆隔离 `IRIS_AGENT_ID` + 进程注册表 `ProcessRegistry`）· ASR 实时校正引擎（剪贴板监听 + Aho-Corasick + LLM 编辑助手，`_clipboard_io.py` + `_text_detector.py` 拆分，替换词典热加载 + 手动热词合并）· ASR 反馈反向优化引擎（feedback.jsonl 驱动词典自动进化，僵尸规则淘汰 + LLM 发现提升 + 热词补充）· ASR 独立熔断器 + 超时配置 · LLM deadline 实时超时控制 · Wiki 引用校验 · 结构化日志 · 共享线程池 · 多工作空间 · 文件监听 · CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit 安全审计 · constraints.txt 可复现构建 · ASR Pipeline 交互式进度输出。
+~32,000 行 / 153 文件 / 25 模块 · CLI 50 命令 · 单元测试 2,626（134 文件）· 覆盖率 62%+ · 10 个项目级 Skill · Wiki 221 页 · 知识图谱节点 219 / 关系边 2,161（wikilink 1,175 + LLM 986） · 数据源 776 文档 / 9,019 Chunk（text-embedding-v3 / 1,024 维）
+
+**近期新增能力**：YAML frontmatter 标准化注入（`core/frontmatter.py`）· 批量 frontmatter 补全（`core/frontmatter_batch.py`，正则+LLM+wikilink+备份恢复）· wikilink 自动注入引擎（`wiki/wikilink_injector.py`，零 LLM 成本）· LLM 用量追踪（SQLite WAL + embedding 纳入）· LLM 响应缓存 + embedding 向量缓存（LRU + TTL）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（`memory_updater.py` + `session_miner.py`，双通道架构）· 多 Agent 并发安全（FileLock + SQLite WAL + Agent 隔离）· ASR 实时校正引擎（Aho-Corasick + LLM 编辑助手 + 反馈反向优化）· CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit · constraints.txt 可复现构建
 
 ### 关键路径
 
@@ -120,8 +122,8 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.20.2 | 软件发布版本 |
-| **协议版本** | `src/iris/__init__.py` | 3.14 | CLI 命令集 / agent-spec 格式 |
+| **产品版本** | `pyproject.toml` | 3.21.0 | 软件发布版本 |
+| **协议版本** | `src/iris/__init__.py` | 3.15 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
 > 只有真正发生变化的层才递增版本号。
@@ -138,10 +140,10 @@ Python 3.9+ · OpenAI 兼容 LLM API（DeepSeek / 百炼 / Qwen）· Pydantic v2
 
 ```
 iris3/
-├── src/iris/          # 21 模块（见下）
+├── src/iris/          # 25 模块（见下）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
-├── tests/             # 2,561 用例，133 文件
+├── tests/             # 2,626 用例，134 文件
 │   ├── unit/          #   纯逻辑单元测试（419 用例，0.5s）
 │   └── integration/   #   集成测试（1,334 用例）
 ├── config/            # *.json gitignored，*.example 版本控制
@@ -153,7 +155,7 @@ iris3/
 └── pyproject.toml · README · CLAUDE · CHANGELOG.md
 ```
 
-**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配/共享线程池）· `memory`（记忆 6 子模块：含 `session_miner.py` 会话模式挖掘）· `qa`（检索问答+图谱注入+`memory_updater.py` 双通道记忆提取）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF+BM25缓存）· `wiki`（Wiki 体系 + backlink/graph + ASR 校正引擎，最大模块；`wiki/asr/` 含 corrector/coverage/feedback/prompt_optimizer/_progress 等 10 个子模块）· `feed`（信息汇聚管道：飞书聊天记录→话题检测→简报生成，11 文件 / 9 命令）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估 + 引用解析）· `complex_input`（多模态三阶段：图片/PDF/DOCX/VIDEO）· `output`（格式化+DOCX）· `app/cli`（58 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py / shared.py）· `trello`（看板）。
+**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配/共享线程池）· `memory`（记忆 6 子模块：含 `session_miner.py` 会话模式挖掘）· `qa`（检索问答+图谱注入+`memory_updater.py` 双通道记忆提取）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF+BM25缓存）· `wiki`（Wiki 体系 + backlink/graph + ASR 校正引擎，最大模块；`wiki/asr/` 含 corrector/coverage/feedback/prompt_optimizer/_progress 等 10 个子模块）· `feed`（信息汇聚管道：飞书聊天记录→话题检测→简报生成，11 文件 / 9 命令）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估 + 引用解析）· `complex_input`（多模态三阶段：图片/PDF/DOCX/VIDEO）· `output`（格式化+DOCX）· `app/cli`（59 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py / shared.py）· `trello`（看板）。
 
 ---
 
@@ -165,7 +167,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.20.2 (2026-07-30)** — 双线合并：① SOURCE 文档质量系统性提升 — YAML frontmatter 标准化（新增 `core/frontmatter.py` 统一工具模块，4 个 CLI 管道输出全部注入 frontmatter 元数据）、wikilink 自动注入引擎（新增 `wiki/wikilink_injector.py`，零 LLM 成本，4 管道集成）、成员周报 Prompt 增强（4 段落结构 + 量化指标要求 + 项目上下文注入）、周报质量门禁（`check_quality`，三级判定，不阻塞写入），测试 +54；② 测试覆盖率系统提升 — 新增 253 个单元测试（9 个新文件），覆盖率 59.87% → 62.82%，覆盖 chunker/formatter/hotwords/lifecycle/embedder/memory_updater/session_miner/feishu_bridge/agent_adapter 等模块。协议版本 3.14（不变）。产品版本 3.20.1→3.20.2。
+**当前 v3.21.0 (2026-08-02)** — SOURCE 元数据工程：① 新增 `frontmatter-batch` 批量补全命令（新模块 `core/frontmatter_batch.py` ~610 行 — 正则快速通道零 LLM 成本 + LLM 深度通道按 9 类目录字段映射 + wikilink 可选注入 + 自动备份/一键恢复 + 幂等跳过）；② wikilink 注入收敛 — 从 4 个管道（doc-convert/chat-digest/transcribe-meeting/extract-weekly-reports）移除，统一由 frontmatter-batch 按需注入；③ 周报按月归档 — `extract-weekly-reports` 输出自动归入 YYYYMM 月份子目录；④ 双周报 frontmatter 注入（title/date/type/period/author）+ analysis `period` 字段。测试 +65（2,626 用例 / 134 文件）。协议版本 3.14→3.15（新增 frontmatter-batch 命令）。产品版本 3.20.2→3.21.0。
+
+**v3.20.2 (2026-07-30)** — 双线合并：① SOURCE 文档质量系统性提升 — YAML frontmatter 标准化（新增 `core/frontmatter.py` 统一工具模块，4 个 CLI 管道输出全部注入 frontmatter 元数据）、wikilink 自动注入引擎（新增 `wiki/wikilink_injector.py`，零 LLM 成本，4 管道集成）、成员周报 Prompt 增强（4 段落结构 + 量化指标要求 + 项目上下文注入）、周报质量门禁（`check_quality`，三级判定，不阻塞写入），测试 +54；② 测试覆盖率系统提升 — 新增 253 个单元测试（9 个新文件），覆盖率 59.87% → 62.82%，覆盖 chunker/formatter/hotwords/lifecycle/embedder/memory_updater/session_miner/feishu_bridge/agent_adapter 等模块。协议版本 3.14（不变）。产品版本 3.20.1→3.20.2。
 
 **v3.20.1 (2026-07-30)** — deep_eval 配置路径改进：chunk 摘要文件路径由硬编码 `main_source_chunk_summary.json` 改为根据 `config.data_source.default_source` 动态加载，便于多数据源切换。协议版本 3.14（不变）。产品版本 3.20.0→3.20.1。
 
@@ -177,35 +181,4 @@ iris3/
 
 **v3.19.24 (2026-07-28)** — 全量代码质量加固（第二轮）：P0 项 Dockerfile 修复/CI 安全门禁/硬编码路径消除 3 项 + P1 项 feed 测试补齐 +177 用例/SecretStr API 密钥保护/pre-commit 工具链升级（ruff v0.11 + 8 基础钩子）/静默异常修复 4 项 + P2 项 logger.exception 替换/导入风格统一/CI 覆盖率合并 3 项。测试 1,977→2,154。协议版本 3.12。16 文件。
 
-> v3.19.10 (2026-07-21)：ASR 引擎全面质量加固（P0~P3 十四项）：P0 Prompt `protected_terms` 字符串截断修复 / P1 热键校验 + 超时 + 参数化 / P2 预检查 + warning + 校验 / P3 Aho-Corasick 优化 + worker 动态 + 单字符代码分档 + 重试（8 文件，+313 / -114 行）
-
-> v3.19.9 (2026-07-20)：双周报流水线全面质量加固（P0~P1 九项）：Stage 1 全空兜底 / owner-map 注入 / 缓存方向数校验 + Stage 3 子方向覆盖重构（max_items → 全覆盖 + ≤3条/子方向 + ~50字精简）+ Stage 2/4b 上下文增强 + brief 优先级排序 + 超时补跑 + key_indicators 端到端贯通（9 文件，+295 行）
-
-> v3.19.8 (2026-07-20)：检测路径全面改进（P0~P2 十四项）：4 处正确性 Bug（死代码 / RANGE_PATTERN 贪婪正则 / 字符串表达式未赋值 / 缺失异常处理）+ 6 处设计缺陷（代码正则补全 / 路径归一化双端一致 / 泛型类型修正 / 槽位效率去重 / 参数签名化）+ +79 测试新建（`test_text_detector.py` 40 用例 + detector/deep_eval/source_locator 补全，总量 1,753）
-
-> v3.19.7 (2026-07-19)：全面质量加固（P0~P2 七项）：`_wiki.py` 5 处静默异常补日志、embedding 向量 LRU 缓存（128/600s）、`corrector.py` 拆分（834→712 行，`_clipboard_io.py` + `_text_detector.py`）、LLM `_CircuitBreaker` 熔断器、新增 109 个单元测试（biweekly helpers 48 + graph engine 26 + config models 35，总量 1,674）
-
-> v3.19.6 (2026-07-19)：ASR 校正引擎加固：`max_mappings` 上限扩展 990→2000 并配置化至 `asr_profiles.json`、替换词典热加载（`_check_dict_reload`，无需重启进程）、手动热词合并机制（`data/asr_manual_hotwords.txt`）
-
-> v3.19.5 (2026-07-19)：全面质量加固：双周报 Stage 4 拆分（4a 纯组装 + 4b LLM 审查）、`_TEAM_OKR_PATTERN` 配置化（`dept_op_keyword` + `team_okr_patterns`）、Stage 3 子方向顺序后置校验、ASR 音近推断示例动态化、`generate_misreadings` 超时修复、新增 30 个测试用例（407 通过）。
-
-> v3.19.4 (2026-07-19)：双周报生成逻辑优化：修复 `load_op_document()` 误取个人 OKR、Stage 0a 支持 `### KR1：` 格式、Stage 3 Prompt 重写（方向标题精简化 / ≤4条 / 来源按时间最新 / 严格 KR 顺序）、`_warn_unresolved_placeholders` 误报修复。
-
-> v3.19.3 (2026-07-19)：交互体验：`build-asr-prompt` 三阶段实时进度输出。新增 `_progress.py` 线程安全进度追踪器，Phase 2（误识别生成）补齐逐批进度（此前完全静默），Phase 级耗时和总耗时汇总，Phase 3 标签修正（去"LLM"误导）。产品版本 3.19.2 → 3.19.3。
-
-> v3.19.2：ASR Phase 1 基础设施：`_AhoCorasick.list_patterns()` 模式枚举 API、`extract_llm_discoveries()` LLM 发现提取、daily-start 集成 ASR 覆盖审计（`_daily_asr_audit` 零 LLM 成本）、`extract_mappings_from_corrections` 修复 `[LLM]` 前缀解析 bug、运行日志中模式计数修复。
-
-> v3.19.1：ASR 代码质量加固：JSONL 反馈格式统一（`llm_time_ms` 写入/加载路径一致）、热词去重修正（移除去重前截断）、死代码清理（移除 `build_optimize_prompt` 等 V2 残留）、剪贴板等待策略改进（固定 delay → 基线+轮询）、coverage.py 常量复用。
-
-> v3.19.0：ASR 实时校正引擎：`iris-asr-corrector` 常驻守护进程，剪贴板监听 vocotype ASR 输出，Aho-Corasick 替换词典 + LLM 编辑助手双重校正，自动反馈数据采集。新增 `asr-audit`（覆盖分析）和 `asr-report`（手动纠错）命令。Prompt 生成改为 Python 模板直渲染（V3 编辑助手）。deepseek-v4-flash 推理关闭（`thinking: disabled`）。高危映射自动过滤。Prompt 热加载支持。
-
-> v3.18.9：代码质量加固：内存系统 FileLock（并发安全）+ 向量索引模型追踪 + `.env` 行尾注释剥离 + Stage2 `max_tokens` 控制 + lark-cli fallback + Wiki 证据阈值配置化。
-
-> v3.18.8：PersonEnricher 飞书 API 频率限制修复：预先过滤已丰富页面 + 自适应批间延迟 + 批次大小调低。
-> v3.18.7：CI/CD 基础设施（Makefile/CI/pre-commit/Dockerfile）+ 测试分层重组（unit/integration，1,467→1,513，覆盖率 60.42%）+ Wiki 模块重构（graph.py 751→215 行、_graph_engine.py 独立、ASR 子包 `wiki/asr/` 物理隔离 + `_types.py` 消除循环导入）。
-> v3.18.6：开源脱敏补充清理。
-> v3.18.5：新增 `iris-daily-start` Skill + 更新 adv_model 降级链。
-
-> 覆盖范围：仅统计 Iris 自身经 provider 发出的 LLM 调用（CLI + 调用 CLI 的 Skill），不含 Claude Code 本体 / Whisper 转写 / 飞书接口。
-
-> 完整版本历史（v3.12.x 及更早）见 [CHANGELOG.md](CHANGELOG.md)。
+> 历史版本摘要（v3.12.x ~ v3.19.10）见 [CHANGELOG.md](CHANGELOG.md)。

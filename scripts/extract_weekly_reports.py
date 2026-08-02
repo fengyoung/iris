@@ -1172,17 +1172,6 @@ class WeeklyReportMarkdownGenerator:
 
         body = "\n".join(lines)
 
-        # ── 注入 wikilink（在 frontmatter 之前，避免污染 YAML）──
-        if wiki_root:
-            try:
-                _wr = Path(wiki_root)
-                if _wr.exists():
-                    from iris.wiki.wikilink_injector import WikilinkInjector
-                    _injector = WikilinkInjector(_wr)
-                    body = _injector.inject(body)
-            except Exception:
-                pass
-
         # ── 注入 frontmatter ──────────────────────────────
         try:
             return inject_frontmatter(body, _fm_fields)
@@ -1221,8 +1210,19 @@ class WeeklyReportMarkdownGenerator:
 
         return ("good", "")
 
+    def _resolve_output_dir(self, email_date: datetime) -> str:
+        """根据邮件日期解析月份子目录，不存在则自动创建。
+
+        SOURCE/07-成员周报 已改为按月归档（YYYYMM 子目录），此方法
+        确保新生成的周报文件自动归入正确的月份目录。
+        """
+        month_dir = email_date.strftime("%Y%m")
+        month_path = os.path.join(self.output_dir, month_dir)
+        os.makedirs(month_path, exist_ok=True)
+        return month_path
+
     def save_markdown(self, email_data: Dict) -> str:
-        """保存邮件为 Markdown 文件。"""
+        """保存邮件为 Markdown 文件（自动归入 YYYYMM 月份子目录）。"""
         sender_name = email_data.get("sender_name", "Unknown")
         date = email_data.get("date")
         if isinstance(date, str):
@@ -1231,7 +1231,8 @@ class WeeklyReportMarkdownGenerator:
             date = datetime.now()
 
         filename = self.format_filename(sender_name, date)
-        filepath = os.path.join(self.output_dir, filename)
+        target_dir = self._resolve_output_dir(date)
+        filepath = os.path.join(target_dir, filename)
 
         # 文件已存在且不允许覆盖 → 自动添加序号
         if os.path.exists(filepath) and not self.file_overwrite:

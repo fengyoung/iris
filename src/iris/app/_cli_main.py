@@ -40,6 +40,7 @@ COMMANDS = [
     "feed-setup", "feed-list", "feed-add", "feed-remove",
     "feed-config", "feed-collect", "feed-pending",
     "feed-confirm", "feed-ignore",
+    "frontmatter-batch",
 ]
 
 _DELEGATED_SCRIPTS = {
@@ -181,6 +182,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--show", action="store_true", help="feed-config 显示完整配置")
     parser.add_argument("--no-extract-docs", action="store_true",
                         help="feed-collect 跳过飞书文档提取")
+    # frontmatter-batch
+    parser.add_argument("--source-dir", action="append", dest="source_dirs", default=[],
+                        help="frontmatter-batch 目标 SOURCE 子目录（可多次指定）")
+    parser.add_argument("--no-llm", action="store_true",
+                        help="frontmatter-batch 跳过 LLM 提取（仅正则）")
+    parser.add_argument("--no-wikilink", action="store_true",
+                        help="frontmatter-batch 跳过 wikilink 注入")
+    parser.add_argument("--no-backup", action="store_true",
+                        help="frontmatter-batch 跳过备份")
+    parser.add_argument("--list-backups", action="store_true",
+                        help="frontmatter-batch 列出所有备份")
+    parser.add_argument("--restore", default="",
+                        help="frontmatter-batch 从指定时间戳备份恢复")
     return parser
 
 
