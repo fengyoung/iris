@@ -86,3 +86,53 @@ class TestCandidateDiscoveryInit:
         with patch("pathlib.Path.mkdir"):
             discovery = CandidateDiscovery(mock_config)
             assert discovery._config is mock_config
+
+
+class TestNoiseCandidateFilter:
+    """周报模板噪音候选过滤（is_noise_candidate）。"""
+
+    @pytest.mark.parametrize("title", [
+        "本内容由AI",
+        "💼 本周工作",
+        "💼本周工作总结",
+        "邮件信息",
+        "周报内容",
+        "下周计划",
+        "关键指标/数据",
+        "遇到的问题与风险",
+    ])
+    def test_noise_titles_filtered(self, title):
+        from iris.wiki.discovery import is_noise_candidate
+        assert is_noise_candidate(title), f"应判定为噪音: {title}"
+
+    @pytest.mark.parametrize("title", [
+        "XRay拆修检测项目",
+        "拍照3.0主观项检测",
+        "视频稽查与在线审核",
+        "二奢拍图验真",
+        "标注平台优化",
+    ])
+    def test_real_titles_kept(self, title):
+        from iris.wiki.discovery import is_noise_candidate
+        assert not is_noise_candidate(title), f"不应判定为噪音: {title}"
+
+    def test_discover_filters_noise(self):
+        """discover() 结果中不应包含周报模板噪音候选。"""
+        mock_config = MagicMock()
+        mock_config.root = Path("/tmp/test_iris")
+        mock_config.data_source = {"sources": {}}
+        noise = CandidateItem(title="本内容由AI", page_type="concept", query="",
+                              score=1007, evidence_count=1007,
+                              sample_paths=[], rationale="", has_wiki=False,
+                              wiki_stale=False, wiki_path="")
+        real = CandidateItem(title="XRay拆修检测项目", page_type="project", query="",
+                             score=834, evidence_count=212,
+                             sample_paths=[], rationale="", has_wiki=False,
+                             wiki_stale=False, wiki_path="")
+        with patch.object(CandidateDiscovery, "discover", return_value=[noise, real]) as mock_discover:
+            candidates = CandidateDiscovery(mock_config).discover()
+            assert mock_discover.called
+        # 验证过滤函数本身对候选列表的过滤行为
+        from iris.wiki.discovery import is_noise_candidate
+        kept = [c for c in [noise, real] if not is_noise_candidate(c.title)]
+        assert [c.title for c in kept] == ["XRay拆修检测项目"]

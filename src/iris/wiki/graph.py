@@ -211,8 +211,15 @@ class WikiGraph:
             logger.info("无页面需要关系提取")
             return []
 
+        # 全量重建（full=True）：去重基准只保留 wikilink 边，
+        # 否则旧 LLM 边既参与去重（新提取相同边被跳过）又被下方过滤丢弃，导致每次重建边数退化。
+        base_edges = (
+            [e for e in self._edges if e.source_type == "wikilink"]
+            if full
+            else self._edges
+        )
         all_new_edges = extractor.extract(
-            pages_to_process, all_pages, self._edges, chunk_size=chunk_size
+            pages_to_process, all_pages, base_edges, chunk_size=chunk_size
         )
 
         wikilink_edges = [e for e in self._edges if e.source_type == "wikilink"]

@@ -1,4 +1,4 @@
-# Iris 3.22.0 — 项目执行说明
+# Iris 3.22.1 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -122,7 +122,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.22.0 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.22.1 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.15 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -167,7 +167,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.22.0 (2026-08-02)** — 合并 0802-alpha → main，开源信息泄露治理全库脱敏（40+ 文件）：① 生产代码 — `IRIS_BOT_USER_ID` 真实 open_id 改环境变量（未配置时跳过飞书推送）；团队名单与 `dept_op_keyword` 默认值清空，改由 app.json 配置驱动（附 null 防御）；② 全库泛化 — 真实人名（11 人）→ 通用占位、`zhuanzhuan.com` 企业邮箱 → `example.com`、真实 OKR/项目名/业务指标（图验技术/拍照3.0/XRay/直检率等）→ 通用词；③ 模板与 Skill — biweekly prompt 真实 OKR 示例、iris-okr-check KR 检索词表、iris-feed dry-run 示例重写；④ DESIGN/CHANGELOG 反向泄露条目二次脱敏；⑤ 测试断言同步更新（61 文件）。合并冲突 1 处（iris-okr-check SKILL.md：归档路径修复 + 人名泛化双保留）。验证：2,612 测试全通过。协议版本 3.15（不变）。产品版本 3.21.1→3.22.0。
+**当前 v3.22.1 (2026-08-03)** — Wiki 发现噪音过滤 + 知识图谱全量重建修复（3 文件 / +76 行）：① Wiki 候选发现增加周报模板噪音过滤（`is_noise_candidate`），过滤「本内容由AI」「💼 本周工作」等固定章节标题噪音，提升候选主题质量；② 知识图谱 `full=True` 全量重建边去重修复 — 旧 LLM 边既参与去重又被下方过滤丢弃，导致每次重建边数退化，修复后去重基准只保留 wikilink 边；③ 测试 +50 行（`TestNoiseCandidateFilter` 参数化测试）。协议版本 3.15（不变）。产品版本 3.22.0→3.22.1。
+
+**v3.22.0 (2026-08-02)** — 合并 0802-alpha → main，开源信息泄露治理全库脱敏（40+ 文件）：① 生产代码 — `IRIS_BOT_USER_ID` 真实 open_id 改环境变量（未配置时跳过飞书推送）；团队名单与 `dept_op_keyword` 默认值清空，改由 app.json 配置驱动（附 null 防御）；② 全库泛化 — 真实人名（11 人）→ 通用占位、`zhuanzhuan.com` 企业邮箱 → `example.com`、真实 OKR/项目名/业务指标（图验技术/拍照3.0/XRay/直检率等）→ 通用词；③ 模板与 Skill — biweekly prompt 真实 OKR 示例、iris-okr-check KR 检索词表、iris-feed dry-run 示例重写；④ DESIGN/CHANGELOG 反向泄露条目二次脱敏；⑤ 测试断言同步更新（61 文件）。合并冲突 1 处（iris-okr-check SKILL.md：归档路径修复 + 人名泛化双保留）。验证：2,612 测试全通过。协议版本 3.15（不变）。产品版本 3.21.1→3.22.0。
 
 **v3.21.1 (2026-08-02)** — SOURCE 归档适配全面修复：① 双周报文件名改为日期前缀（`YYYYMMDD-` 前缀），`resolve_source_archive_path` 正则正确匹配→归档到 `06-我的周报/YYYY/`；② `refresh_meeting_minutes` 非递归查找修复（`find_source_matches`→`rglob`），已归档会议纪要可正确备份/去重；③ `_stage0b_load_style` 风格源文件递归查找修复（`rglob`→扁平→找到 `YYYY/` 下文件）；④ feed 简报生成使用 `resolve_source_archive_path` 替代硬编码 YYYYMM；⑤ 移除 `transcribe_meeting/pipeline.py` 两个扁平路径死函数；⑥ 5 个 Skill 文档 SOURCE 路径更新（iris-okr-check / iris-feed / iris-report / iris-feishu-import / iris-meeting 共 18 处）。附加：`extract_weekly_reports.py` `_resolve_output_dir` 文档一致性注释。协议版本 3.15（不变）。产品版本 3.21.0→3.21.1。
 

@@ -24,6 +24,32 @@ from .discovery_utils import (
 from .searcher import WikiSearcher
 
 
+# 周报模板固定文本/章节标题噪音（出现在内容或 section_path 中的非主题文本，不应成为 Wiki 候选）
+_WIKI_NOISE_TITLES = {
+    "本内容由AI",
+    "邮件信息",
+    "周报内容",
+    "本周工作",
+    "本周工作总结",
+    "下周计划",
+    "关键指标",
+    "关键指标/数据",
+    "遇到的问题与风险",
+    "需要协调的资源",
+}
+_EMOJI_PREFIX_NOISE = ("💼", "📋", "📌", "🔔", "⏰", "✅")
+
+
+def is_noise_candidate(title: str) -> bool:
+    """判断候选标题是否为周报模板等固定文本噪音。"""
+    t = title.strip()
+    if t in _WIKI_NOISE_TITLES:
+        return True
+    if t.startswith(_EMOJI_PREFIX_NOISE):
+        return True
+    return False
+
+
 class CandidateDiscovery:
     """从文档 chunks 中发现潜在的 Wiki 候选（4 种页面类型）。"""
 
@@ -96,6 +122,8 @@ class CandidateDiscovery:
 
         candidates = suppress_path_concentrated_noise(candidates)
         candidates = cluster_and_resolve(candidates)
+        # 过滤周报模板固定文本/章节标题噪音（如「本内容由AI」「💼 本周工作」）
+        candidates = [c for c in candidates if not is_noise_candidate(c.title)]
 
         # 按类型分层排序，确保每种类型都有展示
         per_type_min = max(limit // 5, 3)
