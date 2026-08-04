@@ -1,4 +1,4 @@
-# Iris 3.22.1 — 项目执行说明
+# Iris 3.22.2 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~32,000 行 / 153 文件 / 25 模块 · CLI 50 命令 · 单元测试 2,612（130 文件）· 覆盖率 62%+ · 10 个项目级 Skill · Wiki 221 页 · 知识图谱节点 219 / 关系边 2,161（wikilink 1,175 + LLM 986） · 数据源 776 文档 / 9,019 Chunk（text-embedding-v3 / 1,024 维）
+~32,000 行 / 153 文件 / 25 模块 · CLI 50 命令 · 单元测试 2,626（130 文件）· 覆盖率 62%+ · 10 个项目级 Skill · Wiki 221 页 · 知识图谱节点 219 / 关系边 2,161（wikilink 1,175 + LLM 986） · 数据源 776 文档 / 9,019 Chunk（text-embedding-v3 / 1,024 维）
 
 **近期新增能力**：YAML frontmatter 标准化注入（`core/frontmatter.py`）· 批量 frontmatter 补全（`core/frontmatter_batch.py`，正则+LLM+wikilink+备份恢复）· wikilink 自动注入引擎（`wiki/wikilink_injector.py`，零 LLM 成本）· LLM 用量追踪（SQLite WAL + embedding 纳入）· LLM 响应缓存 + embedding 向量缓存（LRU + TTL）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（`memory_updater.py` + `session_miner.py`，双通道架构）· 多 Agent 并发安全（FileLock + SQLite WAL + Agent 隔离）· ASR 实时校正引擎（Aho-Corasick + LLM 编辑助手 + 反馈反向优化）· CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit · constraints.txt 可复现构建
 
@@ -122,7 +122,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.22.1 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.22.2 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.15 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -143,9 +143,9 @@ iris3/
 ├── src/iris/          # 25 模块（见下）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
-├── tests/             # 2,612 用例，130 文件
-│   ├── unit/          #   纯逻辑单元测试（1,577 用例，<10s）
-│   └── integration/   #   集成测试（1,035 用例）
+├── tests/             # 2,626 用例，130 文件
+│   ├── unit/          #   纯逻辑单元测试（1,289 用例，<10s）
+│   └── integration/   #   集成测试（228 用例）
 ├── config/            # *.json gitignored，*.example 版本控制
 ├── data/              # 运行时数据（全 gitignore）
 ├── .claude/skills/    # 项目级 Skill（9 个）
@@ -167,7 +167,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.22.1 (2026-08-03)** — Wiki 发现噪音过滤 + 知识图谱全量重建修复（3 文件 / +76 行）：① Wiki 候选发现增加周报模板噪音过滤（`is_noise_candidate`），过滤「本内容由AI」「💼 本周工作」等固定章节标题噪音，提升候选主题质量；② 知识图谱 `full=True` 全量重建边去重修复 — 旧 LLM 边既参与去重又被下方过滤丢弃，导致每次重建边数退化，修复后去重基准只保留 wikilink 边；③ 测试 +50 行（`TestNoiseCandidateFilter` 参数化测试）。协议版本 3.15（不变）。产品版本 3.22.0→3.22.1。
+**当前 v3.22.2 (2026-08-04)** — wikilink 注入残留清理（2 文件 / +7 -34）：① 修正过时注释 — `chat_digest.py` 生成输出注释与 `extract_weekly_reports.py` docstring 移除「wikilink 注入」表述（v3.21.0 收敛后已无实际注入）；② 删除 wiki_root 死参数链 — `chat_digest` `_build_markdown` 参数 + `_resolve_wiki_root_safe` 方法，`extract_weekly_reports` `__init__`/`generate_content` 参数 + main 透传链共 10 处；③ 保留 `_wiki_root` 字段（`_load_wiki_context` 真实用途）。验证：相关测试 52 个通过。协议版本 3.15（不变）。产品版本 3.22.1→3.22.2。
+
+**v3.22.1 (2026-08-03)** — Wiki 发现噪音过滤 + 知识图谱全量重建修复（3 文件 / +76 行）：① Wiki 候选发现增加周报模板噪音过滤（`is_noise_candidate`），过滤「本内容由AI」「💼 本周工作」等固定章节标题噪音，提升候选主题质量；② 知识图谱 `full=True` 全量重建边去重修复 — 旧 LLM 边既参与去重又被下方过滤丢弃，导致每次重建边数退化，修复后去重基准只保留 wikilink 边；③ 测试 +50 行（`TestNoiseCandidateFilter` 参数化测试）。协议版本 3.15（不变）。产品版本 3.22.0→3.22.1。
 
 **v3.22.0 (2026-08-02)** — 合并 0802-alpha → main，开源信息泄露治理全库脱敏（40+ 文件）：① 生产代码 — `IRIS_BOT_USER_ID` 真实 open_id 改环境变量（未配置时跳过飞书推送）；团队名单与 `dept_op_keyword` 默认值清空，改由 app.json 配置驱动（附 null 防御）；② 全库泛化 — 真实人名（11 人）→ 通用占位、`zhuanzhuan.com` 企业邮箱 → `example.com`、真实 OKR/项目名/业务指标（图验技术/拍照3.0/XRay/直检率等）→ 通用词；③ 模板与 Skill — biweekly prompt 真实 OKR 示例、iris-okr-check KR 检索词表、iris-feed dry-run 示例重写；④ DESIGN/CHANGELOG 反向泄露条目二次脱敏；⑤ 测试断言同步更新（61 文件）。合并冲突 1 处（iris-okr-check SKILL.md：归档路径修复 + 人名泛化双保留）。验证：2,612 测试全通过。协议版本 3.15（不变）。产品版本 3.21.1→3.22.0。
 

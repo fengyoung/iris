@@ -1,8 +1,10 @@
-# Iris 3.22.1
+# Iris 3.22.2
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
+
+**v3.22.2** — wikilink 注入残留清理：修正 chat_digest / extract_weekly_reports 过时注释（v3.21.0 已移除管道 wikilink 注入）+ 删除 wiki_root 死参数链（`_build_markdown`/`generate_content` 参数与透传链共 10 处）。协议版本 3.15（不变）。
 
 **v3.22.1** — Wiki 候选发现噪音过滤（`is_noise_candidate`，过滤周报模板固定章节标题）+ 知识图谱全量重建边去重修复（`full=True` 时去重基准只保留 wikilink 边，防止 LLM 边逐次退化）。协议版本 3.15（不变）。
 
@@ -187,6 +189,7 @@ iris3/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.22.2** | 2026-08-04 | wikilink 注入残留清理：过时注释修正（chat_digest/extract_weekly_reports）+ wiki_root 死参数链删除（10 处）。协议版本 3.15（不变） |
 | **v3.22.1** | 2026-08-03 | Wiki 发现噪音过滤（周报模板章节标题）+ 知识图谱全量重建边去重修复（LLM 边退化）。协议版本 3.15（不变） |
 | **v3.22.0** | 2026-08-02 | 合并 0802-alpha：开源信息泄露治理全库脱敏 — 真实 open_id 配置化 / 团队名单与 dept_op_keyword 默认值清空（app.json 驱动，null 防御）/ 人名·邮箱·OKR·项目名·业务指标全库泛化 / 测试断言同步（61 文件）。协议版本 3.15（不变） |
 | **v3.21.1** | 2026-08-02 | SOURCE 归档适配修复：双周报日期前缀 + 会议纪要/风格源递归查找 + feed 简报 `resolve_source_archive_path` + 死代码清理 + 5 Skill 路径更新（18 处）。协议版本 3.15（不变） |

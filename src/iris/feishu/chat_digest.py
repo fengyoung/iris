@@ -133,12 +133,10 @@ class ChatDigester:
             logger.error("AI 提炼意外失败 [%s]: %s", target_name, e, exc_info=True)
             return {"status": "error", "error": f"AI 提炼失败: {e}"}
 
-        # 8. 生成输出（含 frontmatter + wikilink 注入）
-        _wiki_root = self._resolve_wiki_root_safe()
+        # 8. 生成输出（注入 frontmatter 元数据）
         output_md = self._build_markdown(extracted, target_name, target_type,
                                           identifier, time_start, time_end,
-                                          len(raw_messages), now_iso(),
-                                          wiki_root=_wiki_root)
+                                          len(raw_messages), now_iso())
         topic = extracted.get("topic", target_name)
         date_str = datetime.now(_TZ).strftime("%Y%m%d")
         clean_topic = sanitize_title(topic)
@@ -373,8 +371,7 @@ SUMMARY:
     def _build_markdown(extracted: Dict[str, Any], target_name: str,
                          target_type: str, chat_id: str,
                          time_start: str, time_end: str,
-                         msg_count: int, now_iso: str,
-                         wiki_root: Optional[Path] = None) -> str:
+                         msg_count: int, now_iso: str) -> str:
         from iris.core.frontmatter import inject_frontmatter
 
         src_label = "群聊" if target_type == "group" else "单聊"
@@ -462,13 +459,6 @@ SUMMARY:
         if self._bundle.wiki:
             return Path(self._bundle.wiki["wiki_root"]).resolve()
         raise ValueError("Wiki 配置缺失：请在 config/wiki.json 中设置 wiki_root")
-
-    def _resolve_wiki_root_safe(self) -> Optional[Path]:
-        """安全获取 wiki_root，返回 None 而非抛异常。"""
-        try:
-            return self._resolve_wiki_root()
-        except (ValueError, KeyError):
-            return None
 
     def _load_wiki_context(self) -> str:
         from iris.wiki.context_loader import WikiContextLoader

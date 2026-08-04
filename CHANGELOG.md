@@ -1,3 +1,30 @@
+## v3.22.2 (2026-08-04)
+
+wikilink 注入残留清理（2 文件 / +7 -34）。
+
+### 1. 过时注释修正
+
+- **`feishu/chat_digest.py`**：生成输出注释「含 frontmatter + wikilink 注入」修正为「注入 frontmatter 元数据」。
+- **`scripts/extract_weekly_reports.py`**：`generate_content` docstring 与调用点注释移除「wikilink 注入」表述（v3.21.0 收敛后已无实际注入，注释残留误导）。
+
+### 2. wiki_root 死参数链删除
+
+- **`chat_digest.py`**：删除 `_build_markdown` 的 `wiki_root` 参数（函数体内未使用）、`_resolve_wiki_root_safe()` 方法及调用点传参；**保留** `self._wiki_root` 字段与 `_resolve_wiki_root()`（`_load_wiki_context` 加载 Wiki 上下文供 LLM 提炼，真实用途）。
+- **`extract_weekly_reports.py`**：删除 `__init__`/`generate_content` 的 `wiki_root` 参数、`self.wiki_root` 字段、main 中 `wiki_root` 初始化与兜底加载块（`if bundle is None` + `bundle.wiki` 提取）及构造传参，共 7 处。
+
+### 3. 验证
+
+- 相关测试（chat_digest / weekly_report_extract / frontmatter）52 个全部通过；语法检查 OK。
+
+### 版本升级
+
+| 层 | 旧版本 | 新版本 | 理由 |
+|------|:---:|:---:|------|
+| 产品版本 | 3.22.1 | **3.22.2** | 代码清理（注释 + 死代码） |
+| 协议版本 | 3.15 | 3.15（不变） | 无新增 CLI 命令 |
+
+---
+
 ## v3.22.1 (2026-08-03)
 
 Wiki 发现噪音过滤 + 知识图谱全量重建边去重修复（3 文件 / +76 行）。

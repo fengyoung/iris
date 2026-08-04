@@ -1052,11 +1052,10 @@ class WeeklyReportMarkdownGenerator:
     """生成格式化的周报 Markdown 文件。"""
 
     def __init__(self, output_dir: str, filename_format: str,
-                 file_overwrite: bool = False, wiki_root: str = ""):
+                 file_overwrite: bool = False):
         self.output_dir = os.path.expanduser(output_dir)
         self.filename_format = filename_format
         self.file_overwrite = file_overwrite
-        self.wiki_root = wiki_root
         os.makedirs(self.output_dir, exist_ok=True)
 
     @staticmethod
@@ -1098,14 +1097,12 @@ class WeeklyReportMarkdownGenerator:
             filename = name[:200 - len(ext)] + ext
         return filename
 
-    def generate_content(self, email_data: Dict, week: int = 0,
-                         wiki_root: str = "") -> str:
-        """生成邮件的 Markdown 内容（含 YAML frontmatter + wikilink 注入）。
+    def generate_content(self, email_data: Dict, week: int = 0) -> str:
+        """生成邮件的 Markdown 内容（含 YAML frontmatter 注入）。
 
         Args:
             email_data: 邮件数据字典
             week: ISO 周数（0 表示未知）
-            wiki_root: Wiki 根目录路径（用于 wikilink 注入）
         """
         from iris.core.frontmatter import inject_frontmatter
 
@@ -1244,9 +1241,7 @@ class WeeklyReportMarkdownGenerator:
             filepath = f"{base}_{counter}{ext}"
 
         _, report_week = self.get_report_week_info(date)
-        # wikilink 注入在 generate_content 内部完成（frontmatter 之前）
-        content = self.generate_content(email_data, week=report_week,
-                                        wiki_root=self.wiki_root)
+        content = self.generate_content(email_data, week=report_week)
 
         # ── 质量门禁 ────────────────────────────────────
         quality_level, quality_reason = self.check_quality(content)
@@ -1297,8 +1292,6 @@ def cmd_run(args: argparse.Namespace) -> None:
     print()
 
     # ── Step 1: 初始化 LLM Provider ───────────────────
-    bundle = None
-    wiki_root = ""
     if not args.skip_ai:
         try:
             bundle = load_config_bundle(PROJECT_ROOT)
@@ -1313,15 +1306,6 @@ def cmd_run(args: argparse.Namespace) -> None:
     else:
         ai_processor = None
         print("⏭️  跳过 AI 处理（--skip-ai）")
-
-    # 加载 wiki_root（用于 wikilink 注入）
-    if bundle is None:
-        try:
-            bundle = load_config_bundle(PROJECT_ROOT)
-        except Exception:
-            pass
-    if bundle and bundle.wiki:
-        wiki_root = bundle.wiki.get("wiki_root", "")
 
     # ── Step 2: 扫描邮箱 ─────────────────────────────
     print()
@@ -1363,7 +1347,6 @@ def cmd_run(args: argparse.Namespace) -> None:
         output_dir=config.output_dir,
         filename_format=config.filename_format,
         file_overwrite=config.file_overwrite,
-        wiki_root=wiki_root,
     )
 
     generated_files = []
