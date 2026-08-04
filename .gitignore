@@ -13,6 +13,7 @@ venv/
 
 # Config (user-specific, contains real paths/keys)
 config/*.json
+config/*.bak*
 
 # Runtime data
 /data/

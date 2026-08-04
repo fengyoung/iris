@@ -70,12 +70,12 @@
     },
     "adv_model": {
       "enabled": true,
-      "default_model_id": "qwen3.7-plus",
+      "default_model_id": "qwen3.8-max",
       "models": {
-        "qwen3.7-plus": {
+        "qwen3.8-max": {
           "provider": "Bailian",
-          "model": "qwen3.7-plus",
-          "display_name": "Qwen 3.7 Plus",
+          "model": "qwen3.8-max",
+          "display_name": "Qwen 3.8 Max",
           "multimodal": true,
           "max_context_tokens": 200000,
           "max_tokens": 8192,
@@ -98,7 +98,65 @@
             "image_understanding",
             "conflict_resolution"
           ],
-          "notes": "默认增强模型，最新版本",
+          "notes": "旗舰模型，最高优先级，多模态",
+          "api_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "api_key": "${YOUR_API_KEY}"
+        },
+        "qwen3.7-flash-2026-07-15": {
+          "provider": "Bailian",
+          "model": "qwen3.7-flash-2026-07-15",
+          "display_name": "Qwen 3.7 Flash (2026-07-15 快照)",
+          "multimodal": true,
+          "max_context_tokens": 1000000,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 300,
+          "max_retries": 3,
+          "priority": 50,
+          "cost_level": "medium",
+          "reasoning_level": "standard",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "summary",
+            "analysis_basic",
+            "image_understanding",
+            "wiki_extract_multimodal"
+          ],
+          "notes": "Flash 快照版，第 2 级，轻量多模态",
+          "api_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "api_key": "${YOUR_API_KEY}"
+        },
+        "qwen3.7-flash": {
+          "provider": "Bailian",
+          "model": "qwen3.7-flash",
+          "display_name": "Qwen 3.7 Flash",
+          "multimodal": true,
+          "max_context_tokens": 1000000,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 300,
+          "max_retries": 3,
+          "priority": 40,
+          "cost_level": "medium",
+          "reasoning_level": "standard",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "summary",
+            "analysis_basic",
+            "image_understanding",
+            "wiki_extract_multimodal"
+          ],
+          "notes": "第 3 级，轻量多模态",
           "api_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
           "api_key": "${YOUR_API_KEY}"
         },
@@ -113,7 +171,7 @@
           "top_p": 1.0,
           "timeout_seconds": 300,
           "max_retries": 3,
-          "priority": 50,
+          "priority": 30,
           "cost_level": "high",
           "reasoning_level": "advanced",
           "supported_inputs": [
@@ -128,118 +186,7 @@
             "image_understanding",
             "conflict_resolution"
           ],
-          "notes": "Qwen 3.7 Plus 快照版，降级链第 1 级 fallback",
-          "api_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-          "api_key": "${YOUR_API_KEY}"
-        },
-        "qwen3.6-plus-2026-04-02": {
-          "provider": "Bailian",
-          "model": "qwen3.6-plus-2026-04-02",
-          "display_name": "Qwen 3.6 Plus (2026-04-02 快照)",
-          "multimodal": true,
-          "max_context_tokens": 200000,
-          "max_tokens": 8192,
-          "temperature": 0.2,
-          "top_p": 1.0,
-          "timeout_seconds": 300,
-          "max_retries": 3,
-          "priority": 40,
-          "cost_level": "high",
-          "reasoning_level": "advanced",
-          "supported_inputs": [
-            "text",
-            "image"
-          ],
-          "use_cases": [
-            "qa",
-            "wiki_extract_multimodal",
-            "wiki_rebuild",
-            "analysis_complex",
-            "image_understanding"
-          ],
-          "notes": "降级链第 2 级 fallback",
-          "api_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-          "api_key": "${YOUR_API_KEY}"
-        },
-        "qwen3.6-flash": {
-          "provider": "Bailian",
-          "model": "qwen3.6-flash",
-          "display_name": "Qwen 3.6 Flash",
-          "multimodal": true,
-          "max_context_tokens": 1000000,
-          "max_tokens": 8192,
-          "temperature": 0.2,
-          "top_p": 1.0,
-          "timeout_seconds": 120,
-          "max_retries": 3,
-          "priority": 30,
-          "cost_level": "medium",
-          "reasoning_level": "standard",
-          "supported_inputs": [
-            "text",
-            "image"
-          ],
-          "use_cases": [
-            "qa",
-            "summary",
-            "analysis_basic",
-            "image_understanding"
-          ],
-          "notes": "降级链第 3 级 fallback，轻量级多模态",
-          "api_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-          "api_key": "${YOUR_API_KEY}"
-        },
-        "qwen3.6-27b": {
-          "provider": "Bailian",
-          "model": "qwen3.6-27b",
-          "display_name": "Qwen 3.6 (27B)",
-          "multimodal": false,
-          "max_context_tokens": 131072,
-          "max_tokens": 8192,
-          "temperature": 0.2,
-          "top_p": 1.0,
-          "timeout_seconds": 120,
-          "max_retries": 3,
-          "priority": 20,
-          "cost_level": "medium",
-          "reasoning_level": "standard",
-          "supported_inputs": [
-            "text"
-          ],
-          "use_cases": [
-            "qa",
-            "summary",
-            "analysis_basic"
-          ],
-          "notes": "降级链第 4 级 fallback，纯文本",
-          "api_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-          "api_key": "${YOUR_API_KEY}"
-        },
-        "qwen3.5-plus-2026-04-20": {
-          "provider": "Bailian",
-          "model": "qwen3.5-plus-2026-04-20",
-          "display_name": "Qwen 3.5 Plus (2026-04-20 快照)",
-          "multimodal": true,
-          "max_context_tokens": 200000,
-          "max_tokens": 8192,
-          "temperature": 0.2,
-          "top_p": 1.0,
-          "timeout_seconds": 300,
-          "max_retries": 3,
-          "priority": 10,
-          "cost_level": "medium",
-          "reasoning_level": "standard",
-          "supported_inputs": [
-            "text",
-            "image"
-          ],
-          "use_cases": [
-            "qa",
-            "summary",
-            "analysis_basic",
-            "image_understanding"
-          ],
-          "notes": "降级链兜底 fallback",
+          "notes": "第 4 级 fallback（唯一保留的 Plus 版，其余 Plus 因额度耗尽移除）",
           "api_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
           "api_key": "${YOUR_API_KEY}"
         }
