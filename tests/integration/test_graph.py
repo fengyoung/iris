@@ -363,6 +363,75 @@ class TestGraphRefresh:
         assert "llm_edges" in report
 
 
+class TestGraphLlmEdgePreserve:
+    """LLM 边保留回归（v3.22.3 修复）。
+
+    背景：extract_relations 末尾 `self._edges = wikilink + all_new_edges` 在增量刷新时
+    丢弃未重提取页面的旧 LLM 边，导致 edges.json 中 LLM 边逐步清零
+    （实测 592 条被一次增量刷新全部清掉）。
+    """
+
+    def _graph_with_edges(self, tmp_path) -> WikiGraph:
+        wiki_root = _make_wiki_root(tmp_path)
+        bundle = _make_config_bundle(tmp_path, wiki_root)
+        graph = WikiGraph(bundle)
+        graph.build_nodes()
+        # 构造既有状态：1 wikilink 边 + 2 旧 LLM 边
+        graph._edges = [
+            GraphEdge(source="领域-搜索", target="项目-项目Alpha",
+                      relation="linked_to", source_type="wikilink", confidence=1.0),
+            GraphEdge(source="领域-搜索", target="概念-排序",
+                      relation="使用", source_type="llm", confidence=0.9),
+            GraphEdge(source="人物-张三", target="项目-项目Alpha",
+                      relation="负责", source_type="llm", confidence=0.8),
+        ]
+        return graph
+
+    def test_incremental_keeps_existing_llm_edges(self, tmp_path, monkeypatch):
+        graph = self._graph_with_edges(tmp_path)
+
+        def fake_extract(self, pages_to_process, all_pages, existing_edges, *, chunk_size=10):
+            # 只返回 1 条新边（对应某个被重提取页面），其余旧 LLM 边必须保留
+            return [GraphEdge(source="概念-排序", target="项目-项目Alpha",
+                              relation="依赖", source_type="llm", confidence=0.7)]
+
+        from iris.wiki._relation_extractor import RelationExtractor
+        monkeypatch.setattr(RelationExtractor, "extract", fake_extract)
+
+        graph.extract_relations(full=False)
+
+        llm_edges = [e for e in graph._edges if e.source_type == "llm"]
+        keys = {(e.source, e.target, e.relation) for e in llm_edges}
+        assert ("领域-搜索", "概念-排序", "使用") in keys   # 旧边保留（回归核心断言）
+        assert ("人物-张三", "项目-项目Alpha", "负责") in keys
+        assert ("概念-排序", "项目-项目Alpha", "依赖") in keys  # 新边并入
+        assert len(llm_edges) == 3
+
+    def test_full_rebuild_replaces_same_key_edges(self, tmp_path, monkeypatch):
+        graph = self._graph_with_edges(tmp_path)
+
+        def fake_extract(self, pages_to_process, all_pages, existing_edges, *, chunk_size=10):
+            # 全量重建重新提取：返回与旧边同 key 的新边
+            return [GraphEdge(source="领域-搜索", target="概念-排序",
+                              relation="使用", source_type="llm", confidence=1.0)]
+
+        from iris.wiki._relation_extractor import RelationExtractor
+        monkeypatch.setattr(RelationExtractor, "extract", fake_extract)
+
+        graph.extract_relations(full=True)
+
+        llm_edges = [e for e in graph._edges if e.source_type == "llm"]
+        # 同 key 以新提取为准且不重复（新提取覆盖旧边）
+        use_edges = [e for e in llm_edges
+                     if (e.source, e.target, e.relation) == ("领域-搜索", "概念-排序", "使用")]
+        assert len(use_edges) == 1
+        assert use_edges[0].confidence == 1.0  # 新提取的值生效
+        # 未被本次提取覆盖的旧边容错保留（提取失败页不丢边）
+        keys = {(e.source, e.target, e.relation) for e in llm_edges}
+        assert ("人物-张三", "项目-项目Alpha", "负责") in keys
+        assert len(llm_edges) == 2
+
+
 # ── 工具函数 ───────────────────────────────────────────────
 
 

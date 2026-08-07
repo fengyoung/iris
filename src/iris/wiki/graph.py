@@ -222,8 +222,16 @@ class WikiGraph:
             pages_to_process, all_pages, base_edges, chunk_size=chunk_size
         )
 
+        # 合并时保留未被本次提取覆盖的旧 LLM 边 —— 否则增量刷新（full=False）
+        # 会把未重提取页面的 LLM 边全部丢弃，导致 edges.json 中 LLM 边逐步清零。
+        # full=True 时旧 LLM 边与新提取同 key 的被覆盖（以最新提取为准），不重复。
+        new_keys = {(e.source, e.target, e.relation) for e in all_new_edges}
+        kept_llm = [
+            e for e in self._edges
+            if e.source_type == "llm" and (e.source, e.target, e.relation) not in new_keys
+        ]
         wikilink_edges = [e for e in self._edges if e.source_type == "wikilink"]
-        self._edges = wikilink_edges + all_new_edges
+        self._edges = wikilink_edges + kept_llm + all_new_edges
         self._rebuild_adjacency()
 
         logger.info("LLM 关系提取完成: %d 条新边 (%d 页)",

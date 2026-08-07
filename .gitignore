@@ -70,3 +70,6 @@ PjMMbaKyroI3X4xMHJ4c0hIln3g
 .coverage
 htmlcov/
 .git-filter-replacements.txt
+
+# lark 工具运行时产物
+.lark-slides/

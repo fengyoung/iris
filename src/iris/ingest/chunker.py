@@ -106,12 +106,14 @@ class MarkdownChunker:
             self._scanner.scan_default_source() if not incremental
             else self._scanner.scan_source_by_name(
                 self._config.data_source["default_source"], incremental=True,
-            )
+            ),
+            incremental=incremental,
         )
 
     def build_source_chunks(self, source_name: str, *, incremental: bool = False) -> ChunkSummary:
         return self._build_chunks_from_scan(
-            self._scanner.scan_source_by_name(source_name, incremental=incremental)
+            self._scanner.scan_source_by_name(source_name, incremental=incremental),
+            incremental=incremental,
         )
 
     def build_all_enabled_sources_chunks(self, *, incremental: bool = False) -> List[ChunkSummary]:
@@ -121,7 +123,9 @@ class MarkdownChunker:
                 summaries.append(self.build_source_chunks(source_name, incremental=incremental))
         return summaries
 
-    def _build_chunks_from_scan(self, scan_summary: ScanSummary) -> ChunkSummary:
+    def _build_chunks_from_scan(
+        self, scan_summary: ScanSummary, *, incremental: bool = False
+    ) -> ChunkSummary:
         previous = self._load_previous_chunks_for_source(scan_summary.source_name)
         reused_documents = 0
         rebuilt_documents = 0
@@ -148,8 +152,10 @@ class MarkdownChunker:
             rebuilt_documents += 1
             rebuilt_paths.append(document.relative_path)
 
-        # 增量模式下保留未变更文件的旧 chunk
-        if deleted_paths or reused_documents > 0:
+        # 增量模式下保留未变更文件的旧 chunk。
+        # 全量重建时 previous 中不在本次 scan 的路径 = 已删除文档的残留，
+        # 绝不能追加（否则死 chunk 会随每次全量重建累积，v3.22.3 修复）。
+        if incremental and (deleted_paths or reused_documents > 0):
             changed_paths = {doc.relative_path for doc in scan_summary.documents}
             for rp, cached_chunks in previous.items():
                 if rp not in changed_paths:

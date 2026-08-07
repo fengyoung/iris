@@ -1,3 +1,37 @@
+## v3.22.3 (2026-08-07)
+
+知识库全面体检修复：索引死数据 45% + 知识图谱 LLM 边清零（5 文件 / +152 -6）。
+
+### 1. 检索索引死数据修复（`chunker.py`）
+
+- **Bug**：`_build_chunks_from_scan` 的 `if deleted_paths or reused_documents > 0:` 分支本意是「增量模式保留未变更旧 chunk」，但全量重建（`deleted_paths` 为空且 `reused>0`）也会进入，把已删除/已归档迁移文档的旧 chunk 全部加回 — 死数据随每次全量重建累积。实测 chunk_summary 中 **4,636 条死 chunk（占 45.1%）**，多为 v3.21.1 `YYYY/` 归档迁移前的旧扁平路径残留，向量索引与 BM25 同步污染，检索候选近半是已删除文档内容。
+- **修复**：该分支增加 `incremental` 条件（`_build_chunks_from_scan` 新增参数，三个 build 方法透传）。
+- **重建验证**：chunk 10,290 → **5,939**（死数据清零）、向量 10,321 → **5,939**（与 chunk 完全一致，清除 31 条多余残留）、覆盖率 201.7% → **100%**。
+
+### 2. 知识图谱 LLM 边清零修复（`graph.py`）
+
+- **Bug**：`extract_relations` 末尾 `self._edges = wikilink_edges + all_new_edges` — 增量刷新（`full=False`）只保留本次重提取页面的 LLM 边，未重提取页面的旧 LLM 边全部丢弃（8/3 提取 592 条后 1 分钟内即被一次增量刷新清零；v3.22.1 只修了全量模式的去重基准，未覆盖此路径）。
+- **修复**：合并时保留未被本次提取覆盖的旧 LLM 边（同 key 以新提取为准，不重复）。
+- **恢复**：从 `relations/` 缓存零成本恢复 591 条 LLM 边；增量刷新验证 591 → **633**（新增 42 条且旧边全保留，不再丢失）。
+
+### 3. deep-eval CLI 参数补齐（`_cli_main.py`）
+
+- `--page-filter` / `--sample-rate` 在 handler 已实现（`getattr`）但 argparse 未注册 — skill/CLAUDE.md 文档承诺的用法一直无法执行，补齐对齐。
+
+### 4. 回归测试
+
+- 新增 `tests/unit/test_chunker_full_rebuild.py`（2 用例：全量重建丢弃死路径 / 增量保留未变更并清理 deleted）+ `tests/integration/test_graph.py` `TestGraphLlmEdgePreserve`（2 用例：增量保留旧 LLM 边 / 全量同 key 以新提取为准）。
+- 验证：单元测试 1,289 → **1,291 全通过**。
+
+### 版本升级
+
+| 层 | 旧版本 | 新版本 | 理由 |
+|------|:---:|:---:|------|
+| 产品版本 | 3.22.2 | **3.22.3** | 两个 P0 数据质量 bug 修复 |
+| 协议版本 | 3.15 | 3.15（不变） | 无新增 CLI 命令（deep-eval 参数为已有命令补齐） |
+
+---
+
 ## v3.22.2 (2026-08-04)
 
 wikilink 注入残留清理（2 文件 / +7 -34）。

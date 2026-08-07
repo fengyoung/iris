@@ -153,6 +153,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--to", default="", help="graph-query path 的终点节点标题")
     parser.add_argument("--hops", type=int, default=1, help="graph-query neighbors 跳数（默认 1）")
     parser.add_argument("--min-degree", type=int, default=3, dest="min_degree", help="graph-query bridges 最小度阈值（默认 3）")
+    # 深度评估
+    parser.add_argument("--page-filter", default="", help="deep-eval 只评估标题包含该子串的页面")
+    parser.add_argument("--sample-rate", type=float, default=None, help="deep-eval 抽样比例 0.0~1.0（默认全量评估）")
     # 用量统计
     parser.add_argument("--by", default="month", choices=["day", "week", "month", "year"],
                         help="usage-stats 时间粒度（默认 month）")
