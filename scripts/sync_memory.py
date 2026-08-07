@@ -195,6 +195,28 @@ def _extract_likes(fm: Dict[str, Any], body: str) -> List[str]:
     return list(dict.fromkeys(items))  # 去重保序
 
 
+def _concept_overlap(desc: str, concept: str) -> bool:
+    """判断 description 和 concept 是否为同一概念的表述（中英文/简繁变体）。
+
+    用于去重：如 desc="飞书操作的两条核心规则" ↔ concept="飞书操作规则"。
+    采用双向前缀匹配 + 核心字符重叠率检测。
+    """
+    if not desc or not concept:
+        return False
+    # 提取中文字符
+    desc_cn = "".join(ch for ch in desc if "一" <= ch <= "鿿")
+    concept_cn = "".join(ch for ch in concept if "一" <= ch <= "鿿")
+    if len(desc_cn) < 2 or len(concept_cn) < 2:
+        return False
+    # 双向包含
+    if concept_cn in desc_cn or desc_cn in concept_cn:
+        return True
+    # 字符重叠率 ≥ 60%
+    common = set(desc_cn) & set(concept_cn)
+    overlap = len(common) / min(len(set(desc_cn)), len(set(concept_cn)))
+    return overlap >= 0.6
+
+
 def _extract_dislikes(fm: Dict[str, Any], body: str) -> List[str]:
     """提取用户偏好（不喜欢）。"""
     items: List[str] = []
@@ -298,8 +320,46 @@ def run_sync(
         if target == "corrections":
             concept, entry = _extract_correction_entry(fm, body)
             existing = corrections_items.get(concept, {})
+            dedup_matched = False  # 是否通过去重匹配到已有条目
+
+            # 去重：检查是否有其他条目已引用同一 CC 文件（防止英文 slug
+            # 与中文概念名重复，如 "deep discussion rule" vs "深入讨论流程"）。
+            # Iris 自身创建的条目 last_source 可能是 "合并自: ..., file_slug, ..."，
+            # 因此用子串匹配而非精确匹配。
+            if not existing:
+                file_slug = fm.get("name", "")
+                if file_slug:
+                    for exist_key, exist_val in corrections_items.items():
+                        exist_source = exist_val.get("last_source", "")
+                        # 同时匹配 kebab-case（deep-discussion-rule）和空格形式（deep discussion rule）
+                        if file_slug in exist_source or file_slug.replace("-", " ") in exist_source:
+                            # 已有条目覆盖同一 CC 文件，更新该条目而非新建
+                            existing = exist_val
+                            concept = exist_key
+                            dedup_matched = True
+                            break
+
+            # 内容去重：如果新条目 concept 是纯英文，用 CC 文件的 description
+            # 与已有中文概念名做模糊匹配，防止同一条规则中英文各存一份。
+            # 如 "document signature rule" → "文档签名规则"
+            if not existing:
+                file_desc = fm.get("description", "")
+                if file_desc:
+                    for exist_key, exist_val in corrections_items.items():
+                        # description 的核心词包含在已有概念名中，或反之
+                        if _concept_overlap(file_desc, exist_key):
+                            existing = exist_val
+                            concept = exist_key
+                            dedup_matched = True
+                            break
+
             if existing.get("preferred") == entry["preferred"]:
                 continue  # 未变化
+
+            # 去重匹配到的中文条目通常更完整（经多次合并），新的英文版
+            # preferred 较短时跳过，避免用不完整内容覆盖
+            if dedup_matched and len(existing.get("preferred", "")) > len(entry.get("preferred", "")):
+                continue
             entry["update_count"] = existing.get("update_count", 0) + 1
             corrections_items[concept] = entry
             if existing:
