@@ -436,7 +436,8 @@ def lint_wiki(wiki_root: Path, data_root: Optional[Path] = None) -> Dict[str, An
         "page_count": page_count,
         "content_quality": quality,
         "by_type": {
-            cfg["name"]: len(list((wiki_root / cfg["dir"]).glob("*.md")))
+            cfg["name"]: len([p for p in (wiki_root / cfg["dir"]).glob("*.md")
+                              if ".bak." not in p.stem])
             for ptype, cfg in PAGE_TYPE_CONFIG.items()
             if (wiki_root / cfg["dir"]).exists()
         },

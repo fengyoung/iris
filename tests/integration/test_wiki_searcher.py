@@ -139,3 +139,40 @@ class TestLoadIndexSummaries:
         p.close()
         result = load_index_summaries(Path(p.name).parent)
         assert result == {}
+
+
+class TestLoadPagesSkipsBackups:
+    """_load_pages 跳过 wiki-update 备份文件（*.bak.*.md）。"""
+
+    def _make_searcher(self, wiki_root: Path) -> WikiSearcher:
+        # 轻量构造：_load_pages 只依赖 _wiki_root，绕开 ConfigBundle
+        searcher = object.__new__(WikiSearcher)
+        searcher._wiki_root = wiki_root.resolve()
+        return searcher
+
+    def test_bak_files_excluded(self, tmp_path: Path):
+        wiki_root = tmp_path / "WIKI"
+        domain = wiki_root / "01-领域"
+        domain.mkdir(parents=True)
+        (domain / "领域-测试.md").write_text(
+            "---\ntitle: 测试\ntype: domain\n---\n\n# 测试\n\n正文。",
+            encoding="utf-8")
+        (domain / "领域-测试.bak.1.md").write_text("备份", encoding="utf-8")
+        (domain / "领域-其他.bak.2.md").write_text("备份2", encoding="utf-8")
+
+        pages = self._make_searcher(wiki_root)._load_pages()
+        assert len(pages) == 1
+        assert pages[0][1] == "测试"
+
+    def test_index_and_changelog_still_excluded(self, tmp_path: Path):
+        wiki_root = tmp_path / "WIKI"
+        wiki_root.mkdir()
+        (wiki_root / "index.md").write_text("# 索引", encoding="utf-8")
+        (wiki_root / "changelog.md").write_text("# 变更", encoding="utf-8")
+        (wiki_root / "01-领域").mkdir()
+        (wiki_root / "01-领域" / "领域-正常.md").write_text(
+            "---\ntitle: 正常\ntype: domain\n---\n\n正文。", encoding="utf-8")
+
+        pages = self._make_searcher(wiki_root)._load_pages()
+        assert len(pages) == 1
+        assert pages[0][1] == "正常"

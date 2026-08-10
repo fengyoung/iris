@@ -1,3 +1,41 @@
+## v3.23.2 (2026-08-10)
+
+wiki-update 备份文件全链路过滤（5 文件 / +11 -4 + 回归测试 3 个）。
+
+### 1. 背景
+
+wiki-update 更新页面前生成备份文件 `{stem}.bak.{n}.md`（generator.py `_backup`），这些备份被 5 处扫描/统计/检索逻辑计入，造成数据污染：
+
+- **WikiSearcher._load_pages**：检索结果混入备份文件（内容与现版页面重复）
+- **navigation.lint_wiki**：各类型页面计数虚高
+- **WikilinkInjector 索引**：备份文件标题进入候选（噪音候选，v3.22.1 的噪音过滤功亏一篑）
+- **helpers._build_status_payload**：`status` 的 wiki_page_count 虚高
+- **ReminderEngine**：备份页含旧指纹且源过期 → 产生重复「项目停滞」信号
+
+### 2. 改动
+
+统一按 `".bak." in p.stem` 过滤（与 `context_loader.py` / `person_enricher.py` 既有的备份过滤模式一致）：
+
+- `wiki/searcher.py`：`_load_pages` 过滤 `*.bak.*.md`
+- `wiki/navigation.py`：`lint_wiki` by_type 计数过滤
+- `wiki/wikilink_injector.py`：索引构建跳过备份文件
+- `app/cli/helpers.py`：`_build_status_payload` wiki_page_count 过滤
+- `analysis/reminders.py`：项目页扫描跳过备份文件
+
+### 3. 测试
+
+- 回归测试 +3：`test_wikilink_injector.py`（索引跳过备份，正常页仍索引）、`test_reminders.py`（备份不产生第二个停滞信号）、`test_wiki_searcher.py`（检索跳过 .bak 且 index/changelog 仍排除）。
+- 验证：unit 全量 **1,362 通过**（+2），integration 239（+2），合计 2,713。
+
+### 版本升级
+
+| 版本 | 值 | 理由 |
+|------|:---:|------|
+| 产品版本 | 3.23.1 → **3.23.2** | wiki-update 备份文件 5 处污染修复 |
+| 协议版本 | 3.16（不变） | 无命令变更 |
+
+---
+
 ## v3.23.1 (2026-08-10)
 
 遗留修复 + 使用指南（4 文件 / +311）。

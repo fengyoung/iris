@@ -161,6 +161,8 @@ class ReminderEngine:
         from iris.wiki.discovery_utils import parse_wiki_source_fingerprint
         signals: List[Dict[str, Any]] = []
         for page in sorted(project_dir.glob("*.md")):
+            if ".bak." in page.stem:
+                continue  # 跳过 wiki-update 备份文件（*.bak.1.md），避免重复信号
             fingerprint = parse_wiki_source_fingerprint(str(page))
             if not fingerprint:
                 continue  # 无指纹（旧页面）无法廉价判定，跳过

@@ -1,8 +1,10 @@
-# Iris 3.23.1
+# Iris 3.23.2
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
+
+**v3.23.2** — wiki-update 备份文件全链路过滤：`*.bak.1.md` 备份被 5 处计入（Wiki 检索结果 / lint 页面计数 / wikilink 标题索引 / status 页面数 / 提醒引擎重复停滞信号），统一按 `.bak.` 过滤；回归测试 +3（合计 2,713 用例）。协议版本 3.16（不变）。
 
 **v3.23.1** — 遗留修复 + 使用指南：① asr-corrector Ctrl+C 修复（Python 3.13 SIGINT 无法中断 `time.sleep`，`run_forever` 显式注册 handler，Ctrl+C 可靠优雅退出）；② `scripts/verify_hotkey_inject.py` 纳入版本控制（CGEventPost 热键注入验证工具，须 `--keycode 61` 右 Option）；③ 会议助理[使用指南](docs/meeting-live-assistant-usage.md)。测试全量 2,709 用例（2,708 通过）。协议版本 3.16（不变）。
 
@@ -130,7 +132,7 @@ SOURCE/                     LLM-WIKI/
 - macOS Keychain（可选密钥存储）
 - PyMuPDF / python-docx（PDF/DOCX 处理）
 - ffmpeg（视频抽帧/抽音轨，视频处理必需）+ openai-whisper（音轨转写，可选）
-- 2,709 个测试用例（138 个测试文件），覆盖率 62%+（仅统计 Iris 自身 LLM 调用）
+- 2,713 个测试用例（138 个测试文件），覆盖率 62%+（仅统计 Iris 自身 LLM 调用）
 
 ## 开发环境
 

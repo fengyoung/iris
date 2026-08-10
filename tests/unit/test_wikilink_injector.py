@@ -75,6 +75,15 @@ class TestWikilinkInjectorIndex:
         # 文件名 "人物-张三" → 标题 "张三"
         assert "张三" in titles
 
+    def test_build_index_skips_backup_files(self, wiki_root: Path):
+        """wiki-update 备份文件（*.bak.1.md）不进入标题索引，避免噪音候选。"""
+        _make_wiki_page(wiki_root, "03-项目", "项目-旧项目.bak.1.md", "旧项目备份")
+        injector = WikilinkInjector(wiki_root)
+        titles = injector.get_title_index()
+        assert "旧项目备份" not in titles
+        # 正常页面仍被索引
+        assert "张三" in titles
+
     def test_missing_wiki_root(self, tmp_path: Path):
         """Wiki 根目录不存在时不抛异常。"""
         nonexistent = tmp_path / "nonexistent"

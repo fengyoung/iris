@@ -110,8 +110,9 @@ class WikiSearcher:
         if not self._wiki_root.exists():
             return []
         paths = sorted(self._wiki_root.rglob("*.md"))
-        # 跳过 index.md 和 changelog.md
-        paths = [p for p in paths if p.name not in ("index.md", "changelog.md")]
+        # 跳过 index.md / changelog.md / 备份文件（*.bak.*.md）
+        paths = [p for p in paths
+                 if p.name not in ("index.md", "changelog.md") and ".bak." not in p.stem]
         signature = []
         for path in paths:
             try:

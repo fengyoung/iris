@@ -208,6 +208,20 @@ class TestProjectStalled:
         stalled = [s for s in result["signals"] if s["type"] == "project_stalled"]
         assert stalled == []
 
+    def test_backup_page_skipped(self, tmp_path):
+        """wiki-update 备份文件（*.bak.1.md）不产生重复停滞信号。"""
+        wiki_root = tmp_path / "WIKI"
+        config, source_root = _make_config(tmp_path, wiki_root=wiki_root)
+        rel = "03-方案报告/20260601-方案-旧项目.md"  # 58 天前
+        _write(source_root / rel)
+        self._make_wiki_page(wiki_root, "项目-旧项目", [rel])
+        # 模拟 wiki-update 备份：同内容 + .bak.1 后缀（也会被 glob 扫到）
+        bak = wiki_root / "03-项目" / "项目-旧项目.bak.1.md"
+        _write(bak, (wiki_root / "03-项目" / "项目-旧项目.md").read_text(encoding="utf-8"))
+        result = ReminderEngine(config).collect(now=_NOW)
+        stalled = [s for s in result["signals"] if s["type"] == "project_stalled"]
+        assert len(stalled) == 1  # 备份不产生第二个信号
+
 
 # ─────────────────────────────────────────────────────────────
 # 工具函数

@@ -154,6 +154,8 @@ class WikilinkInjector:
             if not type_dir.is_dir():
                 continue
             for md_file in type_dir.glob("*.md"):
+                if ".bak." in md_file.stem:
+                    continue  # 跳过 wiki-update 备份文件，避免索引噪音标题
                 self._index_page(md_file, type_dir_name)
 
         # 按标题长度降序排列

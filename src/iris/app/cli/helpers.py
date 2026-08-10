@@ -136,7 +136,8 @@ def _build_status_payload(bundle, logger: IrisLogger) -> Dict[str, Any]:
     if bundle.wiki:
         wiki_root = Path(bundle.wiki["wiki_root"])
         if wiki_root.exists():
-            wiki_info["wiki_page_count"] = len(list(wiki_root.rglob("*.md")))
+            wiki_info["wiki_page_count"] = len(
+                [p for p in wiki_root.rglob("*.md") if ".bak." not in p.stem])
     payload.update({
         "latest_source_mtime": freshness["latest_source_mtime"],
         "suggested_next_action": freshness["suggested_next_action"],
