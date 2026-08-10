@@ -18,6 +18,11 @@
 
 新测试 +63（unit +56：models 11 / session 9 / clipboard 6 / analyzer 11 / doc_writer 10 / live 9；integration +7 端到端：两段全链路、LLM 降级、互斥启动、CLI 注册）。验证：新增 63 全过，unit 全量 1,360（1 个 feed 既有失败与本改动无关），integration 全量 237 全过；真机冒烟：启动 → SIGINT 优雅退出（统计帧 + pid 清理 + 文档保留），asr-corrector 在跑时让位。
 
+### 4. 遗留修复（发布后补丁，版本号不变）
+
+- **asr-corrector Ctrl+C 修复**（`src/iris/wiki/asr/corrector.py`）：Python 3.13 默认 SIGINT 处理无法中断 `time.sleep`（开发会议助理时发现并修复，同款问题在 asr-corrector 的 `run_forever` 同样存在）→ 显式 `signal.signal(SIGINT, raise KeyboardInterrupt)`。真机验证：SIGINT → 「校正引擎已停止」→ pid 清理
+- **`scripts/verify_hotkey_inject.py` 纳入版本控制**：CGEventPost 热键注入验证工具（端到端测试/复现 vocotype 按住说话，须 `--keycode 61` 右 Option）；提交时补充「纯修饰键热键注入左 Option 无反应」的实测提示
+
 ### 版本升级
 
 | 版本 | 值 | 理由 |

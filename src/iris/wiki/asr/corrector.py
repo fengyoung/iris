@@ -1030,6 +1030,14 @@ class AsrCorrector:
 
     def run_forever(self) -> None:
         """主循环：剪贴板监听 + 校正。"""
+        # Python 3.13：默认 SIGINT 处理无法中断 time.sleep（主线程睡眠时不抛
+        # KeyboardInterrupt），显式注册 handler 保证 Ctrl+C 可靠进入优雅退出
+        # （与 meeting-live-assistant 同款修复，见 assistant/live.py）
+        def _sigint_handler(signum, frame):
+            raise KeyboardInterrupt
+
+        signal.signal(signal.SIGINT, _sigint_handler)
+
         print(f"[Iris] ASR 校正引擎已启动 (mode={self._mode})", file=sys.stderr)
         if self._mode == "full":
             prompt_status = f"已加载 ({len(self._prompt)} 字)" if self._prompt else "未加载"
