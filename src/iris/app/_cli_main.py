@@ -22,6 +22,7 @@ COMMANDS = [
     "discover-wiki", "discover-wiki-auto", "build-wiki",
     "build-wiki-nav", "wiki-pipeline", "wiki-lint", "wiki-update",
     "build-asr-prompt", "asr-corrector", "asr-audit", "asr-report",
+    "meeting-live-assistant",
     "enrich-persons", "deep-eval",
     "memory-status", "memory-list", "memory-delete", "memory-maintenance",
     "memory-export", "memory-import", "working-set", "working-show",
@@ -96,7 +97,7 @@ def build_parser() -> argparse.ArgumentParser:
     # 会议转录
     parser.add_argument("--audio-file", default="", help="transcribe-meeting 录音文件路径")
     parser.add_argument("--transcript-file", default="", help="transcribe-meeting 已有转写文本路径")
-    parser.add_argument("--output", default="", help="transcribe-meeting 输出路径")
+    parser.add_argument("--output", default="", help="transcribe-meeting / meeting-live-assistant 输出路径")
     parser.add_argument("--to-source", action="store_true", help="输出归档到 SOURCE（会议纪要→05/，双周报→06/）")
     parser.add_argument("--style-from", default="", help="build-biweekly-report 风格参考文件路径")
     parser.add_argument("--whisper-model", default="base", help="Whisper 模型规格")

@@ -78,6 +78,14 @@
     "max_signals_per_type": 15,
     "_note": "主动提醒引擎（reminders 命令 + daily-start 集成，零 LLM 成本）。category_inactive_days: SOURCE 分类目录无更新告警阈值（天），category_overrides 按目录名覆盖；weekly_roster_window_days: 成员周报活跃窗口（超出视为离开统计范围）；weekly_report_gap_days: 周报断档告警阈值；project_stall_days: 项目 Wiki 引用源文档全部超期的停滞阈值；max_signals_per_type: 每类信号数量上限。"
   },
+  "assistant": {
+    "output_dir": "",
+    "top_k": 5,
+    "llm_model": "",
+    "poll_interval": 0.5,
+    "doc_rewrite_every": 1,
+    "_note": "实时会议助理（meeting-live-assistant）。output_dir: 过程文档输出目录（默认 data/meeting-live/，--output 参数优先）；top_k: 每段知识库检索条数；llm_model: 段分析 LLM 模型（空=走全局路由）；poll_interval: 剪贴板轮询间隔（秒）；doc_rewrite_every: 每 N 段重写过程文档（1=每段）。"
+  },
   "safety": {
     "protect_read_only_sources": true,
     "require_confirmation_for_destructive_actions": true,

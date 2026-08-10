@@ -21,6 +21,18 @@ FALLBACK_TEMPLATES: Dict[str, str] = {
     "retrieval_rerank.md": "你是检索重排器，仅返回 JSON 数组。\n用户问题：{{query}}\n候选列表：\n{{candidate_lines}}",
     "analysis_report.md": "分析主题：{{query}}\n问答整理结果：{{answer}}\n结构化证据：\n{{structured_context}}\n候选证据：{{blocks}}",
     "biweekly_report.md": "时间范围：{{period}}\n背景知识：\n{{wiki_context}}\n近两周工作数据：\n{{evidence}}",
+    # 实时会议助理逐段分析（与 templates/prompt/meeting_live_analyze.md 同构兜底）
+    "meeting_live_analyze.md": (
+        "你是一名实时会议助理。分析当前说话段落，输出纯 JSON 对象（无围栏/无解释）。\n"
+        "# 会议摘要\n{{meeting_summary}}\n"
+        "# 知识库检索上下文（无关请忽略）\n{{retrieval_context}}\n"
+        "# 当前说话段落\n{{segment_text}}\n"
+        "# 输出\n"
+        "{\"key_points\": [\"关键要点\"], \"risks\": [\"风险点\"], \"questions\": [\"问题\"],"
+        " \"decisions\": [\"决策点\"], \"suggested_questions\": [\"建议追问 1-3 条\"]}\n"
+        "要求：只输出 JSON；每条简短（≤80 字）；不重复会议摘要已有内容；"
+        "检索上下文无关则完全忽略。"
+    ),
 }
 
 # 模块级模板缓存，避免每次 render 都从磁盘读取
