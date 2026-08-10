@@ -1,8 +1,10 @@
-# Iris 3.22.5
+# Iris 3.23.0
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
+
+**v3.23.0** — 实时会议助理 `meeting-live-assistant`：会议中按住 vocotype 热键说话，松开即逐段转写 → ASR 校正（词典 + LLM）→ 知识库检索 → LLM 分析（要点/风险/问题/决策点/建议提问）→ 终端面板实时提示 + Markdown 过程文档实时写入（`--output` > `assistant.output_dir` > `data/meeting-live/`）。积压丢弃策略（分析慢于说话时只处理最新段）+ 与 asr-corrector 运行时互斥（独占剪贴板）。测试 +63（合计 2,709 用例）。协议版本 3.15→3.16。
 
 **v3.22.5** — ASR 校正引擎热键门控修复：① CGEventTap 启动失败（辅助功能权限缺失）时热键门控「卡死为全跳过」— `run_forever` 失败后置空监听器，降级为内容特征判定（`_is_asr_text` + 富文本检查兜底），不再误拦真实 ASR 输出；② 监听窗口与热键按住时长挂钩（`max(3s, min(按住时长, 120s))`）— vocotype 松开热键后才转写，1 分钟长语音的剪贴板结果不再因超时被跳过。测试 +13（合计 2,646 用例）。协议版本 3.15（不变）。
 
@@ -91,6 +93,7 @@ python scripts/run_cli.py daily-start
 | 提醒 | `reminders` | 主动提醒：栏目断供 / 成员周报缺失 / 项目停滞（零 LLM 成本，daily-start 已集成） |
 | 系统 | `daily-start`, `check-config`, `status`, `diagnose` | 日常维护（含图谱增量刷新）/ 配置检查 |
 | ASR 校正 | `asr-corrector`, `asr-audit`, `asr-report` | vocotype 实时语音转写纠错润色（[使用指南](docs/asr-corrector-usage.md)） |
+| 会议助理 | `meeting-live-assistant` | 实时会议助理：逐段提炼要点/风险/决策点 + 提示关键提问 + 过程文档（[方案设计](docs/meeting-live-assistant-design.md)） |
 
 ## 知识库结构
 

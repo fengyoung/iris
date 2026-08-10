@@ -1,4 +1,4 @@
-# Iris 3.22.5 — 项目执行说明
+# Iris 3.23.0 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -9,9 +9,9 @@
 
 ### 当前规模
 
-~32,000 行 / 153 文件 / 25 模块 · CLI 50 命令 · 单元测试 2,646（131 文件）· 覆盖率 62%+ · 10 个项目级 Skill · Wiki 222 页 · 知识图谱节点 220 / 关系边 1,858（wikilink 1,225 + LLM 633） · 数据源 822 文档 / 5,939 Chunk（text-embedding-v3 / 1,024 维）
+~34,000 行 / 160 文件 / 26 模块 · CLI 65 命令 · 单元测试 2,709（138 文件）· 覆盖率 62%+ · 10 个项目级 Skill · Wiki 222 页 · 知识图谱节点 220 / 关系边 1,858（wikilink 1,225 + LLM 633） · 数据源 822 文档 / 5,939 Chunk（text-embedding-v3 / 1,024 维）
 
-**近期新增能力**：YAML frontmatter 标准化注入（`core/frontmatter.py`）· 批量 frontmatter 补全（`core/frontmatter_batch.py`，正则+LLM+wikilink+备份恢复）· wikilink 自动注入引擎（`wiki/wikilink_injector.py`，零 LLM 成本）· LLM 用量追踪（SQLite WAL + embedding 纳入）· LLM 响应缓存 + embedding 向量缓存（LRU + TTL）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（`memory_updater.py` + `session_miner.py`，双通道架构）· 多 Agent 并发安全（FileLock + SQLite WAL + Agent 隔离）· ASR 实时校正引擎（Aho-Corasick + LLM 编辑助手 + 反馈反向优化）· CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit · constraints.txt 可复现构建
+**近期新增能力**：实时会议助理（`assistant/`，逐段提炼要点/风险/决策点 + 实时提示关键提问 + 过程文档）· YAML frontmatter 标准化注入（`core/frontmatter.py`）· 批量 frontmatter 补全（`core/frontmatter_batch.py`，正则+LLM+wikilink+备份恢复）· wikilink 自动注入引擎（`wiki/wikilink_injector.py`，零 LLM 成本）· LLM 用量追踪（SQLite WAL + embedding 纳入）· LLM 响应缓存 + embedding 向量缓存（LRU + TTL）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（`memory_updater.py` + `session_miner.py`，双通道架构）· 多 Agent 并发安全（FileLock + SQLite WAL + Agent 隔离）· ASR 实时校正引擎（Aho-Corasick + LLM 编辑助手 + 反馈反向优化）· CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit · constraints.txt 可复现构建
 
 ### 关键路径
 
@@ -155,7 +155,7 @@ iris3/
 └── pyproject.toml · README · CLAUDE · CHANGELOG.md
 ```
 
-**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配/共享线程池）· `memory`（记忆 6 子模块：含 `session_miner.py` 会话模式挖掘）· `qa`（检索问答+图谱注入+`memory_updater.py` 双通道记忆提取）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF+BM25缓存）· `wiki`（Wiki 体系 + backlink/graph + ASR 校正引擎，最大模块；`wiki/asr/` 含 corrector/coverage/feedback/prompt_optimizer/_progress 等 10 个子模块）· `feed`（信息汇聚管道：飞书聊天记录→话题检测→简报生成，11 文件 / 9 命令）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估 + 引用解析）· `complex_input`（多模态三阶段：图片/PDF/DOCX/VIDEO）· `output`（格式化+DOCX）· `app/cli`（59 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py / shared.py）· `trello`（看板）。
+**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配/共享线程池）· `memory`（记忆 6 子模块：含 `session_miner.py` 会话模式挖掘）· `qa`（检索问答+图谱注入+`memory_updater.py` 双通道记忆提取）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF+BM25缓存）· `wiki`（Wiki 体系 + backlink/graph + ASR 校正引擎，最大模块；`wiki/asr/` 含 corrector/coverage/feedback/prompt_optimizer/_progress 等 10 个子模块）· `feed`（信息汇聚管道：飞书聊天记录→话题检测→简报生成，11 文件 / 9 命令）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估 + 引用解析）· `complex_input`（多模态三阶段：图片/PDF/DOCX/VIDEO）· `output`（格式化+DOCX）· `assistant`（实时会议助理：剪贴板采集+校正+检索+逐段分析+面板/文档，9 文件）· `app/cli`（65 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py / shared.py）· `trello`（看板）。
 
 ---
 
@@ -167,7 +167,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.22.5 (2026-08-10)** — ASR 校正引擎热键门控修复（2 文件 / +215 -4）：① 背景 — 用户按住热键让 vocotype 输入 1 分多钟语音，转写写入剪贴板后被「不在监听窗口」跳过（held=False, released_at=0.0）；② 根因双叠 — CGEventTap 启动失败（辅助功能权限缺失）时只警告未置空监听器，`_tick` 门控按配置 mask 而非监听器可用性判定 → `in_listen_window` 恒 False 全部跳过；且固定 3s 监听窗口装不下长语音的转写耗时；③ 改动 — `run_forever` start 失败置空 `_hotkey_monitor` 降级为内容特征判定（`_is_asr_text` + 富文本检查兜底）；`_HotkeyMonitor` 记录按下时刻暴露 `hold_duration`，监听窗口 = `max(3s, min(按住时长, 120s))`，1 分钟语音释放后 60s 内剪贴板变化仍处理；④ 测试 +13（`test_asr_corrector.py` 3 个新测试类）。验证：ASR 相关 183 个 + 单元测试 1,304 全通过（unit 1,291→1,304）。协议版本 3.15（不变）。产品版本 3.22.4→3.22.5。
+**当前 v3.23.0 (2026-08-10)** — 实时会议助理 `iris meeting-live-assistant`（23 文件 / +2,080）：① 背景 — 会议中语音转瞬即逝，需要「会议当下」的实时助理：逐段转写→校正→结合知识库分析→提示关键提问，过程实时写入 Markdown 文档（会后直接拿到完整记录）；与 transcribe-meeting（事后批量）互补，与 asr-corrector 运行时互斥（独占剪贴板）；② 改动 — 新模块 `src/iris/assistant/`（9 文件）：剪贴板采集（复用 corrector 特征判定）→ 词典 fast 校正立即显示 + LLM deep 校正与知识库检索并行（ThreadPoolExecutor(2)，10s 等待窗各自降级）→ LLM 结构化分析（要点/风险/问题/决策点/建议提问，15s deadline 降级）→ 终端面板（ANSI 整帧）+ 过程文档（tmp+os.replace 原子重写，`--output` > `assistant.output_dir` > `data/meeting-live/`）；积压丢弃状态机（处理中 submit 覆盖旧段）；`_probe_running` 只读互斥探测（无副作用）；③ 真机修复 2 个 bug — `resolve_data_path('data')` 无子路径被拒改用 `get_project_root()/data`；Python 3.13 SIGINT 无法中断 time.sleep（Ctrl+C 失效）→ 显式 `signal.signal(SIGINT, raise KeyboardInterrupt)`；④ 测试 +63（unit 56：models 11/session 9/clipboard 6/analyzer 11/doc_writer 10/live 9；integration 7 端到端）。验证：新增 63 全过，unit 全量 1,360（1 个 feed 既有失败与本次无关），integration 全量 237 全过；真机冒烟：启动→SIGINT 优雅退出（统计帧+pid 清理+文档保留），asr-corrector 在跑时让位。协议版本 3.15→3.16（新增命令）。产品版本 3.22.5→3.23.0。
+
+**v3.22.5 (2026-08-10)** — ASR 校正引擎热键门控修复（2 文件 / +215 -4）：① 背景 — 用户按住热键让 vocotype 输入 1 分多钟语音，转写写入剪贴板后被「不在监听窗口」跳过（held=False, released_at=0.0）；② 根因双叠 — CGEventTap 启动失败（辅助功能权限缺失）时只警告未置空监听器，`_tick` 门控按配置 mask 而非监听器可用性判定 → `in_listen_window` 恒 False 全部跳过；且固定 3s 监听窗口装不下长语音的转写耗时；③ 改动 — `run_forever` start 失败置空 `_hotkey_monitor` 降级为内容特征判定（`_is_asr_text` + 富文本检查兜底）；`_HotkeyMonitor` 记录按下时刻暴露 `hold_duration`，监听窗口 = `max(3s, min(按住时长, 120s))`，1 分钟语音释放后 60s 内剪贴板变化仍处理；④ 测试 +13（`test_asr_corrector.py` 3 个新测试类）。验证：ASR 相关 183 个 + 单元测试 1,304 全通过（unit 1,291→1,304）。协议版本 3.15（不变）。产品版本 3.22.4→3.22.5。
 
 **v3.22.4 (2026-08-10)** — 周报提取主题日期不一致自动标注（2 文件 / +60 行）：① 背景 — 提取 W32 成员周报发现李嘉晨 08-07 发送邮件主题仍写「20260731」（复制上周标题未改日期），归档后易误读为错误周期；② 改动 — `scripts/extract_weekly_reports.py` 新增 `_subject_date_mismatch_note` 静态方法（正则提取主题 `YYYYMMDD`/`YYYY-MM-DD` 日期，兼容时区，与发送日期比较），`generate_content` 邮件信息栏不一致时自动加注「⚠️ 主题日期与发送日期不一致」，一致或无日期不加注（零噪音）；③ 测试 +4（`test_weekly_report_extract.py` 12→16 用例）。验证：全量 2,630→2,633 测试全通过（unit 1,291 / integration 230 / 根目录 1,112）。协议版本 3.15（不变）。产品版本 3.22.3→3.22.4。
 

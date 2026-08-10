@@ -1,3 +1,32 @@
+## v3.23.0 (2026-08-10)
+
+实时会议助理 `iris meeting-live-assistant`：会议中实时提炼要点/风险/决策点并提示关键提问（23 文件 / +2,080）。
+
+### 1. 背景
+
+会议中语音信息密度高、转瞬即逝。需要一种「会议当下」的实时助理：逐段转写 → 校正 → 结合知识库分析 → 提示值得追问的问题，同时把过程实时写入 Markdown 文档，会后直接拿到完整记录。与 `transcribe-meeting`（事后批量）互补；与 `asr-corrector` 运行时互斥（独占剪贴板）。
+
+### 2. 改动（文件路径）
+
+- **新模块 `src/iris/assistant/`（9 文件）**：`models.py`（VoiceSegment/SegmentAnalysis/MeetingState/AssistantConfig Pydantic 模型）；`_clipboard.py`（剪贴板轮询 + vocotype 特征判定，复用 corrector `_is_asr_text`/`_looks_like_written_chinese`/`_clipboard_has_rich_text`）；`_corrector.py`（包装 AsrCorrector 双通道：词典 fast 毫秒级 + LLM deep 8s 内部降级 + 上下文入窗）；`_retriever.py`（包装 EnhancedRetriever，构造/查询失败优雅降级）；`_analyzer.py`（LLM 结构化分析：要点/风险/问题/决策点/建议提问，15s deadline + 容错归一化 + 失败降级）；`_session.py`（积压丢弃状态机：Condition + 单槽 pending，处理中 submit 覆盖旧段，dropped_count 累积）；`_doc_writer.py`（过程文档原子重写：frontmatter + 会议累计区 + 逐段记录，tmp + os.replace）；`_panel.py`（ANSI 清屏整帧终端面板，stdout 独占、日志走 stderr）；`live.py`（主编排：`_probe_running` 只读互斥探测 + ProcessRegistry 防重复 + ThreadPoolExecutor(2) 并行深度校正与检索 + 显式 SIGINT handler 保证 3.13 Ctrl+C 可靠退出）
+- **CLI 注册（3 文件）**：`src/iris/app/_cli_main.py`（COMMANDS 64→65）、`src/iris/app/cli/_handlers/_assistant.py`（handler + ASSISTANT_HANDLERS）、`src/iris/app/cli/handlers.py`（聚合）；`--output` 共用参数
+- **配置（2 文件）**：`src/iris/config/models.py`（AppConfig 加 `assistant` 段）、`config/app.json.example`（output_dir/top_k/llm_model/poll_interval/doc_rewrite_every）
+- **模板（2 文件）**：`templates/prompt/meeting_live_analyze.md` + `src/iris/utils/prompting.py` FALLBACK_TEMPLATES 兜底
+- **文档**：`docs/meeting-live-assistant-design.md`（方案设计 v1.0，13 项需求冻结）
+
+### 3. 测试
+
+新测试 +63（unit +56：models 11 / session 9 / clipboard 6 / analyzer 11 / doc_writer 10 / live 9；integration +7 端到端：两段全链路、LLM 降级、互斥启动、CLI 注册）。验证：新增 63 全过，unit 全量 1,360（1 个 feed 既有失败与本改动无关），integration 全量 237 全过；真机冒烟：启动 → SIGINT 优雅退出（统计帧 + pid 清理 + 文档保留），asr-corrector 在跑时让位。
+
+### 版本升级
+
+| 版本 | 值 | 理由 |
+|------|:---:|------|
+| 产品版本 | 3.22.5 → 3.23.0 | 新增实时会议助理功能 |
+| 协议版本 | 3.15 → 3.16 | 新增 meeting-live-assistant 命令 |
+
+---
+
 ## v3.22.5 (2026-08-10)
 
 ASR 校正引擎热键门控修复：长语音不再被跳过（2 文件 / +215 -4）。
