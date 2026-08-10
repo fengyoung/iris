@@ -177,3 +177,56 @@ def test_filter_multiple_senders_and_drops_nonmatching():
     ]
     out = f.filter_emails(emails)
     assert sorted(e["sender_name"] for e in out) == ["张三", "李四"]
+
+
+# ── 主题日期与发送日期不一致标注（复制标题忘改日期）──────────
+
+
+def _make_generator():
+    return ewr.WeeklyReportMarkdownGenerator(
+        output_dir="/tmp/_wr_test",
+        filename_format="{date}-周报-w{week}-{name}.md",
+    )
+
+
+def test_subject_date_mismatch_note_detects():
+    from datetime import datetime
+    gen = _make_generator()
+    send_date = datetime(2026, 8, 7)
+    note = gen._subject_date_mismatch_note("【周报】李嘉晨 - 20260731", send_date)
+    assert note is not None
+    assert "2026-07-31" in note
+    assert "2026-08-07" in note
+
+
+def test_subject_date_mismatch_note_consistent_returns_none():
+    from datetime import datetime
+    gen = _make_generator()
+    send_date = datetime(2026, 8, 7)
+    # 主题日期与发送日期一致 → 无标注
+    assert gen._subject_date_mismatch_note("【周报】李嘉晨 - 20260807", send_date) is None
+    # 主题无日期 → 无标注
+    assert gen._subject_date_mismatch_note("【周报】李嘉晨", send_date) is None
+    # 空主题 → 无标注
+    assert gen._subject_date_mismatch_note("", send_date) is None
+    # 日期带时区 → 正常比较
+    tz_send = datetime(2026, 8, 7, tzinfo=datetime.now().astimezone().tzinfo)
+    assert gen._subject_date_mismatch_note("【周报】李嘉晨 - 20260807", tz_send) is None
+
+
+def test_generate_content_annotates_mismatch():
+    gen = _make_generator()
+    email_data = {
+        "sender_name": "李嘉晨",
+        "from": {"mail_address": "lijiachen01@example.com", "name": "李嘉晨"},
+        "subject": "【周报】李嘉晨 - 20260731",
+        "date": "2026-08-07T10:00:00",
+        "ai_content": "本周工作内容",
+        "ai_processed": True,
+        "ai_model_used": "base",
+        "extracted": {"content": "", "has_images": False},
+    }
+    out = gen.generate_content(email_data, week=32)
+    assert "主题日期与发送日期不一致" in out
+    assert "主题标注 2026-07-31" in out
+    assert "实际发送 2026-08-07" in out

@@ -1097,6 +1097,30 @@ class WeeklyReportMarkdownGenerator:
             filename = name[:200 - len(ext)] + ext
         return filename
 
+    @staticmethod
+    def _subject_date_mismatch_note(subject: str, date: datetime) -> Optional[str]:
+        """检测主题日期与发送日期不一致（复制标题忘改日期），返回标注文本。
+
+        主题中形如 20260731 / 2026-07-31 的日期若与邮件发送日期不同，
+        在邮件信息栏加注提醒，避免归档后误读为错误周期。
+        未发现日期或日期一致时返回 None。
+        """
+        import re
+        if not subject or not date:
+            return None
+        m = re.search(r"(20\d{2})[-/]?(\d{1,2})[-/]?(\d{1,2})", subject)
+        if not m:
+            return None
+        try:
+            subject_date = datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            return None
+        send_date = date.replace(tzinfo=None) if date.tzinfo else date
+        if subject_date.date() == send_date.date():
+            return None
+        return (f"- **⚠️ 主题日期与发送日期不一致**: 主题标注 {subject_date:%Y-%m-%d}，"
+                f"实际发送 {send_date:%Y-%m-%d}（可能是复制标题未改日期）")
+
     def generate_content(self, email_data: Dict, week: int = 0) -> str:
         """生成邮件的 Markdown 内容（含 YAML frontmatter 注入）。
 
@@ -1150,6 +1174,12 @@ class WeeklyReportMarkdownGenerator:
             f"- **主题**: {subject}",
             "",
         ]
+
+        # 主题日期与发送日期不一致时加注（复制标题忘改日期的常见情况）
+        mismatch_note = self._subject_date_mismatch_note(subject, date)
+        if mismatch_note:
+            lines.append(mismatch_note)
+            lines.append("")
 
         if ai_processed:
             model_name = "高级模型" if ai_model == "advanced" else "基础模型"
