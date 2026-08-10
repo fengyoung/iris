@@ -1,4 +1,4 @@
-# Iris 3.23.2 — 项目执行说明
+# Iris 3.23.3 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~35,000 行 / 166 文件 / 26 模块 · CLI 65 命令 · 单元测试 2,713（138 文件）· 覆盖率 62%+ · 10 个项目级 Skill · Wiki 222 页 · 知识图谱节点 220 / 关系边 1,858（wikilink 1,225 + LLM 633） · 数据源 822 文档 / 5,939 Chunk（text-embedding-v3 / 1,024 维）
+~35,000 行 / 166 文件 / 26 模块 · CLI 65 命令 · 单元测试 2,747（138 文件）· 覆盖率 62%+ · 10 个项目级 Skill · Wiki 222 页 · 知识图谱节点 220 / 关系边 1,858（wikilink 1,225 + LLM 633） · 数据源 822 文档 / 5,939 Chunk（text-embedding-v3 / 1,024 维）
 
 **近期新增能力**：实时会议助理（`assistant/`，逐段提炼要点/风险/决策点 + 实时提示关键提问 + 过程文档）· YAML frontmatter 标准化注入（`core/frontmatter.py`）· 批量 frontmatter 补全（`core/frontmatter_batch.py`，正则+LLM+wikilink+备份恢复）· wikilink 自动注入引擎（`wiki/wikilink_injector.py`，零 LLM 成本）· LLM 用量追踪（SQLite WAL + embedding 纳入）· LLM 响应缓存 + embedding 向量缓存（LRU + TTL）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（`memory_updater.py` + `session_miner.py`，双通道架构）· 多 Agent 并发安全（FileLock + SQLite WAL + Agent 隔离）· ASR 实时校正引擎（Aho-Corasick + LLM 编辑助手 + 反馈反向优化）· CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit · constraints.txt 可复现构建
 
@@ -122,8 +122,8 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.23.2 | 软件发布版本 |
-| **协议版本** | `src/iris/__init__.py` | 3.16 | CLI 命令集 / agent-spec 格式 |
+| **产品版本** | `pyproject.toml` | 3.23.3 | 软件发布版本 |
+| **协议版本** | `src/iris/__init__.py` | 3.17 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.5 | 配置文件 Schema |
 
 > 只有真正发生变化的层才递增版本号。
@@ -167,7 +167,7 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.23.2 (2026-08-10)** — wiki-update 备份文件全链路过滤（5 文件 / +11 -4 + 回归测试 3 个）：① 背景 — wiki-update 更新页面时生成的 `*.bak.1.md` 备份文件被 5 处扫描/统计/检索逻辑计入：WikiSearcher 检索结果、lint 页面计数、wikilink 标题索引、status 页面数、提醒引擎（备份页含旧指纹 → 重复停滞信号）；② 改动 — 统一按 `".bak." in stem` 过滤（searcher `_load_pages` / navigation `lint_wiki` / wikilink_injector 索引 / helpers `_build_status_payload` / reminders 信号扫描）；③ 回归测试 +3（injector 索引跳过 / reminders 备份不产生重复信号 / searcher 检索跳过 .bak 且 index/changelog 仍排除）。验证：unit 全量 1,362 通过（+2），integration 239（+2）。协议版本 3.16（不变）。产品版本 3.23.1→3.23.2。
+**当前 v3.23.3 (2026-08-10)** — meeting-live-assistant 全量优化（21 文件 / +700 -100 + 测试 +34）：① 双段流水线 — `_prefetch`（poll 线程）提交段后立即 fast 校正入窗 + 提交 deep/检索 futures，段 N 分析期间段 N+1 的深度校正与检索已在池中（每段关键路径 ~25s→~15s 深度重叠）；短段门控（`short_segment_chars=15`）+ `--fast-only`：确认语/快速模式跳过全部 LLM（`analysis_status="skipped"`）；② 退出路径加固 — worker.join 27s 覆盖分析 deadline（尾段不再丢）、force rewrite 无并发写、DocWriter 唯一 tmp + RLock；③ 会议结束自动总结 — 新模板 `meeting_live_summary.md`（+prompting.py 同构兜底），退出时一次 LLM（10s deadline 失败跳过）写「📝 会议总结」区；④ 检索 deadline 根治挂起 — `LLMQueryPlanner.enhance(_deadline=None)` 透传（全链路唯一无默认 deadline 的 LLM 调用点），`RetrieverAdapter` 传 now+8s，`pool.shutdown` 有界返回；⑤ 采集增强 — `max_segment_chars=2000` 覆盖 120s 长语音（超长警告）、首 poll 吞存量（防幽灵段）、`dedup_window_seconds=30` 限时去重；⑥ 杂项 — 互斥对称（corrector 启动探测 assistant）、文件名带秒、phase 守卫段不丢、`suggest_every=3` 建议提问间隔化、面板首帧。验证：unit 全量 1,393（+31），integration 240（+1），根目录 1,114（+2），合计 2,747 全过。协议版本 3.16→3.17（新增 --fast-only 参数）。产品版本 3.23.2→3.23.3。
 
 **v3.23.1 (2026-08-10)** — 遗留修复 + 使用指南（4 文件 / +311）：① asr-corrector Ctrl+C 修复 — Python 3.13 默认 SIGINT 处理无法中断 time.sleep（3.23.0 会议助理开发中发现并已修复，asr-corrector 的 run_forever 存在同款问题）→ run_forever 显式注册 SIGINT handler；真机验证：SIGINT → 「校正引擎已停止」→ pid 清理；② scripts/verify_hotkey_inject.py 纳入版本控制（CGEventPost 注入验证工具，端到端测试/复现 vocotype 按住说话，须 --keycode 61 右 Option，含「纯修饰键热键注入左 Option 无反应」实测提示）；③ 使用指南 docs/meeting-live-assistant-usage.md（按 asr-corrector-usage.md 惯例：快速开始/命令/前置条件/配置/工作链路/面板/文档/FAQ），README 补链接。验证：ASR 相关 194 个 + 全量 2,708 通过（1 个 feed 既有失败与本次无关）。协议版本 3.16（不变）。产品版本 3.23.0→3.23.1。
 

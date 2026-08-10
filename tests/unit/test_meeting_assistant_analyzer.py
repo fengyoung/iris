@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from types import SimpleNamespace
 
 from iris.assistant._analyzer import SegmentAnalyzer
-from iris.assistant.models import SegmentAnalysis
+from iris.assistant.models import MeetingState, SegmentAnalysis, VoiceSegment
 
 
 class _FakeLLM:
@@ -91,6 +92,52 @@ class TestAnalyze:
         _analyzer(llm).analyze("段文本", "检索块", "摘要块")
         prompt = llm.calls[0]["prompt"]
         assert "段文本" in prompt and "检索块" in prompt and "摘要块" in prompt
+
+
+class TestSummarize:
+    """会议结束总结：成功返回 Markdown，失败返回 None（不阻塞退出）。"""
+
+    def _sum_loader(self):
+        class _SumLoader:
+            def render(self, name, variables):
+                assert name == "meeting_live_summary.md"
+                rendered = "TMPL 累计={{meeting_summary}} | 转写={{transcript}}"
+                for key, value in variables.items():
+                    rendered = rendered.replace("{{" + key + "}}", str(value))
+                return rendered
+        return _SumLoader()
+
+    def test_summarize_success(self):
+        llm = _FakeLLM(text="## 会议主题\n本场会议讨论了目标")
+        analyzer = SegmentAnalyzer(llm, self._sum_loader())
+        state = MeetingState(started_at=datetime(2026, 8, 10, 12, 0))
+        state.decisions = ["决策X"]
+        seg = VoiceSegment(seq=1, started_at=datetime(2026, 8, 10, 12, 1),
+                           raw_text="我们决定采用方案A", corrected_text="我们决定采用方案A")
+        state.add_analysis(seg)
+        result = analyzer.summarize(state)
+        assert result == "## 会议主题\n本场会议讨论了目标"
+        # 转写与累计都已渲染进 Prompt
+        assert "我们决定采用方案A" in llm.calls[0]["prompt"]
+        assert "决策: 决策X" in llm.calls[0]["prompt"]
+        # 路由与实时参数
+        assert llm.calls[0]["route_context"]["task_type"] == "meeting_summary"
+        assert llm.calls[0]["kwargs"]["max_retries"] == 0
+
+    def test_summarize_failure_returns_none(self):
+        llm = _FakeLLM(raise_on_generate=True)
+        analyzer = SegmentAnalyzer(llm, self._sum_loader())
+        assert analyzer.summarize(MeetingState()) is None
+
+    def test_summarize_empty_state(self):
+        llm = _FakeLLM(text="（暂无内容）")
+        analyzer = SegmentAnalyzer(llm, self._sum_loader())
+        assert analyzer.summarize(MeetingState()) == "（暂无内容）"
+
+    def test_summarize_empty_result_returns_none(self):
+        llm = _FakeLLM(text="   ")
+        analyzer = SegmentAnalyzer(llm, self._sum_loader())
+        assert analyzer.summarize(MeetingState()) is None
 
 
 class TestAnalyzeRouting:

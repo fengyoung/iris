@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 import sys
+import time
 from typing import List
 
 from iris.retrieval import EnhancedRetriever, RetrievalHit
+
+# 检索总时间预算：超过即降级为空上下文（与 deep 校正 8s deadline 对齐，
+# 保证线程池槽位有界返回，防止 provider 挂起占死池）
+_RETRIEVER_DEADLINE_SEC = 8.0
 
 
 class RetrieverAdapter:
     """每段校正文本 → 知识库检索（Wiki/文档/记忆），返回检索命中列表。
 
-    降级策略：构造失败置 None（无知识库上下文继续）；查询失败返回 []。
+    降级策略：构造失败置 None（无知识库上下文继续）；查询失败返回 []；
+    LLM 查询增强带 _deadline（全链路唯一无默认 deadline 的 LLM 调用）。
     """
 
     def __init__(self, bundle):
@@ -26,7 +32,12 @@ class RetrieverAdapter:
         if self._retriever is None:
             return []
         try:
-            return self._retriever.search(text, top_k=top_k, mode="local").hits
+            return self._retriever.search(
+                text,
+                top_k=top_k,
+                mode="local",
+                _deadline=time.monotonic() + _RETRIEVER_DEADLINE_SEC,
+            ).hits
         except Exception:
             return []
 

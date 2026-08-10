@@ -116,12 +116,17 @@ class LLMQueryPlanner:
         self._llm = llm_provider
         self._prompts = prompt_loader
 
-    def enhance(self, rule_plan: QueryPlan) -> QueryPlan:
-        """LLM 增强：低置信度时调用模型二次分析，否则返回原规划。"""
+    def enhance(self, rule_plan: QueryPlan, *, _deadline: Optional[float] = None) -> QueryPlan:
+        """LLM 增强：低置信度时调用模型二次分析，否则返回原规划。
+
+        _deadline: 内部参数，LLM 调用的降级链总超时（Unix 时间戳）。
+        实时场景（meeting-live-assistant 检索）必须传入——此调用是全链路唯一
+        默认无 deadline 的 LLM 点，provider 挂起会占死线程池。
+        """
         if not self._should_enhance(rule_plan):
             return rule_plan
         try:
-            enhanced = self._call_llm_enhance(rule_plan)
+            enhanced = self._call_llm_enhance(rule_plan, _deadline=_deadline)
             if enhanced:
                 return enhanced
         except Exception:
@@ -134,7 +139,7 @@ class LLMQueryPlanner:
             return len(plan.entities) < self._MIN_ENTITIES_FOR_SKIP
         return True
 
-    def _call_llm_enhance(self, plan: QueryPlan) -> Optional[QueryPlan]:
+    def _call_llm_enhance(self, plan: QueryPlan, *, _deadline: Optional[float] = None) -> Optional[QueryPlan]:
         """调用 LLM 做语义增强，成功返回新 QueryPlan，失败返回 None。"""
         from iris.llm import LLMRequest
 
@@ -151,7 +156,7 @@ class LLMQueryPlanner:
             prompt=prompt,
             route_context={"input_type": "text", "task_type": "query_enhancement", "use_case": "retrieval"},
         )
-        response = self._llm.generate(request, temperature=0.0)
+        response = self._llm.generate(request, temperature=0.0, _deadline=_deadline)
         if not response or not response.text:
             return None
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, ClassVar, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -29,11 +29,19 @@ class SegmentAnalysis(BaseModel):
 class VoiceSegment(BaseModel):
     """一个语音段（vocotype 一次按住-松开 = 一段）。"""
 
+    # 分析状态：pending（进行中/未分析）· done（已完成）· failed（LLM 失败）
+    # · skipped（短反馈/快速模式，有意跳过）
+    ANALYSIS_PENDING: ClassVar[str] = "pending"
+    ANALYSIS_DONE: ClassVar[str] = "done"
+    ANALYSIS_FAILED: ClassVar[str] = "failed"
+    ANALYSIS_SKIPPED: ClassVar[str] = "skipped"
+
     seq: int = Field(description="段序号（1-based，submit 时递增）")
     started_at: datetime = Field(description="检测时刻")
     raw_text: str = Field(description="剪贴板原文")
     corrected_text: str = Field(default="", description="校正后文本（词典/LLM）")
     analysis: Optional[SegmentAnalysis] = Field(default=None, description="分析结果，None=不可用/未完成")
+    analysis_status: str = Field(default="pending", description="分析状态（pending/done/failed/skipped）")
 
 
 class MeetingState(BaseModel):
@@ -46,6 +54,7 @@ class MeetingState(BaseModel):
     decisions: List[str] = Field(default_factory=list)
     open_questions: List[str] = Field(default_factory=list, description="待解决问题")
     dropped_count: int = Field(default=0, description="积压丢弃的段数")
+    summary: str = Field(default="", description="退出时 AI 生成的会议总结（Markdown 文本）")
 
     @staticmethod
     def _dedup_append(target: List[str], items: List[str]) -> None:
@@ -88,6 +97,16 @@ class AssistantConfig(BaseModel):
     llm_model: str = Field(default="", description="分析 LLM 模型，空=走全局路由")
     poll_interval: float = Field(default=0.5, gt=0, description="剪贴板轮询间隔（秒）")
     doc_rewrite_every: int = Field(default=1, gt=0, description="每 N 段重写文档（1=每段）")
+    fast_only: bool = Field(default=False, description="仅词典校正模式：跳过所有 LLM（deep 校正/检索/分析）")
+    short_segment_chars: int = Field(default=15, gt=0,
+                                     description="短段门控：校正后短于该长度视为确认语，跳过 LLM 深度校正/检索/分析")
+    max_segment_chars: int = Field(default=2000, gt=0,
+                                   description="单段长度上限（超长丢弃并警告，默认 2000 覆盖 120s 长语音场景）")
+    dedup_window_seconds: float = Field(default=30.0, ge=0,
+                                        description="相同文本去重窗口：窗口内重复不触发，超窗视为新段")
+    suggest_every: int = Field(default=3, gt=0,
+                               description="建议提问生成间隔：每 N 段生成一次（省 token 减重复噪音）")
+    summary_enabled: bool = Field(default=True, description="退出时生成 AI 会议总结（失败自动跳过）")
 
     @classmethod
     def from_app_config(cls, cfg: Dict[str, Any]) -> "AssistantConfig":

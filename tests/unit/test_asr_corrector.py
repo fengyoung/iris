@@ -416,3 +416,30 @@ class TestListenWindowGateFallback:
         err = capsys.readouterr().err
         assert "跳过：不在监听窗口" in err
         assert "词典无命中" not in err and "✅" not in err
+
+
+class TestPidAlive:
+    """对称互斥探测（v3.23.3）：asr-corrector 启动前检查 meeting-live-assistant。"""
+
+    def _mod(self):
+        import iris.wiki.asr.corrector as m
+        return m
+
+    def test_no_pid_file(self, tmp_path):
+        assert self._mod()._pid_alive(tmp_path / "meeting-live-assistant.pid") is False
+
+    def test_alive_pid(self, tmp_path):
+        import os
+        pid_file = tmp_path / "meeting-live-assistant.pid"
+        pid_file.write_text(str(os.getpid()))
+        assert self._mod()._pid_alive(pid_file) is True
+
+    def test_dead_pid(self, tmp_path):
+        pid_file = tmp_path / "meeting-live-assistant.pid"
+        pid_file.write_text("999999999")
+        assert self._mod()._pid_alive(pid_file) is False
+
+    def test_corrupt_pid(self, tmp_path):
+        pid_file = tmp_path / "meeting-live-assistant.pid"
+        pid_file.write_text("not-a-pid")
+        assert self._mod()._pid_alive(pid_file) is False

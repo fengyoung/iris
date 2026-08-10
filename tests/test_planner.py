@@ -162,6 +162,44 @@ def test_enhance_calls_llm_when_needed():
     mock_llm.generate.assert_called_once()
 
 
+def test_enhance_passes_deadline_to_llm():
+    """v3.23.3：实时场景（meeting-live-assistant 检索）必须透传 _deadline，
+    该调用是全链路唯一默认无 deadline 的 LLM 点，provider 挂起会占死线程池。"""
+    mock_resp = MagicMock()
+    mock_resp.text = json.dumps({
+        "intent": "definition", "question_type": "term",
+        "time_scope": "recent", "entities": ["RRF"], "keywords": [],
+    })
+    mock_llm = MagicMock()
+    mock_llm.generate.return_value = mock_resp
+
+    llm = LLMQueryPlanner(mock_llm, None)
+    plan = make_plan(intent="general", entities=[])
+    deadline = 1234567890.0
+    llm.enhance(plan, _deadline=deadline)
+
+    _, kwargs = mock_llm.generate.call_args
+    assert kwargs["_deadline"] == deadline
+
+
+def test_enhance_default_no_deadline():
+    """默认（QA 主路径）不传 _deadline：参数为 None 不改变既有行为。"""
+    mock_resp = MagicMock()
+    mock_resp.text = json.dumps({
+        "intent": "definition", "question_type": "term",
+        "time_scope": "recent", "entities": ["RRF"], "keywords": [],
+    })
+    mock_llm = MagicMock()
+    mock_llm.generate.return_value = mock_resp
+
+    llm = LLMQueryPlanner(mock_llm, None)
+    plan = make_plan(intent="general", entities=[])
+    llm.enhance(plan)
+
+    _, kwargs = mock_llm.generate.call_args
+    assert kwargs.get("_deadline") is None
+
+
 def test_enhance_fallback_on_llm_error():
     """LLM 失败 → 返回原 plan（优雅降级）。"""
     mock_llm = MagicMock()

@@ -634,6 +634,22 @@ class _AhoCorasick:
 # vocotype 配置读取
 # ═══════════════════════════════════════════════════════════════════
 
+def _pid_alive(pid_file: Path) -> bool:
+    """只读探测 pid 文件对应进程是否存活。零写副作用。
+
+    用于与 meeting-live-assistant 的对称互斥（独占剪贴板）：
+    残留/损坏/已死 pid 文件 → False（视为无实例）。
+    """
+    if not pid_file.exists():
+        return False
+    try:
+        pid = int(pid_file.read_text().strip())
+        os.kill(pid, 0)
+        return True
+    except (ValueError, OSError):
+        return False
+
+
 def _load_vocotype_hotkey() -> Tuple[int, int]:
     """从 vocotype 配置文件读取录音热键。
 
@@ -1093,6 +1109,11 @@ class AsrCorrector:
         from iris.core.locks import ProcessRegistry
         from pathlib import Path
         pid_dir = Path(__file__).resolve().parent.parent.parent.parent.parent / "data"
+        # 与 meeting-live-assistant 互斥（独占剪贴板）：对称探测其 pid 文件
+        if _pid_alive(pid_dir / "meeting-live-assistant.pid"):
+            print("[Iris] ⚠ meeting-live-assistant 正在运行（独占剪贴板），请先退出后再启动校正引擎",
+                  file=sys.stderr)
+            return
         registry = ProcessRegistry("asr-corrector", pid_dir)
         if not registry.register():
             print("[Iris] ⚠ asr-corrector 已有实例在运行，退出", file=sys.stderr)

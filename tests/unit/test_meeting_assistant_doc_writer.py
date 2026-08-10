@@ -15,13 +15,15 @@ def _state_with(segments: list[VoiceSegment]) -> MeetingState:
     return state
 
 
-def _seg(seq: int = 1, text: str = "讨论内容", analysis=None) -> VoiceSegment:
+def _seg(seq: int = 1, text: str = "讨论内容", analysis=None,
+         analysis_status: str = "pending") -> VoiceSegment:
     return VoiceSegment(
         seq=seq,
         started_at=datetime(2026, 8, 10, 12, 1, seq),
         raw_text=text,
         corrected_text=text,
         analysis=analysis,
+        analysis_status=analysis_status,
     )
 
 
@@ -64,6 +66,24 @@ class TestRender:
         content = DocWriter.render(state)
         assert "本场积压丢弃 3 段" in content
 
+    def test_summary_section_rendered(self):
+        state = _state_with([_seg(1)])
+        state.summary = "## 会议主题\n本场会议讨论了下半年目标"
+        content = DocWriter.render(state)
+        # 总结区位于会议累计之后、逐段记录之前
+        assert "## 📝 会议总结（AI 生成）" in content
+        assert "本场会议讨论了下半年目标" in content
+        assert content.index("会议总结") < content.index("🎙 段 1")
+
+    def test_summary_empty_not_rendered(self):
+        content = DocWriter.render(_state_with([_seg(1)]))
+        assert "会议总结" not in content
+
+    def test_segment_analysis_skipped(self):
+        content = DocWriter.render(_state_with([_seg(1, analysis_status=VoiceSegment.ANALYSIS_SKIPPED)]))
+        assert "跳过分析" in content
+        assert "分析不可用" not in content  # skipped 与 failed 文案区分
+
 
 class TestAtomicWrite:
     def test_write_and_rewrite(self, tmp_path):
@@ -88,7 +108,6 @@ class TestAtomicWrite:
         writer.initial_write(MeetingState(started_at=datetime(2026, 8, 10)))
         old = path.read_text(encoding="utf-8")
 
-        import pytest
         from unittest.mock import patch
         with patch.object(DocWriter, "_atomic_write", side_effect=OSError("disk full")):
             state = _state_with([_seg(1, analysis=SegmentAnalysis(key_points=["A"]))])

@@ -46,6 +46,7 @@ class PanelRenderer:
                 f"  风险: {len(state.risks)}",
                 f"  待解决: {len(state.open_questions)}",
                 f"  积压丢弃: {state.dropped_count}",
+                f"  会议总结: {'✅ 已生成' if state.summary else '— 未生成（失败或未开启）'}",
                 f"  过程文档: {doc_path}",
                 "════════════════════════════",
                 "",
@@ -65,7 +66,9 @@ class PanelRenderer:
             text = d.seg.corrected_text or d.seg.raw_text
             lines.append(f"  [{d.seg.started_at:%H:%M:%S}] 校正文本：{text}")
             lines.append("  ── 本段分析 ──")
-            if d.analysis_unavailable:
+            if d.seg.analysis_status == VoiceSegment.ANALYSIS_SKIPPED:
+                lines.append("  ⏭ 短反馈/快速模式，跳过分析")
+            elif d.analysis_unavailable:
                 lines.append("  ⚠ 分析不可用（LLM 调用失败或超时），已显示词典校正原文")
             elif d.seg.analysis is not None and d.seg.analysis.has_content:
                 a = d.seg.analysis

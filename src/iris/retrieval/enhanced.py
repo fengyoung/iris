@@ -151,14 +151,16 @@ class EnhancedRetriever:
                 self._cache.popitem(last=False)
 
     def search(self, query: str, *, top_k: int = 5, mode: str = "local",
-               query_plan: Optional[QueryPlan] = None) -> EnhancedRetrievalResult:
+               query_plan: Optional[QueryPlan] = None,
+               _deadline: Optional[float] = None) -> EnhancedRetrievalResult:
         cache_key = self._cache_key(query, top_k, mode)
         cached = self._cache_get(cache_key)
         if cached is not None:
             return cached
 
         rule_plan = query_plan or self._planner.build(query)
-        effective_plan = self._llm_planner.enhance(rule_plan)
+        # _deadline 透传给 LLM 增强：实时场景（meeting-live-assistant）限制总等待
+        effective_plan = self._llm_planner.enhance(rule_plan, _deadline=_deadline)
         rewritten = self._rewriter.rewrite(query, effective_plan)
         base_result = self._local.search(rewritten.rewritten, top_k=max(top_k * 4, _MIN_LOCAL_CANDIDATES), query_plan=effective_plan)
         hits = self._boost_hits_for_answerability(base_result.hits, query_plan=effective_plan)

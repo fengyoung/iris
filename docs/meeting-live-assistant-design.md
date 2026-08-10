@@ -1,6 +1,6 @@
 # iris meeting-live-assistant — 实时会议助理 方案设计 v1.0
 
-**日期**：2026-08-10 · **状态**：已实现（v3.23.0 落地，v3.23.1 补充修复）· **最终版本**：产品 3.23.1 / 协议 3.16
+**日期**：2026-08-10 · **状态**：已实现（v3.23.0 落地，v3.23.1 补充修复，v3.23.3 全量优化：双段流水线/短段门控/退出加固/结束总结/检索 deadline/长段支持）· **最终版本**：产品 3.23.3 / 协议 3.17
 
 ---
 
@@ -34,7 +34,7 @@
 | 9 | 互斥 | 启动检测 asr-corrector 实例（ProcessRegistry），存在则提示让位退出；自身防重复实例 |
 | 10 | 自动化测试 | 热键注入（CGEventPost 右 Option 61，已验证）驱动端到端测试 |
 | 11 | 配置 | app.json 新增 `assistant` 段（output_dir/top_k/llm_model/poll_interval），带 example |
-| 12 | 过程文档输出 | 实时增量写 Markdown：`--output <path>` > `assistant.output_dir` > `data/meeting-live/YYYYMMDD-HHMM-会议记录.md`；frontmatter + 逐段记录 + 会议累计清单（原子重写保证累计区实时准确） |
+| 12 | 过程文档输出 | 实时增量写 Markdown：`--output <path>` > `assistant.output_dir` > `data/meeting-live/YYYYMMDD-HHMMSS-会议记录.md`；frontmatter + 逐段记录 + 会议累计清单（原子重写保证累计区实时准确） |
 | 13 | 文档同步 | CHANGELOG/CLAUDE/README + 测试数更新 |
 
 **v1 不做**：会后纪要生成 · 连续自动录音 · 自定义触发键 · macOS 通知 · SOURCE 自动归档（`--output` 可指到 SOURCE 目录，归不归用户决定）
@@ -157,7 +157,7 @@ class MeetingState:
 }
 ```
 
-**路径优先级**：`--output <path>` > `assistant.output_dir` > `data/meeting-live/YYYYMMDD-HHMM-会议记录.md`
+**路径优先级**：`--output <path>` > `assistant.output_dir` > `data/meeting-live/YYYYMMDD-HHMMSS-会议记录.md`
 
 ---
 

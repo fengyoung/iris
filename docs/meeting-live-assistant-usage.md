@@ -1,6 +1,6 @@
 # 实时会议助理 — 使用指南
 
-> Iris 3.23.1 · 会议中实时转写 + 逐段提炼要点/风险/问题/决策点 + 提示关键提问，过程实时写入 Markdown 文档。
+> Iris 3.23.3 · 会议中实时转写 + 逐段提炼要点/风险/问题/决策点 + 提示关键提问，过程实时写入 Markdown 文档，退出时自动生成 AI 会议总结。
 
 ## 快速开始
 
@@ -10,16 +10,17 @@ iris meeting-live-assistant
 
 # 2. 按住 vocotype 右 Option 说话（与平时一致），说一段、松开
 # 3. 松开后自动：转写 → 校正 → 知识库检索 → 分析 → 面板实时更新
-# 4. Ctrl+C 结束会议：打印统计帧，过程文档已完整
+# 4. Ctrl+C 结束会议：生成会议总结 → 打印统计帧，过程文档已完整
 ```
 
-> ⚠️ **互斥**：与 `asr-corrector` 同时只能运行一个（都独占剪贴板）。启动时检测到对方实例会提示让位。
+> ⚠️ **互斥**：与 `asr-corrector` 同时只能运行一个（都独占剪贴板）。任一方向启动时检测到对方实例都会提示让位。
 
 ## 命令
 
 ```bash
-iris meeting-live-assistant                    # 默认输出 data/meeting-live/YYYYMMDD-HHMM-会议记录.md
-iris meeting-live-assistant --output ~/会议.md # 自定义路径（可指到 SOURCE 目录归档，自动带 frontmatter）
+iris meeting-live-assistant                          # 默认输出 data/meeting-live/YYYYMMDD-HHMMSS-会议记录.md
+iris meeting-live-assistant --output ~/会议.md       # 自定义路径（可指到 SOURCE 目录归档，自动带 frontmatter）
+iris meeting-live-assistant --fast-only              # 仅词典校正（跳过所有 LLM：深度校正/检索/分析），零延迟零成本
 ```
 
 ## 前置条件
@@ -33,28 +34,38 @@ iris meeting-live-assistant --output ~/会议.md # 自定义路径（可指到 S
 
 ```jsonc
 "assistant": {
-  "output_dir": "",        // 过程文档输出目录（默认 data/meeting-live/，--output 参数优先）
-  "top_k": 5,              // 每段知识库检索条数
-  "llm_model": "",         // 段分析 LLM 模型（空=走全局路由）
-  "poll_interval": 0.5,    // 剪贴板轮询间隔（秒）
-  "doc_rewrite_every": 1   // 每 N 段重写文档（1=每段）
+  "output_dir": "",             // 过程文档输出目录（默认 data/meeting-live/，--output 参数优先）
+  "top_k": 5,                   // 每段知识库检索条数
+  "llm_model": "",              // 段分析 LLM 模型（空=走全局路由）
+  "poll_interval": 0.5,         // 剪贴板轮询间隔（秒）
+  "doc_rewrite_every": 1,       // 每 N 段重写文档（1=每段）
+  "fast_only": false,           // 仅词典校正模式，跳过所有 LLM（CLI --fast-only 优先）
+  "short_segment_chars": 15,    // 短段门控：短于该长度视为确认语，跳过 LLM（零成本排空流水线）
+  "max_segment_chars": 2000,    // 单段长度上限（超长丢弃并警告「请分段说」；默认覆盖 120s 长语音）
+  "dedup_window_seconds": 30.0, // 相同文本去重窗口（超窗视为新段——重复说同一句不丢）
+  "suggest_every": 3,           // 建议提问生成间隔（每 N 段一次，省 token 减重复噪音）
+  "summary_enabled": true       // 退出时生成 AI 会议总结（失败自动跳过）
 }
 ```
 
-**路径优先级**：`--output` > `assistant.output_dir` > `data/meeting-live/YYYYMMDD-HHMM-会议记录.md`
+**路径优先级**：`--output` > `assistant.output_dir` > `data/meeting-live/YYYYMMDD-HHMMSS-会议记录.md`
 
 ## 工作链路
 
 ```
-说话 → vocotype 转写（右 Option 按住-松开）→ 剪贴板 → Iris 特征判定
-  → 词典校正（毫秒级，立即显示）→ LLM 深度校正 ∥ 知识库检索（并行，10s 窗口）
+说话 → vocotype 转写（右 Option 按住-松开）→ 剪贴板 → Iris 特征判定（首 poll 吞存量防幽灵段）
+  → 词典校正（毫秒级，立即显示 + 入上下文窗）→ 提交 LLM 深度校正 ∥ 知识库检索（futures，8s+8s deadline）
+  → 上段分析进行期间，本段的深度校正/检索已在池中运行（双段流水线，每段关键路径 ~15s）
   → LLM 分析（要点/风险/问题/决策点/建议提问，15s deadline）
-  → 终端面板 + 过程文档原子重写
+  → 终端面板 + 过程文档原子重写（唯一 tmp + RLock）
+  → Ctrl+C：等当前段完成 → AI 会议总结（10s deadline）→ 统计帧 → 文档最终写
 ```
+
+**短段门控**：确认语（「好的」「嗯」等，<15 字）跳过全部 LLM 直接落账，面板/文档显示「⏭ 跳过分析」——会议中高频确认语零成本。
 
 **积压策略**：说话快于分析时只处理最新段（中间段丢弃，面板显示「积压丢弃 N 段」），保证追得上会议节奏。
 
-**降级链**：LLM 不可用 → 仅词典校正 + 面板/文档显示「分析不可用」，会议不中断。
+**降级链**：LLM 不可用 → 仅词典校正 + 面板/文档显示「分析不可用」，会议不中断；退出总结失败自动跳过不阻塞。
 
 ## 面板说明
 
@@ -83,12 +94,15 @@ source: meeting-live-assistant
 ---
 ## 📋 会议累计（实时更新）
 ### 关键要点 / 决策点 / 风险 / 待解决问题
+## 📝 会议总结（AI 生成）        ← Ctrl+C 退出时生成
+## 会议主题 / 关键决策 / 待办与后续 / 风险与注意
 ## 🎙 段 1（11:50:23）
 **校正文本**：……
 **要点** / **风险** / **问题** / **决策点** / **建议提问**
 ```
 
-- 原子写入（tmp + rename）：进程中断不损坏旧文件
+- 原子写入（唯一 tmp + rename + 锁）：进程中断不损坏旧文件，并发写也不交错
+- 会议总结：退出时一次 LLM（10s deadline），失败自动跳过；面板最终帧显示生成状态
 - 归档知识库：`--output` 指到 SOURCE 目录（如 `05-会议纪要/`）即带 frontmatter
 - 需要正式纪要时事后另跑 `transcribe-meeting`（本功能只做过程记录，不做会后归档）
 
@@ -104,7 +118,13 @@ A: 检查 vocotype 是否转写并写入剪贴板（用 `verify_hotkey_inject.py
 A: LLM 调用失败或超时（检查 API Key/网络），已降级为词典校正原文，会议不中断。
 
 **Q: 面板「积压丢弃 N 段」是什么？**
-A: 说话快于分析（LLM 3-8s）时自动只处理最新段，保证实时性；丢弃段不进文档。
+A: 说话快于分析时自动只处理最新段，保证实时性；丢弃段不进文档。v3.23.3 双段流水线已把每段关键路径压到 ~15s，且短段（<15 字确认语）零成本，丢弃大幅减少。
+
+**Q: 说了一长段（1 分钟以上）后面板没反应？**
+A: 检查是否超 `max_segment_chars`（默认 2000 字，覆盖 120s 长语音）——超长会警告「请分段说」。更短的停顿分段说效果最好。
+
+**Q: 重复说同一句话，第二遍没进文档？**
+A: `dedup_window_seconds`（默认 30s）内相同文本视为重复自动去重；超过 30s 再说是新段（默认关闭误伤）。
 
 **Q: 不开会能当普通语音输入用吗？**
-A: 可以——它会逐段分析任意 vocotype 语音（不要求会议场景），但专门的输入增强请用 `asr-corrector`。
+A: 可以——它会逐段分析任意 vocotype 语音（不要求会议场景），但专门的输入增强请用 `asr-corrector`（两者互斥，不能同时运行）。

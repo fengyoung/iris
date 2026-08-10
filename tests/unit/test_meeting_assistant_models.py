@@ -42,6 +42,12 @@ class TestVoiceSegment:
         seg = VoiceSegment(seq=1, started_at=datetime(2026, 8, 10), raw_text="文本")
         assert seg.corrected_text == ""
         assert seg.analysis is None
+        assert seg.analysis_status == VoiceSegment.ANALYSIS_PENDING  # 默认 pending
+
+    def test_analysis_status_constants(self):
+        assert VoiceSegment.ANALYSIS_DONE == "done"
+        assert VoiceSegment.ANALYSIS_FAILED == "failed"
+        assert VoiceSegment.ANALYSIS_SKIPPED == "skipped"
 
     def test_missing_required_raises(self):
         import pytest
@@ -87,6 +93,12 @@ class TestMeetingState:
         state.add_analysis(_make_segment(1, analysis=SegmentAnalysis(key_points=["x"])))
         assert state.dropped_count == 3
 
+    def test_summary_default_empty(self):
+        state = MeetingState()
+        assert state.summary == ""
+        state.summary = "## 会议主题\n..."
+        assert state.summary.startswith("## 会议主题")
+
 
 class TestAssistantConfig:
     def test_defaults(self):
@@ -96,14 +108,26 @@ class TestAssistantConfig:
         assert cfg.llm_model == ""
         assert cfg.poll_interval == 0.5
         assert cfg.doc_rewrite_every == 1
+        # v3.23.3 新增
+        assert cfg.fast_only is False
+        assert cfg.short_segment_chars == 15
+        assert cfg.max_segment_chars == 2000
+        assert cfg.dedup_window_seconds == 30.0
+        assert cfg.suggest_every == 3
+        assert cfg.summary_enabled is True
 
     def test_overrides(self):
         cfg = AssistantConfig.from_app_config(
-            {"top_k": 8, "output_dir": "/tmp/x", "unknown_field": "ignored"}
+            {"top_k": 8, "output_dir": "/tmp/x", "unknown_field": "ignored",
+             "fast_only": True, "short_segment_chars": 50, "summary_enabled": False}
         )
         assert cfg.top_k == 8
         assert cfg.output_dir == "/tmp/x"
+        assert cfg.fast_only is True
+        assert cfg.short_segment_chars == 50
+        assert cfg.summary_enabled is False
 
     def test_non_dict_safe(self):
         cfg = AssistantConfig.from_app_config(None)
         assert cfg.top_k == 5
+        assert cfg.fast_only is False

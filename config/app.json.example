@@ -84,7 +84,13 @@
     "llm_model": "",
     "poll_interval": 0.5,
     "doc_rewrite_every": 1,
-    "_note": "实时会议助理（meeting-live-assistant）。output_dir: 过程文档输出目录（默认 data/meeting-live/，--output 参数优先）；top_k: 每段知识库检索条数；llm_model: 段分析 LLM 模型（空=走全局路由）；poll_interval: 剪贴板轮询间隔（秒）；doc_rewrite_every: 每 N 段重写过程文档（1=每段）。"
+    "fast_only": false,
+    "short_segment_chars": 15,
+    "max_segment_chars": 2000,
+    "dedup_window_seconds": 30.0,
+    "suggest_every": 3,
+    "summary_enabled": true,
+    "_note": "实时会议助理（meeting-live-assistant）。output_dir: 过程文档输出目录（默认 data/meeting-live/，--output 参数优先）；top_k: 每段知识库检索条数；llm_model: 段分析 LLM 模型（空=走全局路由）；poll_interval: 剪贴板轮询间隔（秒）；doc_rewrite_every: 每 N 段重写过程文档（1=每段）；fast_only: 仅词典校正模式跳过所有 LLM（CLI --fast-only 优先）；short_segment_chars: 短段门控，校正后短于该长度视为确认语跳过 LLM；max_segment_chars: 单段长度上限（超长丢弃并警告，默认覆盖 120s 长语音）；dedup_window_seconds: 相同文本去重窗口（超窗视为新段）；suggest_every: 建议提问生成间隔（每 N 段一次）；summary_enabled: 退出时生成 AI 会议总结（失败自动跳过）。"
   },
   "safety": {
     "protect_read_only_sources": true,

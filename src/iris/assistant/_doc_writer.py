@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -13,13 +15,15 @@ from .models import MeetingState, SegmentAnalysis, VoiceSegment
 class DocWriter:
     """每次 maybe_rewrite 从 MeetingState（内存事实源）全量渲染并原子写入。
 
-    原子写：同目录 .tmp + os.replace —— 进程中断时旧文件安全、tmp 残留无害。
+    原子写：同目录唯一名 .tmp + os.replace —— 进程中断时旧文件安全、tmp 残留无害。
+    并发防御：实例 RLock 串行化 + tempfile 唯一 tmp 名 —— 即使出现并发写也不交错损坏。
     """
 
     def __init__(self, path: Path, rewrite_every: int = 1):
         self._path = Path(path)
         self._rewrite_every = max(1, rewrite_every)
         self._last_segment_count = 0
+        self._lock = threading.RLock()
 
     @property
     def path(self) -> Path:
@@ -69,6 +73,12 @@ class DocWriter:
             *DocWriter._bullets("待解决问题", state.open_questions),
             "",
         ]
+        if state.summary:
+            parts += [
+                "## 📝 会议总结（AI 生成）",
+                state.summary.strip(),
+                "",
+            ]
         for seg in state.segments:
             parts.extend(DocWriter._render_segment(seg))
         if state.dropped_count:
@@ -89,7 +99,9 @@ class DocWriter:
             f"**校正文本**：{seg.corrected_text or seg.raw_text}",
         ]
         analysis: Optional[SegmentAnalysis] = seg.analysis
-        if analysis is None:
+        if seg.analysis_status == VoiceSegment.ANALYSIS_SKIPPED:
+            lines.append("**分析**：⏭（短反馈/快速模式，跳过分析）")
+        elif analysis is None:
             lines.append("**分析**：⚠ 分析不可用（LLM 调用失败或超时）")
         else:
             for label, field in (
@@ -103,16 +115,19 @@ class DocWriter:
                     lines.append(f"**{label}**：" + "；".join(field))
         return lines
 
-    @staticmethod
-    def _atomic_write(path: Path, content: str) -> bool:
-        tmp = path.with_name(path.name + ".tmp")
-        try:
-            tmp.write_text(content, encoding="utf-8")
-            os.replace(tmp, path)
-            return True
-        except Exception:
+    def _atomic_write(self, path: Path, content: str) -> bool:
+        # RLock 串行化（并发写不交错）+ 唯一 tmp 名（同目录保证同文件系统，os.replace 原子）
+        with self._lock:
+            fd, tmp_name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
+            tmp = Path(tmp_name)
             try:
-                tmp.unlink(missing_ok=True)
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(content)
+                os.replace(tmp, path)
+                return True
             except Exception:
-                pass
-            raise
+                try:
+                    tmp.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                raise

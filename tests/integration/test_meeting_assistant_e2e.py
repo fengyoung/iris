@@ -42,8 +42,17 @@ def _make_assistant(config_bundle, tmp_path, *, llm, pid_dir=None):
         llm_service=llm,
         pid_dir=pid_dir or (tmp_path / "pids"),
     )
+    # 固定建议提问间隔=1：保证每段都生成，e2e 断言与用户 app.json 配置解耦
+    assistant._cfg = assistant._cfg.model_copy(update={"suggest_every": 1})
     (tmp_path / "pids").mkdir(exist_ok=True)
     return assistant
+
+
+def _process_drained(assistant, seg):
+    """直调 _process_segment 后清空 pending 槽（真实运行由 worker take_pending 消费，
+    测试直调不经过 worker，残留 pending 会让下一次 submit 误计 dropped_count）。"""
+    assistant._process_segment(seg)
+    assistant._session.take_pending(timeout=0)
 
 
 class TestEndToEnd:
@@ -63,9 +72,9 @@ class TestEndToEnd:
         assistant = _make_assistant(config_bundle, tmp_path, llm=_FakeLLM())
         # 显式驱动两段（避免 worker 积压丢弃语义干扰端到端断言）
         seg1 = assistant._session.submit(_ASR_SEGMENTS[0])
-        assistant._process_segment(seg1)
+        _process_drained(assistant, seg1)
         seg2 = assistant._session.submit(_ASR_SEGMENTS[1])
-        assistant._process_segment(seg2)
+        _process_drained(assistant, seg2)
 
         state = assistant._session.state
         assert len(state.segments) == 2
@@ -106,7 +115,7 @@ class TestDegrade:
             config_bundle, tmp_path, llm=_FakeLLM(raise_on_generate=True))
         # 先处理一段（分析失败 → 降级块），再优雅退出
         seg = assistant._session.submit(_ASR_SEGMENTS[0])
-        assistant._process_segment(seg)
+        _process_drained(assistant, seg)
         assert seg.analysis is None
         with patch.object(assistant, "_poll_loop", side_effect=KeyboardInterrupt):
             assert assistant.run() == 0
@@ -157,3 +166,11 @@ class TestCliRegistration:
             ["meeting-live-assistant", "--output", "data/meeting.md"])
         assert args.command == "meeting-live-assistant"
         assert args.output == "data/meeting.md"
+
+    def test_parser_accepts_fast_only(self):
+        from iris.app._cli_main import build_parser
+        parser = build_parser()
+        args = parser.parse_args(["meeting-live-assistant", "--fast-only"])
+        assert args.fast_only is True
+        args2 = parser.parse_args(["meeting-live-assistant"])
+        assert args2.fast_only is False

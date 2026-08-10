@@ -1,3 +1,45 @@
+## v3.23.3 (2026-08-10)
+
+meeting-live-assistant 全量优化（21 文件 / +700 -100 + 测试 +34）：双段流水线 + 检索 deadline + 退出加固 + 结束总结 + 互斥对称。
+
+### 1. 背景
+
+v3.23.0 实时会议助理上线后全量体检（代码审查）发现的真实问题：
+
+- **退出竞态**：Ctrl+C 后 worker join 仅 5s，而单段处理最长 ~25s（并行窗 10s + 分析 deadline 15s）→ 尾段几乎必丢；主线程 force rewrite 与存活 worker 并发写**同一个 .tmp 文件** → 文档可能损坏
+- **`pool.shutdown(wait=True)` 可永久阻塞**：检索链路 `LLMQueryPlanner._call_llm_enhance` 是全链路唯一无 `_deadline` 的 LLM 调用，provider 挂起 → 池槽占死 + 退出卡死
+- **>500 字长段静默丢弃**：`_is_asr_text` 上限 500 与 v3.22.5 的 120s 长语音支持矛盾，且助理侧零日志
+- **互斥不对称**：asr-corrector 启动不探测 meeting-live-assistant（反向有探测）
+- 同分钟重启覆盖文档 / 段异常不落账 / 启动幽灵段 / 相同文本永久去重 / 每段 3 次 LLM 串行 ~25s
+
+### 2. 改动
+
+**双段流水线（预取预跑）**：`_prefetch`（poll 线程）提交段后立即 fast 校正入窗 + 提交 deep/检索 futures（`_futures` 按 seq 登记，worker 消费后 pop）；段 N 分析期间段 N+1 的深度校正与检索已在池中 → 每段关键路径 ~25s → ~15s 且深度重叠。短段门控（`short_segment_chars=15`）与 `--fast-only`：确认语/快速模式跳过全部 LLM，`analysis_status="skipped"` 直接落账。
+
+**退出路径加固**：`run()` finally 按「request_stop → worker.join(27s 覆盖分析 deadline) → 会议总结(10s deadline，失败跳过) → force rewrite（无并发写）→ pool.shutdown（有界返回）」顺序执行；DocWriter 原子写改唯一 tmp（tempfile）+ 实例 RLock，并发写不可能损坏。
+
+**会议结束自动总结**：新模板 `templates/prompt/meeting_live_summary.md`（+ prompting.py 同构兜底），`SegmentAnalyzer.summarize(state)` 退出时一次 LLM → `MeetingState.summary` → 文档「📝 会议总结（AI 生成）」区（会议累计之后）；失败自动跳过。
+
+**检索 deadline（根治挂起/卡死）**：`LLMQueryPlanner.enhance(_deadline=None)` 透传 → `provider.generate(_deadline=...)`（默认 None 不影响 QA 主路径）；`EnhancedRetriever.search(_deadline)`；`RetrieverAdapter.search` 传 `now+8s`。
+
+**采集增强**：`max_segment_chars=2000` 覆盖 120s 长语音（超长警告「请分段说」）；首 poll 预读吞存量（抑制启动幽灵段）；`dedup_window_seconds=30` 限时去重（重复说同一句不再丢）。
+
+**杂项**：对称互斥（corrector `run_forever` 启动前 `_pid_alive` 探测 meeting-live-assistant）；文件名带秒（同分钟重启不覆盖）；`_process_segment` phase 守卫（deep 异常→fast、检索异常→[]、落账异常→日志，段不丢）；`suggest_every=3` 建议提问间隔化；面板首帧「等待语音…」；最终帧含总结状态。
+
+### 3. 测试
+
+- 新增/更新 +34：clipboard（max_len/幽灵段/去重窗口）、live（短段门控/fast_only/预取消费/stale 清理/deep 异常落账/suggest_every/退出总结三态）、analyzer（summarize 成功/失败/空结果）、doc_writer（总结区/skipped 文案）、models（新字段默认值）、corrector（`_pid_alive` 四态）、planner（`_deadline` 透传/默认 None）、e2e（`--fast-only` 解析 + pending 槽排空语义修正）。
+- 验证：unit 全量 **1,393 通过**（+31），integration 240（+1），根目录 1,114（+2），合计 2,747 全过；ruff 通过（改动文件）。
+
+### 版本升级
+
+| 版本 | 值 | 理由 |
+|------|:---:|------|
+| 产品版本 | 3.23.2 → **3.23.3** | meeting-live-assistant 全量优化 |
+| 协议版本 | 3.16 → **3.17** | 新增 `--fast-only` 参数（沿用 v3.20.0 先例） |
+
+---
+
 ## v3.23.2 (2026-08-10)
 
 wiki-update 备份文件全链路过滤（5 文件 / +11 -4 + 回归测试 3 个）。
