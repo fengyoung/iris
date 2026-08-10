@@ -93,7 +93,7 @@ python scripts/run_cli.py daily-start
 | 提醒 | `reminders` | 主动提醒：栏目断供 / 成员周报缺失 / 项目停滞（零 LLM 成本，daily-start 已集成） |
 | 系统 | `daily-start`, `check-config`, `status`, `diagnose` | 日常维护（含图谱增量刷新）/ 配置检查 |
 | ASR 校正 | `asr-corrector`, `asr-audit`, `asr-report` | vocotype 实时语音转写纠错润色（[使用指南](docs/asr-corrector-usage.md)） |
-| 会议助理 | `meeting-live-assistant` | 实时会议助理：逐段提炼要点/风险/决策点 + 提示关键提问 + 过程文档（[方案设计](docs/meeting-live-assistant-design.md)） |
+| 会议助理 | `meeting-live-assistant` | 实时会议助理：逐段提炼要点/风险/决策点 + 提示关键提问 + 过程文档（[使用指南](docs/meeting-live-assistant-usage.md) · [方案设计](docs/meeting-live-assistant-design.md)） |
 
 ## 知识库结构
 
