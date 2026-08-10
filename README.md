@@ -1,8 +1,10 @@
-# Iris 3.23.0
+# Iris 3.23.1
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
+
+**v3.23.1** — 遗留修复 + 使用指南：① asr-corrector Ctrl+C 修复（Python 3.13 SIGINT 无法中断 `time.sleep`，`run_forever` 显式注册 handler，Ctrl+C 可靠优雅退出）；② `scripts/verify_hotkey_inject.py` 纳入版本控制（CGEventPost 热键注入验证工具，须 `--keycode 61` 右 Option）；③ 会议助理[使用指南](docs/meeting-live-assistant-usage.md)。测试全量 2,709 用例（2,708 通过）。协议版本 3.16（不变）。
 
 **v3.23.0** — 实时会议助理 `meeting-live-assistant`：会议中按住 vocotype 热键说话，松开即逐段转写 → ASR 校正（词典 + LLM）→ 知识库检索 → LLM 分析（要点/风险/问题/决策点/建议提问）→ 终端面板实时提示 + Markdown 过程文档实时写入（`--output` > `assistant.output_dir` > `data/meeting-live/`）。积压丢弃策略（分析慢于说话时只处理最新段）+ 与 asr-corrector 运行时互斥（独占剪贴板）。测试 +63（合计 2,709 用例）。协议版本 3.15→3.16。
 

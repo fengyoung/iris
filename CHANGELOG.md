@@ -1,3 +1,30 @@
+## v3.23.1 (2026-08-10)
+
+遗留修复 + 使用指南（4 文件 / +311）。
+
+### 1. 背景
+
+v3.23.0 发布后发现两个遗留问题：asr-corrector 的 Ctrl+C 在 Python 3.13 下可能失效（与会议助理同款的 SIGINT 问题）；`scripts/verify_hotkey_inject.py` 验证脚本未纳入版本控制。
+
+### 2. 改动（文件路径）
+
+- **asr-corrector Ctrl+C 修复**（`src/iris/wiki/asr/corrector.py`）：Python 3.13 默认 SIGINT 处理无法中断 `time.sleep`（主线程睡眠时不抛 KeyboardInterrupt，进程对 Ctrl+C 无反应、pid 文件不清理）→ `run_forever` 显式注册 `signal.signal(SIGINT, raise KeyboardInterrupt)`。真机验证：SIGINT → 「校正引擎已停止」→ pid 清理
+- **`scripts/verify_hotkey_inject.py` 纳入版本控制**：CGEventPost 热键注入验证工具（端到端测试/复现 vocotype 按住说话，须 `--keycode 61` 右 Option）；补充「纯修饰键热键注入左 Option 无反应」实测提示
+- **使用指南 `docs/meeting-live-assistant-usage.md`**（按 asr-corrector-usage.md 惯例）：快速开始 / 命令 / 前置条件 / 配置 / 工作链路 / 面板说明 / 过程文档 / 常见问题；README 补链接
+
+### 3. 测试
+
+无新增用例（行为修复）：ASR 相关 194 个 + 全量 2,708 通过（1 个 feed 既有失败与本次无关）。
+
+### 版本升级
+
+| 版本 | 值 | 理由 |
+|------|:---:|------|
+| 产品版本 | 3.23.0 → 3.23.1 | 修复 asr-corrector 3.13 SIGINT + 工具脚本纳入版本控制 |
+| 协议版本 | 3.16（不变） | 无命令变更 |
+
+---
+
 ## v3.23.0 (2026-08-10)
 
 实时会议助理 `iris meeting-live-assistant`：会议中实时提炼要点/风险/决策点并提示关键提问（23 文件 / +2,080）。
@@ -17,11 +44,6 @@
 ### 3. 测试
 
 新测试 +63（unit +56：models 11 / session 9 / clipboard 6 / analyzer 11 / doc_writer 10 / live 9；integration +7 端到端：两段全链路、LLM 降级、互斥启动、CLI 注册）。验证：新增 63 全过，unit 全量 1,360（1 个 feed 既有失败与本改动无关），integration 全量 237 全过；真机冒烟：启动 → SIGINT 优雅退出（统计帧 + pid 清理 + 文档保留），asr-corrector 在跑时让位。
-
-### 4. 遗留修复（发布后补丁，版本号不变）
-
-- **asr-corrector Ctrl+C 修复**（`src/iris/wiki/asr/corrector.py`）：Python 3.13 默认 SIGINT 处理无法中断 `time.sleep`（开发会议助理时发现并修复，同款问题在 asr-corrector 的 `run_forever` 同样存在）→ 显式 `signal.signal(SIGINT, raise KeyboardInterrupt)`。真机验证：SIGINT → 「校正引擎已停止」→ pid 清理
-- **`scripts/verify_hotkey_inject.py` 纳入版本控制**：CGEventPost 热键注入验证工具（端到端测试/复现 vocotype 按住说话，须 `--keycode 61` 右 Option）；提交时补充「纯修饰键热键注入左 Option 无反应」的实测提示
 
 ### 版本升级
 
