@@ -51,6 +51,7 @@ v3.23.0 发布后发现两个遗留问题：asr-corrector 的 Ctrl+C 在 Python 
 |------|:---:|------|
 | 产品版本 | 3.22.5 → 3.23.0 | 新增实时会议助理功能 |
 | 协议版本 | 3.15 → 3.16 | 新增 meeting-live-assistant 命令 |
+| 数据版本 | app 3.4 → 3.5 | 新增 assistant 配置段（output_dir/top_k/llm_model/poll_interval/doc_rewrite_every），与 v3.19.26 reminders 段先例一致 |
 
 ---
 

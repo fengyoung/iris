@@ -124,7 +124,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 |------|------|:---:|------|
 | **产品版本** | `pyproject.toml` | 3.23.1 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.16 | CLI 命令集 / agent-spec 格式 |
-| **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
+| **数据版本** | `config/*.json` | 3.3/3.5 | 配置文件 Schema |
 
 > 只有真正发生变化的层才递增版本号。
 
