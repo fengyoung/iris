@@ -1,3 +1,39 @@
+## v3.22.5 (2026-08-10)
+
+ASR 校正引擎热键门控修复：长语音不再被跳过（2 文件 / +215 -4）。
+
+### 1. 背景
+
+用户按住热键让 vocotype 输入 1 分多钟语音，转写结果写入剪贴板后被 asr-corrector 跳过：
+
+```
+[Iris] 📋 剪贴板变化 (19 字): 下半年的话，还是取得了非常不错的成绩。
+[Iris] ⏭ 跳过：不在监听窗口 (held=False, released_at=0.0, elapsed=1669928.18s)
+```
+
+两个叠加问题：
+- **热键监听失效即全跳过（P0 bug）**：CGEventTap 无事件流入（辅助功能权限缺失等）时 `start()` 返回 False，但 `run_forever` 只打印警告未置空监听器；`_tick` 门控按「配置了热键（mask>0）」而非「监听器可用」判定 → `in_listen_window` 恒 False → 此后所有剪贴板变化一律跳过。设计意图的「降级为内容特征判定」分支只覆盖热键配置为空的情况，没覆盖启动失败。
+- **3 秒监听窗口装不下长语音（设计缺陷）**：vocotype 为「松开热键后才开始转写」，1 分钟语音的转写+写剪贴板耗时远超固定 `_LISTEN_WINDOW_SEC = 3.0`，即使热键正常也会被跳过。
+
+### 2. 改动（`src/iris/wiki/asr/corrector.py`）
+
+- **门控降级修复**：`run_forever` 中 `CGEventTap.start()` 失败时置空 `self._hotkey_monitor`（并提示权限）；`_tick` 门控判定从 `self._hotkey_mask > 0` 改为 `self._hotkey_monitor is not None`——监听器不可用时放行，改由内容特征判定（`_is_asr_text` + 富文本检查）兜底。
+- **长语音窗口**：新增 `_listen_window_sec()` = `max(3s, min(按住时长, 120s))`；`_HotkeyMonitor` 记录按下时刻（flagsChanged / keyDown 分支）并暴露 `hold_duration` 属性。1 分钟语音 → 释放后 60s 内的剪贴板变化仍被处理。
+
+### 3. 测试
+
+- `tests/unit/test_asr_corrector.py` +13 用例（3 个新测试类）：`TestListenWindow`（基础 3s / 长语音放宽 / 120s 上限截断）、`TestHotkeyMonitorHoldDuration`（按住时长计算）、`TestListenWindowGateFallback`（监听器不可用降级放行 / 可用且超窗口仍跳过 / 长语音窗口内放行 / 超过 120s 上限后跳过）。
+- 验证：全部 ASR 相关测试 183 个 + 单元测试全量 **1,304 用例全通过**（unit 1,291 → 1,304）。
+
+### 版本升级
+
+| 层 | 旧版本 | 新版本 | 理由 |
+|------|:---:|:---:|------|
+| 产品版本 | 3.22.4 | **3.22.5** | ASR 校正热键门控 P0 bug 修复 + 长语音窗口 |
+| 协议版本 | 3.15 | 3.15（不变） | 无新增 CLI 命令 |
+
+---
+
 ## v3.22.4 (2026-08-10)
 
 周报提取主题日期不一致自动标注（2 文件 / +60 行）。

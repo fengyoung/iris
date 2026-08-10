@@ -235,3 +235,184 @@ class TestAsrTextDetectionEdgeCases:
     def test_double_semicolons_blocked(self):
         """多个分号应被拦截。"""
         assert not _is_asr_text("a; b; c; d; e; f; g; h")
+
+
+class TestListenWindow:
+    """监听窗口：基础 3s + 长语音按按住时长放宽（上限 120s）。
+
+    vocotype 为「松开热键后才开始转写」，1 分钟语音的转写+写剪贴板
+    耗时远超固定 3s 窗口，因此窗口与说话时长挂钩。
+    """
+
+    def _win(self, hold):
+        from iris.wiki.asr.corrector import _listen_window_sec
+        return _listen_window_sec(hold)
+
+    def test_no_hold_baseline(self):
+        assert self._win(0.0) == 3.0
+
+    def test_short_hold_keeps_baseline(self):
+        assert self._win(1.5) == 3.0
+
+    def test_long_hold_scales_with_speech(self):
+        assert self._win(60.0) == 60.0
+
+    def test_hold_capped_at_max(self):
+        assert self._win(300.0) == 120.0
+
+    def test_hold_exact_baseline(self):
+        assert self._win(3.0) == 3.0
+
+
+class TestHotkeyMonitorHoldDuration:
+    """热键按住时长计算（纯字段逻辑，不依赖 CGEventTap）。"""
+
+    def _make(self):
+        from iris.wiki.asr.corrector import _HotkeyMonitor
+        return _HotkeyMonitor(0, 0)
+
+    def test_never_pressed(self):
+        assert self._make().hold_duration == 0.0
+
+    def test_pressed_but_not_released(self):
+        m = self._make()
+        with m._lock:
+            m._pressed_at = 100.0
+        assert m.hold_duration == 0.0
+
+    def test_hold_duration_after_release(self):
+        m = self._make()
+        with m._lock:
+            m._pressed_at = 100.0
+            m._released_at = 160.0
+        assert m.hold_duration == 60.0
+
+    def test_release_without_press(self):
+        m = self._make()
+        with m._lock:
+            m._released_at = 50.0
+        assert m.hold_duration == 0.0
+
+
+class TestListenWindowGateFallback:
+    """热键监听器不可用（CGEventTap 启动失败）时降级为内容特征判定，不跳过。
+
+    回归：此前 start() 失败只打印警告未置空 _hotkey_monitor，
+    _tick 门控仍按配置 mask 判定 → in_listen_window 恒 False →
+    所有剪贴板变化（含真实 ASR 输出）一律被「不在监听窗口」跳过。
+    """
+
+    def _make_corrector(self):
+        from iris.wiki.asr.corrector import AsrCorrector
+        return AsrCorrector({}, mode="fast")
+
+    def test_monitor_none_does_not_skip(self, monkeypatch, capsys):
+        import iris.wiki.asr.corrector as corrector_mod
+        c = self._make_corrector()
+        # 模拟：热键已配置但 CGEventTap 启动失败 → _hotkey_monitor 被置空
+        c._hotkey_mask = 0x20000  # Shift，非零即可
+        c._hotkey_monitor = None
+        c._last_text = ""
+        c._last_corrected = ""
+
+        monkeypatch.setattr(
+            corrector_mod, "_read_clipboard",
+            lambda: "嗯就是那个然后我们继续做下去",
+        )
+        monkeypatch.setattr(corrector_mod, "_looks_like_written_chinese", lambda t: False)
+        monkeypatch.setattr(corrector_mod, "_clipboard_has_rich_text", lambda: False)
+
+        c._tick()
+        err = capsys.readouterr().err
+        assert "跳过" not in err  # 未被「不在监听窗口」拦截
+        assert c._last_text == "嗯就是那个然后我们继续做下去"  # 已进入校正流程
+
+    def test_monitor_available_and_out_of_window_still_skips(self, monkeypatch, capsys):
+        """对照：监听器可用且超出窗口时仍应跳过（门控未被废掉）。
+
+        time.monotonic 固定为 1000.0（消除对开机时长的依赖）：
+        释放于 100.0 → elapsed=900s，超出任何窗口 → 必须跳过。
+        """
+        import iris.wiki.asr.corrector as corrector_mod
+        from iris.wiki.asr.corrector import _HotkeyMonitor
+        c = self._make_corrector()
+        c._hotkey_mask = 0x20000
+        monitor = _HotkeyMonitor(0x20000, 0)
+        with monitor._lock:
+            monitor._held = False
+            monitor._pressed_at = 100.0
+            monitor._released_at = 100.0  # 释放时刻距今远超窗口
+        c._hotkey_monitor = monitor
+        c._last_text = ""
+        c._last_corrected = ""
+
+        monkeypatch.setattr(corrector_mod.time, "monotonic", lambda: 1000.0)
+        monkeypatch.setattr(
+            corrector_mod, "_read_clipboard",
+            lambda: "嗯就是那个然后我们继续做下去",
+        )
+        monkeypatch.setattr(corrector_mod, "_looks_like_written_chinese", lambda t: False)
+        monkeypatch.setattr(corrector_mod, "_clipboard_has_rich_text", lambda: False)
+
+        c._tick()
+        err = capsys.readouterr().err
+        assert "跳过：不在监听窗口" in err
+        # _last_text 在门控前更新（防抖：跳过的内容标记为已见，避免下轮重复处理），
+        # 未进入校正流程的信号是：没有词典处理输出
+        assert "词典无命中" not in err and "✅" not in err
+
+    def test_long_hold_keeps_window_open(self, monkeypatch, capsys):
+        """长语音：1 分钟按住 → 窗口放宽到 60s，释放后 30s 剪贴板变化仍被处理。"""
+        import iris.wiki.asr.corrector as corrector_mod
+        from iris.wiki.asr.corrector import _HotkeyMonitor
+        c = self._make_corrector()
+        c._hotkey_mask = 0x20000
+        monitor = _HotkeyMonitor(0x20000, 0)
+        with monitor._lock:
+            monitor._held = False
+            monitor._pressed_at = 100.0
+            monitor._released_at = 160.0  # 按住 60s，30s 前释放
+        c._hotkey_monitor = monitor
+        c._last_text = ""
+        c._last_corrected = ""
+
+        monkeypatch.setattr(corrector_mod.time, "monotonic", lambda: 190.0)
+        monkeypatch.setattr(
+            corrector_mod, "_read_clipboard",
+            lambda: "嗯就是那个然后我们继续做下去",
+        )
+        monkeypatch.setattr(corrector_mod, "_looks_like_written_chinese", lambda t: False)
+        monkeypatch.setattr(corrector_mod, "_clipboard_has_rich_text", lambda: False)
+
+        c._tick()
+        err = capsys.readouterr().err
+        assert "跳过" not in err  # 30s < 窗口 60s → 放行
+        assert c._last_text == "嗯就是那个然后我们继续做下去"
+
+    def test_long_hold_window_expired_after_120s(self, monkeypatch, capsys):
+        """长语音窗口上限 120s：释放后 130s（>120s）剪贴板变化仍被跳过。"""
+        import iris.wiki.asr.corrector as corrector_mod
+        from iris.wiki.asr.corrector import _HotkeyMonitor
+        c = self._make_corrector()
+        c._hotkey_mask = 0x20000
+        monitor = _HotkeyMonitor(0x20000, 0)
+        with monitor._lock:
+            monitor._held = False
+            monitor._pressed_at = 100.0
+            monitor._released_at = 160.0
+        c._hotkey_monitor = monitor
+        c._last_text = ""
+        c._last_corrected = ""
+
+        monkeypatch.setattr(corrector_mod.time, "monotonic", lambda: 290.0)
+        monkeypatch.setattr(
+            corrector_mod, "_read_clipboard",
+            lambda: "嗯就是那个然后我们继续做下去",
+        )
+        monkeypatch.setattr(corrector_mod, "_looks_like_written_chinese", lambda t: False)
+        monkeypatch.setattr(corrector_mod, "_clipboard_has_rich_text", lambda: False)
+
+        c._tick()
+        err = capsys.readouterr().err
+        assert "跳过：不在监听窗口" in err
+        assert "词典无命中" not in err and "✅" not in err

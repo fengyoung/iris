@@ -1,4 +1,4 @@
-# Iris 3.22.4 — 项目执行说明
+# Iris 3.22.5 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~32,000 行 / 153 文件 / 25 模块 · CLI 50 命令 · 单元测试 2,633（131 文件）· 覆盖率 62%+ · 10 个项目级 Skill · Wiki 222 页 · 知识图谱节点 220 / 关系边 1,858（wikilink 1,225 + LLM 633） · 数据源 822 文档 / 5,939 Chunk（text-embedding-v3 / 1,024 维）
+~32,000 行 / 153 文件 / 25 模块 · CLI 50 命令 · 单元测试 2,646（131 文件）· 覆盖率 62%+ · 10 个项目级 Skill · Wiki 222 页 · 知识图谱节点 220 / 关系边 1,858（wikilink 1,225 + LLM 633） · 数据源 822 文档 / 5,939 Chunk（text-embedding-v3 / 1,024 维）
 
 **近期新增能力**：YAML frontmatter 标准化注入（`core/frontmatter.py`）· 批量 frontmatter 补全（`core/frontmatter_batch.py`，正则+LLM+wikilink+备份恢复）· wikilink 自动注入引擎（`wiki/wikilink_injector.py`，零 LLM 成本）· LLM 用量追踪（SQLite WAL + embedding 纳入）· LLM 响应缓存 + embedding 向量缓存（LRU + TTL）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（`memory_updater.py` + `session_miner.py`，双通道架构）· 多 Agent 并发安全（FileLock + SQLite WAL + Agent 隔离）· ASR 实时校正引擎（Aho-Corasick + LLM 编辑助手 + 反馈反向优化）· CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit · constraints.txt 可复现构建
 
@@ -122,7 +122,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.22.4 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.22.5 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.15 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
@@ -143,8 +143,8 @@ iris3/
 ├── src/iris/          # 25 模块（见下）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
-├── tests/             # 2,630 用例，131 文件
-│   ├── unit/          #   纯逻辑单元测试（1,291 用例，<10s）
+├── tests/             # 2,646 用例，131 文件
+│   ├── unit/          #   纯逻辑单元测试（1,304 用例，<10s）
 │   └── integration/   #   集成测试（230 用例）
 ├── config/            # *.json gitignored，*.example 版本控制
 ├── data/              # 运行时数据（全 gitignore）
@@ -167,7 +167,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.22.4 (2026-08-10)** — 周报提取主题日期不一致自动标注（2 文件 / +60 行）：① 背景 — 提取 W32 成员周报发现李嘉晨 08-07 发送邮件主题仍写「20260731」（复制上周标题未改日期），归档后易误读为错误周期；② 改动 — `scripts/extract_weekly_reports.py` 新增 `_subject_date_mismatch_note` 静态方法（正则提取主题 `YYYYMMDD`/`YYYY-MM-DD` 日期，兼容时区，与发送日期比较），`generate_content` 邮件信息栏不一致时自动加注「⚠️ 主题日期与发送日期不一致」，一致或无日期不加注（零噪音）；③ 测试 +4（`test_weekly_report_extract.py` 12→16 用例）。验证：全量 2,630→2,633 测试全通过（unit 1,291 / integration 230 / 根目录 1,112）。协议版本 3.15（不变）。产品版本 3.22.3→3.22.4。
+**当前 v3.22.5 (2026-08-10)** — ASR 校正引擎热键门控修复（2 文件 / +215 -4）：① 背景 — 用户按住热键让 vocotype 输入 1 分多钟语音，转写写入剪贴板后被「不在监听窗口」跳过（held=False, released_at=0.0）；② 根因双叠 — CGEventTap 启动失败（辅助功能权限缺失）时只警告未置空监听器，`_tick` 门控按配置 mask 而非监听器可用性判定 → `in_listen_window` 恒 False 全部跳过；且固定 3s 监听窗口装不下长语音的转写耗时；③ 改动 — `run_forever` start 失败置空 `_hotkey_monitor` 降级为内容特征判定（`_is_asr_text` + 富文本检查兜底）；`_HotkeyMonitor` 记录按下时刻暴露 `hold_duration`，监听窗口 = `max(3s, min(按住时长, 120s))`，1 分钟语音释放后 60s 内剪贴板变化仍处理；④ 测试 +13（`test_asr_corrector.py` 3 个新测试类）。验证：ASR 相关 183 个 + 单元测试 1,304 全通过（unit 1,291→1,304）。协议版本 3.15（不变）。产品版本 3.22.4→3.22.5。
+
+**v3.22.4 (2026-08-10)** — 周报提取主题日期不一致自动标注（2 文件 / +60 行）：① 背景 — 提取 W32 成员周报发现李嘉晨 08-07 发送邮件主题仍写「20260731」（复制上周标题未改日期），归档后易误读为错误周期；② 改动 — `scripts/extract_weekly_reports.py` 新增 `_subject_date_mismatch_note` 静态方法（正则提取主题 `YYYYMMDD`/`YYYY-MM-DD` 日期，兼容时区，与发送日期比较），`generate_content` 邮件信息栏不一致时自动加注「⚠️ 主题日期与发送日期不一致」，一致或无日期不加注（零噪音）；③ 测试 +4（`test_weekly_report_extract.py` 12→16 用例）。验证：全量 2,630→2,633 测试全通过（unit 1,291 / integration 230 / 根目录 1,112）。协议版本 3.15（不变）。产品版本 3.22.3→3.22.4。
 
 **v3.22.3 (2026-08-07)** — 知识库全面体检修复（5 文件 / +152 -6）：① 检索索引死数据修复 — `chunker.py` 全量重建时误执行「保留未变更旧 chunk」分支，把已删除/已归档迁移文档的旧 chunk 全部加回（实测 4,636 死 chunk 占 45.1%），修复后重建：chunk 10,290→5,939、向量 10,321→5,939、覆盖率 201.7%→100%；② 知识图谱 LLM 边清零修复 — `graph.py` 增量刷新只保留本次重提取页面的 LLM 边（8/3 提取 592 条被一次增量刷新清零），修复后从 relations 缓存零成本恢复 591 条，增量刷新验证 591→633 不再丢；③ deep-eval CLI 参数补齐 — `--page-filter`/`--sample-rate` handler 已实现但 argparse 未注册；④ 回归测试 +4（`test_chunker_full_rebuild.py` 2 用例 + `TestGraphLlmEdgePreserve` 2 用例）。验证：单元测试 1,291 全通过。协议版本 3.15（不变）。产品版本 3.22.2→3.22.3。
 

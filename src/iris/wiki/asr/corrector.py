@@ -50,6 +50,17 @@ VOCO_DIR = os.environ.get("IRIS_VOCOTYPE_DIR", _DEFAULT_VOCO_DIR)
 
 # 监听窗口（热键释放后等待剪贴板变化的秒数，覆盖 vocotype 转写延迟）
 _LISTEN_WINDOW_SEC = 3.0
+# 长语音监听窗口上限：按住说话越久，转写耗时越长，窗口按按住时长放宽至此上限
+_LISTEN_WINDOW_MAX_SEC = 120.0
+
+
+def _listen_window_sec(hold_duration: float) -> float:
+    """计算监听窗口秒数：基础 3s，长语音按热键按住时长线性放宽（上限 120s）。
+
+    vocotype 为「松开热键后才开始转写」，1 分钟语音的转写+写剪贴板耗时
+    远超固定 3s 窗口，因此窗口与说话时长挂钩：说话越久给转写留的时间越多。
+    """
+    return max(_LISTEN_WINDOW_SEC, min(hold_duration, _LISTEN_WINDOW_MAX_SEC))
 
 # 剪贴板轮询间隔
 _POLL_INTERVAL = 0.2
@@ -230,6 +241,7 @@ class _HotkeyMonitor:
         self._keycode = keycode
         self._held = False
         self._released_at: float = 0.0
+        self._pressed_at: float = 0.0  # 本次按住开始时刻（长语音窗口计算用）
         self._lock = threading.Lock()
         self._tap: Any = None
         self._source: Any = None
@@ -250,6 +262,14 @@ class _HotkeyMonitor:
     def released_at(self) -> float:
         with self._lock:
             return self._released_at
+
+    @property
+    def hold_duration(self) -> float:
+        """最近一次按住的持续时长（秒）。从未按下返回 0。"""
+        with self._lock:
+            if self._pressed_at <= 0:
+                return 0.0
+            return max(0.0, self._released_at - self._pressed_at)
 
     # ---- 启动 / 停止 ----
 
@@ -325,6 +345,8 @@ class _HotkeyMonitor:
                 with self._lock:
                     was_held = self._held
                     self._held = now_held
+                    if not was_held and now_held:
+                        self._pressed_at = time.monotonic()
                     if was_held and not now_held:
                         self._released_at = time.monotonic()
 
@@ -343,6 +365,7 @@ class _HotkeyMonitor:
                     if self._mask == 0 or (cur_mask & self._mask) == self._mask:
                         with self._lock:
                             self._held = True
+                            self._pressed_at = time.monotonic()
                 else:  # key up
                     with self._lock:
                         was_held = self._held
@@ -1030,14 +1053,18 @@ class AsrCorrector:
                 print(
                     f"[Iris] vocotype 热键: mask={self._hotkey_mask}"
                     f" key={self._hotkey_keycode}"
-                    f" (CGEventTap, 释放后 {_LISTEN_WINDOW_SEC}s 监听窗口)",
+                    f" (CGEventTap, 释放后窗口≥{_LISTEN_WINDOW_SEC}s，长语音按按住时长放宽)",
                     file=sys.stderr,
                 )
             else:
                 print(
-                    "[Iris] ⚠ CGEventTap 启动失败，热键门控不可用",
+                    "[Iris] ⚠ CGEventTap 启动失败，热键门控不可用，"
+                    "降级为内容特征判定",
                     file=sys.stderr,
                 )
+                # 关键：置空监听器，_tick 门控（基于 monitor 可用性）才会放行，
+                # 否则所有剪贴板变化都会因「不在监听窗口」被跳过
+                self._hotkey_monitor = None
         elif self._hotkey_mask or self._hotkey_keycode:
             print(
                 f"[Iris] vocotype 热键: mask={self._hotkey_mask}"
@@ -1123,11 +1150,14 @@ class AsrCorrector:
         self._hotkey_held = currently_held
 
         # 2. 监听窗口判定
-        if self._hotkey_mask > 0:
+        # 仅当热键监听器实际可用时启用门控；监听器未创建/启动失败时
+        # 降级为纯内容特征判定（_is_asr_text + 富文本检查兜底）
+        if self._hotkey_monitor is not None:
             in_listen_window = (
                 currently_held
                 or (self._hotkey_released_at > 0
-                    and (time.monotonic() - self._hotkey_released_at) < _LISTEN_WINDOW_SEC)
+                    and (time.monotonic() - self._hotkey_released_at)
+                    < _listen_window_sec(self._hotkey_monitor.hold_duration))
             )
         else:
             in_listen_window = True
