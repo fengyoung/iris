@@ -122,8 +122,8 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.22.5 | 软件发布版本 |
-| **协议版本** | `src/iris/__init__.py` | 3.15 | CLI 命令集 / agent-spec 格式 |
+| **产品版本** | `pyproject.toml` | 3.23.1 | 软件发布版本 |
+| **协议版本** | `src/iris/__init__.py` | 3.16 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.4 | 配置文件 Schema |
 
 > 只有真正发生变化的层才递增版本号。
@@ -140,12 +140,12 @@ Python 3.9+ · OpenAI 兼容 LLM API（DeepSeek / 百炼 / Qwen）· Pydantic v2
 
 ```
 iris3/
-├── src/iris/          # 25 模块（见下）
+├── src/iris/          # 26 模块（见下）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
-├── tests/             # 2,646 用例，131 文件
-│   ├── unit/          #   纯逻辑单元测试（1,304 用例，<10s）
-│   └── integration/   #   集成测试（230 用例）
+├── tests/             # 2,709 用例，138 文件
+│   ├── unit/          #   纯逻辑单元测试（1,360 用例，<10s）
+│   └── integration/   #   集成测试（237 用例）
 ├── config/            # *.json gitignored，*.example 版本控制
 ├── data/              # 运行时数据（全 gitignore）
 ├── .claude/skills/    # 项目级 Skill（9 个）

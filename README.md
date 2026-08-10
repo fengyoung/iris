@@ -130,7 +130,7 @@ SOURCE/                     LLM-WIKI/
 - macOS Keychain（可选密钥存储）
 - PyMuPDF / python-docx（PDF/DOCX 处理）
 - ffmpeg（视频抽帧/抽音轨，视频处理必需）+ openai-whisper（音轨转写，可选）
-- 2,646 个测试用例（131 个测试文件），覆盖率 62%+（仅统计 Iris 自身 LLM 调用）
+- 2,709 个测试用例（138 个测试文件），覆盖率 62%+（仅统计 Iris 自身 LLM 调用）
 
 ## 开发环境
 
