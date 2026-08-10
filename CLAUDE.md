@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~34,000 行 / 160 文件 / 26 模块 · CLI 65 命令 · 单元测试 2,709（138 文件）· 覆盖率 62%+ · 10 个项目级 Skill · Wiki 222 页 · 知识图谱节点 220 / 关系边 1,858（wikilink 1,225 + LLM 633） · 数据源 822 文档 / 5,939 Chunk（text-embedding-v3 / 1,024 维）
+~35,000 行 / 166 文件 / 26 模块 · CLI 65 命令 · 单元测试 2,709（138 文件）· 覆盖率 62%+ · 10 个项目级 Skill · Wiki 222 页 · 知识图谱节点 220 / 关系边 1,858（wikilink 1,225 + LLM 633） · 数据源 822 文档 / 5,939 Chunk（text-embedding-v3 / 1,024 维）
 
 **近期新增能力**：实时会议助理（`assistant/`，逐段提炼要点/风险/决策点 + 实时提示关键提问 + 过程文档）· YAML frontmatter 标准化注入（`core/frontmatter.py`）· 批量 frontmatter 补全（`core/frontmatter_batch.py`，正则+LLM+wikilink+备份恢复）· wikilink 自动注入引擎（`wiki/wikilink_injector.py`，零 LLM 成本）· LLM 用量追踪（SQLite WAL + embedding 纳入）· LLM 响应缓存 + embedding 向量缓存（LRU + TTL）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（`memory_updater.py` + `session_miner.py`，双通道架构）· 多 Agent 并发安全（FileLock + SQLite WAL + Agent 隔离）· ASR 实时校正引擎（Aho-Corasick + LLM 编辑助手 + 反馈反向优化）· CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit · constraints.txt 可复现构建
 
@@ -148,7 +148,7 @@ iris3/
 │   └── integration/   #   集成测试（237 用例）
 ├── config/            # *.json gitignored，*.example 版本控制
 ├── data/              # 运行时数据（全 gitignore）
-├── .claude/skills/    # 项目级 Skill（9 个）
+├── .claude/skills/    # 项目级 Skill（10 个）
 ├── .github/workflows/ # CI 流水线（Python 3.9-3.12）
 ├── memory/            # Claude 工作记忆
 ├── Makefile           # 常用开发命令
@@ -159,9 +159,9 @@ iris3/
 
 ---
 
-## Claude Code Skill（9 个项目级）
+## Claude Code Skill（10 个项目级）
 
-`iris-daily-start`（每日启动维护）· `iris-wiki`（发现→审核→生成）· `iris-feishu-import`（飞书文档/聊天导入）· `iris-meeting`（转写→纪要→归档）· `iris-ask`（问答）· `iris-process`（富媒体处理：图片/PDF/DOCX/视频）· `iris-report`（分析报告/思维导图/双周报）· `iris-health`（质量巡检）· `iris-okr-check`（OKR 双周逐项检查）。
+`iris-daily-start`（每日启动维护）· `iris-wiki`（发现→审核→生成）· `iris-feishu-import`（飞书文档/聊天导入）· `iris-feed`（信息汇聚：飞书群聊话题检测→简报生成）· `iris-meeting`（转写→纪要→归档）· `iris-ask`（问答）· `iris-process`（富媒体处理：图片/PDF/DOCX/视频）· `iris-report`（分析报告/思维导图/双周报）· `iris-health`（质量巡检）· `iris-okr-check`（OKR 双周逐项检查）。
 
 ---
 
