@@ -84,8 +84,8 @@ class TestReplaceTextInPlace:
             assert "command down" in script
             assert 'keystroke "a" using command down' not in script  # 短文本不用 Cmd+A
 
-    def test_long_text_select_all(self):
-        """v3.24.1: >120 字走 Cmd+A 全选 + Cmd+V 覆盖粘贴（快速 O(1)，避免超时截断）。"""
+    def test_long_text_backspace_delete(self):
+        """v3.24.2: >120 字也走逐字符 Delete（Cmd+A 跨 App 不可靠，导致原文残留+校正追加=重复）。"""
         long_raw = "测试" * 70  # 140 字
         with patch("iris.wiki.asr._clipboard_io._write_clipboard"), \
              patch("iris.wiki.asr._clipboard_io._read_clipboard", return_value=long_raw), \
@@ -96,9 +96,9 @@ class TestReplaceTextInPlace:
             assert ok is True
             final_call_args = mock_run.call_args_list[-1][0][0]
             script = " ".join(final_call_args)
-            assert 'keystroke "a" using command down' in script  # Cmd+A 全选
-            assert 'keystroke "v" using command down' in script  # Cmd+V 粘贴
-            assert "key code 51" not in script                   # 不用逐字符删除
+            assert "key code 51" in script                # Delete 逐字符删除
+            assert "keystroke" in script                   # Cmd+V 粘贴
+            assert 'keystroke "a" using command down' not in script  # 全场景不用 Cmd+A
 
     def test_snapshot_mismatch_returns_false(self):
         """快照校验：剪贴板已不等于原文（新句到达/用户其他复制）→ 不写不贴。"""

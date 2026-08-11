@@ -41,10 +41,11 @@ def _replace_text_in_place(corrected: str, raw_text: str) -> bool:
     2. 轮询剪贴板确认稳定（vocotype 没有二次写入）
     3. 快照校验：剪贴板仍等于 raw_text 才继续
     4. 写入校正文本到剪贴板
-    5. **短文本（≤120 字）**：逐字符 Delete 删除 + Cmd+V 粘贴
-       （精准，只删 vocotype 刚贴入的文本，不误删其他内容）
-    6. **长文本（>120 字）**：Cmd+A 全选 + Cmd+V 覆盖粘贴
-       （快速，O(1) 完成避免超时截断；全选覆盖在 vocotype 独占窗口场景安全）
+    5. 逐字符 Delete 删除原始文本 + Cmd+V 粘贴校正文本
+
+    逐字符删除是唯一跨 App 可靠的替换方式——Cmd+A 在聊天输入框/浏览器文本框
+    等场景中行为不一致（可能全选整个对话而非当前输入），导致原文残留+校正追加=重复。
+    timeout 按 100ms/字校准，250 字长文本约 25s，全链路覆盖。
 
     Returns:
         True 成功；False 快照不符/系统异常（调用方负责告警与状态回滚）
@@ -79,40 +80,24 @@ def _replace_text_in_place(corrected: str, raw_text: str) -> bool:
 
     raw_length = len(raw_text)
 
-    # ── 短文本：逐字符 Delete + 粘贴（精准不误删） ──
-    # 理由：Cmd+A 在某些 app（聊天输入框/特殊编辑器）中选不中文档内容，
-    # 逐字符删除是唯一可靠的方式；≤120 字时耗时可控（timeout 按 80ms/字）
-    if raw_length <= 120:
-        try:
-            subprocess.run([
-                "osascript", "-e",
-                f'''
-                tell application "System Events"
-                    repeat {raw_length} times
-                        key code 51  -- Delete / Backspace
-                    end repeat
-                    delay 0.05
-                    keystroke "v" using command down
-                end tell
-                ''',
-            ], timeout=max(5, int(raw_length * 0.08)))
-            return True
-        except Exception:
-            return False
-
-    # ── 长文本：Cmd+A 全选 + 粘贴（快速，O(1)） ──
-    # vocotype 独占窗口场景全选覆盖安全；若 Cmd+A 在目标 app 无效则降级返回 False
+    # 逐字符 Delete + Cmd+V 粘贴：唯一跨 App 可靠的方式。
+    # Cmd+A（全选覆盖）在不同 app 中行为不一致（可能选不中当前输入框内容），
+    # 导致原文残留 + 校正追加 = 文本重复。逐字符删除精准删除 vocotype
+    # 刚贴入的 raw_length 个字符，然后粘贴校正文本。
+    # timeout 按 100ms/字校准（AppleScript 逐键发送约 50ms/键 + 余量）。
     try:
         subprocess.run([
             "osascript", "-e",
-            '''
+            f'''
             tell application "System Events"
-                keystroke "a" using command down
+                repeat {raw_length} times
+                    key code 51  -- Delete / Backspace
+                end repeat
                 delay 0.05
                 keystroke "v" using command down
             end tell
             ''',
-        ], timeout=5)
+        ], timeout=max(5, int(raw_length * 0.1)))
         return True
     except Exception:
         return False
