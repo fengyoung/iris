@@ -211,14 +211,20 @@ class MeetingLiveAssistant:
         self._futures_lock = threading.Lock()
 
     def _load_llm_prompt(self) -> str:
-        """加载 LLM 校正 Prompt（data/assistant/asr_prompt.md）；缺失→空（降级仅词典）。"""
+        """加载 LLM 校正 Prompt；缺失时使用内嵌兜底 Prompt（不依赖 asr-corrector 的 build-asr-prompt 产物）。"""
         path = get_project_root() / "data" / "assistant" / "asr_prompt.md"
         if path.exists():
             try:
                 return path.read_text(encoding="utf-8")
             except Exception as e:
                 _logger.warning("LLM 校正 Prompt 加载失败: %s", e)
-        return ""
+        # 内嵌兜底 Prompt（与 asr-corrector 默认 prompt 逻辑一致）
+        return (
+            "你是语音转录修正官。将以下语音转写文本中的错别字、同音字修正为正确文本。\n"
+            "规则：修正所有明显的音近错字；保持原意和句子结构；只输出修正后的文本，不要解释。\n"
+            "{{context}}\n"
+            "待修正文本：{{text}}"
+        )
 
     # ── 主流程 ──────────────────────────────────────────────
 
@@ -308,6 +314,9 @@ class MeetingLiveAssistant:
 
     def _audio_loop(self) -> None:
         """音频采集线程：sounddevice 回调 → ASREngine.feed() → submit 段。"""
+        if self._asr_engine is None:
+            _logger.error("ASR 引擎未初始化（mode=%s），无法启动音频采集", self._asr_cfg.mode)
+            return
         mic = AudioCapture(sample_rate=self._asr_cfg.local.sample_rate)
         mic.start()
         try:
@@ -346,10 +355,20 @@ class MeetingLiveAssistant:
             if self._cfg.fast_only or len(fast) < self._cfg.short_segment_chars:
                 return
             with self._futures_lock:
-                self._futures[seg.seq] = (
-                    self._pool.submit(self._corrector.deep, fast),
-                    self._pool.submit(self._retriever.search, fast, top_k=self._cfg.top_k),
-                )
+                if self._asr_cfg.llm_correct_enabled:
+                    self._futures[seg.seq] = (
+                        self._pool.submit(self._corrector.deep, fast),
+                        self._pool.submit(self._retriever.search, fast, top_k=self._cfg.top_k),
+                    )
+                else:
+                    # LLM 校正关闭：仅提交检索（deep 降级为返回原文）
+                    from concurrent.futures import Future as _Future
+                    _f = _Future()
+                    _f.set_result(fast)
+                    self._futures[seg.seq] = (
+                        _f,
+                        self._pool.submit(self._retriever.search, fast, top_k=self._cfg.top_k),
+                    )
                 # 清理过期条目：worker 消费段时已 pop 自己的 futures；
                 # 仍残留且 seq 更小的条目 = pending 被覆盖的段，结果无人消费
                 for old_seq in [k for k in self._futures if k < seg.seq]:
