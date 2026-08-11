@@ -196,26 +196,33 @@ class AsrConfig(BaseModel):
     mode: str = Field(default="local", description="ASR 模式：local | remote")
     local: AsrLocalConfig = Field(default_factory=AsrLocalConfig)
     remote: AsrRemoteConfig = Field(default_factory=AsrRemoteConfig)
-    hotwords_file: str = Field(default="", description="热词文件路径（每行一个词条）")
-    replace_dict_file: str = Field(default="", description="音近词→正确词映射文件（JSON）")
+    hotwords_file: str = Field(default="data/assistant/asr_hotwords.txt",
+                               description="热词文件路径（每行一个词条）")
+    replace_dict_file: str = Field(default="data/assistant/asr_replace_dict.json",
+                                   description="音近词→正确词映射文件（JSON）")
     llm_correct_enabled: bool = Field(default=True, description="启用 LLM 深度校正")
     llm_correct_timeout_ms: int = Field(default=8000, gt=0, description="LLM 校正超时（毫秒）")
 
     @classmethod
     def from_app_config(cls, cfg: Dict[str, Any]) -> "AsrConfig":
-        """从 bundle.app.get("assistant", {}).get("asr", {}) 构造。"""
+        """从 bundle.app.get("assistant", {}).get("asr", {}) 构造。
+
+        缺失字段使用模型默认值（不覆盖），实现零配置启动。
+        """
         if not isinstance(cfg, dict):
             return cls()
         local_cfg = cfg.get("local", {})
         remote_cfg = cfg.get("remote", {})
+        # 只传用户显式配置的字段，其余用模型默认值
+        kwargs: Dict[str, Any] = {}
+        for key in ("mode", "hotwords_file", "replace_dict_file",
+                     "llm_correct_enabled", "llm_correct_timeout_ms"):
+            if key in cfg:
+                kwargs[key] = cfg[key]
         return cls(
-            mode=cfg.get("mode", "local"),
             local=AsrLocalConfig(**{k: v for k, v in local_cfg.items()
                                     if k in AsrLocalConfig.model_fields}),
             remote=AsrRemoteConfig(**{k: v for k, v in remote_cfg.items()
                                       if k in AsrRemoteConfig.model_fields}),
-            hotwords_file=cfg.get("hotwords_file", ""),
-            replace_dict_file=cfg.get("replace_dict_file", ""),
-            llm_correct_enabled=cfg.get("llm_correct_enabled", True),
-            llm_correct_timeout_ms=cfg.get("llm_correct_timeout_ms", 8000),
+            **kwargs,
         )
