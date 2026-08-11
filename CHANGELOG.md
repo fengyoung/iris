@@ -1,3 +1,44 @@
+## v3.24.2 (2026-08-11)
+
+asr-corrector 写回路径修正（真机验证驱动）— 取消 Cmd+A 全选覆盖，全场景恢复逐字符 Delete。
+
+### 问题
+
+v3.24.0/v3.24.1 真机验证中发现两个写回问题：
+- **长文本文本重复**：Cmd+A 全选覆盖在不同 App（聊天输入框/浏览器文本框等）中行为不一致，可能选不中 vocotype 写入的文本区域，导致原文残留 + 校正文本追加 = 文本重复
+- **短文本逐字符删除可靠**：Cmd+A 的唯一优势是长文本 O(1) 速度，但可靠性代价太高
+
+### 改动
+
+- `_replace_text_in_place`：取消 Cmd+A 分支，全场景统一走逐字符 Delete + Cmd+V 粘贴（唯一跨 App 可靠的方式）；timeout 按 100ms/字校准，250 字长文本约 25s
+
+### 测试
+
+- 适配 `test_long_text_backspace_delete`（长文本验证逐字符删除而非 Cmd+A）
+
+---
+
+## v3.24.1 (2026-08-11)
+
+asr-corrector 写回修正（真机验证驱动）— full 模式跳过词典写回仅 LLM 一次输出。
+
+### 问题
+
+v3.24.0 真机验证中发现两个问题：
+- **两次写回闪烁**：full 模式下词典先写回文档、LLM 精修后再写回 → 用户看到两次校正输出而非最终结果
+- **短文本 Cmd+A 不可靠**：Cmd+A 在 vocotype 写入的文本框中不生效 → 不删除前文
+
+### 改动
+
+- `corrector.py` `_tick`：full 模式跳过词典写回（仅更新 `_last_corrected` 防重入），LLM 精修后统一一次写回；LLM 写回快照修正为 `current_text`（文档实际内容仍是原始转写）
+- `_replace_text_in_place`：≤120 字恢复逐字符 Delete（精准），>120 字保留 Cmd+A 兜底
+
+### 测试
+
+- `test_short_text_backspace_delete`（短文本验证逐删）+ `test_long_text_select_all`（长文本验证全选）
+
+---
+
 ## v3.24.0 (2026-08-11)
 
 meeting-live-assistant × asr-corrector 全面优化（26 文件 / +733 -190 + 测试 +23）：写回机制重构 + 反馈管线时序修正 + 交叉冲突防护 + 预取原子化 + LLM 调用治理。

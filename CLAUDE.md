@@ -1,4 +1,4 @@
-# Iris 3.24.0 — 项目执行说明
+# Iris 3.24.2 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -122,7 +122,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.24.0 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.24.2 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.18 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.5 | 配置文件 Schema |
 
@@ -167,7 +167,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.24.0 (2026-08-11)** — meeting-live-assistant × asr-corrector 全面优化（26 文件 / +733 -190 + 测试 +23）：① 写回机制重构 — `_replace_text_in_place(corrected, raw_text)` 改「稳定轮询 → 快照校验（剪贴板仍等于原文）→ Cmd+A 全选 + Cmd+V 覆盖粘贴」替代逐字符删除（根除 100+ 字 5s 超时静默截断），两处调用（词典/LLM 写回）成功后才更新 `_last_corrected`（失败保留旧值下条自然重试）、失败告警，LLM 写回快照 = `snap_fast` 拦截跨句竞态；② 反馈管线时序修正 — feedback 块移到 `generate_misreadings` 之后（提升映射不被整体覆盖、僵尸淘汰面对已填充规则）、热词文件最后统一写盘（补充热词真正落盘）、僵尸判定加 `history_rules` 时间窗（仅上次部署词典规则参与，防生成→淘汰→再生成振荡）、`prompt_optimizer` 移除 provider 死参数 + hotwords 真正使用（新增高频词段 top 40）；③ 交叉冲突防护 — `format_replace_dict` 跳过误识别词与任一正确术语重合的映射（音近人名不误伤），`analyze_dict_quality` 报告新增交叉冲突项；④ assistant 预取原子化 — `submit` 新增 `on_publish` 临界区回调（futures 注册与 pending 原子，worker 取段必见注册，双跑消除），fast 校正移锁外，`suggest_every` 取模改 `(seq-1)%N`（首段保留建议提问）；⑤ 热键监控器 Event 化 — `_ready` 替代 `join(2s)` 白等，stop 唤醒 tap 线程自身 run loop；⑥ LLM 治理 — hotwords/extractor 补 `_deadline` + 并发上限 4、extractor map 改 as_completed + 残批有界收尾、误识别回显 `normalized_key` 匹配、corrector LLM 输出相似度门槛（ratio ≥ 0.5 拦幻觉）；⑦ 配置化 — `--max-asr-length`（CLI > profile > 默认 500）对齐 assistant 2000 覆盖长语音；⑧ 杂项 — deque 快照迭代、`released_at=0` 日志 `—`、`_pid_alive`/`_probe_running` ps 命令行校验（防 PID 复用误判）、version 首次 bump 按类型、formatter 原子写。验证：unit 全量 1,416（+23），integration e2e 互斥/注册子集通过，ruff 通过。协议版本 3.17→3.18（新增 --max-asr-length 参数）。产品版本 3.23.3→3.24.0。
+**当前 v3.24.2 (2026-08-11)** — asr-corrector 写回修正（真机验证驱动）：① full 模式跳过词典写回（仅 LLM 最终结果一次输出，消除两次写回闪烁）；② 取消 Cmd+A 全选覆盖，全场景恢复逐字符 Delete 删除（Cmd+A 跨 App 不可靠——聊天输入框/浏览器文本框等场景可能选不中 vocotype 写入的文本区域，导致原文残留+校正追加=文本重复），timeout 按 100ms/字校准覆盖长文本。验证：unit 全量 1,417 通过，ruff 通过。协议版本 3.18（不变）。产品版本 3.24.0→3.24.2。
+
+**v3.24.0 (2026-08-11)** — meeting-live-assistant × asr-corrector 全面优化（26 文件 / +733 -190 + 测试 +23）：① 写回机制重构 — `_replace_text_in_place` 快照校验 + 成功才更新 `_last_corrected`（失败下条自然重试），LLM 写回快照拦截跨句竞态；② 反馈管线时序修正 — feedback 块移到 `generate_misreadings` 之后（提升映射不被整体覆盖、僵尸淘汰面对已填充规则）、热词文件最后统一写盘、僵尸判定加 `history_rules` 时间窗；③ 交叉冲突防护 — `format_replace_dict` 跳过误识别词与任一正确术语重合的映射；④ assistant 预取原子化 — `submit` 新增 `on_publish` 临界区回调（futures 注册与 pending 原子，双跑消除），`suggest_every` 改 `(seq-1)%N`；⑤ 热键监控器 Event 化 — `_ready` 替代 `join(2s)`，stop 唤醒 tap 线程自身 run loop；⑥ LLM 治理 — hotwords/extractor 补 `_deadline` + 并发上限 4、corrector LLM 输出相似度门槛（ratio ≥ 0.5）；⑦ `--max-asr-length` 参数化；⑧ deque 快照迭代、`_pid_alive` ps 命令行校验、version 首次 bump 按类型、formatter 原子写。验证：unit 全量 1,416（+23），ruff 通过。协议版本 3.17→3.18。产品版本 3.23.3→3.24.0。
 
 **v3.23.3 (2026-08-10)** — meeting-live-assistant 全量优化（21 文件 / +700 -100 + 测试 +34）：① 双段流水线 — `_prefetch`（poll 线程）提交段后立即 fast 校正入窗 + 提交 deep/检索 futures，段 N 分析期间段 N+1 的深度校正与检索已在池中（每段关键路径 ~25s→~15s 深度重叠）；短段门控（`short_segment_chars=15`）+ `--fast-only`：确认语/快速模式跳过全部 LLM（`analysis_status="skipped"`）；② 退出路径加固 — worker.join 27s 覆盖分析 deadline（尾段不再丢）、force rewrite 无并发写、DocWriter 唯一 tmp + RLock；③ 会议结束自动总结 — 新模板 `meeting_live_summary.md`（+prompting.py 同构兜底），退出时一次 LLM（10s deadline 失败跳过）写「📝 会议总结」区；④ 检索 deadline 根治挂起 — `LLMQueryPlanner.enhance(_deadline=None)` 透传（全链路唯一无默认 deadline 的 LLM 调用点），`RetrieverAdapter` 传 now+8s，`pool.shutdown` 有界返回；⑤ 采集增强 — `max_segment_chars=2000` 覆盖 120s 长语音（超长警告）、首 poll 吞存量（防幽灵段）、`dedup_window_seconds=30` 限时去重；⑥ 杂项 — 互斥对称（corrector 启动探测 assistant）、文件名带秒、phase 守卫段不丢、`suggest_every=3` 建议提问间隔化、面板首帧。验证：unit 全量 1,393（+31），integration 240（+1），根目录 1,114（+2），合计 2,747 全过。协议版本 3.16→3.17（新增 --fast-only 参数）。产品版本 3.23.2→3.23.3。
 
