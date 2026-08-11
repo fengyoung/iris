@@ -19,14 +19,21 @@ _logger = logging.getLogger(__name__)
 class ASREngine:
     """FunASR Paraformer ONNX 识别引擎。
 
-    使用 vocotype 同款模型：speech_paraformer-large-contextual（中文 + 热词偏置）。
-    VAD 和标点暂时跳过（Paraformer 自身对静音鲁棒，标点后续补充）。
+    使用 vocotype 同款模型栈：
+    - ASR: speech_paraformer-large-contextual（中文 + 热词偏置）
+    - VAD: 自实现 RMS 能量检测
+    - 标点: punc_ct-transformer（CT-Transformer 标点恢复）
     """
 
     SAMPLE_RATE = 16000
     _MAX_BUFFER_SAMPLES = int(SAMPLE_RATE * 60)     # 缓冲区上限 60s
     _ENERGY_THRESHOLD = 0.005                       # RMS 能量阈值（低于此值视为静音）
     _SILENCE_FRAMES = 15                            # 连续静音帧数 → 切段（15×40ms=600ms）
+
+    _PUNC_MODEL_NAME = "punc_ct-transformer_zh-cn-common-vocab272727-onnx"
+
+    # CT-Transformer 标点标签映射（FunASR 标准：0=pad 1=_ 2=， 3=。 4=？ 5=！）
+    _PUNC_LABEL_MAP = {0: "", 1: "", 2: "，", 3: "。", 4: "？", 5: "！"}
 
     def __init__(self, model_dir: str, hotwords: str = "", device: str = "cpu"):
         """初始化 ASR 引擎。
@@ -43,6 +50,7 @@ class ASREngine:
         self._silence_count = 0
         self._is_speaking = False
         self._model = self._init_model()
+        self._punc_session, self._punc_char_to_id = self._init_punc_model()
 
     def _init_model(self):
         """初始化 FunASR ONNX Paraformer（延迟导入）。"""
@@ -109,7 +117,7 @@ class ASREngine:
         return None
 
     def _transcribe(self) -> Optional[str]:
-        """将当前缓冲区中的语音段送 ASR 转写。"""
+        """将当前缓冲区中的语音段送 ASR 转写 + 标点恢复。"""
         if not self._buffer:
             return None
         total = np.concatenate(self._buffer)
@@ -127,8 +135,66 @@ class ASREngine:
         if result and result[0].get("text"):
             text = result[0]["text"].strip()
             if text:
-                return text
+                return self._add_punctuation(text)
         return None
+
+    # ── 标点恢复 ──────────────────────────────────────────
+
+    def _init_punc_model(self):
+        """初始化 CT-Transformer 标点模型（ONNX 推理）。
+
+        返回 (session, char_to_id) 或 (None, {})。
+        """
+        import json
+        punc_dir = self._model_dir.parent / self._PUNC_MODEL_NAME
+        if not punc_dir.is_dir():
+            _logger.info("标点模型未找到 (%s)，跳过", punc_dir)
+            return None, {}
+        try:
+            import onnxruntime as ort
+            session = ort.InferenceSession(
+                str(punc_dir / "model_quant.onnx"),
+                providers=['CPUExecutionProvider'],
+            )
+            with open(punc_dir / "tokens.json") as f:
+                token_list = json.load(f)
+            # tokens.json 是 list，index 即 token ID
+            char_to_id = {c: i for i, c in enumerate(token_list)}
+            _logger.info("标点模型就绪（%d chars）", len(char_to_id))
+            return session, char_to_id
+        except Exception as e:
+            _logger.warning("标点模型初始化失败（跳过）: %s", e)
+            return None, {}
+
+    def _add_punctuation(self, text: str) -> str:
+        """对 ASR 输出文本追加标点符号。
+
+        CT-Transformer ONNX 推理 → per-character 标点标签 → 插入标点。
+        模型不可用时直接返回原文（不阻塞）。
+        """
+        if not self._punc_session or not self._punc_char_to_id:
+            return text
+        try:
+            # char → token id
+            token_ids = [self._punc_char_to_id.get(c, 0) for c in text]
+            inputs = np.array([token_ids], dtype=np.int32)
+            lengths = np.array([len(token_ids)], dtype=np.int32)
+            outputs = self._punc_session.run(
+                None, {"inputs": inputs, "text_lengths": lengths}
+            )
+            preds = outputs[0][0].argmax(axis=1)
+
+            # 在预测标点位置插入对应符号
+            result = []
+            for i, char in enumerate(text):
+                result.append(char)
+                label = self._PUNC_LABEL_MAP.get(int(preds[i]), "")
+                if label:
+                    result.append(label)
+            return "".join(result)
+        except Exception as e:
+            _logger.warning("标点恢复异常（返回原文）: %s", e)
+            return text
 
     @staticmethod
     def auto_detect_model_dir() -> Optional[str]:
