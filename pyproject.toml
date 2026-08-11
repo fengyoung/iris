@@ -21,10 +21,9 @@ dev = ["pytest>=7.0", "pytest-cov>=4.0"]
 graph = ["networkx>=3.0"]
 async = ["httpx>=0.27"]
 asr = [
-    "funasr>=1.4",
+    "funasr-onnx>=0.4",
     "onnxruntime>=1.19",
     "sounddevice>=0.5",
-    "torchaudio>=2.0",
     "pyahocorasick>=2.0",
 ]
 
