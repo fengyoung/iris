@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import sys
+import logging
 import time
 from typing import Any, Dict, List, Optional
 
@@ -10,11 +10,15 @@ from iris.feed._topic_detector import _parse_json_safe
 
 from .models import SegmentAnalysis
 
+_logger = logging.getLogger(__name__)
+
 _ANALYSIS_DEADLINE_SEC = 15.0  # 单段分析总时间预算（实时场景，超时降级）
 _SUMMARY_DEADLINE_SEC = 10.0   # 会议总结时间预算（退出场景，失败跳过）
 _MAX_ITEMS = 10                # 每字段最多保留条数
 _MAX_ITEM_CHARS = 120          # 每条最多字符数
 _TRANSCRIPT_MAX_CHARS = 4000   # 总结 Prompt 的逐段转写上限
+_HEAD_CHARS = 1000             # 截断时保留头部（会议背景/开场）
+_TAIL_CHARS = 3000             # 截断时保留尾部（结论/行动项）
 
 
 class SegmentAnalyzer:
@@ -34,6 +38,8 @@ class SegmentAnalyzer:
         segment_text: str,
         retrieval_context: str,
         meeting_summary: str,
+        *,
+        open_questions: str = "",
     ) -> Optional[SegmentAnalysis]:
         prompt = self._loader.render(
             "meeting_live_analyze.md",
@@ -41,6 +47,7 @@ class SegmentAnalyzer:
                 "segment_text": segment_text,
                 "retrieval_context": retrieval_context,
                 "meeting_summary": meeting_summary,
+                "open_questions": open_questions or "（暂无）",
             },
         )
         try:
@@ -63,7 +70,7 @@ class SegmentAnalyzer:
                 return None
             return SegmentAnalysis(**self._normalize(data))
         except Exception as e:
-            print(f"[Iris] ⚠ 会议段分析失败: {e}", file=sys.stderr)
+            _logger.warning("会议段分析失败: %s", e)
             return None
 
     def summarize(self, state: Any) -> Optional[str]:
@@ -76,7 +83,16 @@ class SegmentAnalyzer:
             for s in state.segments
         )
         if len(transcript) > _TRANSCRIPT_MAX_CHARS:
-            transcript = transcript[: _TRANSCRIPT_MAX_CHARS] + "…"
+            # 头+尾策略：保留开场背景与最新结论，避免纯头部截断丢失会议后半程内容
+            head = transcript[:_HEAD_CHARS]
+            # 在换行边界截断 head（避免断在句子中间）
+            if "\n" in head:
+                head = head[: head.rfind("\n")]
+            tail_start = max(_HEAD_CHARS, len(transcript) - _TAIL_CHARS)
+            # tail 也在换行边界开始
+            if "\n" in transcript[tail_start:]:
+                tail_start += transcript[tail_start:].index("\n")
+            transcript = head + "\n…\n" + transcript[tail_start:]
         parts = []
         if state.key_points:
             parts.append("要点: " + "；".join(state.key_points))
@@ -111,8 +127,56 @@ class SegmentAnalyzer:
             text = (result.text or "").strip()
             return text or None
         except Exception as e:
-            print(f"[Iris] ⚠ 会议总结失败（跳过）: {e}", file=sys.stderr)
+            _logger.warning("会议总结失败（跳过）: %s", e)
             return None
+
+    def suggest_questions(
+        self,
+        analysis: "SegmentAnalysis",
+        meeting_summary: str,
+        retrieval_context: str,
+        deadline: float,
+    ) -> list[str]:
+        """独立生成建议提问（仅采样段调用，temperature=0.5 提升尖锐度）。
+
+        deadline：总时间预算（time.monotonic() 绝对值），超时不等待直接降级返回 []。
+        """
+        remaining = deadline - time.monotonic()
+        if remaining < 2.0:
+            return []  # 时间不足，跳过
+
+        prompt = self._loader.render(
+            "meeting_live_suggest.md",
+            {
+                "key_points": "；".join(analysis.key_points) or "（无）",
+                "risks": "；".join(analysis.risks) or "（无）",
+                "questions": "；".join(analysis.questions) or "（无）",
+                "decisions": "；".join(analysis.decisions) or "（无）",
+                "meeting_summary": meeting_summary,
+                "retrieval_context": retrieval_context,
+            },
+        )
+        try:
+            result = self._llm.generate(
+                prompt,
+                route_context={
+                    "task_type": "meeting_suggest",
+                    "input_type": "text",
+                    "use_case": "meeting_analysis",
+                },
+                temperature=0.5,
+                max_tokens=300,
+                max_retries=0,
+                extra_body={"thinking": {"type": "disabled"}},
+                force_model=self._model or None,
+                _deadline=deadline,
+            )
+            data = _parse_json_safe(result.text, "建议提问")
+            if isinstance(data, list):
+                return [s.strip() for s in data if isinstance(s, str) and s.strip()][:3]
+            return []
+        except Exception:
+            return []  # 失败静默降级，保留主分析的 suggested_questions
 
     @staticmethod
     def _normalize(data: Any) -> Dict[str, List[str]]:
@@ -126,6 +190,7 @@ class SegmentAnalyzer:
             "questions",
             "decisions",
             "suggested_questions",
+            "resolved_questions",
         )
         result: Dict[str, List[str]] = {f: [] for f in fields}
         if not isinstance(data, dict):

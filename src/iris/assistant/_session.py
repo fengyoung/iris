@@ -50,6 +50,11 @@ class MeetingSession:
             self._next_seq += 1
             if self._pending is not None:
                 self._state.dropped_count += 1
+                # 保留被丢弃段的原文（上限 20 条，防附录膨胀）
+                if len(self._state.dropped_texts) < MeetingState._MAX_DROPPED_TEXTS:
+                    self._state.dropped_texts.append(
+                        self._pending.raw_text[:200]
+                    )
             self._pending = seg
             if on_publish is not None:
                 on_publish(seg)
@@ -72,6 +77,20 @@ class MeetingSession:
             seg = self._pending
             self._pending = None
             return seg
+
+    def take_pending_if(self, seq: int) -> Optional[VoiceSegment]:
+        """原子检查 pending 的 seq 是否匹配，匹配则消费返回，不匹配返回 None。
+
+        用于 P4-13 乐观并发：worker 在消费段 N 后发现段 N+1 的预取 futures 已就绪，
+        通过本方法原子消费——若 N+1 在此期间被 N+2 覆盖（pending seq 不匹配），
+        返回 None 表示已过期，跳过处理。覆盖时的 dropped_count 递增已在 submit 完成。
+        """
+        with self._cond:
+            if self._pending is not None and self._pending.seq == seq:
+                seg = self._pending
+                self._pending = None
+                return seg
+            return None
 
     def request_stop(self) -> None:
         """请求停止：唤醒工作线程，在段边界退出。"""
@@ -104,6 +123,12 @@ class MeetingSession:
         if len(block) > max_chars:
             block = block[:max_chars] + "…"
         return block
+
+    def open_questions_for_prompt(self) -> str:
+        """待解决问题列表（供分析 Prompt 的 resolved_questions 判定）。"""
+        if not self._state.open_questions:
+            return "（暂无）"
+        return "\n".join(f"- {q}" for q in self._state.open_questions)
 
     @property
     def state(self) -> MeetingState:

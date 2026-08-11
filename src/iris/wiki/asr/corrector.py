@@ -912,6 +912,10 @@ class AsrCorrector:
     def mode(self) -> str:
         return self._mode
 
+    def push_context(self, sentence: str) -> None:
+        """公开接口：将校正后句子追加到近期上下文窗口（供外部编排使用，如 meeting-live-assistant）。"""
+        self._push_context(sentence)
+
     def _push_context(self, sentence: str) -> None:
         """将校正后的句子追加到近期上下文滚动窗口。"""
         self._recent_sentences.append((sentence, time.monotonic()))

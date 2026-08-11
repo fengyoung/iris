@@ -36,11 +36,17 @@ class PanelRenderer:
 
     def render_final(self, state: MeetingState, doc_path: Path) -> None:
         """退出统计帧（不清屏，保留面板）。"""
+        # 聚合分析耗时统计
+        analyzed = [s for s in state.segments
+                    if s.analysis_started_at and s.analysis_done_at]
+        total_elapsed = sum(s.analysis_done_at - s.analysis_started_at for s in analyzed)
+        avg_elapsed = total_elapsed / len(analyzed) if analyzed else 0
         with self._lock:
             lines = [
                 "",
                 "╔══════ 会议结束统计 ══════",
                 f"  段落: {len(state.segments)}",
+                f"  LLM 分析次数: {len(analyzed)} · 总耗时 {total_elapsed:.1f}s · 平均 {avg_elapsed:.1f}s",
                 f"  关键要点: {len(state.key_points)}",
                 f"  决策点: {len(state.decisions)}",
                 f"  风险: {len(state.risks)}",

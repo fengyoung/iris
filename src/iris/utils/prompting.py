@@ -25,13 +25,23 @@ FALLBACK_TEMPLATES: Dict[str, str] = {
     "meeting_live_analyze.md": (
         "你是一名实时会议助理。分析当前说话段落，输出纯 JSON 对象（无围栏/无解释）。\n"
         "# 会议摘要\n{{meeting_summary}}\n"
+        "# 当前待解决问题\n{{open_questions}}\n"
         "# 知识库检索上下文（无关请忽略）\n{{retrieval_context}}\n"
         "# 当前说话段落\n{{segment_text}}\n"
         "# 输出\n"
         "{\"key_points\": [\"关键要点\"], \"risks\": [\"风险点\"], \"questions\": [\"问题\"],"
-        " \"decisions\": [\"决策点\"], \"suggested_questions\": [\"建议追问 1-3 条\"]}\n"
+        " \"decisions\": [\"决策点\"], \"suggested_questions\": [\"建议追问 1-3 条\"],"
+        " \"resolved_questions\": [\"已被本段回答的旧问题，无则[]\"]}\n"
         "要求：只输出 JSON；每条简短（≤80 字）；不重复会议摘要已有内容；"
-        "检索上下文无关则完全忽略。"
+        "检索上下文无关则完全忽略；resolved_questions 检查当前待解决问题是否已被本段回答。"
+    ),
+    # 实时会议助理建议提问独立生成（与 templates/prompt/meeting_live_suggest.md 同构兜底）
+    "meeting_live_suggest.md": (
+        "你是会议中的「尖锐提问者」。基于当前段落分析结果和会议状态，生成 1-3 条追问。\n"
+        "# 会议摘要\n{{meeting_summary}}\n"
+        "# 本段分析\n要点：{{key_points}}\n风险：{{risks}}\n问题：{{questions}}\n决策：{{decisions}}\n"
+        "# 检索上下文\n{{retrieval_context}}\n"
+        "# 输出\n[\"提问1\", \"提问2\", \"提问3\"] 最多 3 条 JSON 数组。"
     ),
     # 实时会议助理结束总结（与 templates/prompt/meeting_live_summary.md 同构兜底）
     "meeting_live_summary.md": (

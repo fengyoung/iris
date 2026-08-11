@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-import sys
+import logging
 import time
 from typing import List
 
 from iris.retrieval import EnhancedRetriever, RetrievalHit
+
+_logger = logging.getLogger(__name__)
 
 # 检索总时间预算：超过即降级为空上下文（与 deep 校正 8s deadline 对齐，
 # 保证线程池槽位有界返回，防止 provider 挂起占死池）
@@ -25,8 +27,7 @@ class RetrieverAdapter:
             self._retriever = EnhancedRetriever(bundle)
         except Exception as e:
             self._retriever = None
-            print(f"[Iris] ⚠ 检索初始化失败，本场会议无知识库上下文: {e}",
-                  file=sys.stderr)
+            _logger.warning("检索初始化失败，本场会议无知识库上下文: %s", e)
 
     def search(self, text: str, *, top_k: int = 5) -> List[RetrievalHit]:
         if self._retriever is None:

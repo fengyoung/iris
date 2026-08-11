@@ -1,4 +1,4 @@
-# Iris 3.24.2 — 项目执行说明
+# Iris 3.24.3 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -122,7 +122,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.24.2 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.24.3 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.18 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.5 | 配置文件 Schema |
 
@@ -167,7 +167,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.24.2 (2026-08-11)** — asr-corrector 写回修正（真机验证驱动）：① full 模式跳过词典写回（仅 LLM 最终结果一次输出，消除两次写回闪烁）；② 取消 Cmd+A 全选覆盖，全场景恢复逐字符 Delete 删除（Cmd+A 跨 App 不可靠——聊天输入框/浏览器文本框等场景可能选不中 vocotype 写入的文本区域，导致原文残留+校正追加=文本重复），timeout 按 100ms/字校准覆盖长文本。验证：unit 全量 1,417 通过，ruff 通过。协议版本 3.18（不变）。产品版本 3.24.0→3.24.2。
+**当前 v3.24.3 (2026-08-11)** — meeting-live-assistant 全面优化（13 项 / 14 文件）：① 并发安全加固 — `_futures` 显式 Lock 保护 + 超时 future cancel 释放线程池槽位 + bare except 加 exc_info 日志；② 信息完整性 — 积压丢弃段原文保留到 `<details>` 附录 + 总结截断改头+尾策略（保留开场背景与最新结论）+ 分析 Prompt few-shot 示例提升输出边界清晰度；③ 质量天花板 — LLM 语义关闭待解决问题（`resolved_questions` 字段 + fuzzy match）+ `_dedup_append` SequenceMatcher 模糊去重（≥0.85 阈值）；④ 工程卫生 — AsrCorrector 公开 `push_context()` 方法 + 结构化 logging（双输出：文件 DEBUG + 控制台 INFO）+ 段耗时元数据 + 面板统计帧含 LLM 分析次数/总耗时/平均耗时；⑤ 建议提问高温度独立生成（sampled 段 temperature=0.5，失败降级保留原有提问）+ `meeting_live_suggest.md` 模板；⑥ 性能架构 — DocWriter 增量渲染缓存（segment 块 O(1) 追加，历史段复用缓存）+ 乐观并发批处理（N+1 预取就绪时两段 LLM 分析并发提交、按 seq 顺序落账）。验证：全量 2,762 通过，ruff 零告警。协议版本 3.18（不变）。产品版本 3.24.2→3.24.3。
+
+**v3.24.2 (2026-08-11)** — asr-corrector 写回修正（真机验证驱动）：① full 模式跳过词典写回（仅 LLM 最终结果一次输出，消除两次写回闪烁）；② 取消 Cmd+A 全选覆盖，全场景恢复逐字符 Delete 删除（Cmd+A 跨 App 不可靠——聊天输入框/浏览器文本框等场景可能选不中 vocotype 写入的文本区域，导致原文残留+校正追加=文本重复），timeout 按 100ms/字校准覆盖长文本。验证：unit 全量 1,417 通过，ruff 通过。协议版本 3.18（不变）。产品版本 3.24.0→3.24.2。
 
 **v3.24.0 (2026-08-11)** — meeting-live-assistant × asr-corrector 全面优化（26 文件 / +733 -190 + 测试 +23）：① 写回机制重构 — `_replace_text_in_place` 快照校验 + 成功才更新 `_last_corrected`（失败下条自然重试），LLM 写回快照拦截跨句竞态；② 反馈管线时序修正 — feedback 块移到 `generate_misreadings` 之后（提升映射不被整体覆盖、僵尸淘汰面对已填充规则）、热词文件最后统一写盘、僵尸判定加 `history_rules` 时间窗；③ 交叉冲突防护 — `format_replace_dict` 跳过误识别词与任一正确术语重合的映射；④ assistant 预取原子化 — `submit` 新增 `on_publish` 临界区回调（futures 注册与 pending 原子，双跑消除），`suggest_every` 改 `(seq-1)%N`；⑤ 热键监控器 Event 化 — `_ready` 替代 `join(2s)`，stop 唤醒 tap 线程自身 run loop；⑥ LLM 治理 — hotwords/extractor 补 `_deadline` + 并发上限 4、corrector LLM 输出相似度门槛（ratio ≥ 0.5）；⑦ `--max-asr-length` 参数化；⑧ deque 快照迭代、`_pid_alive` ps 命令行校验、version 首次 bump 按类型、formatter 原子写。验证：unit 全量 1,416（+23），ruff 通过。协议版本 3.17→3.18。产品版本 3.23.3→3.24.0。
 

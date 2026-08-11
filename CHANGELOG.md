@@ -1,3 +1,49 @@
+## v3.24.3 (2026-08-11)
+
+meeting-live-assistant 全面优化（13 项 / 14 文件）— 并发安全加固 + 信息完整性提升 + 质量天花板突破 + 工程卫生 + 性能架构优化。
+
+### 1. 并发安全加固（P0）
+
+- `_futures` 显式 `threading.Lock` 保护（poll 线程写 + worker 线程读/pop + P4-13 peek），锁顺序文档化（poll: `_cond` → `_futures_lock`，worker: 仅 `_futures_lock`）
+- `_publish_prefetch` bare `except Exception: pass` 改为 `_logger.warning(exc_info=True)` 记录异常堆栈
+- `_collect_results` 超时未完成的 future 显式 `cancel()` 释放线程池槽位
+
+### 2. 信息完整性（P1）
+
+- **积压丢弃段原文保留**：`MeetingState.dropped_texts`（上限 20 条，截断 200 字），`DocWriter` 渲染为 Obsidian `<details>` 可折叠附录
+- **总结截断头+尾策略**：纯头部截断 → 保留开场 1000 字 + 尾部 3000 字（换行边界对齐），避免丢失会议后半程决策与结论
+- **分析 Prompt few-shot 示例**：`meeting_live_analyze.md` 新增 1 个完整示例展示 key_points / decisions / risks / suggested_questions 边界
+
+### 3. 质量天花板（P2）
+
+- **LLM 语义关闭待解决问题**：新增 `resolved_questions` 字段（SegmentAnalysis），Prompt 传入当前 open_questions，LLM 标记已回答项 → `add_analysis` 双路径关闭（优先 fuzzy match + 精确匹配 fallback）
+- **`_dedup_append` 模糊去重**：`difflib.SequenceMatcher` ≥ 0.85 阈值，短文本（<8 字）保持精确匹配防误伤
+
+### 4. 工程卫生（P3）
+
+- **AsrCorrector 公开 API**：新增 `push_context()` 公开方法（委托 `_push_context`），`CorrectorAdapter` 不再访问私有 API
+- **结构化日志**：新文件 `_logging.py`，双 handler（文件 DEBUG 持久化 + 控制台 INFO stderr），所有 `print()` 替换为 `logging.getLogger("iris.assistant")`
+- **段耗时元数据**：`VoiceSegment` 新增 `analysis_started_at` / `analysis_done_at`（`time.monotonic()` 时间戳）
+- **面板统计增强**：`render_final` 新增 LLM 分析次数 / 总耗时 / 平均耗时统计行
+- **测试适配**：`test_over_max_len_warns` capsys → caplog
+
+### 5. 建议提问高温度独立生成（P3）
+
+- 新模板 `meeting_live_suggest.md`（temperature=0.5）+ `FALLBACK_TEMPLATES` 兜底
+- `SegmentAnalyzer.suggest_questions()`：仅采样段调用，deadline 预算检查（remaining ≥ 2s），失败静默降级保留原有 suggested_questions
+
+### 6. 性能与架构（P4）
+
+- **DocWriter 增量渲染缓存**：`_rendered_segments` 列表缓存段渲染块 → `_assemble_from_cache` 组装（header + cumulative + cached blocks + dropped），单段 O(1) 渲染；`render()` 保持静态全量渲染供测试
+- **乐观并发批处理**：`_process_segment` 收集 N 段 deep/检索后 peek `_futures[N+1]`——若均已 done → `take_pending_if(N+1)` 原子消费 → `_process_batch` 双段 LLM 分析并发提交 pool → 按 seq 顺序落账
+
+### 测试
+
+- 全量 2,762 通过（unit 1,417 + integration 240 + 根目录 1,105），ruff 零告警
+- 协议版本 3.18（不变，无新增 CLI 命令/参数）
+
+---
+
 ## v3.24.2 (2026-08-11)
 
 asr-corrector 写回路径修正（真机验证驱动）— 取消 Cmd+A 全选覆盖，全场景恢复逐字符 Delete。

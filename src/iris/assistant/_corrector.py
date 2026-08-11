@@ -42,4 +42,4 @@ class CorrectorAdapter:
 
     def push_context(self, text: str) -> None:
         """将校正后文本推入近期上下文滚动窗口（本场会议语境）。"""
-        self._corrector._push_context(text)  # noqa: SLF001 — 设计授权复用内部上下文窗口
+        self._corrector.push_context(text)
