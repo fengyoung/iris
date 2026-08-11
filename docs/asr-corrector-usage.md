@@ -1,6 +1,6 @@
 # ASR 实时校正引擎 — 使用指南
 
-> Iris 3.19.13 · 将 vocotype 语音转写接入 Iris，实现实时纠错 + 润色 + 反馈闭环。
+> Iris 3.24.0 · 将 vocotype 语音转写接入 Iris，实现实时纠错 + 润色 + 反馈闭环。
 
 ## 快速开始
 
@@ -20,7 +20,7 @@ iris3 asr-corrector --correct-mode full
 | 命令 | 用途 | 常用参数 |
 |------|------|------|
 | `iris3 build-asr-prompt --deploy` | 生成三件套 + 部署到 vocotype | `--deploy` 一键部署 |
-| `iris3 asr-corrector` | 启动实时校正守护进程 | `--correct-mode fast\|full` `--context-ab` 上下文 A/B 对比 |
+| `iris3 asr-corrector` | 启动实时校正守护进程 | `--correct-mode fast\|full` `--context-ab` 上下文 A/B 对比 `--max-asr-length` 长语音上限（默认 500） |
 | `iris3 asr-audit --pretty` | 热词覆盖率 + 词典质量检查 | `--pretty` 人类可读 |
 | `iris3 asr-report --notes "..."` | 手动纠错（剪贴板原文 + 用户提供正确文本） | |
 

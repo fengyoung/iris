@@ -19,29 +19,33 @@ paraformer ASR 的常见误识别映射，最终渲染为 vocotype 可用的校�
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
 import re
 import sys
 import time
-from concurrent.futures import as_completed, TimeoutError as FuturesTimeoutError
+from concurrent.futures import (
+    as_completed,
+    TimeoutError as FuturesTimeoutError,
+    wait,
+)
 
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 from .._constants import get_all_types, get_wiki_prefix
-from .._term_cleaners import _HEADING_RE, _BOLD_RE, _WIKI_LINK_RE, _SKIP_HEADINGS, _NOISE_TERM_RE, is_noise_term, clean_markup, truncate_context
+from .._term_cleaners import _HEADING_RE, _BOLD_RE, _WIKI_LINK_RE, _SKIP_HEADINGS, is_noise_term, clean_markup, truncate_context
 from ..context_loader import WikiPageInfo
-from ..discovery_utils import extract_terms, is_high_value_term, normalized_key
+from ..discovery_utils import is_high_value_term, normalized_key
 from iris.utils.template_loader import load_template as _load_template_file
 
-from ._types import AsrTerm, AsrPromptVersion
+from ._types import AsrTerm
 from ._progress import ProgressTracker
 
 logger = logging.getLogger(__name__)
+
+# 单批 LLM 调用时间预算（秒）：与超时兜底对齐，provider 侧有界返回
+_BATCH_DEADLINE_SEC = 90.0
 
 if TYPE_CHECKING:
     from iris.llm.provider import EnvironmentConfiguredLLMProvider
@@ -328,6 +332,7 @@ class TermExtractor:
                         ),
                         temperature=0.3,
                         max_tokens=8192,
+                        _deadline=time.monotonic() + _BATCH_DEADLINE_SEC,
                     )
                     self._parse_misreadings_response(response.text, batch)
                     filled = sum(1 for t in batch if t.mis_asr)
@@ -347,10 +352,19 @@ class TermExtractor:
         _max_workers = min(len(batches), os.cpu_count() or 8)
         from iris.core.thread_pool import shared_pool
         with shared_pool.executor(max_workers=_max_workers) as executor:
+            futures = [
+                executor.submit(_run_batch, (idx, batch))
+                for idx, batch in enumerate(batches)
+            ]
             try:
-                list(executor.map(_run_batch, enumerate(batches), timeout=_timeout))
+                # 完成即等待：批内异常已自行处理，此处仅等待进度自然推进
+                for _ in as_completed(futures, timeout=_timeout):
+                    pass
             except FuturesTimeoutError:
-                logger.warning("ASR 误识别生成超时（%ds），已处理完成的批次保留", _timeout)
+                logger.warning("ASR 误识别生成超时（%ds），等待残批有界收尾", _timeout)
+                # 残批仍在池中运行并写回 terms.mis_asr——有界等待其结束，
+                # 避免主线程已进入 format_replace_dict 渲染时结果仍不确定
+                wait(futures, timeout=30.0)
 
         total_mappings = sum(len(t.mis_asr) for t in terms)
         print(f"[asr]   ... 误识别生成完成 ({tracker.elapsed():.1f}s): {total_mappings} 映射",
@@ -485,22 +499,24 @@ class TermExtractor:
             return
 
         # 构建查找索引（含 category 别名兼容：LLM 可能返回 "domain" 代替 "domain_term"）
+        # key 用 normalized_key 规范化：LLM 回显大小写/空格差异（qwen vs QWEN）不丢匹配
         CATEGORY_ALIASES = {"domain": "domain_term"}
         index: Dict[str, AsrTerm] = {}
         for t in terms:
-            index[f"{t.term}|{t.category}"] = t
+            index[f"{normalized_key(t.term)}|{t.category}"] = t
 
         for item in data:
             if not isinstance(item, dict):
                 continue
             raw_cat = item.get("category", "")
             resolved_cat = CATEGORY_ALIASES.get(raw_cat, raw_cat)
-            key = f"{item.get('term', '')}|{resolved_cat}"
+            item_key = normalized_key(item.get("term", ""))
+            key = f"{item_key}|{resolved_cat}"
             term_obj = index.get(key)
             if term_obj is None:
-                # 模糊匹配：仅按 term 名称匹配
+                # 模糊匹配：仅按 term 名称匹配（规范化后比较）
                 for k, t in index.items():
-                    if k.startswith(f"{item.get('term', '')}|"):
+                    if k.startswith(item_key + "|"):
                         term_obj = t
                         break
             if term_obj:

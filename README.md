@@ -1,8 +1,10 @@
-# Iris 3.23.3
+# Iris 3.24.0
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
+
+**v3.24.0** — [meeting-live-assistant × asr-corrector 全面优化](CHANGELOG.md)：写回机制重构（Cmd+A 全选覆盖 + 快照校验，根除长文本超时截断）+ 反馈反向优化管线时序修正（补充热词/提升发现/僵尸淘汰全部生效）+ 替换词典交叉冲突防护（音近人名不误伤）+ assistant 预取原子化（futures 注册与 pending 原子，双跑消除）+ 热键监控器 Event 化（启动零等待 + 唤醒正确 run loop）+ LLM 调用治理（deadline 补全 + 并发上限 + 相似度门槛拦幻觉）+ `--max-asr-length` 参数化。测试 +23（合计 2,770 用例）。协议版本 3.17→3.18。
 
 **v3.23.3** — [meeting-live-assistant 全量优化](docs/meeting-live-assistant-usage.md)：双段流水线（段 N 分析期间段 N+1 的深度校正/检索已并行，关键路径 25s→15s）+ 短段门控（<15 字确认语零 LLM 成本）+ `--fast-only` 仅词典模式；退出路径加固（尾段不再丢 + 原子写并发防御）；AI 会议总结（退出时一次 LLM 写文档「会议总结」区）；检索链路 deadline 根治（全链路唯一无 deadline 的 LLM 调用点）；长段支持（2000 字覆盖 120s 长语音）+ 幽灵段抑制 + 限时去重；互斥对称（asr-corrector 启动也探测助理）。测试 +34（合计 2,747 用例全过）。协议版本 3.16→3.17。
 

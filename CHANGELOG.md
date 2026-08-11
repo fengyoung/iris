@@ -1,3 +1,52 @@
+## v3.24.0 (2026-08-11)
+
+meeting-live-assistant × asr-corrector 全面优化（26 文件 / +733 -190 + 测试 +23）：写回机制重构 + 反馈管线时序修正 + 交叉冲突防护 + 预取原子化 + LLM 调用治理。
+
+### 1. 背景
+
+两个模块深度审查（逐文件 + 竞态验证）发现的真实问题：
+
+- **剪贴板写回静默截断文档**：逐字符 Delete 键删除 + 5s 超时，100+ 字转写必超时且 `except Exception: pass` 静默吞错；`_last_corrected` 已先置 → 永不重试，文档残缺零报错
+- **LLM 写回跨句损坏**：代际检查在 LLM 返回之后、写回之前，与下一 tick 的词典替换存在竞态窗口（缓存命中时概率不低）
+- **反馈反向优化全部失效**：feedback 应用在 `generate_misreadings` 之前 → 补充热词 100% 丢失、提升映射被整体覆盖、僵尸淘汰恒空（`mis_asr` 尚未填充）
+- **替换词典交叉冲突**：误识别词 == 其他正确术语（音近人名）→ 替换误伤真实人名
+- **assistant 预取双跑竞态**：`submit` 与 `_prefetch` 之间无锁窗口，worker 抢跑 pop 空 → 现场重提 + poll 再提 → 同一段 deep/检索各跑两遍
+- **LLM 输出无幻觉拦截**：长度启发式拦不住答非所问的幻觉输出整段替换文档
+
+外加 P2：热键监控器 join(2s) 白等 + 唤醒错误 run loop、热词/误识别生成 LLM 无 `_deadline` 且并发无上限、`_MAX_ASR_LENGTH=500` 无配置且与 assistant 不对称、僵尸判定无时间窗（生成→淘汰→再生成振荡）、`[手动]` 前缀与反馈解析器不兼容等。
+
+### 2. 改动
+
+**写回机制重构（Cmd+A 覆盖 + 快照校验）**：`_replace_text_in_place(corrected, raw_text) -> bool` —— 稳定轮询后校验剪贴板仍等于原文（文档内容就是这段转写才允许全选覆盖），Cmd+A 全选 → Cmd+V 覆盖粘贴替代逐字符删除（长文本毫秒级完成，超时截断根除）；两处调用适配（corrector 词典写回 / LLM 精修写回）改为**成功后才更新 `_last_corrected`**（失败保留旧值 → 下条输入自然重试自愈），失败打印告警；LLM 写回快照 = `snap_fast`（文档实际内容）→ 竞态窗口内剪贴板已是新文本，快照校验拦截，不触碰文档。
+
+**反馈管线时序修正**：`_wiki.py` 中 feedback 块移到 `generate_misreadings` 之后（提升映射不再被整体覆盖、僵尸淘汰面对已填充规则），热词文件写盘移到 feedback 之后统一写盘（补充热词真正落盘）；`prompt_optimizer` 移除 `provider` 死参数、`hotwords` 真正使用（新增「## 高频词」段，top 40）；僵尸判定加 `history_rules` 时间窗（仅上次部署词典中已有规则参与淘汰，防振荡）；`[手动] ` 前缀与 `[LLM] ` 一致剥离；`corrections_applied` 非 list 脏数据防御。
+
+**交叉冲突防护**：`format_replace_dict` 构建全部术语规范化集合，误识别词与任一正确术语重合（`normalized_key`）即跳过并告警；`analyze_dict_quality` 的 `dangerous_mappings` 新增交叉冲突项（生成前可见）。
+
+**assistant 预取原子化**：`MeetingSession.submit` 新增 `on_publish` 临界区回调（notify 前执行）——fast 校正移到锁外、futures 注册与 pending 设置原子 → worker 取段时 futures 必已注册（双跑消除），清理循环随临界区同步消除 dict 迭代竞态；`suggest_every` 取模改 `(seq-1) % N`（首段保留建议提问——会议开场引导）。
+
+**热键监控器 Event 化**：`_HotkeyMonitor.start()` 用 `_ready` Event 替代 `join(2s)`（成功启动零等待）；tap 线程保存自身 run loop 引用，`stop()` 唤醒正确线程（原唤醒主线程 loop 无效）。
+
+**LLM 调用治理**：hotwords/extractor 的 `provider.generate` 补 `_deadline`（90s 批次预算）+ 并发上限 4；extractor 的 `executor.map` 改 `as_completed` + 超时后 `wait(30s)` 有残批收尾（渲染前结果确定）；误识别回显匹配规范化（`normalized_key`，大小写/空格差异不再丢整条）；corrector LLM 输出加相似度门槛（`difflib` ratio ≥ 0.5，幻觉降级为词典结果）。
+
+**长度上限配置化**：`AsrCorrector(max_asr_length=500)` + CLI `--max-asr-length`（优先级 CLI > profile > 默认 500），corrector 场景可对齐 assistant 的 2000 覆盖长语音。
+
+**杂项**：deque 快照迭代（`_build_context_block` 并发 append 不再抛 RuntimeError 静默降级）；`released_at=0` 日志显示 `—`；`_pid_alive`/`_probe_running` 加 ps 命令行校验（防 PID 复用误判阻塞启动）；`version.py` 首次生成按 bump 类型（major→1.0.0 / minor→0.1.0，不再固定 0.0.1）；`formatter.write_text` 改 tmp+os.replace 原子写。
+
+### 3. 测试
+
+- 新增/更新 +23：clipboard（Cmd+A/Cmd+V 断言、快照不符返回 False、osascript 异常返回 False）、live（worker 取段原子可见 futures、首段保留建议提问、stale 清理适配）、session（on_publish 临界区顺序、异常传播锁无泄漏）、formatter（交叉冲突跳过 ×2）、feedback（history_rules 时间窗 ×3、`[手动]` 前缀、无历史降级）、prompt_optimizer（高频词段 ×3、provider 移除）、corrector（相似度门槛三态：幻觉降级/润色通过/长度炸弹、pid 复用误判 ×2）。
+- 验证：unit 全量 **1,416 通过**（+23）；integration e2e 全过；ruff 通过（改动文件）。
+
+### 版本升级
+
+| 版本 | 值 | 理由 |
+|------|:---:|------|
+| 产品版本 | 3.23.3 → **3.24.0** | 两个模块全面优化（写回/管线/竞态/LLM 治理） |
+| 协议版本 | 3.17 → **3.18** | 新增 `--max-asr-length` CLI 参数 |
+
+---
+
 ## v3.23.3 (2026-08-10)
 
 meeting-live-assistant 全量优化（21 文件 / +700 -100 + 测试 +34）：双段流水线 + 检索 deadline + 退出加固 + 结束总结 + 互斥对称。

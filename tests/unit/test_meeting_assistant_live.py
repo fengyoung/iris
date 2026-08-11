@@ -22,9 +22,19 @@ class TestProbeRunning:
         assert list(tmp_path.iterdir()) == []
 
     def test_alive_pid(self, tmp_path):
+        # v3.24: 除 os.kill 存活探测外，还校验进程命令行含 "iris"（防 PID 复用误判）
         (tmp_path / "asr-corrector.pid").write_text(str(os.getpid()))
-        assert _probe_running("asr-corrector", tmp_path) is True
+        with patch("subprocess.run", return_value=SimpleNamespace(
+                stdout="python /Users/fengyoung/MyProjects/iris3/src/iris/app/main.py")):
+            assert _probe_running("asr-corrector", tmp_path) is True
         assert (tmp_path / "asr-corrector.pid").exists()  # 不清理
+
+    def test_pid_reused_by_unrelated_process(self, tmp_path):
+        """PID 被无关进程复用：存活但命令行不含 iris → 视为无实例。"""
+        (tmp_path / "asr-corrector.pid").write_text(str(os.getpid()))
+        with patch("subprocess.run", return_value=SimpleNamespace(
+                stdout="/usr/bin/some-unrelated-daemon")):
+            assert _probe_running("asr-corrector", tmp_path) is False
 
     def test_dead_pid(self, tmp_path):
         (tmp_path / "asr-corrector.pid").write_text("999999999")
@@ -157,7 +167,10 @@ class TestPipelineParallel:
         pid_dir.mkdir(exist_ok=True)
         (pid_dir / "asr-corrector.pid").write_text(str(os.getpid()))
         assistant = _make_assistant(tmp_path)
-        assert assistant.run() == 1
+        # v3.24: _probe_running 含 ps 命令行校验，mock 通过（当前进程命令行不含 iris）
+        with patch("subprocess.run", return_value=SimpleNamespace(
+                stdout="python /Users/fengyoung/MyProjects/iris3/src/iris/app/main.py")):
+            assert assistant.run() == 1
         # 未创建文档（让位）
         assert not assistant._doc_path.exists()
 
@@ -249,9 +262,12 @@ class TestPrefetch:
 
         assistant = _make_assistant(tmp_path)
         assistant._corrector = _FakeCorrector()
-        # poll 线程侧：submit + 预取
-        seg = assistant._session.submit("今天讨论下半年目标预算")
-        assistant._prefetch(seg)
+        # poll 线程侧：fast 校正（锁外）→ submit（on_publish 临界区内注册 futures）
+        fast = assistant._corrector.fast("今天讨论下半年目标预算")
+        seg = assistant._session.submit(
+            "今天讨论下半年目标预算",
+            on_publish=lambda s: assistant._publish_prefetch(s, fast),
+        )
         assert seg.seq in assistant._futures
         f_deep, f_retr = assistant._futures[seg.seq]
         # worker 侧：消费预取 futures（无现场提交兜底）
@@ -265,23 +281,43 @@ class TestPrefetch:
         f_deep.cancel()
         f_retr.cancel()
 
+    def test_worker_take_sees_futures_atomic(self, tmp_path):
+        """v3.24 原子注册：on_publish 在 submit 临界区内执行——worker 从
+        submit 返回后立即取段时 futures 必已注册（消除双跑竞态）。"""
+        assistant = _make_assistant(tmp_path)
+        with patch.object(assistant._pool, "submit", wraps=assistant._pool.submit):
+            fast = assistant._corrector.fast("今天讨论下半年目标预算")
+            seg = assistant._session.submit(
+                "今天讨论下半年目标预算",
+                on_publish=lambda s: assistant._publish_prefetch(s, fast),
+            )
+            taken = assistant._session.take_pending(timeout=0.1)
+            assert taken is seg
+            futures = assistant._futures.pop(seg.seq, None)
+            assert futures is not None  # 取段时已注册，worker 无 None → 无兜底重提
+            futures[0].cancel()
+            futures[1].cancel()
+
     def test_prefetch_skipped_for_short_segment(self, tmp_path):
         b = _make_bundle(tmp_path)
         b.app["assistant"]["short_segment_chars"] = 15
         assistant = _make_assistant(tmp_path, bundle=b)
-        seg = assistant._session.submit("好的")
-        assistant._prefetch(seg)  # 短段：只 fast 校正，不提交 futures
-        assert seg.seq not in assistant._futures
+        fast = assistant._corrector.fast("好的")
+        seg = assistant._session.submit(
+            "好的", on_publish=lambda s: assistant._publish_prefetch(s, fast))
+        assert seg.seq not in assistant._futures  # 短段：只 fast 校正，不提交 futures
         assert seg.corrected_text == "好的"
 
     def test_stale_futures_pruned(self, tmp_path):
         assistant = _make_assistant(tmp_path)
-        seg = assistant._session.submit("今天讨论下半年目标预算")
-        assistant._prefetch(seg)
+        seg = assistant._session.submit(
+            "今天讨论下半年目标预算",
+            on_publish=lambda s: assistant._publish_prefetch(s, s.raw_text))
         f_deep, f_retr = assistant._futures[seg.seq]
         # 再提交一个更远的段：旧条目应被清理
-        seg2 = assistant._session.submit("第二段讨论内容也是足够长的会议发言")
-        assistant._prefetch(seg2)
+        seg2 = assistant._session.submit(
+            "第二段讨论内容也是足够长的会议发言",
+            on_publish=lambda s: assistant._publish_prefetch(s, s.raw_text))
         assert seg.seq not in assistant._futures  # 已被 prune
         assert seg2.seq in assistant._futures
         f_deep.cancel()
@@ -350,13 +386,20 @@ class TestSuggestEvery:
         assistant = _make_assistant(tmp_path, bundle=self._bundle_with_suggest(tmp_path, every=3))
         seg2 = _seg(seq=2)
         assistant._process_segment(seg2)
-        assert seg2.analysis.suggested_questions == []  # 2 % 3 != 0 → 清空
+        assert seg2.analysis.suggested_questions == []  # (2-1) % 3 != 0 → 清空
 
     def test_sample_segment_keeps_questions(self, tmp_path):
         assistant = _make_assistant(tmp_path, bundle=self._bundle_with_suggest(tmp_path, every=3))
-        seg3 = _seg(seq=3)
-        assistant._process_segment(seg3)
-        assert seg3.analysis.suggested_questions == ["追问Z"]  # 3 % 3 == 0 → 保留
+        seg4 = _seg(seq=4)
+        assistant._process_segment(seg4)
+        assert seg4.analysis.suggested_questions == ["追问Z"]  # (4-1) % 3 == 0 → 保留
+
+    def test_first_segment_keeps_questions(self, tmp_path):
+        """v3.24: 首段（seq=1）保留建议提问——会议开场恰需引导提问。"""
+        assistant = _make_assistant(tmp_path, bundle=self._bundle_with_suggest(tmp_path, every=3))
+        seg1 = _seg(seq=1)
+        assistant._process_segment(seg1)
+        assert seg1.analysis.suggested_questions == ["追问Z"]  # (1-1) % 3 == 0 → 保留
 
 
 class TestExitSummary:

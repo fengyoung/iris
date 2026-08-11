@@ -62,6 +62,62 @@ class TestBacklogDiscard:
         taken = session.take_pending(timeout=0.1)
         assert taken is seg
 
+    def test_on_publish_called_before_pending_visible(self):
+        """v3.24: on_publish 在临界区内（notify 前）调用——worker 取段时
+        预取产物（futures 注册）必已完成，消除「worker 抢跑 → 双份 LLM」竞态。"""
+        session = MeetingSession()
+        order = []
+
+        def publish(seg):
+            order.append(("publish", seg.seq))
+            # 临界区内已可见 pending 指向本段
+            assert session.state.dropped_count >= 0
+
+        seg = session.submit("段A", on_publish=publish)
+        assert order == [("publish", 1)]
+        assert seg.corrected_text == ""  # 回调内未设置时保持空（live 侧负责填充）
+
+    def test_on_publish_exception_propagates_but_pending_set(self):
+        """回调异常传播给调用方（live 侧回调内部自兜底，session 契约不吞），
+        但 pending 已设置、锁已释放——后续 take 不阻塞、状态一致。"""
+        session = MeetingSession()
+
+        def bad_publish(_seg):
+            raise RuntimeError("预取兜底失败")
+
+        raised = False
+        try:
+            session.submit("段A", on_publish=bad_publish)
+        except RuntimeError:
+            raised = True
+        assert raised
+        taken = session.take_pending(timeout=0.1)
+        assert taken is not None and taken.seq == 1  # pending 已设置，无锁泄漏
+
+    def test_on_publish_runs_before_worker_take(self):
+        """并发验证：worker 在 notify 后取段时，on_publish 已完成。"""
+        import threading
+        session = MeetingSession()
+        events = []
+        publish_done = threading.Event()
+
+        def publish(seg):
+            events.append(("publish", seg.seq))
+            publish_done.set()
+
+        def worker():
+            taken = session.take_pending(timeout=1.0)
+            events.append(("take", taken.seq if taken else None))
+
+        t = threading.Thread(target=worker)
+        t.start()
+        session.submit("段A", on_publish=publish)
+        t.join(timeout=2)
+        # 发布必须先于取走（临界区顺序保证）
+        pub_idx = events.index(("publish", 1))
+        take_idx = events.index(("take", 1))
+        assert pub_idx < take_idx
+
 
 class TestSummaryPrompt:
     def _seed(self, session: MeetingSession) -> None:

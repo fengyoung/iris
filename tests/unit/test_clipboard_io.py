@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import subprocess
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from iris.wiki.asr._clipboard_io import (
     _read_clipboard,
@@ -60,26 +60,50 @@ class TestPaste:
 class TestReplaceTextInPlace:
     def test_writes_corrected_to_clipboard(self):
         with patch("iris.wiki.asr._clipboard_io._write_clipboard") as mock_write, \
-             patch("iris.wiki.asr._clipboard_io._read_clipboard", return_value="corrected"), \
+             patch("iris.wiki.asr._clipboard_io._read_clipboard", return_value="原始文本"), \
              patch("subprocess.run"), \
              patch("time.sleep"), \
              patch("time.monotonic", side_effect=[0, 0.2, 1.0]):
-            _replace_text_in_place("corrected", 5)
-            mock_write.assert_called_once_with("corrected")
+            ok = _replace_text_in_place("校正文本", "原始文本")
+            assert ok is True
+            mock_write.assert_called_once_with("校正文本")
 
-    def test_sends_delete_and_paste_keystrokes(self):
+    def test_sends_select_all_and_paste_keystrokes(self):
+        """v3.24: Cmd+A 全选 + Cmd+V 覆盖粘贴，替代逐字符删除（长文本不再超时截断）。"""
         with patch("iris.wiki.asr._clipboard_io._write_clipboard"), \
-             patch("iris.wiki.asr._clipboard_io._read_clipboard", return_value="corrected"), \
+             patch("iris.wiki.asr._clipboard_io._read_clipboard", return_value="原始文本"), \
              patch("subprocess.run") as mock_run, \
              patch("time.sleep"), \
              patch("time.monotonic", side_effect=[0, 0.2, 1.0]):
-            _replace_text_in_place("corrected", 10)
-            # 最终调用应包含 AppleScript 命令
+            ok = _replace_text_in_place("校正文本", "原始文本")
+            assert ok is True
             final_call_args = mock_run.call_args_list[-1][0][0]
             script = " ".join(final_call_args)
-            assert "key code 51" in script  # Delete
-            assert "keystroke" in script     # Cmd+V
-            assert "command down" in script
+            assert 'keystroke "a" using command down' in script  # Cmd+A 全选
+            assert 'keystroke "v" using command down' in script  # Cmd+V 粘贴
+            assert "key code 51" not in script                   # 不再逐字符删除
+
+    def test_snapshot_mismatch_returns_false(self):
+        """快照校验：剪贴板已不等于原文（新句到达/用户其他复制）→ 不写不贴。"""
+        with patch("iris.wiki.asr._clipboard_io._write_clipboard") as mock_write, \
+             patch("iris.wiki.asr._clipboard_io._read_clipboard", return_value="其他内容"), \
+             patch("subprocess.run") as mock_run, \
+             patch("time.sleep"), \
+             patch("time.monotonic", side_effect=[0, 0.2, 1.0]):
+            ok = _replace_text_in_place("校正文本", "原始文本")
+            assert ok is False
+            mock_write.assert_not_called()
+            mock_run.assert_not_called()
+
+    def test_osascript_exception_returns_false(self):
+        """系统异常（超时/无权限）→ 返回 False，调用方告警并回滚状态。"""
+        with patch("iris.wiki.asr._clipboard_io._write_clipboard"), \
+             patch("iris.wiki.asr._clipboard_io._read_clipboard", return_value="原始文本"), \
+             patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 5)), \
+             patch("time.sleep"), \
+             patch("time.monotonic", side_effect=[0, 0.2, 1.0]):
+            ok = _replace_text_in_place("校正文本", "原始文本")
+            assert ok is False
 
     def test_polling_waits_for_stable_clipboard(self):
         """剪贴板不稳定时轮询等待，稳定后才粘贴。"""
@@ -91,9 +115,9 @@ class TestReplaceTextInPlace:
             return "stable"
         with patch("iris.wiki.asr._clipboard_io._write_clipboard"), \
              patch("iris.wiki.asr._clipboard_io._read_clipboard", side_effect=unstable_then_stable), \
-             patch("subprocess.run") as mock_run, \
+             patch("subprocess.run"), \
              patch("time.sleep"), \
              patch("time.monotonic", return_value=0):
-            _replace_text_in_place("corrected", 3)
-            # 应该等待稳定后才执行 keystroke
+            ok = _replace_text_in_place("校正文本", "stable")
+            assert ok is True
             assert call_count[0] >= 3  # 至少轮询了几次

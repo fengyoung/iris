@@ -140,7 +140,9 @@ def determine_new_version(
     if old:
         new_ver = bump_version(old.version, bump)
     else:
-        new_ver = bump_version("0.0.0", "patch")  # 首次生成 → 0.0.1
+        # 首次生成：按 bump 类型起步（auto 视同 patch → 0.0.1；
+        # major → 1.0.0、minor → 0.1.0，手动指定时不再固定 0.0.1）
+        new_ver = bump_version("0.0.0", "patch" if bump == "auto" else bump)
 
     return AsrPromptVersion(
         version=new_ver,

@@ -16,9 +16,8 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set
 
 from ._types import AsrCorrection, AsrTerm
 
@@ -77,6 +76,11 @@ def load_corrections(feedback_path: str) -> List[AsrCorrection]:
                 continue
             try:
                 data = json.loads(line)
+                # 防御历史脏数据：corrections_applied 非 list（如 str）时置空，
+                # 否则下游迭代会按字符拆解污染分析结果
+                corrections_applied = data.get("corrections_applied", [])
+                if not isinstance(corrections_applied, list):
+                    corrections_applied = []
                 records.append(
                     AsrCorrection(
                         timestamp=data.get("timestamp", ""),
@@ -84,7 +88,7 @@ def load_corrections(feedback_path: str) -> List[AsrCorrection]:
                         fast_corrected=data.get("fast_corrected", ""),
                         full_corrected=data.get("full_corrected", ""),
                         mode=data.get("mode", "full"),
-                        corrections_applied=data.get("corrections_applied", []),
+                        corrections_applied=corrections_applied,
                         llm_time_ms=data.get("llm_time_ms", 0),
                     )
                 )
@@ -96,6 +100,8 @@ def load_corrections(feedback_path: str) -> List[AsrCorrection]:
 
 # [LLM] 标记前缀，用于区分词典命中 vs LLM 发现的修正
 _LLM_PREFIX = "[LLM] "
+# [手动] 标记前缀：asr-report 手动确认写入的修正（解析时同样剥离）
+_MANUAL_PREFIX = "[手动] "
 
 
 def extract_mappings_from_corrections(
@@ -118,9 +124,11 @@ def extract_mappings_from_corrections(
 
     for c in corrections:
         for applied in c.corrections_applied:
-            # 剥离 [LLM] 前缀（LLM 发现的修正）
+            # 剥离 [LLM] / [手动] 前缀（LLM 发现的修正 / 手动确认的修正）
             if applied.startswith(_LLM_PREFIX):
                 applied = applied[len(_LLM_PREFIX):]
+            elif applied.startswith(_MANUAL_PREFIX):
+                applied = applied[len(_MANUAL_PREFIX):]
             # 格式: "误识别词→正确词"
             parts = applied.split("→", 1)
             if len(parts) == 2:
@@ -190,21 +198,30 @@ def find_zombie_rules(
     corrections: List[AsrCorrection],
     terms: List[AsrTerm],
     min_samples: int = 50,
+    history_rules: Optional[Set[str]] = None,
 ) -> List[tuple]:
     """找出反馈数据中从未命中的替换词典规则。
 
     判断依据：在一段时间的反馈数据中，该规则没有出现过任何命中记录。
     足够样本量（≥ min_samples）下仍未命中，说明规则大概率无效。
 
+    时间窗：仅「历史规则」（上次部署词典中已存在的规则键 "误→正"）
+    参与判定——本次 LLM 新生成的规则在反馈历史中必然无命中记录，
+    若全部参与会被误判为僵尸导致「生成→淘汰→再生成」振荡。
+    history_rules 为 None/空时返回 []（不淘汰）。
+
     Args:
         corrections: AsrCorrection 列表
         terms: 当前 AsrTerm 列表（含 mis_asr 映射）
         min_samples: 最少需要多少条反馈记录才触发分析
+        history_rules: 上次部署替换词典的规则键集合（"误→正"），仅其中规则参与判定
 
     Returns:
         [(mis, correct, category), ...] 僵尸规则列表
     """
     if len(corrections) < min_samples:
+        return []
+    if not history_rules:
         return []
 
     # 收集所有被触发过的（非 LLM）规则
@@ -218,7 +235,8 @@ def find_zombie_rules(
     for t in terms:
         for mis in t.mis_asr:
             rule_key = f"{mis}→{t.term}"
-            if rule_key not in triggered:
+            # 仅历史规则参与判定：本次新生成的规则不在 history_rules 中
+            if rule_key in history_rules and rule_key not in triggered:
                 zombies.append((mis, t.term, t.category))
 
     return zombies
@@ -230,11 +248,12 @@ def build_feedback_recommendations(
     hotwords: List[str],
     min_samples: int = 50,
     promote_threshold: int = 3,
+    history_rules: Optional[Set[str]] = None,
 ) -> Dict[str, object]:
     """分析 feedback.jsonl 并返回优化建议。
 
     这是 Phase 1 反馈反向优化的核心分析函数。三个维度：
-    1. 淘汰僵尸规则 — 从未命中的替换映射
+    1. 淘汰僵尸规则 — 从未命中的替换映射（仅历史规则参与，防振荡）
     2. 提升 LLM 发现 — 高频 LLM 修正提升为词典规则
     3. 补充热词 — 反馈中被 LLM 纠正的专有名词
 
@@ -244,6 +263,7 @@ def build_feedback_recommendations(
         hotwords: 当前热词列表
         min_samples: 最少需要多少条反馈记录
         promote_threshold: LLM 发现需达到多少次才提升为词典规则
+        history_rules: 上次部署替换词典的规则键集合（透传给 find_zombie_rules）
 
     Returns:
         {
@@ -287,7 +307,8 @@ def build_feedback_recommendations(
     )
 
     # ── 2. 僵尸规则检测 ──────────────────────────────────
-    zombies = find_zombie_rules(corrections, terms, min_samples=min_samples)
+    zombies = find_zombie_rules(corrections, terms, min_samples=min_samples,
+                                history_rules=history_rules)
     result["zombie_rules"] = zombies
     result["zombie_count"] = len(zombies)
 

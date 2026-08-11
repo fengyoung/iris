@@ -39,7 +39,6 @@ def handle_discover_wiki(args, bundle, logger) -> int:
 
 
 def handle_discover_wiki_auto(args, bundle, logger) -> int:
-    from iris.wiki import CandidateDiscovery
     from iris.app.cli.helpers import _auto_discover_wiki
 
     result = _auto_discover_wiki(bundle, changed_count=999)
@@ -48,7 +47,7 @@ def handle_discover_wiki_auto(args, bundle, logger) -> int:
 
 
 def handle_build_wiki(args, bundle, logger) -> int:
-    from iris.wiki import BatchWikiItem, WikiGenerator
+    from iris.wiki import WikiGenerator
 
     generator = WikiGenerator(bundle)
     if args.review_file:
@@ -180,7 +179,7 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
     from iris.wiki.context_loader import WikiContextLoader
     from iris.wiki.asr import (
         TermExtractor, render_asr_prompt, determine_new_version,
-        load_version, save_version, format_hotwords_file,
+        save_version, format_hotwords_file,
         format_replace_dict, LLMHotwordExtractor, LLMPromptOptimizer,
         hotwords_to_terms,
     )
@@ -227,15 +226,6 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
         print(f"[asr]   ... Phase 1 完成 ({time.monotonic() - _t1:.1f}s): "
               f"{len(hotwords)} 热词", file=sys.stderr)
 
-        # 仅在需要热词文件的模式写盘；prompt 模式只将热词喂给优化器
-        if mode in ("all", "hotwords"):
-            hotwords_path = f"asr-hotwords-{today}.txt"
-            if args.output_file and mode != "all":
-                hotwords_path = args.output_file
-            hotwords_file = format_hotwords_file(
-                hotwords, bundle.root / "output" / hotwords_path
-            )
-
     # ── Phase 2：术语提取 + 替换词典 ─────────────────────
     terms: List = []
     replace_dict_file = ""
@@ -248,9 +238,25 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
         if hotwords and mode == "all":
             terms = hotwords_to_terms(hotwords, terms)
 
-        # ── 反馈反向优化：从 feedback.jsonl 学习，淘汰僵尸规则 + 提升LLM发现 ──
-        _fb_removed, _fb_promoted, _fb_hotwords = 0, 0, 0
+        # 版本判定
+        bump = getattr(args, "bump", "auto") or "auto"
+        new_version = determine_new_version(pages, data_dir, bump=bump)
+
         if mode in ("all", "replace-dict"):
+            # LLM 生成误识别映射
+            print(f"[asr] Phase 2/3: LLM 误识别生成（{len(terms)} 术语）...",
+                  file=sys.stderr)
+            _t2 = time.monotonic()
+            terms = extractor.generate_misreadings(terms, provider,
+                                                   domain_context=domain_context)
+            total_mappings = sum(len(t.mis_asr) for t in terms)
+            print(f"[asr]   ... Phase 2 完成 ({time.monotonic() - _t2:.1f}s): "
+                  f"{total_mappings} 映射", file=sys.stderr)
+
+            # ── 反馈反向优化：在 LLM 误识别生成之后应用 ──
+            # 时序要求：提升映射 append 进 mis_asr 后不再被 generate_misreadings
+            # 整体覆盖；僵尸淘汰面对的是已填充的规则；补充热词随后统一写盘
+            _fb_removed, _fb_promoted, _fb_hotwords = 0, 0, 0
             from iris.wiki.asr.feedback import (
                 load_corrections, build_feedback_recommendations,
                 apply_feedback_optimizations,
@@ -260,9 +266,13 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
                 try:
                     corrections = load_corrections(str(feedback_path))
                     if len(corrections) >= 50:
+                        # 僵尸判定时间窗：仅上次部署词典中已有的规则参与淘汰，
+                        # 防止本次新生成规则被误判为僵尸（生成→淘汰→再生成振荡）
+                        history_rules = _load_history_replace_rules(data_dir)
                         recs = build_feedback_recommendations(
                             corrections, terms, hotwords,
                             min_samples=50, promote_threshold=3,
+                            history_rules=history_rules,
                         )
                         # 应用优化
                         _fb_removed, _fb_promoted, _fb_hotwords = \
@@ -299,26 +309,10 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
                         file=sys.stderr,
                     )
 
-        # 版本判定
-        bump = getattr(args, "bump", "auto") or "auto"
-        new_version = determine_new_version(pages, data_dir, bump=bump)
-
-        if mode in ("all", "replace-dict"):
-            # LLM 生成误识别映射
-            print(f"[asr] Phase 2/3: LLM 误识别生成（{len(terms)} 术语）...",
-                  file=sys.stderr)
-            _t2 = time.monotonic()
-            terms = extractor.generate_misreadings(terms, provider,
-                                                   domain_context=domain_context)
-            total_mappings = sum(len(t.mis_asr) for t in terms)
-            print(f"[asr]   ... Phase 2 完成 ({time.monotonic() - _t2:.1f}s): "
-                  f"{total_mappings} 映射", file=sys.stderr)
-
             max_mappings = getattr(args, "max_mappings", 2000) or 2000
             max_chars = getattr(args, "max_chars", 20) or 20
             # 从 profile 配置读取 max_mappings 覆盖（优先级：CLI 参数 > profile > 默认值）
             import json as _profile_json
-            from pathlib import Path as _ProfilePath
             profile_path = resolve_data_path("config/asr_profiles.json")
             if profile_path.exists() and getattr(args, "max_mappings", None) is None:
                 try:
@@ -339,6 +333,16 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
                 max_mappings=max_mappings, max_chars=max_chars,
             )
 
+    # 热词文件写盘：在 feedback 补充热词之后统一写盘
+    # （all 模式此时 hotwords 已含反馈补充；hotwords 模式无 Phase 2 直接写盘）
+    if mode in ("all", "hotwords"):
+        hotwords_path = f"asr-hotwords-{today}.txt"
+        if args.output_file and mode != "all":
+            hotwords_path = args.output_file
+        hotwords_file = format_hotwords_file(
+            hotwords, bundle.root / "output" / hotwords_path
+        )
+
     # ── Phase 3：LLM Prompt 优化 ────────────────────────
     prompt = ""
     output_path = ""
@@ -349,9 +353,9 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
         new_version.term_count = len(terms)
         new_version.wiki_page_count = len(pages)
 
-        # LLM 优化器生成紧凑 prompt
+        # 优化器渲染规则式 prompt（纯模板渲染，零 LLM 调用）
         optimizer = LLMPromptOptimizer()
-        prompt = optimizer.optimize(hotwords, terms, provider, domain_context=domain_context)
+        prompt = optimizer.optimize(hotwords, terms, domain_context=domain_context)
         if not prompt:
             prompt = render_asr_prompt(
                 terms, new_version, output_format="standard"
@@ -393,7 +397,7 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
 
         if voco_path.exists():
             # 备份
-            backup_dir = resolve_data_path("output") / "vocotype-backup" / _dt.now().strftime("%Y%m%d-%H%M%S")
+            backup_dir = resolve_data_path("output/") / "vocotype-backup" / _dt.now().strftime("%Y%m%d-%H%M%S")
             backup_dir.mkdir(parents=True, exist_ok=True)
             for fname in ("hotwords.txt", "postprocess.json", "ai_settings.json"):
                 src = voco_path / fname
@@ -459,7 +463,7 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
                     logger.warning("写入 postprocess.json 失败: %s", e)
 
             # 部署到 Iris data/
-            data_dir = resolve_data_path("data")
+            data_dir = resolve_data_path("data/")
             data_dir.mkdir(parents=True, exist_ok=True)
             if replace_dict_file:
                 shutil.copy2(replace_dict_file, str(data_dir / "asr_replace_dict.json"))
@@ -584,6 +588,24 @@ def _strip_version_suffix(stem: str) -> str:
     如 "asr_prompt_v1.0.0" → "asr_prompt"
     """
     return _VERSION_SUFFIX_PATTERN.sub("", stem)
+
+
+def _load_history_replace_rules(data_dir: Path) -> set:
+    """加载上次部署的替换词典规则键集合（"误→正"），供僵尸规则时间窗判定。
+
+    缺失/损坏 → 空集合（僵尸淘汰自动降级为不淘汰，安全默认）。
+    """
+    path = Path(data_dir) / "asr_replace_dict.json"
+    if not path.exists():
+        return set()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return {
+            f"{mis}→{correct}"
+            for mis, correct in data.get("replace_map", {}).items()
+        }
+    except Exception:
+        return set()
 
 
 # ── asr-audit ──────────────────────────────────────────────
@@ -729,6 +751,13 @@ def handle_asr_corrector(args, bundle, logger) -> int:
     _llm_profile = profile_config.get("llm", {}) if isinstance(profile_config, dict) else {}
     llm_timeout_ms = _llm_profile.get("timeout_ms", 8000) if isinstance(_llm_profile, dict) else 8000
 
+    # ASR 文本长度上限（优先级：CLI 参数 > profile > 默认 500），
+    # 覆盖长语音场景（corrector 与 meeting-live-assistant 对齐可放宽）
+    max_asr_length = getattr(args, "max_asr_length", None)
+    if max_asr_length is None:
+        max_asr_length = profile_config.get("max_asr_length", 500)
+    max_asr_length = int(max_asr_length)
+
     # 启动校正引擎
     corrector = AsrCorrector(
         replace_dict=replace_dict,
@@ -739,6 +768,7 @@ def handle_asr_corrector(args, bundle, logger) -> int:
         context_expire_minutes=context_expire_minutes,
         context_ab=context_ab,
         llm_timeout_ms=llm_timeout_ms,
+        max_asr_length=max_asr_length,
     )
 
     if provider:
@@ -749,7 +779,7 @@ def handle_asr_corrector(args, bundle, logger) -> int:
             from iris.llm.provider import _CircuitBreaker as _CB
             _asr_breaker = _CB(threshold=2, reset_after=30.0)
             provider.set_circuit_breaker(_asr_breaker)
-            print(f"[Iris] ASR 熔断器: threshold=2 reset=30s (独立实例)",
+            print("[Iris] ASR 熔断器: threshold=2 reset=30s (独立实例)",
                   file=sys.stderr)
         except Exception:
             pass  # 降级：使用 provider 默认的全局熔断器

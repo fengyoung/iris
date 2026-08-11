@@ -140,7 +140,10 @@ class TestMutexStartup:
         (pid_dir / "asr-corrector.pid").write_text(str(os.getpid()))
         assistant = _make_assistant(config_bundle, tmp_path, llm=_FakeLLM(),
                                     pid_dir=pid_dir)
-        assert assistant.run() == 1
+        # v3.24: _probe_running 含 ps 命令行校验（当前 pytest 进程命令行不含 iris，
+        # 直接探测会判定无实例而进入主循环）→ mock 互斥探测通过
+        with patch("iris.assistant.live._probe_running", return_value=True):
+            assert assistant.run() == 1
         assert not assistant._doc_path.exists()  # 让位未创建文档
 
     def test_dead_pid_allows_start(self, config_bundle, tmp_path):

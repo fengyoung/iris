@@ -6,12 +6,13 @@
 
 from __future__ import annotations
 
-from typing import List, TYPE_CHECKING
+from typing import List
 
 from ._types import AsrTerm
 
-if TYPE_CHECKING:
-    from iris.llm.provider import EnvironmentConfiguredLLMProvider
+# 高频词段最多嵌入数（控制 prompt 体积，避免稀释映射/规则部分）
+_TOP_HOTWORDS = 40
+
 
 class LLMPromptOptimizer:
     """LLM 驱动的 ASR 校正提示词优化器。
@@ -29,7 +30,6 @@ class LLMPromptOptimizer:
     def optimize(
         hotwords: List[str],
         terms: List[AsrTerm],
-        provider: "EnvironmentConfiguredLLMProvider",
         domain_context: str = "",
     ) -> str:
         """直接渲染规则式校正 Prompt（V2）。
@@ -105,6 +105,8 @@ class LLMPromptOptimizer:
         mappings_text = "、".join(embedded) if embedded else "（暂无）"
         top_persons = "、".join(t.term for t in persons[:8]) if persons else ""
         domain_bg = domain_context or "专业团队工作场景"
+        # 高频词段：团队高频术语（来自 Wiki 提取），帮助 LLM 优先正确识别
+        hotwords_text = "、".join(hotwords[:_TOP_HOTWORDS]) if hotwords else ""
 
         # 领域保护名单：项目名 + 概念名（来自 Wiki，确保 LLM 不改错）
         _protected_list = [
@@ -127,6 +129,8 @@ class LLMPromptOptimizer:
             "未命中时，根据音近原则推断：\n"
             f"{inference_examples}"
             "- 如果某词听感相近但语境不符，尝试同音/近音替换为领域术语\n\n"
+            "## 高频词（本团队高频出现，校正时优先正确识别）\n"
+            f"{hotwords_text or '（暂无）'}\n\n"
             "## 润色\n"
             "- 合并口语化碎片和重复表述（「包括…包括…」→ 精简表达）\n"
             "- 补充缺失的标点符号，按语义合理分句\n"

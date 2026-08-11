@@ -48,9 +48,19 @@ def _probe_running(name: str, pid_dir: Path) -> bool:
     try:
         pid = int(pid_file.read_text().strip())
         os.kill(pid, 0)
-        return True
     except (ValueError, OSError):
         return False  # 残留/损坏/已死 → 视为无实例
+    # 防 PID 复用误判：存活但命令行不含 "iris" 的进程不是本项目实例
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True, text=True, timeout=2,
+        ).stdout
+        return "iris" in out
+    except Exception:
+        return False
 
 
 def _load_replace_dict() -> Dict[str, str]:
@@ -244,25 +254,35 @@ class MeetingLiveAssistant:
         while not self._session.stop.is_set():
             text = self._watcher.poll()
             if text:
-                seg = self._session.submit(text)
-                self._prefetch(seg)
+                # fast 校正（Aho-Corasick，毫秒级）在锁外执行，不阻塞 worker；
+                # 预取注册通过 on_publish 在 submit 临界区内完成（与 pending 原子）
+                fast = self._corrector.fast(text)
+                seg = self._session.submit(
+                    text,
+                    on_publish=lambda s, f=fast: self._publish_prefetch(s, f),
+                )
                 print(f"[Iris] 📋 语音段 {seg.seq} 已捕获（{len(text)} 字），排队分析…",
                       file=sys.stderr)
             time.sleep(self._cfg.poll_interval)
 
-    def _prefetch(self, seg: VoiceSegment) -> None:
-        """poll 线程侧预取：fast 校正立即入窗，提交 deep/检索 futures（双段流水线）。
+    def _publish_prefetch(self, seg: VoiceSegment, fast: str) -> None:
+        """预取发布（submit 临界区内调用）：fast 入窗 + 提交 deep/检索 futures。
 
+        - 在临界区内执行 ⇒ worker 取走段时 futures 必已注册，且清理循环
+          迭代期间无其他线程改写 _futures（worker 在 cond 上等待）——双段
+          流水线无竞态、无双跑
         - 短段门控（< short_segment_chars）与 fast_only：跳过全部 LLM 前置
         - 过期段（pending 被覆盖）的 futures 无 worker 消费，结果自然废弃
           （与积压丢弃哲学一致；LLM 成本有界：deep 8s / 检索 8s deadline）
+        - 回调须 µs 级：此处只有 dict 操作与 deque.append（均无锁开销）
+        - 整体兜底：回调在 submit 临界区内执行，任何异常不得阻断 pending 设置
+          （session 状态机契约：on_publish 不抛未捕获异常）
         """
-        fast = self._corrector.fast(seg.raw_text)
-        seg.corrected_text = fast
-        self._corrector.push_context(fast)
-        if self._cfg.fast_only or len(fast) < self._cfg.short_segment_chars:
-            return
         try:
+            seg.corrected_text = fast
+            self._corrector.push_context(fast)
+            if self._cfg.fast_only or len(fast) < self._cfg.short_segment_chars:
+                return
             self._futures[seg.seq] = (
                 self._pool.submit(self._corrector.deep, fast),
                 self._pool.submit(self._retriever.search, fast, top_k=self._cfg.top_k),
@@ -273,6 +293,8 @@ class MeetingLiveAssistant:
                 self._futures.pop(old_seq, None)
         except RuntimeError:
             pass  # 池已关闭（退出窗口）：worker 侧现场提交兜底
+        except Exception:
+            pass  # 预取兜底失败不阻断提交（段仍以 fast-only 落账）
 
     def _worker_loop(self) -> None:
         while not self._session.stop.is_set():
@@ -346,8 +368,10 @@ class MeetingLiveAssistant:
         seg.analysis_status = (
             VoiceSegment.ANALYSIS_DONE if analysis else VoiceSegment.ANALYSIS_FAILED
         )
-        if analysis and seg.seq % self._cfg.suggest_every != 0:
-            analysis.suggested_questions = []  # 间隔化：非采样段清空建议提问（省 token 减重复噪音）
+        # 间隔化：非采样段清空建议提问（省 token 减重复噪音）
+        # (seq-1) 取模：首段（seq=1）保留建议提问——会议开场恰需引导提问
+        if analysis and (seg.seq - 1) % self._cfg.suggest_every != 0:
+            analysis.suggested_questions = []
 
         try:
             self._session.record(seg)

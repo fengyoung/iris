@@ -1,17 +1,13 @@
 """ASR 反馈数据模型 — 单元测试。"""
 
-import json
 import os
 import tempfile
-from pathlib import Path
 
-import pytest
 from iris.wiki.asr._types import AsrCorrection, AsrTerm
 from iris.wiki.asr.feedback import (
     save_correction,
     load_corrections,
     extract_mappings_from_corrections,
-    extract_llm_discoveries,
     compute_hit_frequency,
     apply_feedback_to_dict,
     find_zombie_rules,
@@ -121,6 +117,27 @@ class TestExtractMappings:
         # 应去重
         assert len(mappings["剪切板"]) == 1
 
+    def test_manual_prefix_stripped(self):
+        """v3.24: [手动] 前缀条目（asr-report 写入）与 [LLM] 一致剥离，
+        不再把整段原始文本当误识别词入库。"""
+        corrections = [
+            AsrCorrection(
+                corrections_applied=["[手动] 检测板→剪切板"],
+            ),
+        ]
+        mappings = extract_mappings_from_corrections(corrections)
+        assert "剪切板" in mappings
+        assert mappings["剪切板"] == ["检测板"]  # 前缀已剥离，误识别词不包含 "[手动]"
+
+    def test_llm_prefix_stripped(self):
+        corrections = [
+            AsrCorrection(
+                corrections_applied=["[LLM] 检测板→剪切板"],
+            ),
+        ]
+        mappings = extract_mappings_from_corrections(corrections)
+        assert mappings["剪切板"] == ["检测板"]
+
 
 class TestHitFrequency:
     def test_frequency_count(self):
@@ -174,7 +191,7 @@ class TestApplyFeedback:
 
 class TestFindZombieRules:
     def test_finds_untriggered_rules(self):
-        """从未出现的规则应被标记为僵尸。"""
+        """从未出现的规则应被标记为僵尸（须在 history_rules 时间窗内）。"""
         terms = [
             AsrTerm(term="剪切板", category="concept", context="",
                     mis_asr=["检测板", "剪切版"]),
@@ -184,7 +201,10 @@ class TestFindZombieRules:
             AsrCorrection(corrections_applied=["检测板→剪切板"])
             for _ in range(60)
         ]
-        zombies = find_zombie_rules(corrections, terms, min_samples=50)
+        zombies = find_zombie_rules(
+            corrections, terms, min_samples=50,
+            history_rules={"检测板→剪切板", "剪切版→剪切板"},
+        )
         assert len(zombies) == 1
         assert zombies[0][0] == "剪切版"
         assert zombies[0][1] == "剪切板"
@@ -199,8 +219,43 @@ class TestFindZombieRules:
             AsrCorrection(corrections_applied=["检测板→剪切板"])
             for _ in range(60)
         ]
-        zombies = find_zombie_rules(corrections, terms, min_samples=50)
+        zombies = find_zombie_rules(
+            corrections, terms, min_samples=50,
+            history_rules={"检测板→剪切板"},
+        )
         assert len(zombies) == 0
+
+    def test_no_history_rules_returns_empty(self):
+        """v3.24: 无 history_rules（上次词典缺失/首次构建）→ 不淘汰任何规则，
+        防止本次新生成规则被误判为僵尸（生成→淘汰→再生成振荡）。"""
+        terms = [
+            AsrTerm(term="剪切板", category="concept", context="",
+                    mis_asr=["检测板", "剪切版"]),
+        ]
+        corrections = [
+            AsrCorrection(corrections_applied=["检测板→剪切板"])
+            for _ in range(60)
+        ]
+        assert find_zombie_rules(corrections, terms, min_samples=50) == []
+        assert find_zombie_rules(corrections, terms, min_samples=50, history_rules=set()) == []
+
+    def test_only_history_rules_participate(self):
+        """仅 history 中的规则参与判定：本次新生成的规则即使未命中也不淘汰。"""
+        terms = [
+            AsrTerm(term="剪切板", category="concept", context="",
+                    mis_asr=["检测板", "剪切版", "新生成规则"]),
+        ]
+        corrections = [
+            AsrCorrection(corrections_applied=["检测板→剪切板"])
+            for _ in range(60)
+        ]
+        zombies = find_zombie_rules(
+            corrections, terms, min_samples=50,
+            history_rules={"剪切版→剪切板"},  # 只有"剪切版"在历史词典中
+        )
+        assert len(zombies) == 1
+        assert zombies[0][0] == "剪切版"
+        assert "新生成规则" not in [z[0] for z in zombies]
 
     def test_insufficient_samples_returns_empty(self):
         """样本量不足时跳过分析。"""
@@ -226,7 +281,10 @@ class TestFindZombieRules:
             AsrCorrection(corrections_applied=["[LLM] 数据湖工程→数据湖"])
             for _ in range(60)
         ]
-        zombies = find_zombie_rules(corrections, terms, min_samples=50)
+        zombies = find_zombie_rules(
+            corrections, terms, min_samples=50,
+            history_rules={"数据湖工程→数据湖"},
+        )
         # "数据湖工程→数据湖" 前面带 [LLM] 前缀，不算词典命中，应标记为僵尸
         assert len(zombies) == 1
         assert zombies[0][0] == "数据湖工程"
@@ -267,14 +325,26 @@ class TestBuildFeedbackRecommendations:
         recs = build_feedback_recommendations(
             corrections, terms, [],
             min_samples=50, promote_threshold=3,
+            history_rules={"数据糊→数据湖", "数据湖工程→数据湖", "检测板→剪切板"},
         )
 
         assert recs["total_corrections"] == 100
         assert recs["dict_hit_count"] == 100  # 每条记录都有"数据糊→数据湖"
         assert recs["total_rules"] == 3
 
-        # 僵尸规则："数据湖工程→数据湖"和"检测板→剪切板"从未被触发
+        # 僵尸规则："数据湖工程→数据湖"和"检测板→剪切板"从未被触发（且在历史窗内）
         assert recs["zombie_count"] == 2
+
+    def test_full_recommendations_no_history_skips_zombies(self):
+        """v3.24: 无历史词典 → 僵尸维度降级为不淘汰（其余维度不受影响）。"""
+        terms = self._make_terms()
+        corrections = self._make_corrections(100)
+        recs = build_feedback_recommendations(
+            corrections, terms, [],
+            min_samples=50, promote_threshold=3,
+        )
+        assert recs["zombie_count"] == 0
+        assert recs["promote_count"] > 0  # 提升维度正常
 
         # LLM 发现 "数据胡→数据湖" 出现 20 次 (i%5==0, n=100)
         # "检策板→剪切板" 出现 10 次 (i%10==0)

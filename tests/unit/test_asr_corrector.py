@@ -1,7 +1,7 @@
 """ASR 校正引擎 — 单元测试（Aho-Corasick + AsrCorrector）。"""
 
-import pytest
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 from iris.wiki.asr._types import AsrCorrection
 from iris.wiki.asr.corrector import (
     _AhoCorasick,
@@ -110,24 +110,6 @@ class TestHotkeyParsing:
         assert key1 == key2
 
 
-class TestCorrectTextStatic:
-    def test_fast_mode_only(self):
-        result, applied = correct_text_static(
-            "我写到检测板里头",
-            {"检测板": "剪切板"},
-        )
-        assert "剪切板" in result
-        assert "检测板" not in result
-
-    def test_no_dict_returns_original(self):
-        result, applied = correct_text_static(
-            "今天天气真好",
-            {},
-        )
-        assert result == "今天天气真好"
-        assert applied == []
-
-
 class TestChineseCount:
     def test_pure_chinese(self):
         assert _count_chinese("你好世界") == 4
@@ -195,15 +177,58 @@ class TestCorrectTextStatic:
         assert "检测板" not in result
 
 
+class TestLLMSimilarityGate:
+    """v3.24: LLM 输出相似度门槛——幻觉/答非所问降级为词典结果。"""
+
+    def _make_corrector(self, mock_service):
+        from iris.wiki.asr.corrector import AsrCorrector
+        corrector = AsrCorrector(
+            replace_dict={"检测板": "剪切板"},
+            llm_prompt="你是 ASR 校正助手。输入文本：",
+            mode="full",
+        )
+        corrector.set_llm_service(mock_service)
+        return corrector
+
+    def test_hallucination_falls_back_to_dict(self):
+        """输出与输入相似度过低（<0.5）→ 视为幻觉，降级为词典结果。"""
+        mock_service = MagicMock()
+        mock_service.generate.return_value = SimpleNamespace(
+            text="今天天气真好啊我们去公园散步吧",
+            provider="mock", model="mock",
+        )
+        result, _ = self._make_corrector(mock_service).correct_full("我写到检测板里头")
+        assert "剪切板" in result  # 词典结果保留
+        assert "公园" not in result  # 幻觉内容未写入
+
+    def test_normal_rewrite_passes(self):
+        """相似润色（补标点/顺句）通过门槛。"""
+        mock_service = MagicMock()
+        mock_service.generate.return_value = SimpleNamespace(
+            text="我写到剪切板里头，检查一下。",
+            provider="mock", model="mock",
+        )
+        result, _ = self._make_corrector(mock_service).correct_full("我写到检测板里头")
+        assert "检查一下" in result
+
+    def test_length_bomb_still_blocked(self):
+        """超长推理过程仍被长度启发式拦截（先于相似度检查）。"""
+        mock_service = MagicMock()
+        mock_service.generate.return_value = SimpleNamespace(
+            text="让我分析一下这个文本的含义，首先我看到...然后继续分析..." * 20,
+            provider="mock", model="mock",
+        )
+        result, _ = self._make_corrector(mock_service).correct_full("我写到检测板里头")
+        assert "剪切板" in result
+
+
 class TestAsrCorrectionType:
     def test_dataclass_defaults(self):
-        from iris.wiki.asr._types import AsrCorrection
         c = AsrCorrection()
         assert c.timestamp == ""
         assert c.mode == "full"
 
     def test_dataclass_full_fields(self):
-        from iris.wiki.asr._types import AsrCorrection
         c = AsrCorrection(
             timestamp="2026-01-01T00:00:00Z",
             raw_text="原始文本",
@@ -432,7 +457,19 @@ class TestPidAlive:
         import os
         pid_file = tmp_path / "meeting-live-assistant.pid"
         pid_file.write_text(str(os.getpid()))
-        assert self._mod()._pid_alive(pid_file) is True
+        # v3.24: 含 ps 命令行校验（防 PID 复用误判），mock 通过
+        with patch("subprocess.run", return_value=SimpleNamespace(
+                stdout="python /Users/fengyoung/MyProjects/iris3/src/iris/app/main.py")):
+            assert self._mod()._pid_alive(pid_file) is True
+
+    def test_pid_reused_by_unrelated_process(self, tmp_path):
+        """PID 被无关进程复用：存活但命令行不含 iris → 视为无实例。"""
+        import os
+        pid_file = tmp_path / "meeting-live-assistant.pid"
+        pid_file.write_text(str(os.getpid()))
+        with patch("subprocess.run", return_value=SimpleNamespace(
+                stdout="/usr/bin/some-unrelated-daemon")):
+            assert self._mod()._pid_alive(pid_file) is False
 
     def test_dead_pid(self, tmp_path):
         pid_file = tmp_path / "meeting-live-assistant.pid"

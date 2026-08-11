@@ -10,7 +10,6 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-import pytest
 
 from iris.wiki.asr._types import AsrTerm, AsrPromptVersion
 from iris.wiki.asr.formatter import (
@@ -80,7 +79,7 @@ class TestFormatHotwordsFile:
         path = str(tmp_path / "hotwords.txt")
         words = ["C", "A", "B", "a", "c"]
         format_hotwords_file(words, path)
-        content = Path(result := str(path)).read_text(encoding="utf-8").strip().split("\n")
+        content = Path(str(path)).read_text(encoding="utf-8").strip().split("\n")
         assert content == ["C", "A", "B"]
 
 
@@ -142,6 +141,32 @@ class TestFormatReplaceDict:
         result = format_replace_dict(terms, path, max_mappings=10)
         data = json.loads(Path(result).read_text(encoding="utf-8"))
         assert len(data["replace_map"]) <= 10
+
+    def test_cross_term_conflict_skipped(self, tmp_path):
+        """v3.24 交叉冲突防护：误识别词 == 其他正确术语时跳过——
+        音近人名场景（A 的误识别恰好是 B 的正确姓名），否则替换会误伤真实人名。"""
+        path = str(tmp_path / "replace.json")
+        terms = [
+            _make_term("李磊", "person", mis_asr=["李雷"]),
+            _make_term("李雷", "person", mis_asr=["李累"]),
+        ]
+        result = format_replace_dict(terms, path)
+        data = json.loads(Path(result).read_text(encoding="utf-8"))
+        # "李雷" 是正确术语 → "李雷→李磊" 被跳过；"李累→李雷" 保留
+        assert "李雷" not in data["replace_map"]
+        assert data["replace_map"]["李累"] == "李雷"
+
+    def test_cross_term_conflict_normalized_key(self, tmp_path):
+        """规范化后重合也跳过（去空格/大小写）。"""
+        path = str(tmp_path / "replace.json")
+        terms = [
+            _make_term("AI质检", "concept", mis_asr=["ai质检"]),
+            _make_term("ai 质检", "concept", mis_asr=["ai质捡"]),
+        ]
+        result = format_replace_dict(terms, path)
+        data = json.loads(Path(result).read_text(encoding="utf-8"))
+        assert "ai质检" not in data["replace_map"]  # 规范化后 == "AI质检"
+        assert data["replace_map"]["ai质捡"] == "ai 质检"
 
     def test_creates_parent_dir(self, tmp_path):
         path = str(tmp_path / "sub" / "replace.json")

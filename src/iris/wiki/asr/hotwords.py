@@ -10,12 +10,11 @@ import os
 import re
 import sys
 import time
-from typing import Dict, List, Optional, Set, TYPE_CHECKING
+from typing import List, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from iris.llm.provider import EnvironmentConfiguredLLMProvider
 
-from .._constants import get_wiki_prefix
 from ..context_loader import WikiPageInfo
 from ._types import AsrTerm
 from ._progress import ProgressTracker
@@ -33,6 +32,10 @@ _is_noise_term = is_noise_term
 
 # 每批最多处理的 Wiki 页面数
 _HOTWORD_BATCH_SIZE = 20
+# 单批 LLM 调用时间预算（秒）：与超时兜底对齐，provider 侧有界返回
+_BATCH_DEADLINE_SEC = 90.0
+# LLM 并发上限：避免全量批次并发打爆 provider
+_MAX_CONCURRENCY = 4
 
 def _build_page_batches(pages: List[WikiPageInfo]) -> List[List[WikiPageInfo]]:
     """按类型分组，每批不超过 _HOTWORD_BATCH_SIZE 个页面。
@@ -112,7 +115,6 @@ def _build_hotwords_prompt(batch: List[WikiPageInfo], domain_context: str = "") 
 
 
 from iris.utils.tokenization import (  # noqa: E402 — 向后兼容别名
-    count_chinese as _count_chinese,
     exceeds_char_limit as _exceeds_char_limit,
 )
 
@@ -243,6 +245,7 @@ class LLMHotwordExtractor:
                         ),
                         temperature=0.3,
                         max_tokens=8192,
+                        _deadline=time.monotonic() + _BATCH_DEADLINE_SEC,
                     )
                     local_seen: set = set()
                     batch_terms = _parse_hotwords_response(response.text, local_seen)
@@ -270,7 +273,7 @@ class LLMHotwordExtractor:
         from concurrent.futures import as_completed
         from iris.core.thread_pool import shared_pool
         _timeout = len(batches) * 90
-        _max_workers = min(len(batches), os.cpu_count() or 6)
+        _max_workers = min(len(batches), os.cpu_count() or 6, _MAX_CONCURRENCY)
         with shared_pool.executor(max_workers=_max_workers) as executor:
             futures = {
                 executor.submit(_run_batch, (idx, batch)): idx

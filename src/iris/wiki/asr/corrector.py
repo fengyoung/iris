@@ -30,7 +30,7 @@ import time
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ._types import AsrCorrection
 from ._clipboard_io import (  # noqa: F401 — re-exported for backwards compatibility
@@ -47,6 +47,10 @@ from ._text_detector import _CODE_PATTERNS, _count_chinese, _is_asr_text  # noqa
 
 _DEFAULT_VOCO_DIR = os.path.expanduser("~/Library/Application Support/VocoType")
 VOCO_DIR = os.environ.get("IRIS_VOCOTYPE_DIR", _DEFAULT_VOCO_DIR)
+
+# LLM 输出与输入的最小相似度：低于该值视为答非所问（幻觉），
+# 降级为词典结果，防止整段替换用户文档（润色通常保持 0.6+ 相似度）
+_MIN_LLM_SIMILARITY = 0.5
 
 # 监听窗口（热键释放后等待剪贴板变化的秒数，覆盖 vocotype 转写延迟）
 _LISTEN_WINDOW_SEC = 3.0
@@ -250,6 +254,10 @@ class _HotkeyMonitor:
         self._first_event = False  # 调试：首次事件确认
         # 引用保持，防止 Python 回收回调
         self._callback_ref: Any = None
+        # 就绪事件：tap 线程完成初始化（成功或失败）时 set，start 等待它
+        self._ready = threading.Event()
+        # tap 线程自己的 run loop 引用（stop 唤醒目标，非主线程 loop）
+        self._runloop: Any = None
 
     # ---- 线程安全属性 ----
 
@@ -289,8 +297,10 @@ class _HotkeyMonitor:
         )
         self._thread.start()
 
-        # 等待 tap 初始化完成（最多 2s）
-        self._thread.join(timeout=2.0)
+        # 等待 tap 初始化完成（最多 2s）：
+        # 用 ready 事件而非 join(timeout)——tap 线程是常驻循环永不退出，
+        # 成功启动时 join 必然等到超时白等 2s；事件在初始化完成后立即 set
+        self._ready.wait(timeout=2.0)
         if self._tap is None:
             self._alive = False
             return False
@@ -299,11 +309,13 @@ class _HotkeyMonitor:
     def stop(self) -> None:
         """停止监听并回收线程。"""
         self._alive = False
-        # 唤醒 run loop 使其检查 _alive 标志
+        # 唤醒 tap 线程自己的 run loop 使其检查 _alive 标志
+        # （CFRunLoopGetCurrent 返回调用线程的 loop，此处须用 tap 线程保存的引用）
         if _CF and self._source:
             try:
                 _CF.CFRunLoopSourceSignal(self._source)
-                _CF.CFRunLoopWakeUp(_CF.CFRunLoopGetCurrent())
+                if self._runloop is not None:
+                    _CF.CFRunLoopWakeUp(self._runloop)
             except Exception:
                 pass
         if self._thread and self._thread.is_alive():
@@ -454,6 +466,7 @@ class _HotkeyMonitor:
                 "    系统偏好设置 → 隐私与安全性 → 辅助功能 → 添加终端",
                 file=sys.stderr,
             )
+            self._ready.set()  # 失败也唤醒 start 的等待（其检查 _tap is None）
             return
 
         # 将 tap 包装为 run loop source
@@ -464,6 +477,10 @@ class _HotkeyMonitor:
             self._source,
             _kCFRunLoopCommonModes,
         )
+
+        # 保存本线程 run loop 引用（stop 用它唤醒）+ 通知 start 就绪
+        self._runloop = _CF.CFRunLoopGetCurrent()
+        self._ready.set()
 
         # 事件循环（每 0.5s 检查一次 _alive 标志）
         while self._alive:
@@ -645,8 +662,16 @@ def _pid_alive(pid_file: Path) -> bool:
     try:
         pid = int(pid_file.read_text().strip())
         os.kill(pid, 0)
-        return True
     except (ValueError, OSError):
+        return False
+    # 防 PID 复用误判：存活但命令行不含 "iris" 的进程不是本项目的实例
+    try:
+        out = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True, text=True, timeout=2,
+        ).stdout
+        return "iris" in out
+    except Exception:
         return False
 
 
@@ -748,6 +773,7 @@ class AsrCorrector:
         context_expire_minutes: int = 10,
         context_ab: bool = False,
         llm_timeout_ms: int = 8000,
+        max_asr_length: int = 500,
     ):
         """
         Args:
@@ -776,6 +802,10 @@ class AsrCorrector:
 
         # LLM 降级链总超时
         self._llm_timeout_ms = llm_timeout_ms
+
+        # ASR 文本长度上限（_is_asr_text 的 max_length）：超长转写视为非语音特征
+        # 默认 500（原 _MAX_ASR_LENGTH），可通过 CLI --max-asr-length 放宽覆盖长语音
+        self._max_asr_length = max_asr_length
 
         # 热键状态 — CGEventTap 系统级事件监听
         # 替代 CGEventSourceKeyState 轮询，解决右 Option 在输入法体系下不可见的问题
@@ -896,8 +926,10 @@ class AsrCorrector:
         误判为聊天消息并做出回答，而不是执行 ASR 校正任务。
         """
         now = time.monotonic()
+        # 快照迭代：主线程 push_context 可能并发 append，deque 迭代期间修改
+        # 会抛 RuntimeError（被 _correct_llm 的 except 吞掉 → 静默降级词典结果）
         valid = [
-            text for text, ts in self._recent_sentences
+            text for text, ts in tuple(self._recent_sentences)
             if now - ts <= self._context_expire_seconds
         ]
         if not valid:
@@ -998,6 +1030,12 @@ class AsrCorrector:
                 if len(llm_output) > len(text) * 3:
                     print(f"[Iris] ⚠ LLM 输出疑似推理过程（{len(llm_output)}字），降级为词典结果",
                           file=sys.stderr)
+                    return text, [], elapsed_ms
+                # 幻觉拦截：与输入相似度过低 = 答非所问，不可整段替换文档
+                ratio = difflib.SequenceMatcher(None, text, llm_output).ratio()
+                if ratio < _MIN_LLM_SIMILARITY:
+                    print(f"[Iris] ⚠ LLM 输出与输入相似度过低（{ratio:.2f}），"
+                          f"疑似幻觉，降级为词典结果", file=sys.stderr)
                     return text, [], elapsed_ms
                 print(f"[Iris] ✅ {label}完成 ({elapsed_ms}ms, {_model_info})", file=sys.stderr)
                 return llm_output, [], elapsed_ms
@@ -1210,7 +1248,7 @@ class AsrCorrector:
               file=sys.stderr)
 
         # 4. 判定是否为 vocotype ASR 输出（文本特征 + 剪贴板类型）
-        if not _is_asr_text(current_text):
+        if not _is_asr_text(current_text, max_length=self._max_asr_length):
             print("[Iris] ⏭ 跳过：非 ASR 文本特征（长度/中文比/代码特征不符）",
                   file=sys.stderr)
             return
@@ -1225,11 +1263,17 @@ class AsrCorrector:
         # 5. 监听窗口门控
         # 热键可检测时必须在窗口内；热键不可检测时仅依赖内容特征
         if not in_listen_window:
+            # released_at=0（从未释放）时 elapsed 为巨大值，显示 — 防误导
+            elapsed_txt = (
+                f"{time.monotonic() - self._hotkey_released_at:.2f}s"
+                if self._hotkey_released_at > 0
+                else "—"
+            )
             print(
                 f"[Iris] ⏭ 跳过：不在监听窗口 "
                 f"(held={self._hotkey_held}, "
                 f"released_at={self._hotkey_released_at:.1f}, "
-                f"elapsed={time.monotonic() - self._hotkey_released_at:.2f}s)",
+                f"elapsed={elapsed_txt}s)",
                 file=sys.stderr,
             )
             return
@@ -1244,9 +1288,13 @@ class AsrCorrector:
         dict_ms = int((time.monotonic() - t_dict_start) * 1000)
 
         if fast_result != current_text:
-            with self._last_corrected_lock:
-                self._last_corrected = fast_result
-            _replace_text_in_place(fast_result, len(current_text))
+            # 写回成功才更新 _last_corrected（失败保留旧值 → 下一条输入自然重试）
+            if _replace_text_in_place(fast_result, current_text):
+                with self._last_corrected_lock:
+                    self._last_corrected = fast_result
+            else:
+                print("[Iris] ⚠ 词典写回失败（剪贴板已变化或系统异常），跳过本次替换",
+                      file=sys.stderr)
             if dict_applied:
                 print(f"[Iris] ✅ 词典({dict_ms}ms): {', '.join(dict_applied)}", file=sys.stderr)
         else:
@@ -1258,8 +1306,7 @@ class AsrCorrector:
             if self._pending_llm and not self._pending_llm.done():
                 self._pending_llm.cancel()
 
-            snap_fast = fast_result        # 闭包捕获当前词典结果
-            snap_raw_len = len(fast_result)  # 用于二次替换的删除长度
+            snap_fast = fast_result        # 闭包捕获当前词典结果（LLM 写回快照基准）
             snap_gen = current_gen         # 捕获提交时的代际，用于过期判定
 
             def _llm_refine():
@@ -1328,10 +1375,17 @@ class AsrCorrector:
                     self._record(current_text, snap_fast, llm_result,
                                  dict_applied, llm_ms, context_ab=ab_data)
                     return
-                # 二次替换：删除词典结果，粘贴 LLM 精修结果
-                with self._last_corrected_lock:
-                    self._last_corrected = llm_result
-                _replace_text_in_place(llm_result, snap_raw_len)
+                # 二次替换：删除词典结果，粘贴 LLM 精修结果。
+                # 快照 = snap_fast（文档实际内容）：LLM 返回时若剪贴板已变
+                # （新句到达/用户其他复制），快照校验拦截，不触碰文档
+                if _replace_text_in_place(llm_result, snap_fast):
+                    with self._last_corrected_lock:
+                        self._last_corrected = llm_result
+                else:
+                    print("[Iris] ⚠ LLM 精修写回失败（剪贴板已变化或系统异常），保留词典结果",
+                          file=sys.stderr)
+                    with self._last_corrected_lock:
+                        self._last_corrected = snap_fast  # 文档实际内容仍是词典结果
                 llm_diff = _diff_changes(snap_fast, llm_result)
                 if llm_diff:
                     print(f"[Iris] 🤖 LLM 精修 ({llm_ms}ms): {', '.join(llm_diff)}", file=sys.stderr)

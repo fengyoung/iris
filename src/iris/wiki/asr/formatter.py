@@ -6,15 +6,17 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+import os
+import sys
+import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import List
 
 from ._types import AsrTerm, AsrPromptVersion
 
+from iris.wiki.discovery_utils import normalized_key
 
 from iris.utils.tokenization import (  # noqa: E402 — 向后兼容别名
-    count_chinese as _count_chinese,
     exceeds_char_limit as _exceeds_char_limit,
 )
 
@@ -58,6 +60,8 @@ def format_replace_dict(
     过滤规则：
     - 错误词和正确词均不超过 max_chars 字符或 max_chinese 个中文字
     - 误识别词不能是通用高频字（如"在""是"），避免大面积误伤
+    - 误识别词不能与其他正确术语重合（音近人名场景：A 的误识别恰好是 B
+      的正确姓名，替换会误伤真实人名，交叉冲突映射必须跳过）
 
     Args:
         terms: 已填充 mis_asr 的术语列表
@@ -71,9 +75,14 @@ def format_replace_dict(
     """
     from iris.wiki.asr.coverage import is_dangerous_mapping
 
+    # 全部正确术语集合：误识别词若与任一正确术语重合（规范化后），
+    # 替换会改掉真实术语 → 交叉冲突，跳过
+    terms_set = {normalized_key(t.term) for t in terms}
+
     replace_map = {}
     added = set()
     dangerous_skipped = 0
+    cross_skipped = 0
     for t in terms:
         if _exceeds_char_limit(t.term, max_total=max_chars, max_chinese=max_chinese):
             continue
@@ -86,6 +95,9 @@ def format_replace_dict(
             # 错误词也检查长度
             if _exceeds_char_limit(mis, max_total=max_chars, max_chinese=max_chinese):
                 continue
+            if normalized_key(mis) in terms_set:
+                cross_skipped += 1
+                continue
             if mis not in added and mis != t.term:
                 replace_map[mis] = t.term
                 added.add(mis)
@@ -93,12 +105,22 @@ def format_replace_dict(
                     break
         if len(replace_map) >= max_mappings:
             break
+    if cross_skipped:
+        print(f"[asr] ⚠ 跳过 {cross_skipped} 条交叉冲突映射（误识别词与正确术语重合）",
+              file=sys.stderr)
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps({"replace_map": replace_map}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    # 原子写：tmp + os.replace，中断不残留半截文件
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"replace_map": replace_map}, ensure_ascii=False, indent=2))
+        os.replace(tmp, path)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
     return str(path)
 
 

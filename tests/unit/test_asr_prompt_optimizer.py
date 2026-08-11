@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from iris.wiki.asr._types import AsrTerm
 from iris.wiki.asr.prompt_optimizer import LLMPromptOptimizer
@@ -99,6 +98,27 @@ class TestRenderV2:
         result = LLMPromptOptimizer._render_v2([], [], domain_context="")
         assert "专业团队" in result
 
+    def test_hotwords_section_appears(self):
+        """v3.24: hotwords 参数真正使用——渲染「高频词（优先识别）」段。"""
+        result = LLMPromptOptimizer._render_v2(["图验技术", "质检平台", "AI巡检"], [])
+        assert "高频词" in result
+        assert "图验技术" in result
+        assert "质检平台" in result
+        assert "AI巡检" in result
+
+    def test_hotwords_empty_placeholder(self):
+        result = LLMPromptOptimizer._render_v2([], [])
+        assert "高频词" in result
+        assert "（暂无）" in result
+
+    def test_hotwords_capped_at_40(self):
+        hotwords = [f"热词{i}" for i in range(60)]
+        result = LLMPromptOptimizer._render_v2(hotwords, [])
+        # 只嵌入前 40 个
+        assert "热词0" in result
+        assert "热词39" in result
+        assert "热词40" not in result
+
     def test_top_n_mappings_limit(self):
         terms = [
             _make_term(f"词{i}", "project", [f"词{i}误"])
@@ -114,7 +134,7 @@ class TestRenderV2:
 
     def test_no_duplicate_method_definition(self):
         """确认 optimize() 和 _render_v2 正常工作，无重复定义导致的 NotImplementedError。"""
-        result = LLMPromptOptimizer.optimize([], [], provider=None)
+        result = LLMPromptOptimizer.optimize([], [])
         assert isinstance(result, str)
 
     def test_dynamic_inference_example_appears(self):
@@ -130,11 +150,16 @@ class TestRenderV2:
 
 class TestOptimize:
     def test_returns_string(self):
-        result = LLMPromptOptimizer.optimize([], [], provider=None)
+        result = LLMPromptOptimizer.optimize([], [])
         assert isinstance(result, str)
 
     def test_same_output_as_render_v2(self):
         terms = [_make_term("测试词", "concept", ["测试词误"])]
-        via_optimize = LLMPromptOptimizer.optimize([], terms, provider=None)
+        via_optimize = LLMPromptOptimizer.optimize([], terms)
         via_render = LLMPromptOptimizer._render_v2([], terms)
         assert via_optimize == via_render
+
+    def test_hotwords_flow_through_optimize(self):
+        """v3.24: hotwords 经 optimize 流入渲染（不再有死参数）。"""
+        result = LLMPromptOptimizer.optimize(["团队热词X"], [])
+        assert "团队热词X" in result

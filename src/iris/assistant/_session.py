@@ -27,8 +27,20 @@ class MeetingSession:
 
     # ── 轮询线程侧 ──────────────────────────────────────────
 
-    def submit(self, raw_text: str, started_at: Optional[datetime] = None) -> VoiceSegment:
-        """提交新语音段；若已有未消费段则覆盖并计丢弃。"""
+    def submit(
+        self,
+        raw_text: str,
+        started_at: Optional[datetime] = None,
+        on_publish: Optional[object] = None,
+    ) -> VoiceSegment:
+        """提交新语音段；若已有未消费段则覆盖并计丢弃。
+
+        on_publish：临界区内（notify 前）调用的发布回调——预取注册
+        （futures 入表、上下文入窗）与 pending 设置原子化，保证 worker
+        取走段时预取产物必已就绪（消除「worker 抢跑 → 现场重提 → 双份
+        LLM 成本」竞态）。调用方须保证回调 µs 级且不抛未捕获异常
+        （live 侧内部自兜底）。
+        """
         seg = VoiceSegment(
             seq=self._next_seq,
             started_at=started_at or datetime.now(),
@@ -39,6 +51,8 @@ class MeetingSession:
             if self._pending is not None:
                 self._state.dropped_count += 1
             self._pending = seg
+            if on_publish is not None:
+                on_publish(seg)
             self._cond.notify()
         return seg
 

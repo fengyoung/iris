@@ -245,11 +245,19 @@ def analyze_dict_quality(terms: List[AsrTerm]) -> DictQualityReport:
             )
 
     # 高危映射检测：误识别词为通用高频单字
+    terms_set = {_normalize_name(t.term) for t in terms}
     for t in terms:
         for mis in t.mis_asr:
             if is_dangerous_mapping(mis):
                 report.dangerous_mappings.append(
                     f"{mis}→{t.term} [{t.category}]"
+                )
+            # 交叉冲突：误识别词与其他正确术语重合（音近人名场景），
+            # 替换会误伤真实术语——format_replace_dict 渲染时会跳过，
+            # 此处报告帮助在生成前发现
+            elif _normalize_name(mis) in terms_set:
+                report.dangerous_mappings.append(
+                    f"交叉冲突: {mis}→{t.term}（误识别词 '{mis}' 本身是正确术语）"
                 )
 
     # 类别分布
