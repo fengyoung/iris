@@ -1282,19 +1282,25 @@ class AsrCorrector:
         self._tick_generation += 1
         current_gen = self._tick_generation
 
-        # Step 1：词典校正，立即替换
+        # Step 1：词典校正
         t_dict_start = time.monotonic()
         fast_result, dict_applied = self.correct_fast(current_text)
         dict_ms = int((time.monotonic() - t_dict_start) * 1000)
 
         if fast_result != current_text:
-            # 写回成功才更新 _last_corrected（失败保留旧值 → 下一条输入自然重试）
-            if _replace_text_in_place(fast_result, current_text):
+            if self._mode == "fast":
+                # fast 模式：立即写回（无 LLM 精修阶段，词典结果是最终结果）
+                if _replace_text_in_place(fast_result, current_text):
+                    with self._last_corrected_lock:
+                        self._last_corrected = fast_result
+                else:
+                    print("[Iris] ⚠ 词典写回失败（剪贴板已变化或系统异常），跳过本次替换",
+                          file=sys.stderr)
+            else:
+                # full 模式：不写回文档（等 LLM 精修后统一写回），
+                # 仅更新 _last_corrected 防同一文本被重复处理
                 with self._last_corrected_lock:
                     self._last_corrected = fast_result
-            else:
-                print("[Iris] ⚠ 词典写回失败（剪贴板已变化或系统异常），跳过本次替换",
-                      file=sys.stderr)
             if dict_applied:
                 print(f"[Iris] ✅ 词典({dict_ms}ms): {', '.join(dict_applied)}", file=sys.stderr)
         else:
@@ -1306,7 +1312,9 @@ class AsrCorrector:
             if self._pending_llm and not self._pending_llm.done():
                 self._pending_llm.cancel()
 
-            snap_fast = fast_result        # 闭包捕获当前词典结果（LLM 写回快照基准）
+            snap_fast = fast_result        # 词典结果（LLM 校正输入）
+            snap_raw = current_text       # 原文 = 文档实际内容（full 模式词典不写回，
+                                           # 文档仍是原始转写；LLM 写回以此为快照校验基准）
             snap_gen = current_gen         # 捕获提交时的代际，用于过期判定
 
             def _llm_refine():
@@ -1375,17 +1383,17 @@ class AsrCorrector:
                     self._record(current_text, snap_fast, llm_result,
                                  dict_applied, llm_ms, context_ab=ab_data)
                     return
-                # 二次替换：删除词典结果，粘贴 LLM 精修结果。
-                # 快照 = snap_fast（文档实际内容）：LLM 返回时若剪贴板已变
+                # LLM 精修写回：文档仍是原始转写（full 模式词典不写回），
+                # 快照 = snap_raw（文档实际内容）：LLM 返回时若剪贴板已变
                 # （新句到达/用户其他复制），快照校验拦截，不触碰文档
-                if _replace_text_in_place(llm_result, snap_fast):
+                if _replace_text_in_place(llm_result, snap_raw):
                     with self._last_corrected_lock:
                         self._last_corrected = llm_result
                 else:
-                    print("[Iris] ⚠ LLM 精修写回失败（剪贴板已变化或系统异常），保留词典结果",
+                    print("[Iris] ⚠ LLM 精修写回失败（剪贴板已变化或系统异常），保留原始转写",
                           file=sys.stderr)
                     with self._last_corrected_lock:
-                        self._last_corrected = snap_fast  # 文档实际内容仍是词典结果
+                        self._last_corrected = snap_raw  # 文档实际内容仍是原始转写
                 llm_diff = _diff_changes(snap_fast, llm_result)
                 if llm_diff:
                     print(f"[Iris] 🤖 LLM 精修 ({llm_ms}ms): {', '.join(llm_diff)}", file=sys.stderr)
