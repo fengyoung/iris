@@ -167,7 +167,7 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.24.3 (2026-08-11)** — meeting-live-assistant 全面优化（13 项 / 14 文件）：① 并发安全加固 — `_futures` 显式 Lock 保护 + 超时 future cancel 释放线程池槽位 + bare except 加 exc_info 日志；② 信息完整性 — 积压丢弃段原文保留到 `<details>` 附录 + 总结截断改头+尾策略（保留开场背景与最新结论）+ 分析 Prompt few-shot 示例提升输出边界清晰度；③ 质量天花板 — LLM 语义关闭待解决问题（`resolved_questions` 字段 + fuzzy match）+ `_dedup_append` SequenceMatcher 模糊去重（≥0.85 阈值）；④ 工程卫生 — AsrCorrector 公开 `push_context()` 方法 + 结构化 logging（双输出：文件 DEBUG + 控制台 INFO）+ 段耗时元数据 + 面板统计帧含 LLM 分析次数/总耗时/平均耗时；⑤ 建议提问高温度独立生成（sampled 段 temperature=0.5，失败降级保留原有提问）+ `meeting_live_suggest.md` 模板；⑥ 性能架构 — DocWriter 增量渲染缓存（segment 块 O(1) 追加，历史段复用缓存）+ 乐观并发批处理（N+1 预取就绪时两段 LLM 分析并发提交、按 seq 顺序落账）。验证：全量 2,762 通过，ruff 零告警。协议版本 3.18（不变）。产品版本 3.24.2→3.24.3。
+**当前 v3.24.3 (2026-08-11)** — meeting-live-assistant 全面优化（14 项 / 14 文件）：① 并发安全加固 — `_futures` 显式 Lock 保护 + 超时 future cancel 释放线程池槽位 + bare except 加 exc_info 日志；② 信息完整性 — 积压丢弃段原文保留到 `<details>` 附录 + 总结截断改头+尾策略（保留开场背景与最新结论）+ 分析 Prompt few-shot 示例；③ 质量天花板 — LLM 语义关闭待解决问题（`resolved_questions` + fuzzy match）+ `_dedup_append` SequenceMatcher 模糊去重（≥0.85）；④ 工程卫生 — AsrCorrector 公开 `push_context()` + 结构化 logging（双输出）+ 段耗时元数据 + 面板 LLM 统计；⑤ 建议提问高温度独立生成（t=0.5）+ `meeting_live_suggest.md`；⑥ 性能架构 — DocWriter 增量渲染缓存（O(1)）+ 乐观并发批处理（双段并发分析）；⑦ 遗留修复 — finally 块 `signal(SIGINT, SIG_IGN)` 防二次 Ctrl+C 穿透清理（与 asr-corrector 同模式）。验证：全量 2,762 通过，ruff 零告警。协议版本 3.18（不变）。产品版本 3.24.2→3.24.3。
 
 **v3.24.2 (2026-08-11)** — asr-corrector 写回修正（真机验证驱动）：① full 模式跳过词典写回（仅 LLM 最终结果一次输出，消除两次写回闪烁）；② 取消 Cmd+A 全选覆盖，全场景恢复逐字符 Delete 删除（Cmd+A 跨 App 不可靠——聊天输入框/浏览器文本框等场景可能选不中 vocotype 写入的文本区域，导致原文残留+校正追加=文本重复），timeout 按 100ms/字校准覆盖长文本。验证：unit 全量 1,417 通过，ruff 通过。协议版本 3.18（不变）。产品版本 3.24.0→3.24.2。
 

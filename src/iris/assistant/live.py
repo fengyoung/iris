@@ -231,26 +231,38 @@ class MeetingLiveAssistant:
         except KeyboardInterrupt:
             _logger.info("正在结束会议…")
         finally:
-            self._session.request_stop()
-            if worker is not None:
-                # 段边界退出：等待当前段完成（并行窗 + 分析 deadline + 余量）
-                worker.join(timeout=_EXIT_JOIN_SEC)
-                if worker.is_alive():
-                    _logger.warning("退出等待超时，当前段可能未完成")
-            # 会议总结：退出时一次 LLM（10s deadline），失败自动跳过
-            if self._cfg.summary_enabled and self._session.state.segments:
-                summary = self._analyzer.summarize(self._session.state)
-                if summary:
-                    self._session.state.summary = summary
-                    _logger.info("会议总结已生成")
-                else:
-                    _logger.warning("会议总结生成失败（跳过）")
-            # worker 已退出（或超时），此处写文档无并发写
-            self._writer.maybe_rewrite(self._session.state, force=True)
-            self._panel.render_final(self._session.state, self._doc_path)
-            # 池内任务均有 deadline（deep 8s / 检索 8s），有界返回
-            self._pool.shutdown(wait=True, cancel_futures=True)
-            registry.unregister()
+            # 安全关闭：屏蔽 SIGINT 防止清理过程中二次 Ctrl+C 中断
+            #（与 asr-corrector run_forever 同模式）。Python 3.13 ssl 层
+            # 在 HTTP 阻塞 I/O 中收到 SIGINT 时会重抛 KeyboardInterrupt，
+            # signal.SIG_IGN 彻底阻止。
+            # 如需强制终止：Ctrl+\
+            orig_sigint = signal.signal(signal.SIGINT, signal.SIG_IGN)
+            try:
+                self._session.request_stop()
+                if worker is not None:
+                    # 段边界退出：等待当前段完成（并行窗 + 分析 deadline + 余量）
+                    worker.join(timeout=_EXIT_JOIN_SEC)
+                    if worker.is_alive():
+                        _logger.warning("退出等待超时，当前段可能未完成")
+                # 会议总结：退出时一次 LLM（10s deadline），失败自动跳过
+                if self._cfg.summary_enabled and self._session.state.segments:
+                    try:
+                        summary = self._analyzer.summarize(self._session.state)
+                        if summary:
+                            self._session.state.summary = summary
+                            _logger.info("会议总结已生成")
+                        else:
+                            _logger.warning("会议总结生成失败（跳过）")
+                    except Exception:
+                        _logger.warning("会议总结异常（跳过）")
+                # worker 已退出（或超时），此处写文档无并发写
+                self._writer.maybe_rewrite(self._session.state, force=True)
+                self._panel.render_final(self._session.state, self._doc_path)
+                # 池内任务均有 deadline（deep 8s / 检索 8s），有界返回
+                self._pool.shutdown(wait=True, cancel_futures=True)
+                registry.unregister()
+            finally:
+                signal.signal(signal.SIGINT, orig_sigint)
         return 0
 
     # ── 线程逻辑 ────────────────────────────────────────────

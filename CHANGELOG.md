@@ -37,6 +37,10 @@ meeting-live-assistant 全面优化（13 项 / 14 文件）— 并发安全加�
 - **DocWriter 增量渲染缓存**：`_rendered_segments` 列表缓存段渲染块 → `_assemble_from_cache` 组装（header + cumulative + cached blocks + dropped），单段 O(1) 渲染；`render()` 保持静态全量渲染供测试
 - **乐观并发批处理**：`_process_segment` 收集 N 段 deep/检索后 peek `_futures[N+1]`——若均已 done → `take_pending_if(N+1)` 原子消费 → `_process_batch` 双段 LLM 分析并发提交 pool → 按 seq 顺序落账
 
+### 7. 遗留修复
+
+- **双 Ctrl+C 穿透清理**：`run()` finally 块中 `signal.signal(SIGINT, SIG_IGN)` 屏蔽二次 Ctrl+C（与 asr-corrector 同模式）。Python 3.13 ssl 层在 HTTP 阻塞 I/O 中收到 SIGINT 时会重抛 KeyboardInterrupt，`SIG_IGN` 彻底阻止穿透。退出总结 LLM summarize 加 try/except 兜底
+
 ### 测试
 
 - 全量 2,762 通过（unit 1,417 + integration 240 + 根目录 1,105），ruff 零告警
