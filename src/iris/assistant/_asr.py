@@ -104,18 +104,27 @@ class ASREngine:
 
     @staticmethod
     def auto_detect_model_dir() -> Optional[str]:
-        """自动检测 ModelScope 缓存路径（vocotype 下载的模型）。
+        """自动检测 ASR 模型目录（vocotype 下载的 Paraformer 中文 contextual 模型）。
 
         检测顺序：
-        1. ~/.cache/modelscope/hub/models/iic
-        2. ~/.cache/modelscope/hub/models
+        1. ~/.cache/modelscope/hub/models/iic/speech_paraformer-large-contextual...onnx
+        2. ~/.cache/modelscope/hub/models/iic（搜索含 model_quant.onnx 的子目录）
         """
         candidates = [
+            os.path.expanduser(
+                "~/.cache/modelscope/hub/models/iic/"
+                "speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404-onnx"
+            ),
             os.path.expanduser("~/.cache/modelscope/hub/models/iic"),
-            os.path.expanduser("~/.cache/modelscope/hub/models"),
         ]
         for path in candidates:
             p = Path(path)
-            if p.is_dir() and any(p.iterdir()):
-                return str(p)
+            if p.is_dir():
+                # 如果直接就是模型目录 → 直接返回
+                if (p / "model_quant.onnx").is_file():
+                    return str(p)
+                # 如果是父目录 → 搜索子目录
+                for sub in sorted(p.iterdir()):
+                    if sub.is_dir() and (sub / "model_quant.onnx").is_file():
+                        return str(sub)
         return None
