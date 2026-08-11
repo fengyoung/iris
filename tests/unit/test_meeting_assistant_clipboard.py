@@ -109,13 +109,13 @@ class TestMaxLen:
              patch(_RICH, return_value=False):
             assert watcher.poll() == _ASR_TEXT
 
-    def test_over_max_len_warns(self, capsys):
+    def test_over_max_len_warns(self, caplog):
         watcher = ClipboardWatcher(max_len=20)
         _warm(watcher)
         long_text = "我们今天讨论一下下半年的目标和预算安排需要确认"
         with patch(_READ, return_value=long_text):
             watcher.poll()
-        assert "请分段说" in capsys.readouterr().err
+        assert any("请分段说" in r.message for r in caplog.records)
 
 
 class TestDedupWindow:

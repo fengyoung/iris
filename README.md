@@ -1,8 +1,10 @@
-# Iris 3.24.2
+# Iris 3.24.3
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
+
+**v3.24.3** — [meeting-live-assistant 全面优化](CHANGELOG.md)（13 项 / 14 文件）：并发安全加固（`_futures` Lock + 超时 cancel + bare except 日志）· 信息完整性（丢弃段原文保留 + 总结头+尾截断 + few-shot Prompt）· 质量天花板（LLM 语义关闭待解决问题 + fuzzy dedup）· 工程卫生（AsrCorrector 公开 API + 结构化日志 + 段耗时元数据 + 面板统计）· 建议提问高温度独立生成 · 增量文档缓存 + 乐观并发批处理。协议版本 3.18（不变）。
 
 **v3.24.2** — asr-corrector 写回修正：full 模式跳过词典写回仅 LLM 最终结果一次输出（消除两次写回闪烁）；取消 Cmd+A 全选覆盖、全场景恢复逐字符 Delete 删除（Cmd+A 跨 App 不可靠导致原文残留+校正追加=文本重复）。协议版本 3.18（不变）。
 

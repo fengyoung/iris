@@ -1,6 +1,6 @@
 # iris meeting-live-assistant — 实时会议助理 方案设计 v1.0
 
-**日期**：2026-08-10 · **状态**：已实现（v3.23.0 落地，v3.23.3 全量优化：双段流水线/短段门控/退出加固/结束总结/检索 deadline/长段支持，v3.24.0 全面加固：写回机制重构/预取原子化/LLM 治理/交叉冲突防护，v3.24.2 真机验证修正：full 模式一次写回 + 全场景逐字符删除）· **最终版本**：产品 3.24.2 / 协议 3.18
+**日期**：2026-08-10 · **状态**：已实现（v3.23.0 落地，v3.23.3 全量优化：双段流水线/短段门控/退出加固/结束总结/检索 deadline/长段支持，v3.24.0 全面加固：写回机制重构/预取原子化/LLM 治理/交叉冲突防护，v3.24.2 真机验证修正：full 模式一次写回 + 全场景逐字符删除，v3.24.3 全面优化：并发安全/信息完整性/质量天花板/工程卫生/性能架构 13 项）· **最终版本**：产品 3.24.3 / 协议 3.18
 
 ---
 
@@ -234,6 +234,40 @@ source: meeting-live-assistant
 
 ## 12. 版本与交付
 
-- **产品版本**：3.22.5 → **3.23.0**（新功能）
-- **协议版本**：3.15 → **3.16**（新增 1 命令）
-- **交付物**：新模块 + CLI 命令 + 测试（预计 unit +30~40 / integration +5~10）+ CHANGELOG/CLAUDE/README 同步
+- **初版**：产品 3.22.5 → 3.23.0（新功能），协议 3.15 → 3.16（新增 1 命令）
+- **v3.23.3**：全量优化（双段流水线/短段门控/退出加固/结束总结/检索 deadline/长段支持）
+- **v3.24.0**：全面加固（写回机制重构/预取原子化/LLM 治理/交叉冲突防护）
+- **v3.24.2**：真机验证修正（full 模式一次写回 + 全场景逐字符删除）
+- **v3.24.3**（当前）：全面优化 13 项（并发安全/信息完整性/质量天花板/工程卫生/性能架构），协议 3.18（不变）
+
+---
+
+## 13. v3.24.3 优化详情
+
+### 并发安全加固
+- `_futures` 显式 `threading.Lock` 保护（poll 写 + worker 读/pop + peek），锁顺序文档化
+- 超时未完成的 future 显式 `cancel()` 释放线程池槽位（`_collect_results`）
+- `_publish_prefetch` bare `except Exception` 改为 `_logger.warning(exc_info=True)`
+
+### 信息完整性
+- **丢弃段原文保留**：`MeetingState.dropped_texts`（上限 20 条），文档以 `<details>` 折叠附录呈现
+- **总结截断头+尾策略**：保留开场 1000 字（背景）+ 尾部 3000 字（结论/行动项），换行边界对齐
+- **分析 Prompt few-shot 示例**：展示 key_points / decisions / risks / suggested_questions 的边界
+
+### 质量天花板
+- **LLM 语义关闭待解决问题**：`SegmentAnalysis.resolved_questions` 字段，Prompt 传入当前 open_questions → LLM 标记已回答项 → fuzzy match 关闭（+ 精确匹配 fallback）
+- **fuzzy dedup**：`_dedup_append` 用 `SequenceMatcher`（≥0.85 阈值），短文本（<8 字）保持精确匹配防误伤
+
+### 工程卫生
+- AsrCorrector 公开 `push_context()` 方法（替代 `_push_context` 私有 API 访问）
+- 结构化 logging（`_logging.py`）：文件 DEBUG + 控制台 INFO 双输出，会话日志写入过程文档同目录
+- `VoiceSegment` 新增 `analysis_started_at` / `analysis_done_at` 耗时元数据
+- 面板统计帧含 LLM 分析次数 / 总耗时 / 平均耗时
+
+### 建议提问高温度独立生成
+- 新模板 `meeting_live_suggest.md`（temperature=0.5），仅采样段调用
+- `SegmentAnalyzer.suggest_questions()`：deadline 预算检查（remaining ≥ 2s），失败静默降级
+
+### 性能与架构
+- **DocWriter 增量渲染缓存**：`_rendered_segments` 列表缓存段渲染块 → 单段 O(1) 组装，`force=True` 退出前全量渲染自愈
+- **乐观并发批处理**：收集 seg(N) deep/检索后 peek `_futures[N+1]`，均已 done → `take_pending_if(N+1)` 原子消费 → 双段 LLM 分析并发提交 pool → 按 seq 顺序落账

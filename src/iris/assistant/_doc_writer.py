@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import os
-import sys
 import tempfile
 import threading
 from pathlib import Path
 from typing import Optional
 
 from .models import MeetingState, SegmentAnalysis, VoiceSegment
+
+_logger = logging.getLogger(__name__)
 
 
 class DocWriter:
@@ -24,39 +26,85 @@ class DocWriter:
         self._rewrite_every = max(1, rewrite_every)
         self._last_segment_count = 0
         self._lock = threading.RLock()
+        # 增量写入缓存：段渲染块（按 seq 顺序），供增量追加与退出全量校验
+        self._rendered_segments: list[str] = []
 
     @property
     def path(self) -> Path:
         return self._path
 
     def initial_write(self, state: MeetingState) -> bool:
-        """创建输出目录并写首帧；失败返回 False。"""
+        """创建输出目录并写首帧（全量渲染，用于初始化缓存）；失败返回 False。"""
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._rendered_segments = []  # 重置缓存
             return self._atomic_write(self._path, self.render(state))
         except Exception as e:
-            print(f"[Iris] ⚠ 过程文档创建失败: {e}", file=sys.stderr)
+            _logger.warning("过程文档创建失败: %s", e)
             return False
 
     def maybe_rewrite(self, state: MeetingState, *, force: bool = False) -> bool:
-        """按 rewrite_every 节流重写；force 强制（退出前）。"""
+        """按 rewrite_every 节流重写；force 强制（退出前，全量渲染自愈校验）。
+
+        增量路径：新段追加渲染块到缓存 → 全量原子写入（header + cumulative +
+        缓存的段块 + dropped）。单段渲染 O(1)，历史段块复用缓存。
+        """
         count = len(state.segments)
         if not force and count - self._last_segment_count < self._rewrite_every:
             return False
+        # 增量渲染：仅当有新段时追加渲染块到缓存
+        new_count = count - len(self._rendered_segments)
+        if new_count > 0:
+            for seg in state.segments[-new_count:]:
+                self._rendered_segments.append(
+                    "\n".join(self._render_segment(seg))
+                )
         try:
-            ok = self._atomic_write(self._path, self.render(state))
+            if force:
+                # 退出前全量渲染自愈：从 state 完整渲染并校验缓存
+                content = self.render(state)
+            else:
+                content = self._assemble_from_cache(state)
+            ok = self._atomic_write(self._path, content)
         except Exception as e:
-            print(f"[Iris] ⚠ 过程文档写入失败: {e}", file=sys.stderr)
+            _logger.warning("过程文档写入失败: %s", e)
             return False
         if ok:
             self._last_segment_count = count
         return ok
 
-    # ── 渲染 ──────────────────────────────────────────────
+    def _assemble_from_cache(self, state: MeetingState) -> str:
+        """从缓存组装文档（header + cumulative + cached segments + dropped）。"""
+        parts = self._render_header(state)
+        parts.append("")
+        parts.extend(self._render_cumulative(state))
+        if state.summary:
+            parts += ["", "## 📝 会议总结（AI 生成）", state.summary.strip()]
+        parts.append("")
+        parts.extend(self._rendered_segments)
+        if state.dropped_count:
+            parts += self._render_dropped(state)
+        return "\n".join(parts)
+
+    # ── 渲染（公开静态方法 + 内部组件） ──────────────────
 
     @staticmethod
     def render(state: MeetingState) -> str:
-        parts = [
+        """全量渲染 Markdown 文档（供测试和首次写入使用）。"""
+        parts = DocWriter._render_header(state)
+        parts.append("")
+        parts.extend(DocWriter._render_cumulative(state))
+        if state.summary:
+            parts += ["", "## 📝 会议总结（AI 生成）", state.summary.strip()]
+        parts.append("")
+        for seg in state.segments:
+            parts.extend(DocWriter._render_segment(seg))
+        parts.extend(DocWriter._render_dropped(state))
+        return "\n".join(parts)
+
+    @staticmethod
+    def _render_header(state: MeetingState) -> list[str]:
+        return [
             "---",
             f"title: 实时会议记录 {state.started_at:%Y-%m-%d %H:%M}",
             f"date: {state.started_at:%Y-%m-%d %H:%M}",
@@ -65,25 +113,35 @@ class DocWriter:
             "---",
             "",
             f"# 实时会议记录 {state.started_at:%Y-%m-%d %H:%M}",
-            "",
+        ]
+
+    @staticmethod
+    def _render_cumulative(state: MeetingState) -> list[str]:
+        return [
             "## 📋 会议累计（实时更新）",
             *DocWriter._bullets("关键要点", state.key_points),
             *DocWriter._bullets("决策点", state.decisions),
             *DocWriter._bullets("风险", state.risks),
             *DocWriter._bullets("待解决问题", state.open_questions),
-            "",
         ]
-        if state.summary:
-            parts += [
-                "## 📝 会议总结（AI 生成）",
-                state.summary.strip(),
-                "",
-            ]
-        for seg in state.segments:
-            parts.extend(DocWriter._render_segment(seg))
+
+    @staticmethod
+    def _render_dropped(state: MeetingState) -> list[str]:
+        parts: list[str] = []
         if state.dropped_count:
             parts += ["", f"> 本场积压丢弃 {state.dropped_count} 段（分析慢于说话节奏时自动丢弃中间段）"]
-        return "\n".join(parts)
+            if state.dropped_texts:
+                parts += [
+                    "",
+                    "<details>",
+                    "<summary>📎 丢弃段原文（最近 " + str(len(state.dropped_texts)) + " 条）</summary>",
+                    "",
+                ]
+                for i, text in enumerate(state.dropped_texts, 1):
+                    parts.append(f"- 丢弃段 {i}：{text}")
+                parts.append("")
+                parts.append("</details>")
+        return parts
 
     @staticmethod
     def _bullets(section: str, items: list[str]) -> list[str]:

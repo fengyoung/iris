@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import sys
+import logging
 import time
 from typing import Optional
 
@@ -12,6 +12,8 @@ from iris.wiki.asr.corrector import (
     _is_asr_text,
     _looks_like_written_chinese,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 class ClipboardWatcher:
@@ -68,11 +70,10 @@ class ClipboardWatcher:
         self._last_seen = text  # 先记再判：非语音变化也消费掉
         self._last_seen_at = now
         if len(text) > self._HARD_MAX_LEN:
-            print("[Iris] ⚠ 剪贴板内容过长，已忽略（非语音段）", file=sys.stderr)
+            _logger.warning("剪贴板内容过长，已忽略（非语音段）")
             return None
         if len(text) > self._max_len:
-            print("[Iris] ⚠ 语音段超长（>" + str(self._max_len) + "字），已丢弃，请分段说",
-                  file=sys.stderr)
+            _logger.warning("语音段超长（>%d 字），已丢弃，请分段说", self._max_len)
             return None
         if not _is_asr_text(text, max_length=self._max_len):
             return None

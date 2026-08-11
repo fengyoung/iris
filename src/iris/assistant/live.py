@@ -7,9 +7,9 @@ worker 只做等待/分析——段 N 分析期间段 N+1 的深度校正与检�
 
 from __future__ import annotations
 
+import logging
 import os
 import signal
-import sys
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, wait
@@ -23,10 +23,13 @@ from ._analyzer import SegmentAnalyzer, _ANALYSIS_DEADLINE_SEC
 from ._clipboard import ClipboardWatcher
 from ._corrector import CorrectorAdapter
 from ._doc_writer import DocWriter
+from ._logging import setup_session_logger
 from ._panel import PanelDisplay, PanelRenderer
 from ._retriever import RetrieverAdapter
 from ._session import MeetingSession
 from .models import AssistantConfig, VoiceSegment
+
+_logger = logging.getLogger(__name__)
 
 # 段处理并行等待窗：LLM 深度校正与检索共享，超时各自降级
 _PARALLEL_WAIT_SEC = 10.0
@@ -69,15 +72,14 @@ def _load_replace_dict() -> Dict[str, str]:
 
     path = resolve_data_path("data/asr_replace_dict.json")
     if not path.exists():
-        print("[Iris] ⚠ 替换词典不存在，仅保留原文（可先运行 build-asr-prompt --deploy）",
-              file=sys.stderr)
+        _logger.warning("替换词典不存在，仅保留原文（可先运行 build-asr-prompt --deploy）")
         return {}
     try:
         with open(path) as f:
             data = json.load(f)
         return data.get("replace_map", {})
     except Exception as e:
-        print(f"[Iris] ⚠ 替换词典加载失败: {e}（使用空词典）", file=sys.stderr)
+        _logger.warning("替换词典加载失败: %s（使用空词典）", e)
         return {}
 
 
@@ -85,13 +87,12 @@ def _load_asr_prompt() -> str:
     """加载 LLM 校正 Prompt（data/asr_prompt.md）；缺失→空（降级仅词典）。"""
     path = resolve_data_path("data/asr_prompt.md")
     if not path.exists():
-        print("[Iris] ⚠ 校正 Prompt 不存在，LLM 深度校正降级为仅词典",
-              file=sys.stderr)
+        _logger.warning("校正 Prompt 不存在，LLM 深度校正降级为仅词典")
         return ""
     try:
         return path.read_text(encoding="utf-8")
     except Exception as e:
-        print(f"[Iris] ⚠ 校正 Prompt 加载失败: {e}", file=sys.stderr)
+        _logger.warning("校正 Prompt 加载失败: %s", e)
         return ""
 
 
@@ -145,8 +146,7 @@ class MeetingLiveAssistant:
                 from iris.llm.service import LLMService
                 self._llm = LLMService(bundle)
             except Exception as e:
-                print(f"[Iris] ⚠ LLM 初始化失败，会议降级为仅词典校正: {e}",
-                      file=sys.stderr)
+                _logger.warning("LLM 初始化失败，会议降级为仅词典校正: %s", e)
                 self._llm = None
         if self._llm is not None:
             self._corrector.set_llm_service(self._llm)
@@ -175,20 +175,23 @@ class MeetingLiveAssistant:
         self._pool = ThreadPoolExecutor(max_workers=2)
         # 预取 futures：seq → (deep_future, retr_future)，worker 消费后 pop
         self._futures: Dict[int, Tuple[Future, Future]] = {}
+        # _futures 并发保护：poll 线程在 _publish_prefetch 中写（_cond 临界区内），
+        # worker 线程在 _process_segment 中读/pop；P4-13 乐观并发在 worker 侧 peek。
+        # 锁顺序：poll 线程先拿 _cond（submit）再拿 _futures_lock（on_publish）；
+        # worker 只拿 _futures_lock（不拿 _cond），无死锁。
+        self._futures_lock = threading.Lock()
 
     # ── 主流程 ──────────────────────────────────────────────
 
     def run(self) -> int:
         if _probe_running("asr-corrector", self._pid_dir):
-            print("[Iris] ⚠ asr-corrector 正在运行（独占剪贴板），请先退出后再启动会议助理",
-                  file=sys.stderr)
+            _logger.warning("asr-corrector 正在运行（独占剪贴板），请先退出后再启动会议助理")
             return 1
 
         from iris.core.locks import ProcessRegistry
         registry = ProcessRegistry("meeting-live-assistant", self._pid_dir)
         if not registry.register():
-            print("[Iris] ⚠ meeting-live-assistant 已有实例在运行，退出",
-                  file=sys.stderr)
+            _logger.warning("meeting-live-assistant 已有实例在运行，退出")
             return 1
 
         # Python 3.13 中默认 SIGINT 处理无法中断 time.sleep（主线程睡眠时不抛
@@ -198,6 +201,11 @@ class MeetingLiveAssistant:
 
         signal.signal(signal.SIGINT, _sigint_handler)
 
+        # 会话日志：文件输出到过程文档同目录（session_id 取自文档文件名去扩展名）
+        session_id = self._doc_path.stem
+        setup_session_logger(self._doc_path.parent, session_id)
+        _logger.info("会话日志已启动: %s.log", session_id)
+
         worker = None
         try:
             # vocotype 热键缺失仅警告，不阻塞（可手动粘贴文本测试）
@@ -205,18 +213,15 @@ class MeetingLiveAssistant:
                 from iris.wiki.asr.corrector import _load_vocotype_hotkey
                 mask, keycode = _load_vocotype_hotkey()
                 if not (mask or keycode):
-                    print("[Iris] ⚠ 未检测到 vocotype 热键，仍可手动复制文本进行测试",
-                          file=sys.stderr)
+                    _logger.warning("未检测到 vocotype 热键，仍可手动复制文本进行测试")
             except Exception:
                 pass
 
             if not self._writer.initial_write(self._session.state):
                 return 1
 
-            print(f"[Iris] 实时会议助理已启动，过程文档: {self._doc_path}",
-                  file=sys.stderr)
-            print("[Iris] 按住 vocotype 热键说话，松开即转写并分析（Ctrl+C 退出）",
-                  file=sys.stderr)
+            _logger.info("实时会议助理已启动，过程文档: %s", self._doc_path)
+            _logger.info("按住 vocotype 热键说话，松开即转写并分析（Ctrl+C 退出）")
 
             self._panel.render(PanelDisplay(status="等待语音…", state=self._session.state))
 
@@ -224,22 +229,22 @@ class MeetingLiveAssistant:
             worker.start()
             self._poll_loop()
         except KeyboardInterrupt:
-            print("\n[Iris] 正在结束会议…", file=sys.stderr)
+            _logger.info("正在结束会议…")
         finally:
             self._session.request_stop()
             if worker is not None:
                 # 段边界退出：等待当前段完成（并行窗 + 分析 deadline + 余量）
                 worker.join(timeout=_EXIT_JOIN_SEC)
                 if worker.is_alive():
-                    print("[Iris] ⚠ 退出等待超时，当前段可能未完成", file=sys.stderr)
+                    _logger.warning("退出等待超时，当前段可能未完成")
             # 会议总结：退出时一次 LLM（10s deadline），失败自动跳过
             if self._cfg.summary_enabled and self._session.state.segments:
                 summary = self._analyzer.summarize(self._session.state)
                 if summary:
                     self._session.state.summary = summary
-                    print("[Iris] ✅ 会议总结已生成", file=sys.stderr)
+                    _logger.info("会议总结已生成")
                 else:
-                    print("[Iris] ⚠ 会议总结生成失败（跳过）", file=sys.stderr)
+                    _logger.warning("会议总结生成失败（跳过）")
             # worker 已退出（或超时），此处写文档无并发写
             self._writer.maybe_rewrite(self._session.state, force=True)
             self._panel.render_final(self._session.state, self._doc_path)
@@ -261,8 +266,7 @@ class MeetingLiveAssistant:
                     text,
                     on_publish=lambda s, f=fast: self._publish_prefetch(s, f),
                 )
-                print(f"[Iris] 📋 语音段 {seg.seq} 已捕获（{len(text)} 字），排队分析…",
-                      file=sys.stderr)
+                _logger.info("语音段 %d 已捕获（%d 字），排队分析…", seg.seq, len(text))
             time.sleep(self._cfg.poll_interval)
 
     def _publish_prefetch(self, seg: VoiceSegment, fast: str) -> None:
@@ -283,18 +287,22 @@ class MeetingLiveAssistant:
             self._corrector.push_context(fast)
             if self._cfg.fast_only or len(fast) < self._cfg.short_segment_chars:
                 return
-            self._futures[seg.seq] = (
-                self._pool.submit(self._corrector.deep, fast),
-                self._pool.submit(self._retriever.search, fast, top_k=self._cfg.top_k),
-            )
-            # 清理过期条目：worker 消费段时已 pop 自己的 futures；
-            # 仍残留且 seq 更小的条目 = pending 被覆盖的段，结果无人消费
-            for old_seq in [k for k in self._futures if k < seg.seq]:
-                self._futures.pop(old_seq, None)
+            with self._futures_lock:
+                self._futures[seg.seq] = (
+                    self._pool.submit(self._corrector.deep, fast),
+                    self._pool.submit(self._retriever.search, fast, top_k=self._cfg.top_k),
+                )
+                # 清理过期条目：worker 消费段时已 pop 自己的 futures；
+                # 仍残留且 seq 更小的条目 = pending 被覆盖的段，结果无人消费
+                for old_seq in [k for k in self._futures if k < seg.seq]:
+                    self._futures.pop(old_seq, None)
         except RuntimeError:
             pass  # 池已关闭（退出窗口）：worker 侧现场提交兜底
-        except Exception:
-            pass  # 预取兜底失败不阻断提交（段仍以 fast-only 落账）
+        except Exception as e:
+            _logger.warning(
+                "预取发布异常（段 %d 仍以 fast-only 落账）: %s",
+                seg.seq, e, exc_info=True,
+            )
 
     def _worker_loop(self) -> None:
         while not self._session.stop.is_set():
@@ -304,20 +312,22 @@ class MeetingLiveAssistant:
             try:
                 self._process_segment(seg)
             except Exception as e:
-                print(f"[Iris] ⚠ 段 {seg.seq} 处理异常: {e}", file=sys.stderr)
+                _logger.error("段 %d 处理异常: %s", seg.seq, e)
 
     def _process_segment(self, seg: VoiceSegment) -> None:
-        """段处理流水线：fast（poll 线程已预做）→ 等 deep/检索 futures → 分析 → 落账。
+        """段处理流水线：fast → deep/检索 → [乐观并发批处理] → 分析 → 落账。
 
-        每阶段独立降级（phase 守卫）：任何一步失败段仍落账，不丢段。
+        P4-13 乐观并发：在收集 seg(N) 的 deep/检索后，peek 检查 seg(N+1) 的
+        预取 futures 是否已就绪。若就绪且 pending 槽未覆盖，则批处理两段分析
+        （pool 并发提交），按 seq 顺序落账。单段路径不受影响。
         """
-        # t0：fast 兜底（正常由 _prefetch 完成；极端时序下现场补做）
+        # t0：fast 兜底
         if not seg.corrected_text:
             seg.corrected_text = self._corrector.fast(seg.raw_text)
             self._corrector.push_context(seg.corrected_text)
         fast = seg.corrected_text
 
-        # 短段门控 / 快速模式：确认语零 LLM 成本，直接落账快速排空流水线
+        # 短段门控 / 快速模式
         if self._cfg.fast_only or len(fast) < self._cfg.short_segment_chars:
             seg.analysis_status = VoiceSegment.ANALYSIS_SKIPPED
             display = PanelDisplay(
@@ -330,13 +340,49 @@ class MeetingLiveAssistant:
                 self._session.record(seg)
                 self._writer.maybe_rewrite(self._session.state)
             except Exception as e:
-                print(f"[Iris] ⚠ 段 {seg.seq} 落账异常: {e}", file=sys.stderr)
+                _logger.error("段 %d 落账异常: %s", seg.seq, e)
             return
 
         self._panel.render(PanelDisplay(status="分析中…", seg=seg, state=self._session.state))
 
         # t1/t2：deep 校正 与 检索（优先消费 poll 线程预跑的 futures）
-        futures = self._futures.pop(seg.seq, None)
+        deep, hits = self._collect_deep_retrieval(seg, fast)
+
+        if deep != fast:
+            seg.corrected_text = deep
+            self._corrector.push_context(deep)
+
+        # P4-13 乐观并发：检查 N+1 的 deep/检索是否已就绪
+        next_seg = None
+        with self._futures_lock:
+            # peek：只看不 pop（pop 在 _collect_deep_retrieval 中完成）
+            peek_seq = seg.seq + 1
+            peek_futures = self._futures.get(peek_seq)
+            if peek_futures is not None:
+                f_deep, f_retr = peek_futures
+                if f_deep.done() and f_retr.done():
+                    # N+1 预取就绪 → 原子消费 pending 槽
+                    next_seg = self._session.take_pending_if(peek_seq)
+
+        if next_seg is not None:
+            # 批处理：N 和 N+1 的分析并发提交
+            self._process_batch(seg, deep, hits, next_seg)
+        else:
+            # 单段路径（常规）
+            self._analyze_and_record(seg, deep, hits)
+            display = PanelDisplay(
+                status=f"已处理段 {seg.seq}",
+                seg=seg,
+                analysis_unavailable=seg.analysis is None,
+                state=self._session.state,
+            )
+            self._panel.render(display)
+            self._writer.maybe_rewrite(self._session.state)
+
+    def _collect_deep_retrieval(self, seg: VoiceSegment, fast: str):
+        """收集 deep 校正与检索结果（含预取消费 + 降级）。"""
+        with self._futures_lock:
+            futures = self._futures.pop(seg.seq, None)
         if futures is None:
             try:
                 futures = (
@@ -344,63 +390,160 @@ class MeetingLiveAssistant:
                     self._pool.submit(self._retriever.search, fast, top_k=self._cfg.top_k),
                 )
             except RuntimeError:
-                futures = None  # 池已关闭：仅 fast 降级
+                futures = None
         deep, hits = fast, []
         if futures is not None:
             done, _ = wait(futures, timeout=_PARALLEL_WAIT_SEC)
             deep, hits = self._collect_results(futures, done, fast)
+        return deep, hits
 
-        if deep != fast:
-            seg.corrected_text = deep
-            self._corrector.push_context(deep)  # deep 覆盖入窗（镜像 corrector _tick 行为）
+    def _process_batch(
+        self,
+        seg: VoiceSegment,
+        deep: str,
+        hits: list,
+        next_seg: VoiceSegment,
+    ) -> None:
+        """乐观并发批处理：收集 N+1 的 deep/检索 → 并发提交两组分析 → 按序落账。"""
+        # 收集 N+1 的 deep/检索（futures 已在 peek 时确认 done）
+        fast_n1 = next_seg.corrected_text or next_seg.raw_text
+        if not next_seg.corrected_text:
+            next_seg.corrected_text = self._corrector.fast(next_seg.raw_text)
+            self._corrector.push_context(next_seg.corrected_text)
+            fast_n1 = next_seg.corrected_text
+        deep_n1, hits_n1 = self._collect_deep_retrieval(next_seg, fast_n1)
+        if deep_n1 != fast_n1:
+            next_seg.corrected_text = deep_n1
+            self._corrector.push_context(deep_n1)
 
-        # t3：LLM 分析（会议状态 + 检索上下文 + 本段）
-        analysis = None
+        _logger.info("乐观并发：段 %d + 段 %d 批处理分析", seg.seq, next_seg.seq)
+
+        # 并发提交两组 LLM 分析
+        f_analysis_n = self._pool.submit(
+            self._run_analysis, seg, deep, hits,
+            self._session.summary_for_prompt(),
+            self._session.open_questions_for_prompt(),
+        )
+        f_analysis_n1 = self._pool.submit(
+            self._run_analysis, next_seg, deep_n1, hits_n1,
+            self._session.summary_for_prompt(),  # 不包含 N 段结果（N 尚未落账）
+            self._session.open_questions_for_prompt(),
+        )
+
+        # 等待两组分析完成
+        done, _ = wait([f_analysis_n, f_analysis_n1], timeout=_ANALYSIS_DEADLINE_SEC + 2.0)
+        for f in [f_analysis_n, f_analysis_n1]:
+            if f not in done and not f.done():
+                f.cancel()
+
+        # 按 seq 顺序落账（先 N，再 N+1）
+        for s in [seg, next_seg]:
+            self._finalize_segment(s, deep if s is seg else deep_n1,
+                                   hits if s is seg else hits_n1)
+            display = PanelDisplay(
+                status=f"已处理段 {s.seq}",
+                seg=s,
+                analysis_unavailable=s.analysis is None,
+                state=self._session.state,
+            )
+            self._panel.render(display)
+            self._writer.maybe_rewrite(self._session.state)
+
+    def _run_analysis(
+        self,
+        seg: VoiceSegment,
+        deep: str,
+        hits: list,
+        meeting_summary: str,
+        open_questions: str,
+    ) -> None:
+        """在池线程中执行 LLM 分析并将结果写入 seg（供并发批处理使用）。"""
+        seg.analysis_started_at = time.monotonic()
         try:
-            analysis = self._analyzer.analyze(
+            seg.analysis = self._analyzer.analyze(
                 deep,
                 RetrieverAdapter.format_context(hits),
-                self._session.summary_for_prompt(),
+                meeting_summary,
+                open_questions=open_questions,
+            )
+            seg.analysis_done_at = time.monotonic()
+            seg.analysis_status = (
+                VoiceSegment.ANALYSIS_DONE if seg.analysis
+                else VoiceSegment.ANALYSIS_FAILED
             )
         except Exception as e:
-            print(f"[Iris] ⚠ 段 {seg.seq} 分析异常: {e}", file=sys.stderr)
-        seg.analysis = analysis
-        seg.analysis_status = (
-            VoiceSegment.ANALYSIS_DONE if analysis else VoiceSegment.ANALYSIS_FAILED
+            _logger.warning("段 %d 分析异常: %s", seg.seq, e)
+            seg.analysis = None
+            seg.analysis_status = VoiceSegment.ANALYSIS_FAILED
+
+    def _analyze_and_record(self, seg: VoiceSegment, deep: str, hits: list) -> None:
+        """单段分析 + 记录（常规路径）。"""
+        self._run_analysis(
+            seg, deep, hits,
+            self._session.summary_for_prompt(),
+            self._session.open_questions_for_prompt(),
         )
-        # 间隔化：非采样段清空建议提问（省 token 减重复噪音）
-        # (seq-1) 取模：首段（seq=1）保留建议提问——会议开场恰需引导提问
-        if analysis and (seg.seq - 1) % self._cfg.suggest_every != 0:
-            analysis.suggested_questions = []
+        self._finalize_segment(seg, deep, hits)
+
+    def _finalize_segment(self, seg: VoiceSegment, deep: str, hits: list) -> None:
+        """分析后处理：建议提问间隔化 + 落账（单段/批处理共用）。"""
+        analysis = seg.analysis
+        if analysis:
+            elapsed = getattr(seg, 'analysis_done_at', 0.0) - getattr(seg, 'analysis_started_at', 0.0)
+            _logger.info(
+                "段 %d 分析完成（%.1fs）· 要点=%d 决策=%d 风险=%d 问题=%d",
+                seg.seq, elapsed,
+                len(analysis.key_points), len(analysis.decisions),
+                len(analysis.risks), len(analysis.questions),
+            )
+            # 间隔化建议提问
+            if (seg.seq - 1) % self._cfg.suggest_every == 0:
+                try:
+                    deadline = (getattr(seg, 'analysis_started_at', time.monotonic())
+                                + _ANALYSIS_DEADLINE_SEC)
+                    sharp = self._analyzer.suggest_questions(
+                        analysis,
+                        self._session.summary_for_prompt(),
+                        RetrieverAdapter.format_context(hits),
+                        deadline=deadline,
+                    )
+                    if sharp:
+                        analysis.suggested_questions = sharp
+                        _logger.info("段 %d 建议提问已用高温度(0.5)重新生成（%d 条）",
+                                     seg.seq, len(sharp))
+                except Exception:
+                    pass
+            else:
+                analysis.suggested_questions = []
 
         try:
             self._session.record(seg)
         except Exception as e:
-            print(f"[Iris] ⚠ 段 {seg.seq} 落账异常: {e}", file=sys.stderr)
-
-        # t4：输出（面板 + 文档）
-        display = PanelDisplay(
-            status=f"已处理段 {seg.seq}",
-            seg=seg,
-            analysis_unavailable=analysis is None,
-            state=self._session.state,
-        )
-        self._panel.render(display)
-        self._writer.maybe_rewrite(self._session.state)
+            _logger.error("段 %d 落账异常: %s", seg.seq, e)
 
     @staticmethod
     def _collect_results(futures: Tuple[Future, Future], done: set, fast: str):
-        """并行结果收集：超时/异常/取消各自降级（deep→fast，检索→[]）。"""
+        """并行结果收集：超时/异常/取消各自降级（deep→fast，检索→[]）。
+
+        超时未完成的 future 显式 cancel 释放线程池槽位，防止连续超时场景
+        下池中槽位被「已放弃但仍在跑」的调用占满。
+        """
         f_deep, f_retr = futures
         deep, hits = fast, []
         try:
             if f_deep in done and not f_deep.cancelled():
                 deep = f_deep.result()
         except Exception as e:
-            print(f"[Iris] ⚠ 深度校正异常，保留词典结果: {e}", file=sys.stderr)
+            _logger.warning("深度校正异常，保留词典结果: %s", e)
+        else:
+            if not f_deep.done():
+                f_deep.cancel()  # 超时未完成 → 释放槽位
         try:
             if f_retr in done and not f_retr.cancelled():
                 hits = f_retr.result()
         except Exception as e:
-            print(f"[Iris] ⚠ 检索异常，降级为空上下文: {e}", file=sys.stderr)
+            _logger.warning("检索异常，降级为空上下文: %s", e)
+        else:
+            if not f_retr.done():
+                f_retr.cancel()  # 超时未完成 → 释放槽位
         return deep, hits
