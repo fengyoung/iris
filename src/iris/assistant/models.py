@@ -165,3 +165,57 @@ class AssistantConfig(BaseModel):
         if not isinstance(cfg, dict):
             cfg = {}
         return cls(**{k: v for k, v in cfg.items() if k in cls.model_fields})
+
+
+class AsrLocalConfig(BaseModel):
+    """本地 FunASR Paraformer ONNX 模型配置（assistant.asr.local）。"""
+
+    model_dir: str = Field(default="", description="模型缓存目录（vocotype 已下载的 ModelScope 路径）")
+    device: str = Field(default="cpu", description="ONNX 推理设备（cpu / mps）")
+    sample_rate: int = Field(default=16000, gt=0, description="音频采样率")
+    batch_size_s: int = Field(default=60, gt=0, description="单次 VAD+ASR 最大音频长度（秒）")
+
+
+class AsrRemoteConfig(BaseModel):
+    """云端 ASR 配置（assistant.asr.remote，未来扩展）。"""
+
+    provider: str = Field(default="", description="云服务提供商")
+    api_base: str = Field(default="", description="API 端点")
+    api_key: str = Field(default="", description="API 密钥")
+    model: str = Field(default="", description="模型名称")
+
+
+class AsrConfig(BaseModel):
+    """ASR 配置段（config/app.json["assistant"]["asr"]）。
+
+    mode: "local" = 本地 Paraformer；"remote" = 云端 API（预留）。
+    hotwords_file / replace_dict_file 为 assistant 专属数据文件，
+    独立于 asr-corrector 和 vocotype。
+    """
+
+    mode: str = Field(default="local", description="ASR 模式：local | remote")
+    local: AsrLocalConfig = Field(default_factory=AsrLocalConfig)
+    remote: AsrRemoteConfig = Field(default_factory=AsrRemoteConfig)
+    hotwords_file: str = Field(default="", description="热词文件路径（每行一个词条）")
+    replace_dict_file: str = Field(default="", description="音近词→正确词映射文件（JSON）")
+    llm_correct_enabled: bool = Field(default=True, description="启用 LLM 深度校正")
+    llm_correct_timeout_ms: int = Field(default=8000, gt=0, description="LLM 校正超时（毫秒）")
+
+    @classmethod
+    def from_app_config(cls, cfg: Dict[str, Any]) -> "AsrConfig":
+        """从 bundle.app.get("assistant", {}).get("asr", {}) 构造。"""
+        if not isinstance(cfg, dict):
+            return cls()
+        local_cfg = cfg.get("local", {})
+        remote_cfg = cfg.get("remote", {})
+        return cls(
+            mode=cfg.get("mode", "local"),
+            local=AsrLocalConfig(**{k: v for k, v in local_cfg.items()
+                                    if k in AsrLocalConfig.model_fields}),
+            remote=AsrRemoteConfig(**{k: v for k, v in remote_cfg.items()
+                                      if k in AsrRemoteConfig.model_fields}),
+            hotwords_file=cfg.get("hotwords_file", ""),
+            replace_dict_file=cfg.get("replace_dict_file", ""),
+            llm_correct_enabled=cfg.get("llm_correct_enabled", True),
+            llm_correct_timeout_ms=cfg.get("llm_correct_timeout_ms", 8000),
+        )

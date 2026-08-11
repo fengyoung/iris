@@ -1,4 +1,7 @@
-"""实时会议助理 — 主编排单元测试（互斥探测 + 全链路 mock）。"""
+"""实时会议助理 — 主编排单元测试（互斥探测 + 全链路 mock）。
+
+v3.25.0: 适配音频 ASR 架构（_load_assistant_data + ASREngine mock）。
+"""
 
 from __future__ import annotations
 
@@ -18,19 +21,16 @@ from iris.assistant.models import VoiceSegment
 class TestProbeRunning:
     def test_no_pid_file(self, tmp_path):
         assert _probe_running("asr-corrector", tmp_path) is False
-        # 零写副作用：探测后目录仍空
         assert list(tmp_path.iterdir()) == []
 
     def test_alive_pid(self, tmp_path):
-        # v3.24: 除 os.kill 存活探测外，还校验进程命令行含 "iris"（防 PID 复用误判）
         (tmp_path / "asr-corrector.pid").write_text(str(os.getpid()))
         with patch("subprocess.run", return_value=SimpleNamespace(
                 stdout="python /Users/fengyoung/MyProjects/iris3/src/iris/app/main.py")):
             assert _probe_running("asr-corrector", tmp_path) is True
-        assert (tmp_path / "asr-corrector.pid").exists()  # 不清理
+        assert (tmp_path / "asr-corrector.pid").exists()
 
     def test_pid_reused_by_unrelated_process(self, tmp_path):
-        """PID 被无关进程复用：存活但命令行不含 iris → 视为无实例。"""
         (tmp_path / "asr-corrector.pid").write_text(str(os.getpid()))
         with patch("subprocess.run", return_value=SimpleNamespace(
                 stdout="/usr/bin/some-unrelated-daemon")):
@@ -45,12 +45,11 @@ class TestProbeRunning:
         assert _probe_running("asr-corrector", tmp_path) is False
 
 
-# ── 全链路（mock 校正/检索/分析） ──────────────────────
+# ── 共享 Fixtures ──────────────────────────────────────
 
 
 class _StubLLM:
     """分析用 stub：返回固定 JSON。"""
-
     def generate(self, prompt, route_context=None, **kwargs):
         return SimpleNamespace(
             text='{"key_points": ["要点X"], "decisions": ["决策Y"],'
@@ -58,17 +57,26 @@ class _StubLLM:
         )
 
 
-def _make_bundle(tmp_path):
-    """最小 bundle：app 含 assistant 段 + root（PromptTemplateLoader 需要）。
-
-    short_segment_chars=1：让既有分析路径测试绕过短段门控（默认 15 会误伤短测试文本）。
-    """
+def _make_bundle(tmp_path, **overrides):
+    """最小 bundle：含 assistant 段 + asr 子段 + root。"""
+    cfg = {
+        "top_k": 3, "poll_interval": 0.05, "output_dir": "",
+        "short_segment_chars": 1,
+    }
+    cfg.update(overrides)
     return SimpleNamespace(
         root=tmp_path,
-        app={"assistant": {
-            "top_k": 3, "poll_interval": 0.05, "output_dir": "",
-            "short_segment_chars": 1,
-        }},
+        app={
+            "assistant": cfg,
+            "asr": {
+                "mode": "local",
+                "local": {"model_dir": str(tmp_path / "fake_models")},
+                "hotwords_file": "",
+                "replace_dict_file": "",
+                "llm_correct_enabled": True,
+                "llm_correct_timeout_ms": 8000,
+            }
+        },
     )
 
 
@@ -78,6 +86,15 @@ def _make_assistant(tmp_path, bundle=None, **kwargs):
     kwargs.setdefault("llm_service", _StubLLM())
     kwargs.setdefault("pid_dir", tmp_path / "pids")
     (tmp_path / "pids").mkdir(exist_ok=True)
+    # 创建假的模型目录
+    fake_models = tmp_path / "fake_models"
+    fake_models.mkdir(exist_ok=True)
+    for name in [
+        "speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404-onnx",
+        "speech_fsmn_vad_zh-cn-16k-common-onnx",
+        "punc_ct-transformer_zh-cn-common-vocab272727-onnx",
+    ]:
+        (fake_models / name).mkdir(exist_ok=True)
     return MeetingLiveAssistant(bundle or _make_bundle(tmp_path), **kwargs)
 
 
@@ -92,13 +109,15 @@ def _seg(seq=1, raw="今天讨论下半年的目标", **kw):
     )
 
 
+# ── 全链路 ──────────────────────────────────────────────
+
+
 class TestPipelineParallel:
     @pytest.fixture(autouse=True)
     def _no_real_io(self):
-        # 隔离真实剪贴板/词典/检索/面板输出
-        with patch("iris.assistant._clipboard._read_clipboard", return_value=None), \
-             patch("iris.assistant.live._load_replace_dict", return_value={}), \
-             patch("iris.assistant.live._load_asr_prompt", return_value=""), \
+        with patch("iris.assistant.live._load_assistant_data", return_value=({}, "")), \
+             patch("iris.assistant.live.ASREngine", autospec=True), \
+             patch("iris.assistant.live.AudioCapture", autospec=True), \
              patch("iris.assistant.live.RetrieverAdapter.search", return_value=[]), \
              patch("iris.assistant.live.PanelRenderer.render"), \
              patch("iris.assistant.live.PanelRenderer.render_final"):
@@ -115,7 +134,6 @@ class TestPipelineParallel:
         assert len(state.segments) == 1
         assert state.key_points == ["要点X"]
         assert state.decisions == ["决策Y"]
-        # 文档已写
         assert assistant._doc_path.exists()
         content = assistant._doc_path.read_text(encoding="utf-8")
         assert "要点X" in content
@@ -124,13 +142,10 @@ class TestPipelineParallel:
         class _FakeCorrector:
             def __init__(self):
                 self.context: list[str] = []
-
             def fast(self, text: str) -> str:
                 return text
-
             def deep(self, text: str) -> str:
                 return "深度校正后文本"
-
             def push_context(self, text: str) -> None:
                 self.context.append(text)
 
@@ -146,19 +161,15 @@ class TestPipelineParallel:
 
     def test_analyzer_failure_degrades_gracefully(self, tmp_path):
         assistant = _make_assistant(tmp_path)
-
         class _FailingAnalyzer:
             def analyze(self, *a, **kw):
                 return None
-
         assistant._analyzer = _FailingAnalyzer()
         seg = _seg(seq=1, raw="原始")
-        assistant._process_segment(seg)  # 不应抛异常
+        assistant._process_segment(seg)
         assert seg.analysis is None
         assert seg.analysis_status == VoiceSegment.ANALYSIS_FAILED
-        state = assistant._session.state
-        assert len(state.segments) == 1
-        # 文档降级块
+        assert len(assistant._session.state.segments) == 1
         content = assistant._doc_path.read_text(encoding="utf-8")
         assert "分析不可用" in content
 
@@ -167,11 +178,9 @@ class TestPipelineParallel:
         pid_dir.mkdir(exist_ok=True)
         (pid_dir / "asr-corrector.pid").write_text(str(os.getpid()))
         assistant = _make_assistant(tmp_path)
-        # v3.24: _probe_running 含 ps 命令行校验，mock 通过（当前进程命令行不含 iris）
         with patch("subprocess.run", return_value=SimpleNamespace(
                 stdout="python /Users/fengyoung/MyProjects/iris3/src/iris/app/main.py")):
             assert assistant.run() == 1
-        # 未创建文档（让位）
         assert not assistant._doc_path.exists()
 
     def test_run_blocks_duplicate_instance(self, tmp_path):
@@ -182,9 +191,8 @@ class TestPipelineParallel:
 
     def test_run_registers_and_unregisters(self, tmp_path):
         assistant = _make_assistant(tmp_path)
-        # run() 内局部导入 iris.core.locks.ProcessRegistry，patch 源头模块
         with patch("iris.core.locks.ProcessRegistry") as mock_registry, \
-             patch.object(assistant, "_poll_loop", side_effect=KeyboardInterrupt):
+             patch.object(assistant, "_audio_loop", side_effect=KeyboardInterrupt):
             mock_reg = MagicMock()
             mock_registry.return_value = mock_reg
             assert assistant.run() == 0
@@ -196,17 +204,15 @@ class TestShortGate:
 
     @pytest.fixture(autouse=True)
     def _no_real_io(self):
-        with patch("iris.assistant._clipboard._read_clipboard", return_value=None), \
-             patch("iris.assistant.live._load_replace_dict", return_value={}), \
-             patch("iris.assistant.live._load_asr_prompt", return_value=""), \
+        with patch("iris.assistant.live._load_assistant_data", return_value=({}, "")), \
+             patch("iris.assistant.live.ASREngine", autospec=True), \
+             patch("iris.assistant.live.AudioCapture", autospec=True), \
              patch("iris.assistant.live.PanelRenderer.render"), \
              patch("iris.assistant.live.PanelRenderer.render_final"):
             yield
 
     def _bundle_with_gate(self, tmp_path, threshold=50):
-        b = _make_bundle(tmp_path)
-        b.app["assistant"]["short_segment_chars"] = threshold
-        return b
+        return _make_bundle(tmp_path, short_segment_chars=threshold)
 
     def test_short_segment_skipped_no_analyzer(self, tmp_path):
         assistant = _make_assistant(tmp_path, bundle=self._bundle_with_gate(tmp_path))
@@ -215,23 +221,12 @@ class TestShortGate:
              patch.object(assistant._pool, "submit") as mock_submit:
             assistant._process_segment(seg)
             mock_analyze.assert_not_called()
-            mock_submit.assert_not_called()  # 不提交 deep/检索
+            mock_submit.assert_not_called()
         assert seg.analysis is None
         assert seg.analysis_status == VoiceSegment.ANALYSIS_SKIPPED
-        assert len(assistant._session.state.segments) == 1  # 已落账
+        assert len(assistant._session.state.segments) == 1
         content = assistant._doc_path.read_text(encoding="utf-8")
         assert "跳过分析" in content
-
-    def test_fast_only_skips_everything(self, tmp_path):
-        assistant = _make_assistant(tmp_path, fast_only=True)
-        seg = _seg(seq=1, raw="这是一段足够长的正常会议发言内容需要分析")
-        with patch.object(assistant._analyzer, "analyze") as mock_analyze, \
-             patch.object(assistant._pool, "submit") as mock_submit:
-            assistant._process_segment(seg)
-            mock_analyze.assert_not_called()
-            mock_submit.assert_not_called()
-        assert seg.analysis_status == VoiceSegment.ANALYSIS_SKIPPED
-        assert len(assistant._session.state.segments) == 1
 
 
 class TestPrefetch:
@@ -239,9 +234,9 @@ class TestPrefetch:
 
     @pytest.fixture(autouse=True)
     def _no_real_io(self):
-        with patch("iris.assistant._clipboard._read_clipboard", return_value=None), \
-             patch("iris.assistant.live._load_replace_dict", return_value={}), \
-             patch("iris.assistant.live._load_asr_prompt", return_value=""), \
+        with patch("iris.assistant.live._load_assistant_data", return_value=({}, "")), \
+             patch("iris.assistant.live.ASREngine", autospec=True), \
+             patch("iris.assistant.live.AudioCapture", autospec=True), \
              patch("iris.assistant.live.PanelRenderer.render"), \
              patch("iris.assistant.live.PanelRenderer.render_final"):
             yield
@@ -250,19 +245,15 @@ class TestPrefetch:
         class _FakeCorrector:
             def __init__(self):
                 self.context: list[str] = []
-
             def fast(self, text: str) -> str:
                 return text
-
             def deep(self, text: str) -> str:
                 return "预取深度校正结果"
-
             def push_context(self, text: str) -> None:
                 self.context.append(text)
 
         assistant = _make_assistant(tmp_path)
         assistant._corrector = _FakeCorrector()
-        # poll 线程侧：fast 校正（锁外）→ submit（on_publish 临界区内注册 futures）
         fast = assistant._corrector.fast("今天讨论下半年目标预算")
         seg = assistant._session.submit(
             "今天讨论下半年目标预算",
@@ -270,11 +261,10 @@ class TestPrefetch:
         )
         assert seg.seq in assistant._futures
         f_deep, f_retr = assistant._futures[seg.seq]
-        # worker 侧：消费预取 futures（无现场提交兜底）
         with patch.object(assistant._pool, "submit") as mock_submit:
             assistant._process_segment(seg)
-            mock_submit.assert_not_called()  # 未兜底重新提交
-        assert seg.seq not in assistant._futures  # 已 pop
+            mock_submit.assert_not_called()
+        assert seg.seq not in assistant._futures
         assert seg.analysis is not None
         assert seg.corrected_text == "预取深度校正结果"
         assert assistant._corrector.context == ["今天讨论下半年目标预算", "预取深度校正结果"]
@@ -282,8 +272,6 @@ class TestPrefetch:
         f_retr.cancel()
 
     def test_worker_take_sees_futures_atomic(self, tmp_path):
-        """v3.24 原子注册：on_publish 在 submit 临界区内执行——worker 从
-        submit 返回后立即取段时 futures 必已注册（消除双跑竞态）。"""
         assistant = _make_assistant(tmp_path)
         with patch.object(assistant._pool, "submit", wraps=assistant._pool.submit):
             fast = assistant._corrector.fast("今天讨论下半年目标预算")
@@ -294,18 +282,17 @@ class TestPrefetch:
             taken = assistant._session.take_pending(timeout=0.1)
             assert taken is seg
             futures = assistant._futures.pop(seg.seq, None)
-            assert futures is not None  # 取段时已注册，worker 无 None → 无兜底重提
+            assert futures is not None
             futures[0].cancel()
             futures[1].cancel()
 
     def test_prefetch_skipped_for_short_segment(self, tmp_path):
-        b = _make_bundle(tmp_path)
-        b.app["assistant"]["short_segment_chars"] = 15
+        b = _make_bundle(tmp_path, short_segment_chars=15)
         assistant = _make_assistant(tmp_path, bundle=b)
         fast = assistant._corrector.fast("好的")
         seg = assistant._session.submit(
             "好的", on_publish=lambda s: assistant._publish_prefetch(s, fast))
-        assert seg.seq not in assistant._futures  # 短段：只 fast 校正，不提交 futures
+        assert seg.seq not in assistant._futures
         assert seg.corrected_text == "好的"
 
     def test_stale_futures_pruned(self, tmp_path):
@@ -314,11 +301,10 @@ class TestPrefetch:
             "今天讨论下半年目标预算",
             on_publish=lambda s: assistant._publish_prefetch(s, s.raw_text))
         f_deep, f_retr = assistant._futures[seg.seq]
-        # 再提交一个更远的段：旧条目应被清理
         seg2 = assistant._session.submit(
             "第二段讨论内容也是足够长的会议发言",
             on_publish=lambda s: assistant._publish_prefetch(s, s.raw_text))
-        assert seg.seq not in assistant._futures  # 已被 prune
+        assert seg.seq not in assistant._futures
         assert seg2.seq in assistant._futures
         f_deep.cancel()
         f_retr.cancel()
@@ -331,27 +317,23 @@ class TestPhaseGuards:
 
     @pytest.fixture(autouse=True)
     def _no_real_io(self):
-        with patch("iris.assistant._clipboard._read_clipboard", return_value=None), \
-             patch("iris.assistant.live._load_replace_dict", return_value={}), \
-             patch("iris.assistant.live._load_asr_prompt", return_value=""), \
+        with patch("iris.assistant.live._load_assistant_data", return_value=({}, "")), \
+             patch("iris.assistant.live.ASREngine", autospec=True), \
+             patch("iris.assistant.live.AudioCapture", autospec=True), \
              patch("iris.assistant.live.PanelRenderer.render"), \
              patch("iris.assistant.live.PanelRenderer.render_final"):
             yield
 
     def test_deep_future_exception_still_records(self, tmp_path):
         from concurrent.futures import Future
-
         def _boom(*a, **kw):
             raise RuntimeError("deep 挂")
-
         assistant = _make_assistant(tmp_path)
-        # 用真实 future 模拟：完成但带异常
         f_deep = Future()
         f_deep.set_exception(RuntimeError("deep 挂"))
-        assistant._futures[1] = (f_deep, Future())  # retr future 永不完成 → 超时降级
+        assistant._futures[1] = (f_deep, Future())
         seg = _seg(seq=1, raw="今天讨论下半年目标预算")
         assistant._process_segment(seg)
-        # 段仍落账，deep 异常降级为 fast
         assert len(assistant._session.state.segments) == 1
         assert seg.analysis_status == VoiceSegment.ANALYSIS_DONE or seg.analysis is None
 
@@ -360,8 +342,8 @@ class TestPhaseGuards:
         seg = _seg(seq=1, raw="今天讨论下半年目标预算")
         with patch.object(assistant._session, "record", side_effect=RuntimeError("落账失败")), \
              patch("sys.stderr.write"):
-            assistant._process_segment(seg)  # 不抛
-        assert seg.analysis is not None  # 分析已完成
+            assistant._process_segment(seg)
+        assert seg.analysis is not None
 
 
 class TestSuggestEvery:
@@ -369,37 +351,34 @@ class TestSuggestEvery:
 
     @pytest.fixture(autouse=True)
     def _no_real_io(self):
-        with patch("iris.assistant._clipboard._read_clipboard", return_value=None), \
-             patch("iris.assistant.live._load_replace_dict", return_value={}), \
-             patch("iris.assistant.live._load_asr_prompt", return_value=""), \
+        with patch("iris.assistant.live._load_assistant_data", return_value=({}, "")), \
+             patch("iris.assistant.live.ASREngine", autospec=True), \
+             patch("iris.assistant.live.AudioCapture", autospec=True), \
              patch("iris.assistant.live.RetrieverAdapter.search", return_value=[]), \
              patch("iris.assistant.live.PanelRenderer.render"), \
              patch("iris.assistant.live.PanelRenderer.render_final"):
             yield
 
     def _bundle_with_suggest(self, tmp_path, every=3):
-        b = _make_bundle(tmp_path)
-        b.app["assistant"]["suggest_every"] = every
-        return b
+        return _make_bundle(tmp_path, suggest_every=every)
 
     def test_non_sample_segment_clears_questions(self, tmp_path):
         assistant = _make_assistant(tmp_path, bundle=self._bundle_with_suggest(tmp_path, every=3))
         seg2 = _seg(seq=2)
         assistant._process_segment(seg2)
-        assert seg2.analysis.suggested_questions == []  # (2-1) % 3 != 0 → 清空
+        assert seg2.analysis.suggested_questions == []
 
     def test_sample_segment_keeps_questions(self, tmp_path):
         assistant = _make_assistant(tmp_path, bundle=self._bundle_with_suggest(tmp_path, every=3))
         seg4 = _seg(seq=4)
         assistant._process_segment(seg4)
-        assert seg4.analysis.suggested_questions == ["追问Z"]  # (4-1) % 3 == 0 → 保留
+        assert seg4.analysis.suggested_questions == ["追问Z"]
 
     def test_first_segment_keeps_questions(self, tmp_path):
-        """v3.24: 首段（seq=1）保留建议提问——会议开场恰需引导提问。"""
         assistant = _make_assistant(tmp_path, bundle=self._bundle_with_suggest(tmp_path, every=3))
         seg1 = _seg(seq=1)
         assistant._process_segment(seg1)
-        assert seg1.analysis.suggested_questions == ["追问Z"]  # (1-1) % 3 == 0 → 保留
+        assert seg1.analysis.suggested_questions == ["追问Z"]
 
 
 class TestExitSummary:
@@ -407,9 +386,9 @@ class TestExitSummary:
 
     @pytest.fixture(autouse=True)
     def _no_real_io(self):
-        with patch("iris.assistant._clipboard._read_clipboard", return_value=None), \
-             patch("iris.assistant.live._load_replace_dict", return_value={}), \
-             patch("iris.assistant.live._load_asr_prompt", return_value=""), \
+        with patch("iris.assistant.live._load_assistant_data", return_value=({}, "")), \
+             patch("iris.assistant.live.ASREngine", autospec=True), \
+             patch("iris.assistant.live.AudioCapture", autospec=True), \
              patch("iris.assistant.live.RetrieverAdapter.search", return_value=[]), \
              patch("iris.assistant.live.PanelRenderer.render"), \
              patch("iris.assistant.live.PanelRenderer.render_final"):
@@ -418,8 +397,8 @@ class TestExitSummary:
     def test_exit_summary_written_to_doc(self, tmp_path):
         assistant = _make_assistant(tmp_path)
         seg = _seg(seq=1, raw="今天讨论下半年目标预算")
-        assistant._process_segment(seg)  # 先有一段的会议状态
-        with patch.object(assistant, "_poll_loop", side_effect=KeyboardInterrupt), \
+        assistant._process_segment(seg)
+        with patch.object(assistant, "_audio_loop", side_effect=KeyboardInterrupt), \
              patch.object(assistant._analyzer, "summarize",
                           return_value="## 会议主题\n本场会议讨论了下半年目标") as mock_sum:
             assert assistant.run() == 0
@@ -432,16 +411,16 @@ class TestExitSummary:
         assistant = _make_assistant(tmp_path)
         seg = _seg(seq=1, raw="今天讨论下半年目标预算")
         assistant._process_segment(seg)
-        with patch.object(assistant, "_poll_loop", side_effect=KeyboardInterrupt), \
+        with patch.object(assistant, "_audio_loop", side_effect=KeyboardInterrupt), \
              patch.object(assistant._analyzer, "summarize", return_value=None) as mock_sum:
             assert assistant.run() == 0
             mock_sum.assert_called_once()
         content = assistant._doc_path.read_text(encoding="utf-8")
-        assert "会议总结（AI 生成）" not in content  # 失败不写总结区
+        assert "会议总结（AI 生成）" not in content
 
     def test_no_segments_no_summary_call(self, tmp_path):
         assistant = _make_assistant(tmp_path)
-        with patch.object(assistant, "_poll_loop", side_effect=KeyboardInterrupt), \
+        with patch.object(assistant, "_audio_loop", side_effect=KeyboardInterrupt), \
              patch.object(assistant._analyzer, "summarize") as mock_sum:
             assert assistant.run() == 0
-            mock_sum.assert_not_called()  # 无段 → 跳过总结
+            mock_sum.assert_not_called()

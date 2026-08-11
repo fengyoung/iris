@@ -82,15 +82,35 @@
     "output_dir": "",
     "top_k": 5,
     "llm_model": "",
-    "poll_interval": 0.5,
-    "doc_rewrite_every": 1,
-    "fast_only": false,
     "short_segment_chars": 15,
     "max_segment_chars": 2000,
     "dedup_window_seconds": 30.0,
     "suggest_every": 3,
     "summary_enabled": true,
-    "_note": "实时会议助理（meeting-live-assistant）。output_dir: 过程文档输出目录（默认 data/meeting-live/，--output 参数优先）；top_k: 每段知识库检索条数；llm_model: 段分析 LLM 模型（空=走全局路由）；poll_interval: 剪贴板轮询间隔（秒）；doc_rewrite_every: 每 N 段重写过程文档（1=每段）；fast_only: 仅词典校正模式跳过所有 LLM（CLI --fast-only 优先）；short_segment_chars: 短段门控，校正后短于该长度视为确认语跳过 LLM；max_segment_chars: 单段长度上限（超长丢弃并警告，默认覆盖 120s 长语音）；dedup_window_seconds: 相同文本去重窗口（超窗视为新段）；suggest_every: 建议提问生成间隔（每 N 段一次）；summary_enabled: 退出时生成 AI 会议总结（失败自动跳过）。"
+    "doc_rewrite_every": 1,
+    "_note": "实时会议助理（meeting-live-assistant）。output_dir: 过程文档输出目录（默认 data/meeting-live/）；top_k: 每段知识库检索条数；llm_model: 段分析 LLM 模型（空=走全局路由）；short_segment_chars: 短段门控阈值；max_segment_chars: 单段长度上限；dedup_window_seconds: 相同文本去重窗口；suggest_every: 建议提问生成间隔；summary_enabled: 退出时生成 AI 会议总结。",
+    "asr": {
+      "mode": "local",
+      "local": {
+        "model_dir": "",
+        "device": "cpu",
+        "sample_rate": 16000,
+        "batch_size_s": 60,
+        "_note": "model_dir: Paraformer 模型缓存目录（空=自动检测 vocotype 已下载的路径 ~/.cache/modelscope/hub/models/iic/）"
+      },
+      "remote": {
+        "provider": "",
+        "api_base": "",
+        "api_key": "",
+        "model": "",
+        "_note": "云端 ASR 配置（未来扩展）"
+      },
+      "hotwords_file": "data/assistant/asr_hotwords.txt",
+      "replace_dict_file": "data/assistant/asr_replace_dict.json",
+      "llm_correct_enabled": true,
+      "llm_correct_timeout_ms": 8000,
+      "_note": "hotwords_file: 热词文件（每行一个词条，ASR 阶段提升识别准确率）；replace_dict_file: 音近词→正确词映射（Aho-Corasick 词典替换）；llm_correct_enabled: 启用 LLM 深度校正；llm_correct_timeout_ms: LLM 校正超时。热词和替换词典为 assistant 专属，独立于 asr-corrector。"
+    }
   },
   "safety": {
     "protect_read_only_sources": true,

@@ -9,7 +9,7 @@ def handle_meeting_live_assistant(args, bundle, logger) -> int:
     """启动实时会议助理守护进程。
 
     --output 指定过程文档路径（默认 data/meeting-live/YYYYMMDD-HHMMSS-会议记录.md）；
-    --fast-only 仅词典校正（跳过所有 LLM）；与 asr-corrector 互斥（独占剪贴板）。
+    --asr 指定 ASR 模式（local|remote，默认从 app.json 读取）。
     """
     from iris.assistant.live import MeetingLiveAssistant
 
@@ -17,8 +17,8 @@ def handle_meeting_live_assistant(args, bundle, logger) -> int:
     if output_path:
         print(f"[Iris] 过程文档将输出到: {output_path}", file=sys.stderr)
 
-    fast_only = getattr(args, "fast_only", False)
-    assistant = MeetingLiveAssistant(bundle, output_path=output_path, fast_only=fast_only)
+    asr_mode = getattr(args, "asr", "") or ""
+    assistant = MeetingLiveAssistant(bundle, output_path=output_path, asr_mode=asr_mode)
     return assistant.run()
 
 

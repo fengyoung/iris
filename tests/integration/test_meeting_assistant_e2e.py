@@ -60,9 +60,9 @@ class TestEndToEnd:
 
     @pytest.fixture(autouse=True)
     def _isolate_io(self):
-        with patch("iris.assistant._clipboard._read_clipboard", return_value=None), \
-             patch("iris.assistant.live._load_replace_dict", return_value={}), \
-             patch("iris.assistant.live._load_asr_prompt", return_value=""), \
+        with patch("iris.assistant.live._load_assistant_data", return_value=({}, "")), \
+             patch("iris.assistant.live.ASREngine", autospec=True), \
+             patch("iris.assistant.live.AudioCapture", autospec=True), \
              patch("iris.assistant.live.RetrieverAdapter.search", return_value=[]), \
              patch("iris.assistant.live.PanelRenderer.render"), \
              patch("iris.assistant.live.PanelRenderer.render_final"):
@@ -90,7 +90,7 @@ class TestEndToEnd:
     def test_run_lifecycle_graceful_exit(self, config_bundle, tmp_path):
         """run() 完整生命周期：注册 → 轮询 → Ctrl+C 优雅退出（文档最终写 + 统计帧）。"""
         assistant = _make_assistant(config_bundle, tmp_path, llm=_FakeLLM())
-        with patch.object(assistant, "_poll_loop", side_effect=KeyboardInterrupt), \
+        with patch.object(assistant, "_audio_loop", side_effect=KeyboardInterrupt), \
              patch("iris.assistant.live.PanelRenderer.render_final") as mock_final:
             assert assistant.run() == 0
         assert assistant._doc_path.exists()
@@ -102,9 +102,9 @@ class TestDegrade:
 
     @pytest.fixture(autouse=True)
     def _isolate_io(self):
-        with patch("iris.assistant._clipboard._read_clipboard", return_value=None), \
-             patch("iris.assistant.live._load_replace_dict", return_value={}), \
-             patch("iris.assistant.live._load_asr_prompt", return_value=""), \
+        with patch("iris.assistant.live._load_assistant_data", return_value=({}, "")), \
+             patch("iris.assistant.live.ASREngine", autospec=True), \
+             patch("iris.assistant.live.AudioCapture", autospec=True), \
              patch("iris.assistant.live.RetrieverAdapter.search", return_value=[]), \
              patch("iris.assistant.live.PanelRenderer.render"), \
              patch("iris.assistant.live.PanelRenderer.render_final"):
@@ -117,7 +117,7 @@ class TestDegrade:
         seg = assistant._session.submit(_ASR_SEGMENTS[0])
         _process_drained(assistant, seg)
         assert seg.analysis is None
-        with patch.object(assistant, "_poll_loop", side_effect=KeyboardInterrupt):
+        with patch.object(assistant, "_audio_loop", side_effect=KeyboardInterrupt):
             assert assistant.run() == 0
         content = assistant._doc_path.read_text(encoding="utf-8")
         assert "分析不可用" in content  # 降级块
@@ -129,9 +129,9 @@ class TestMutexStartup:
 
     @pytest.fixture(autouse=True)
     def _isolate_io(self):
-        with patch("iris.assistant._clipboard._read_clipboard", return_value=None), \
-             patch("iris.assistant.live._load_replace_dict", return_value={}), \
-             patch("iris.assistant.live._load_asr_prompt", return_value=""):
+        with patch("iris.assistant.live._load_assistant_data", return_value=({}, "")), \
+             patch("iris.assistant.live.ASREngine", autospec=True), \
+             patch("iris.assistant.live.AudioCapture", autospec=True):
             yield
 
     def test_asr_corrector_running_yields(self, config_bundle, tmp_path):
@@ -152,7 +152,7 @@ class TestMutexStartup:
         (pid_dir / "asr-corrector.pid").write_text("999999999")
         assistant = _make_assistant(config_bundle, tmp_path, llm=_FakeLLM(),
                                     pid_dir=pid_dir)
-        with patch.object(assistant, "_poll_loop", side_effect=KeyboardInterrupt):
+        with patch.object(assistant, "_audio_loop", side_effect=KeyboardInterrupt):
             assert assistant.run() == 0
 
 
@@ -170,10 +170,10 @@ class TestCliRegistration:
         assert args.command == "meeting-live-assistant"
         assert args.output == "data/meeting.md"
 
-    def test_parser_accepts_fast_only(self):
+    def test_parser_accepts_asr_mode(self):
         from iris.app._cli_main import build_parser
         parser = build_parser()
-        args = parser.parse_args(["meeting-live-assistant", "--fast-only"])
-        assert args.fast_only is True
+        args = parser.parse_args(["meeting-live-assistant", "--asr", "local"])
+        assert args.asr == "local"
         args2 = parser.parse_args(["meeting-live-assistant"])
-        assert args2.fast_only is False
+        assert args2.asr == ""

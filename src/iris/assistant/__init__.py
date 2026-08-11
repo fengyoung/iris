@@ -8,6 +8,9 @@ from __future__ import annotations
 
 from .live import MeetingLiveAssistant, _probe_running
 from .models import (
+    AsrConfig,
+    AsrLocalConfig,
+    AsrRemoteConfig,
     AssistantConfig,
     MeetingState,
     SegmentAnalysis,
@@ -16,9 +19,12 @@ from .models import (
 from ._session import MeetingSession
 
 __all__ = [
+    "AsrConfig",
+    "AsrLocalConfig",
+    "AsrRemoteConfig",
+    "AssistantConfig",
     "MeetingLiveAssistant",
     "MeetingSession",
-    "AssistantConfig",
     "MeetingState",
     "SegmentAnalysis",
     "VoiceSegment",

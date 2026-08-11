@@ -98,8 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--audio-file", default="", help="transcribe-meeting 录音文件路径")
     parser.add_argument("--transcript-file", default="", help="transcribe-meeting 已有转写文本路径")
     parser.add_argument("--output", default="", help="transcribe-meeting / meeting-live-assistant 输出路径")
-    parser.add_argument("--fast-only", action="store_true",
-                        help="meeting-live-assistant 仅词典校正模式（跳过所有 LLM：深度校正/检索/分析）")
+    parser.add_argument("--asr", default="", help="meeting-live-assistant ASR 模式（local|remote，默认从 app.json 读取）")
     parser.add_argument("--to-source", action="store_true", help="输出归档到 SOURCE（会议纪要→05/，双周报→06/）")
     parser.add_argument("--style-from", default="", help="build-biweekly-report 风格参考文件路径")
     parser.add_argument("--whisper-model", default="base", help="Whisper 模型规格")

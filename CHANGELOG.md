@@ -1,3 +1,41 @@
+## v3.25.0 (2026-08-11)
+
+meeting-live-assistant 本地音频 ASR — 直接采集麦克风 + FunASR Paraformer 实时转写，去除 vocotype 和剪贴板依赖。
+
+### 背景
+
+meeting-live-assistant 原本依赖 vocotype 第三方 App 进行语音采集和 ASR 转写，通过轮询 macOS 剪贴板获取结果。问题：① 依赖第三方 App 部署门槛高；② 剪贴板被覆盖会污染输入；③ 非跨平台；④ 与 asr-corrector 互斥（都独占剪贴板）。
+
+### 新增：本地音频 ASR 引擎
+
+- **新增文件** `_audio.py`（sounddevice 麦克风采集 16kHz）+ `_asr.py`（FunASR Paraformer VAD+ASR+标点）
+- **模型**：复用 vocotype 已下载的 ModelScope 缓存（`~/.cache/modelscope/hub/models/iic/`），Paraformer-large-contextual（863MB）+ VAD（512KB）+ 标点（274MB），ONNX 推理
+- **热词注入**：`data/assistant/asr_hotwords.txt`（618 词条，独立于 vocotype），ASR 阶段直接提升识别准确率
+- **配置**：`app.json` → `assistant.asr` 段（mode / model_dir / hotwords_file / replace_dict_file / llm_correct_*）
+- **CLI**：`--asr local|remote`（默认从配置读取），移除 `--fast-only`
+
+### 代码隔离
+
+- **完全独立于 iris.wiki.asr**：零 import 依赖
+- `_corrector.py` 重写：自实现 Aho-Corasick 词典替换 + LLM 深度校正 + 上下文窗口
+- 替换词典独立：`data/assistant/asr_replace_dict.json`（不再使用 asr-corrector 的 `data/asr_replace_dict.json`）
+- 热词独立：`data/assistant/asr_hotwords.txt`（不再直接引用 vocotype 路径）
+
+### 新增依赖
+
+```toml
+[project.optional-dependencies]
+asr = ["funasr>=1.4", "onnxruntime>=1.19", "sounddevice>=0.5", "torchaudio>=2.0", "pyahocorasick>=2.0"]
+```
+
+### 测试
+
+- 全量 2,762 通过，ruff 零告警
+- 协议版本 3.18→3.19（新增 `--asr` CLI 参数，移除 `--fast-only`）
+- 产品版本 3.24.3→3.25.0
+
+---
+
 ## v3.24.3 (2026-08-11)
 
 meeting-live-assistant 全面优化（13 项 / 14 文件）— 并发安全加固 + 信息完整性提升 + 质量天花板突破 + 工程卫生 + 性能架构优化。

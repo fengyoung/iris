@@ -1,12 +1,13 @@
-"""主编排：MeetingLiveAssistant 常驻进程（采集 → 校正 → 检索 → 分析 → 面板/文档）。
+"""主编排：MeetingLiveAssistant 常驻进程（音频采集 → ASR → 校正 → 检索 → 分析 → 面板/文档）。
 
+v3.25.0 音频模式：本地 FunASR Paraformer 采集+转写，完全独立于 vocotype/asr-corrector。
 v3.23.3 双段流水线：poll 线程预取（fast 校正 + 提交 deep/检索 futures），
-worker 只做等待/分析——段 N 分析期间段 N+1 的深度校正与检索已在池中运行，
-每段关键路径从 ~25s 降到 ~15s 且深度重叠。
+worker 只做等待/分析——段 N 分析期间段 N+1 的深度校正与检索已在池中运行。
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import signal
@@ -17,17 +18,18 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
-from iris.utils.paths import get_project_root, resolve_data_path
+from iris.utils.paths import get_project_root
 
 from ._analyzer import SegmentAnalyzer, _ANALYSIS_DEADLINE_SEC
-from ._clipboard import ClipboardWatcher
+from ._asr import ASREngine
+from ._audio import AudioCapture
 from ._corrector import CorrectorAdapter
 from ._doc_writer import DocWriter
 from ._logging import setup_session_logger
 from ._panel import PanelDisplay, PanelRenderer
 from ._retriever import RetrieverAdapter
 from ._session import MeetingSession
-from .models import AssistantConfig, VoiceSegment
+from .models import AsrConfig, AssistantConfig, VoiceSegment
 
 _logger = logging.getLogger(__name__)
 
@@ -35,8 +37,6 @@ _logger = logging.getLogger(__name__)
 _PARALLEL_WAIT_SEC = 10.0
 # 退出 join 上限：并行窗(10s) + 分析 deadline(15s) + 余量 —— 段边界退出
 _EXIT_JOIN_SEC = _PARALLEL_WAIT_SEC + _ANALYSIS_DEADLINE_SEC + 2.0
-# 预取 futures 清理规则：worker 消费段时已 pop 自己的条目；
-# 仍残留且 seq < 当前 seq 的条目只可能是「pending 被覆盖」的段（结果无人消费）
 
 
 def _probe_running(name: str, pid_dir: Path) -> bool:
@@ -52,10 +52,8 @@ def _probe_running(name: str, pid_dir: Path) -> bool:
         pid = int(pid_file.read_text().strip())
         os.kill(pid, 0)
     except (ValueError, OSError):
-        return False  # 残留/损坏/已死 → 视为无实例
-    # 防 PID 复用误判：存活但命令行不含 "iris" 的进程不是本项目实例
+        return False
     import subprocess
-
     try:
         out = subprocess.run(
             ["ps", "-p", str(pid), "-o", "command="],
@@ -66,41 +64,58 @@ def _probe_running(name: str, pid_dir: Path) -> bool:
         return False
 
 
-def _load_replace_dict() -> Dict[str, str]:
-    """加载替换词典（data/asr_replace_dict.json，build-asr-prompt --deploy 产物）；缺失→空。"""
-    import json
-
-    path = resolve_data_path("data/asr_replace_dict.json")
-    if not path.exists():
-        _logger.warning("替换词典不存在，仅保留原文（可先运行 build-asr-prompt --deploy）")
-        return {}
-    try:
-        with open(path) as f:
-            data = json.load(f)
-        return data.get("replace_map", {})
-    except Exception as e:
-        _logger.warning("替换词典加载失败: %s（使用空词典）", e)
-        return {}
+def _resolve_assistant_path(rel_path: str) -> Path:
+    """解析 assistant 数据文件路径（相对于项目根目录）。"""
+    path = Path(rel_path).expanduser()
+    if not path.is_absolute():
+        path = get_project_root() / path
+    return path
 
 
-def _load_asr_prompt() -> str:
-    """加载 LLM 校正 Prompt（data/asr_prompt.md）；缺失→空（降级仅词典）。"""
-    path = resolve_data_path("data/asr_prompt.md")
-    if not path.exists():
-        _logger.warning("校正 Prompt 不存在，LLM 深度校正降级为仅词典")
-        return ""
-    try:
-        return path.read_text(encoding="utf-8")
-    except Exception as e:
-        _logger.warning("校正 Prompt 加载失败: %s", e)
-        return ""
+def _load_assistant_data(asr_cfg: AsrConfig) -> tuple[dict, str]:
+    """从 assistant.asr 配置加载替换词典和热词。
+
+    两个文件均为 assistant 专属，独立于 asr-corrector 和 vocotype：
+    - data/assistant/asr_replace_dict.json  — 音近词→正确词映射
+    - data/assistant/asr_hotwords.txt       — ASR 热词表
+    """
+    replace_dict: dict = {}
+    hotwords = ""
+
+    if asr_cfg.replace_dict_file:
+        path = _resolve_assistant_path(asr_cfg.replace_dict_file)
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                replace_dict = data.get("replace_map", {})
+            except Exception as e:
+                _logger.warning("替换词典加载失败: %s", e)
+        else:
+            _logger.warning("替换词典不存在: %s（仅做原文转写）", path)
+
+    if asr_cfg.hotwords_file:
+        path = _resolve_assistant_path(asr_cfg.hotwords_file)
+        if path.exists():
+            try:
+                lines = [ln.strip() for ln in path.read_text(encoding="utf-8").splitlines()
+                         if ln.strip()]
+                hotwords = " ".join(lines)
+            except Exception as e:
+                _logger.warning("热词文件加载失败: %s", e)
+        else:
+            _logger.warning("热词文件不存在: %s", path)
+
+    return replace_dict, hotwords
 
 
 class MeetingLiveAssistant:
     """实时会议助理编排核心。
 
+    v3.25.0 音频模式：sounddevice 采集 → FunASR Paraformer 转写 → 校正 → 检索 → 分析。
+    完全独立于 vocotype 和 asr-corrector（零 import、独立配置、独立数据）。
+
     线程模型：
-    - poll 线程：剪贴板轮询 → submit 段 → 预取（fast 校正入窗 + 提交 deep/检索 futures）
+    - 音频线程：sounddevice 回调采集 → ASREngine.feed() → submit 段
     - 工作线程：串行消费段（等 futures → 分析 → 落账）；处理中 submit 只覆盖
       pending 指针 → 天然丢弃中间段（积压策略）
     - 段内并行：LLM 深度校正与知识库检索各占一个线程（ThreadPoolExecutor(2)），
@@ -114,28 +129,24 @@ class MeetingLiveAssistant:
         output_path: str = "",
         llm_service: Optional[object] = None,
         pid_dir: Optional[Path] = None,
-        fast_only: bool = False,
+        asr_mode: str = "",
     ):
         self._bundle = bundle
         self._cfg = AssistantConfig.from_app_config(bundle.app.get("assistant", {}) if bundle.app else {})
-        if fast_only:
-            self._cfg = self._cfg.model_copy(update={"fast_only": True})  # CLI --fast-only > 配置
-        # pid 目录 = 项目根/data（resolve_data_path 仅接受带子路径的 data/… 形式）
+        # ASR 配置
+        asr_raw = (bundle.app or {}).get("asr", {}) if bundle.app else {}
+        self._asr_cfg = AsrConfig.from_app_config(asr_raw)
+        if asr_mode:
+            self._asr_cfg.mode = asr_mode  # CLI --asr > 配置
+        # pid 目录
         self._pid_dir = Path(pid_dir) if pid_dir else (get_project_root() / "data")
 
-        # 采集
-        self._watcher = ClipboardWatcher(
-            poll_interval=self._cfg.poll_interval,
-            max_len=self._cfg.max_segment_chars,
-            dedup_window_seconds=self._cfg.dedup_window_seconds,
-        )
-
-        # 校正（复用 AsrCorrector 双通道）
-        replace_dict = _load_replace_dict()
-        llm_prompt = _load_asr_prompt()
+        # 校正引擎（自实现 Aho-Corasick，零 asr-corrector 依赖）
+        replace_dict, hotwords = _load_assistant_data(self._asr_cfg)
         self._corrector = CorrectorAdapter(
             replace_dict=replace_dict,
-            llm_prompt=llm_prompt,
+            llm_prompt=self._load_llm_prompt(),
+            llm_timeout_ms=self._asr_cfg.llm_correct_timeout_ms,
         )
 
         # LLM：外部注入（测试用）或 LLMService 构造
@@ -166,20 +177,48 @@ class MeetingLiveAssistant:
         if output_path:
             self._doc_path = Path(output_path).expanduser()
         else:
-            out_dir = self._cfg.output_dir or str(resolve_data_path("data/meeting-live"))
+            out_dir = self._cfg.output_dir or str(get_project_root() / "data" / "meeting-live")
             self._doc_path = (
                 Path(out_dir) / f"{datetime.now():%Y%m%d-%H%M%S}-会议记录.md"
             ).expanduser()
         self._writer = DocWriter(self._doc_path, rewrite_every=self._cfg.doc_rewrite_every)
 
+        # ASR 引擎（local 模式）
+        if self._asr_cfg.mode == "local":
+            model_dir = self._asr_cfg.local.model_dir or ASREngine.auto_detect_model_dir()
+            if not model_dir:
+                raise FileNotFoundError(
+                    "未找到 ASR 模型目录。请配置 assistant.asr.local.model_dir "
+                    "或安装 vocotype 后自动检测。"
+                )
+            self._asr_engine = ASREngine(
+                model_dir=model_dir,
+                hotwords=hotwords,
+                device=self._asr_cfg.local.device,
+            )
+            if not self._asr_engine.is_available():
+                raise FileNotFoundError(f"ASR 模型不完整: {model_dir}")
+            _logger.info("ASR 引擎就绪（本地 Paraformer）· 模型 %s · 热词 %d 字",
+                         model_dir, len(hotwords))
+        else:
+            self._asr_engine = None
+            _logger.info("ASR 模式: %s（remote 待实现）", self._asr_cfg.mode)
+
         self._pool = ThreadPoolExecutor(max_workers=2)
         # 预取 futures：seq → (deep_future, retr_future)，worker 消费后 pop
         self._futures: Dict[int, Tuple[Future, Future]] = {}
-        # _futures 并发保护：poll 线程在 _publish_prefetch 中写（_cond 临界区内），
-        # worker 线程在 _process_segment 中读/pop；P4-13 乐观并发在 worker 侧 peek。
-        # 锁顺序：poll 线程先拿 _cond（submit）再拿 _futures_lock（on_publish）；
-        # worker 只拿 _futures_lock（不拿 _cond），无死锁。
+        # _futures 并发保护：音频线程在 _audio_loop 中写，worker 在 _process_segment 中读/pop
         self._futures_lock = threading.Lock()
+
+    def _load_llm_prompt(self) -> str:
+        """加载 LLM 校正 Prompt（data/assistant/asr_prompt.md）；缺失→空（降级仅词典）。"""
+        path = get_project_root() / "data" / "assistant" / "asr_prompt.md"
+        if path.exists():
+            try:
+                return path.read_text(encoding="utf-8")
+            except Exception as e:
+                _logger.warning("LLM 校正 Prompt 加载失败: %s", e)
+        return ""
 
     # ── 主流程 ──────────────────────────────────────────────
 
@@ -227,7 +266,7 @@ class MeetingLiveAssistant:
 
             worker = threading.Thread(target=self._worker_loop, daemon=True)
             worker.start()
-            self._poll_loop()
+            self._audio_loop()
         except KeyboardInterrupt:
             _logger.info("正在结束会议…")
         finally:
@@ -267,19 +306,26 @@ class MeetingLiveAssistant:
 
     # ── 线程逻辑 ────────────────────────────────────────────
 
-    def _poll_loop(self) -> None:
-        while not self._session.stop.is_set():
-            text = self._watcher.poll()
-            if text:
-                # fast 校正（Aho-Corasick，毫秒级）在锁外执行，不阻塞 worker；
-                # 预取注册通过 on_publish 在 submit 临界区内完成（与 pending 原子）
-                fast = self._corrector.fast(text)
-                seg = self._session.submit(
-                    text,
-                    on_publish=lambda s, f=fast: self._publish_prefetch(s, f),
-                )
-                _logger.info("语音段 %d 已捕获（%d 字），排队分析…", seg.seq, len(text))
-            time.sleep(self._cfg.poll_interval)
+    def _audio_loop(self) -> None:
+        """音频采集线程：sounddevice 回调 → ASREngine.feed() → submit 段。"""
+        mic = AudioCapture(sample_rate=self._asr_cfg.local.sample_rate)
+        mic.start()
+        try:
+            while not self._session.stop.is_set():
+                chunk = mic.read()
+                if chunk is None:
+                    time.sleep(0.02)
+                    continue
+                text = self._asr_engine.feed(chunk)
+                if text:
+                    fast = self._corrector.fast(text)
+                    seg = self._session.submit(
+                        text,
+                        on_publish=lambda s, f=fast: self._publish_prefetch(s, f),
+                    )
+                    _logger.info("语音段 %d 已识别（%d 字），排队分析…", seg.seq, len(text))
+        finally:
+            mic.stop()
 
     def _publish_prefetch(self, seg: VoiceSegment, fast: str) -> None:
         """预取发布（submit 临界区内调用）：fast 入窗 + 提交 deep/检索 futures。

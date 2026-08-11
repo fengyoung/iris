@@ -1,45 +1,141 @@
-"""校正适配：包装 AsrCorrector 双通道（词典快速 + LLM 深度），供会议助理一次性调用。"""
+"""校正引擎：Aho-Corasick 词典快速校正 + LLM 深度校正。
+
+完全独立于 iris.wiki.asr（零 import 依赖），自行实现 AC 自动机替换逻辑。
+与 asr-corrector 校正逻辑一致但代码隔离——两套独立实例、独立配置、独立数据。
+"""
 
 from __future__ import annotations
 
-from typing import Dict
+import logging
+import time
+from collections import deque
+from typing import Dict, Optional
 
-from iris.wiki.asr import AsrCorrector
+_logger = logging.getLogger(__name__)
 
 
 class CorrectorAdapter:
-    """包装 AsrCorrector：fast 同步毫秒级；deep 带内部 deadline 自动降级。
+    """ASR 校正适配器（完全独立于 iris.wiki.asr）。
 
-    - fast(text)：替换词典校正（Aho-Corasick，毫秒级），结果立即入上下文窗口
-    - deep(fast_text)：LLM 深度校正（correct_full，内部 8s deadline，失败降级返回原文）
-    - push_context(text)：手动滚动本场会议语境（correct_full 一次性调用不更新上下文）
+    - fast(text)：Aho-Corasick 词典替换（毫秒级），结果立即入上下文窗口
+    - deep(text)：LLM 深度校正（带内部 deadline 降级，失败返回原文）
+    - push_context(text)：手动滚动近期上下文窗口
     """
+
+    # 上下文窗口配置
+    _CONTEXT_SIZE = 5          # 最多保留最近 N 句
+    _CONTEXT_EXPIRE_SEC = 600  # 上下文过期时间（10 分钟）
 
     def __init__(
         self,
         replace_dict: Dict[str, str],
-        llm_prompt: str = "",
         *,
+        llm_prompt: str = "",
         llm_timeout_ms: int = 8000,
     ):
-        self._corrector = AsrCorrector(
-            replace_dict=replace_dict,
-            llm_prompt=llm_prompt,
-            mode="full",
-            llm_timeout_ms=llm_timeout_ms,
-        )
+        self._replace_dict = replace_dict
+        self._llm_prompt = llm_prompt
+        self._llm_timeout_ms = llm_timeout_ms
+        self._llm: Optional[object] = None
+        # 近期上下文窗口：（句子, 时间戳）
+        self._recent: deque = deque(maxlen=self._CONTEXT_SIZE)
+        self._build_ac()
+
+    # ── 公开接口 ──────────────────────────────────────────
 
     def set_llm_service(self, llm_service: object) -> None:
-        self._corrector.set_llm_service(llm_service)
+        """注入 LLM 服务（延迟绑定，支持 None 降级为仅词典模式）。"""
+        self._llm = llm_service
 
     def fast(self, text: str) -> str:
-        """词典快速校正，返回校正后文本。"""
-        return self._corrector.correct_fast(text)[0]
+        """词典快速校正（Aho-Corasick，毫秒级）。"""
+        if not self._replace_dict or not text:
+            return text
+        return self._ac_replace(text)
 
-    def deep(self, fast_text: str) -> str:
-        """LLM 深度校正；内部 deadline 降级链保证失败返回 fast 原文。"""
-        return self._corrector.correct_full(fast_text)[0]
+    def deep(self, text: str) -> str:
+        """LLM 深度校正；无 LLM 或无 Prompt 时降级返回 fast 原文。"""
+        if not self._llm or not self._llm_prompt:
+            return text
+        context = self._build_context()
+        # 简单模板替换（兼容 asr-corrector 的 prompt 格式）
+        prompt = (self._llm_prompt
+                  .replace("{{context}}", context)
+                  .replace("{{text}}", text))
+        try:
+            result = self._llm.generate(
+                prompt,
+                route_context={
+                    "task_type": "asr_correction",
+                    "input_type": "text",
+                },
+                temperature=0.1,
+                max_tokens=2048,
+                max_retries=0,
+                extra_body={"thinking": {"type": "disabled"}},
+                _deadline=time.monotonic() + self._llm_timeout_ms / 1000,
+            )
+            corrected = (result.text or "").strip()
+            return corrected if corrected and self._is_similar(text, corrected) else text
+        except Exception as e:
+            _logger.warning("LLM 深度校正异常，保留原文: %s", e)
+            return text
 
     def push_context(self, text: str) -> None:
-        """将校正后文本推入近期上下文滚动窗口（本场会议语境）。"""
-        self._corrector.push_context(text)
+        """将校正后文本推入近期上下文窗口。"""
+        self._recent.append((text, time.monotonic()))
+
+    # ── Aho-Corasick ──────────────────────────────────────
+
+    def _build_ac(self) -> None:
+        """从替换词典构建 Aho-Corasick 自动机。
+
+        使用 pyahocorasick（已存在于 Iris 依赖中）。
+        """
+        import ahocorasick
+        self._automaton = ahocorasick.Automaton()
+        for key, value in self._replace_dict.items():
+            if key and value and key != value:  # 跳过无效和恒等映射
+                self._automaton.add_word(key, (key, value))
+        self._automaton.make_automaton()
+
+    def _ac_replace(self, text: str) -> str:
+        """Aho-Corasick 替换：按匹配位置从后往前替换，避免偏移问题。"""
+        try:
+            matches = list(self._automaton.iter(text))
+        except Exception:
+            return text  # 自动机损坏时降级
+        if not matches:
+            return text
+        # 按结束位置降序排列 → 从后往前替换
+        matches.sort(key=lambda m: m[0], reverse=True)
+        chars = list(text)
+        for end_idx, (key, value) in matches:
+            start = end_idx - len(key) + 1
+            if start >= 0:
+                chars[start:end_idx + 1] = list(value)
+        return "".join(chars)
+
+    # ── 上下文 ────────────────────────────────────────────
+
+    def _build_context(self) -> str:
+        """构建注入 Prompt 的近期上下文文本块。
+
+        双重过滤：deque maxlen（数量）+ 时间过期（防止长时间暂停后旧语境残留）。
+        """
+        now = time.monotonic()
+        valid = [
+            text for text, ts in tuple(self._recent)
+            if now - ts <= self._CONTEXT_EXPIRE_SEC
+        ]
+        if not valid:
+            return ""
+        return "\n".join(f"- {s}" for s in valid)
+
+    # ── 辅助 ──────────────────────────────────────────────
+
+    @staticmethod
+    def _is_similar(a: str, b: str, threshold: float = 0.5) -> bool:
+        """检查两个字符串是否相似（ratio ≥ threshold）。防止 LLM 幻觉完全改写。"""
+        from difflib import SequenceMatcher
+        return SequenceMatcher(None, a, b).ratio() >= threshold
