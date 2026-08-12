@@ -26,7 +26,7 @@ class ASREngine:
     """
 
     SAMPLE_RATE = 16000
-    _MAX_BUFFER_SAMPLES = int(SAMPLE_RATE * 10)     # 最长连续语音 10s（超时强制切段）
+    _MAX_BUFFER_SAMPLES = int(SAMPLE_RATE * 5)      # 最长连续语音 5s（超时强制切段）
     _SILENCE_FRAMES = 15                            # 连续静音帧数 → 切段（15×40ms=600ms）
     _NOISE_FLOOR_ALPHA = 0.02                       # 噪声底限平滑系数
 
@@ -124,7 +124,7 @@ class ASREngine:
             # 条件 1：静音达到阈值 → 正常切段
             # 条件 2：语音超过 10s → 强制切段（高噪声环境）
             speech_duration = (self._total_frames - self._speech_start_frame) * 0.04
-            if self._silence_count >= self._SILENCE_FRAMES or speech_duration > 10:
+            if self._silence_count >= self._SILENCE_FRAMES or speech_duration > 5:
                 self._is_speaking = False
                 return self._transcribe()
 
@@ -141,9 +141,12 @@ class ASREngine:
             return None
         total = np.concatenate(self._buffer)
         speech_len = len(total) / self.SAMPLE_RATE
-        if speech_len < 0.3:  # 太短，可能是噪音
+        if speech_len < 0.3:
+            _logger.debug("ASR 跳过：语音太短 (%.2fs)", speech_len)
             self._buffer = []
             return None
+        rms = float(np.sqrt(np.mean(total.astype(np.float64) ** 2)))
+        _logger.info("🎙 转写中… (%.1fs, RMS=%.4f)", speech_len, rms)
         try:
             result = self._model(total)
         except Exception as e:
@@ -154,7 +157,10 @@ class ASREngine:
         if result and result[0].get("text"):
             text = result[0]["text"].strip()
             if text:
-                return self._add_punctuation(text)
+                punctuated = self._add_punctuation(text)
+                _logger.info("📝 识别: %s", punctuated)
+                return punctuated
+        _logger.debug("ASR 返回空 (%.1fs)", speech_len)
         return None
 
     # ── 标点恢复 ──────────────────────────────────────────
