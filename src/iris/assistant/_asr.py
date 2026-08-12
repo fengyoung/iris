@@ -47,8 +47,11 @@ class ASREngine:
         import logging as _logging
         from funasr import AutoModel
         _logger.info("加载 Paraformer 模型…")
-        # 抑制 funasr 的热词 INFO 日志（618 词全量打印太吵）
-        _logging.getLogger("funasr").setLevel(_logging.WARNING)
+        # 抑制 funasr 的热词解析 INFO 日志（618 词全量打印泄露隐私+噪音）
+        for _name in ("funasr", "funasr.models.contextual_paraformer",
+                       "funasr.models.contextual_paraformer.model",
+                       "modelscope"):
+            _logging.getLogger(_name).setLevel(_logging.WARNING)
         model = AutoModel(model=_MODEL_ID, device=self._device, disable_pbar=True)
         _logger.info("Paraformer 就绪（热词 %d 字）", len(self._hotwords))
         return model
