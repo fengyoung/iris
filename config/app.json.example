@@ -96,7 +96,8 @@
         "device": "cpu",
         "sample_rate": 16000,
         "batch_size_s": 60,
-        "_note": "model_dir: Paraformer 模型缓存目录（空=自动检测 vocotype 已下载的路径 ~/.cache/modelscope/hub/models/iic/）"
+        "energy_threshold": 0.005,
+        "_note": "model_dir: Paraformer 模型缓存目录（空=自动检测）；energy_threshold: VAD 能量阈值（0=调试模式显示电平不识别，0.001 安静环境 0.01 嘈杂环境 0.05 大声）"
       },
       "remote": {
         "provider": "",

@@ -27,7 +27,6 @@ class ASREngine:
 
     SAMPLE_RATE = 16000
     _MAX_BUFFER_SAMPLES = int(SAMPLE_RATE * 60)     # 缓冲区上限 60s
-    _ENERGY_THRESHOLD = 0.005                       # RMS 能量阈值（低于此值视为静音）
     _SILENCE_FRAMES = 15                            # 连续静音帧数 → 切段（15×40ms=600ms）
 
     _PUNC_MODEL_NAME = "punc_ct-transformer_zh-cn-common-vocab272727-onnx"
@@ -35,17 +34,20 @@ class ASREngine:
     # CT-Transformer 标点标签映射（FunASR 标准：0=pad 1=_ 2=， 3=。 4=？ 5=！）
     _PUNC_LABEL_MAP = {0: "", 1: "", 2: "，", 3: "。", 4: "？", 5: "！"}
 
-    def __init__(self, model_dir: str, hotwords: str = "", device: str = "cpu"):
+    def __init__(self, model_dir: str, hotwords: str = "", device: str = "cpu",
+                 energy_threshold: float = 0.005):
         """初始化 ASR 引擎。
 
         Args:
             model_dir: ModelScope 模型缓存目录（含 model_quant.onnx / config.yaml / tokens.json）
             hotwords: 空格分隔的热词（如 "冯扬 转转 Iris"）
             device: ONNX 推理设备（cpu / mps）
+            energy_threshold: RMS 能量阈值（0.001-0.05，低于此值视为静音，0 输出电平不识别）
         """
         self._model_dir = Path(model_dir)
         self._hotwords = hotwords
         self._device = device
+        self._energy_threshold = energy_threshold
         self._buffer: list[np.ndarray] = []
         self._silence_count = 0
         self._is_speaking = False
@@ -91,7 +93,18 @@ class ASREngine:
         """
         rms = float(np.sqrt(np.mean(audio.astype(np.float64) ** 2)))
 
-        if rms > self._ENERGY_THRESHOLD:
+        if self._energy_threshold == 0:
+            # 阈值=0：调试模式，每秒输出一次电平，不触发识别
+            if not hasattr(self, '_last_rms_log'):
+                self._last_rms_log = 0.0
+            now = __import__('time').monotonic()
+            if now - self._last_rms_log > 1.0:
+                bar = '█' * int(rms * 200)  # 0.05 = 10格满
+                _logger.debug("🔊 RMS %.4f %s", rms, bar)
+                self._last_rms_log = now
+            return None
+
+        if rms > self._energy_threshold:
             # 检测到语音
             if not self._is_speaking:
                 self._is_speaking = True

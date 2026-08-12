@@ -205,6 +205,7 @@ class MeetingLiveAssistant:
                 model_dir=model_dir,
                 hotwords=hotwords,
                 device=self._asr_cfg.local.device,
+                energy_threshold=self._asr_cfg.local.energy_threshold,
             )
             if not self._asr_engine.is_available():
                 raise FileNotFoundError(f"ASR 模型不完整: {model_dir}")
