@@ -161,18 +161,18 @@ class PanelRenderer:
         seg_count = len(state.segments) if state else 0
         dropped = state.dropped_count if state else 0
 
-        # 标题行
+        # 标题行（CJK 感知宽度）
         if seg_count == 0:
             title = "实时会议助理 · 等待语音…"
         else:
             drop_part = f" · 丢 {dropped}" if dropped else ""
             title = f"实时会议助理 · {seg_count} 段{drop_part}"
-        # 视觉填充到盒宽
-        pad_right = w - 2 - len(title) - 2  # 2 for ╔╗
+        title_dw = _display_width(title)
+        pad_right = w - 2 - title_dw - 2  # ╔╗ + 两边空格
         if pad_right > 0:
             title = f"╔{'═' * (pad_right // 2)} {title} {'═' * (pad_right - pad_right // 2)}╗"
         else:
-            title = f"╔{'═' * 2} {title} ═╗"
+            title = f"╔═ {title} ═╗"
 
         lines = [title]
 
