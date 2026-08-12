@@ -27,6 +27,36 @@ _RESET = "\033[0m"
 _BOX_WIDTH = min(80, max(48, shutil.get_terminal_size().columns - 2))
 
 
+def _display_width(text: str) -> int:
+    """计算字符串的终端显示宽度（CJK 字符占 2 列，ASCII 占 1 列）。"""
+    w = 0
+    for ch in text:
+        cp = ord(ch)
+        # CJK 统一表意文字 + 全角符号 + 中文标点
+        if (0x1100 <= cp <= 0x115F or    # Hangul Jamo
+            0x2E80 <= cp <= 0xA4CF or    # CJK Radicals ~ Yi
+            0xA960 <= cp <= 0xA97C or    # Hangul
+            0xAC00 <= cp <= 0xD7A3 or    # Hangul Syllables
+            0xF900 <= cp <= 0xFAFF or    # CJK Compatibility
+            0xFE10 <= cp <= 0xFE19 or    # Vertical forms
+            0xFE30 <= cp <= 0xFE6F or    # CJK Compatibility Forms
+            0xFF01 <= cp <= 0xFF60 or    # Fullwidth Forms
+            0xFFE0 <= cp <= 0xFFE6 or    # Fullwidth Signs
+            0x1F300 <= cp <= 0x1F64F or  # Emoticons
+            0x20000 <= cp <= 0x2FFFF or  # CJK Extension
+            0x30000 <= cp <= 0x3FFFF):   # CJK Extension
+            w += 2
+        else:
+            w += 1
+    return w
+
+
+def _ljust_cjk(text: str, width: int) -> str:
+    """CJK 感知的左对齐填充（用空格补足到终端显示宽度 width）。"""
+    need = width - _display_width(text)
+    return text + " " * max(0, need)
+
+
 @dataclass
 class PanelDisplay:
     """一帧面板的数据：状态行 + 当前段 + 分析占位 + 会议状态。"""
@@ -38,12 +68,22 @@ class PanelDisplay:
 
 
 def _wrap(text: str, width: int) -> list[str]:
-    """中文友好的文本折行（textwrap.wrap 对 CJK 宽度计算不准，手动处理）。"""
+    """CJK 感知的文本折行。width 为显示列数。"""
     lines = []
-    while len(text) > width:
-        # 在宽度处查找最近的空格/标点作为断点
-        cut = width
-        for i in range(width, max(0, width - 20), -1):
+    while _display_width(text) > width:
+        # 累积显示宽度找到断点
+        w = 0
+        cut = 0
+        for i, ch in enumerate(text):
+            dw = 2 if _display_width(ch) == 2 else 1  # noqa: PLR2004
+            if w + dw > width:
+                cut = i
+                break
+            w += dw
+        else:
+            cut = len(text)
+        # 回退到最近的空格/标点
+        for i in range(min(cut, len(text) - 1), max(0, cut - 12), -1):
             if text[i] in " ，。、；：！？\n-,.;:!?":
                 cut = i + 1
                 break
@@ -55,8 +95,8 @@ def _wrap(text: str, width: int) -> list[str]:
 
 
 def _fill_line(text: str, width: int, *, pad: str = " ") -> str:
-    """填充文本到指定宽度（左右留边距）。"""
-    return pad + text.ljust(width - 2) + pad
+    """CJK 感知的填充到指定显示宽度（左右留边距）。"""
+    return pad + _ljust_cjk(text, width - 2) + pad
 
 
 def _dim(text: str) -> str:
