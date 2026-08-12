@@ -206,7 +206,8 @@ class MeetingLiveAssistant:
             model=self._cfg.llm_model,
         )
         self._session = MeetingSession()
-        self._panel = PanelRenderer()
+        # v3.26.2 双主题面板（dark/light，配置驱动）
+        self._panel = PanelRenderer(theme=self._cfg.panel_theme)
         self._feed = InsightFeed()      # v3.25.3 洞察推送引擎
 
         # 输出路径：--output > assistant.output_dir > data/meeting-live/

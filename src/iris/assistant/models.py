@@ -399,6 +399,8 @@ class AssistantConfig(BaseModel):
     suggest_every: int = Field(default=3, gt=0,
                                description="建议提问生成间隔：每 N 段生成一次（省 token 减重复噪音）")
     summary_enabled: bool = Field(default=True, description="退出时生成 AI 会议总结（失败自动跳过）")
+    panel_theme: str = Field(default="dark",
+                             description="v3.26.2 面板主题（dark/light，非法值回退 dark）")
     agenda: str = Field(default="", description="预设议题（分号分隔），注入分析 prompt 并用于跑偏检测")
     save_knowledge: bool = Field(default=False,
                                  description="[预留·v3.27.0] 退出时自动回写知识库（决策→Wiki/待办→Trello），当前版本不生效")

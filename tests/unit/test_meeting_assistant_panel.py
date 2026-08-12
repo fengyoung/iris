@@ -202,3 +202,91 @@ class TestPanelRenderer:
         assert "要点 1" in output
         assert "决策 1" in output
         assert "已生成" in output
+
+
+# ── TestPanelTheme（v3.26.2 双主题）────────────────────────
+
+from iris.assistant._theme import DARK, LIGHT, THEMES  # noqa: E402
+
+
+class TestPanelTheme:
+    """双主题切换 + 语义色应用。"""
+
+    def test_theme_resolution_valid(self):
+        """合法主题名解析到对应 Theme。"""
+        assert PanelRenderer("dark").theme is DARK
+        assert PanelRenderer("light").theme is LIGHT
+
+    def test_theme_resolution_invalid_falls_back_dark(self):
+        """非法主题名回退 dark。"""
+        assert PanelRenderer("neon").theme is DARK
+        assert PanelRenderer("").theme is DARK
+
+    def test_dark_light_have_distinct_colors(self):
+        """dark/light 两套配色互不相同。"""
+        assert DARK.bg != LIGHT.bg
+        assert DARK.fg_text != LIGHT.fg_text
+        assert DARK.fg_ok != LIGHT.fg_ok
+        assert len(THEMES) == 2
+
+    def test_frame_contains_ansi_escapes(self):
+        """渲染帧包含 ANSI 颜色转义（256 色）。"""
+        renderer = PanelRenderer("dark")
+        state = _make_state()
+        frame = renderer._build(PanelDisplay(status="等待语音…", state=state))
+        assert "\033[38;5;" in frame   # 前景色
+        assert "\033[48;5;" in frame   # 背景色（整帧填充）
+
+    def test_light_theme_uses_light_background(self):
+        """light 主题背景色为浅色 254 号。"""
+        renderer = PanelRenderer("light")
+        state = _make_state()
+        frame = renderer._build(PanelDisplay(status="等待语音…", state=state))
+        assert f"\033[48;5;{LIGHT.bg}m" in frame
+
+    def test_semantic_colors_in_analysis(self):
+        """分析区语义色：要点绿 / 决策绿 / 风险橙。"""
+        renderer = PanelRenderer("dark")
+        t = renderer.theme
+        analysis = _make_analysis(
+            key_points=["提升图像识别准确率"],
+            decisions=["采用 Paraformer 模型"],
+            risks=["模型延迟高"],
+        )
+        seg = _make_seg(analysis=analysis, analysis_status="done")
+        state = _make_state(segments=[seg], key_points=["提升图像识别准确率"],
+                           decisions=["采用 Paraformer 模型"], risks=["模型延迟高"])
+        frame = renderer._build(PanelDisplay(status="已处理段 1", seg=seg, state=state))
+        # 要点块 → 绿色
+        assert f"\033[38;5;{t.fg_ok}m" in frame
+        # 风险块 → 橙色
+        assert f"\033[38;5;{t.fg_risk}m" in frame
+
+    def test_alert_uses_alert_background(self):
+        """告警区使用红底亮黄字。"""
+        renderer = PanelRenderer("dark")
+        t = renderer.theme
+        state = _make_state()
+        display = PanelDisplay(status="等待语音…", state=state,
+                               alerts=["文档写入失败（磁盘空间不足？）"])
+        frame = renderer._build(display)
+        assert f"\033[48;5;{t.bg_alert}m" in frame
+        assert f"\033[38;5;{t.fg_alert}m" in frame
+
+    def test_final_frame_fills_background(self):
+        """退出统计帧整帧全区填充（含底色）。"""
+        renderer = PanelRenderer("dark")
+        t = renderer.theme
+        state = _make_state(summary="总结")
+        import io
+        import sys
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            renderer.render_final(state, Path("/tmp/test.md"))
+        finally:
+            sys.stdout = old
+        output = buf.getvalue()
+        assert f"\033[48;5;{t.bg}m" in output
+        assert "会议结束统计" in output
