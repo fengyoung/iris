@@ -336,8 +336,10 @@ class MeetingLiveAssistant:
                 now = time.monotonic()
                 if now - _heartbeat_at > 10:
                     bar = "█" * int(_peak_rms * 500)
-                    _logger.debug("🔊 峰值 %.4f %s（阈值 %.3f）",
-                                  _peak_rms, bar, self._asr_engine._energy_threshold)
+                    thr = self._asr_engine._effective_threshold
+                    nf = self._asr_engine._noise_floor
+                    _logger.debug("🔊 峰值 %.4f %s（噪声 %.4f 阈值 %.4f）",
+                                  _peak_rms, bar, nf, thr)
                     _peak_rms = 0.0
                     _heartbeat_at = now
                 text = self._asr_engine.feed(chunk)

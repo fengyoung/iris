@@ -174,7 +174,7 @@ class AsrLocalConfig(BaseModel):
     device: str = Field(default="cpu", description="ONNX 推理设备（cpu / mps）")
     sample_rate: int = Field(default=16000, gt=0, description="音频采样率")
     batch_size_s: int = Field(default=60, gt=0, description="单次 VAD+ASR 最大音频长度（秒）")
-    energy_threshold: float = Field(default=0.002, ge=0, le=0.1,
+    energy_threshold: float = Field(default=0, ge=0, le=0.1,
                                     description="VAD 能量阈值（0=调试模式显示电平不识别，0.001-0.05 正常）")
 
 

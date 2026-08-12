@@ -26,8 +26,9 @@ class ASREngine:
     """
 
     SAMPLE_RATE = 16000
-    _MAX_BUFFER_SAMPLES = int(SAMPLE_RATE * 60)     # 缓冲区上限 60s
+    _MAX_BUFFER_SAMPLES = int(SAMPLE_RATE * 10)     # 最长连续语音 10s（超时强制切段）
     _SILENCE_FRAMES = 15                            # 连续静音帧数 → 切段（15×40ms=600ms）
+    _NOISE_FLOOR_ALPHA = 0.02                       # 噪声底限平滑系数
 
     _PUNC_MODEL_NAME = "punc_ct-transformer_zh-cn-common-vocab272727-onnx"
 
@@ -35,24 +36,35 @@ class ASREngine:
     _PUNC_LABEL_MAP = {0: "", 1: "", 2: "，", 3: "。", 4: "？", 5: "！"}
 
     def __init__(self, model_dir: str, hotwords: str = "", device: str = "cpu",
-                 energy_threshold: float = 0.002):
+                 energy_threshold: float = 0):
         """初始化 ASR 引擎。
 
         Args:
-            model_dir: ModelScope 模型缓存目录（含 model_quant.onnx / config.yaml / tokens.json）
-            hotwords: 空格分隔的热词（如 "冯扬 转转 Iris"）
+            model_dir: ModelScope 模型缓存目录
+            hotwords: 空格分隔的热词
             device: ONNX 推理设备（cpu / mps）
-            energy_threshold: RMS 能量阈值（0.001-0.05，低于此值视为静音，0 输出电平不识别）
+            energy_threshold: RMS 阈值（0=自动校准+调试模式，>0 手动指定，
+                              实际阈值 = max(threshold, noise_floor * 2)）
         """
         self._model_dir = Path(model_dir)
         self._hotwords = hotwords
         self._device = device
-        self._energy_threshold = energy_threshold
+        self._base_threshold = energy_threshold
+        self._noise_floor = 0.0       # 自适应噪声底限（平滑估计）
         self._buffer: list[np.ndarray] = []
         self._silence_count = 0
         self._is_speaking = False
+        self._speech_start_frame = 0  # 当前语音段起始帧数
+        self._total_frames = 0         # 总帧数（用于超时检测）
         self._model = self._init_model()
         self._punc_session, self._punc_char_to_id = self._init_punc_model()
+
+    @property
+    def _effective_threshold(self) -> float:
+        """有效阈值 = max(手动阈值, 噪声底限 × 2)。启动初期用较高值防误触发。"""
+        if self._noise_floor < 0.0001:
+            return max(self._base_threshold, 0.005)  # 冷启动用较高值
+        return max(self._base_threshold, self._noise_floor * 2.0)
 
     def _init_model(self):
         """初始化 FunASR ONNX Paraformer（延迟导入）。"""
@@ -83,8 +95,8 @@ class ASREngine:
     def feed(self, audio: np.ndarray) -> Optional[str]:
         """喂入音频帧；检测到完整语音段后返回转写文本，否则返回 None。
 
-        内置能量检测 VAD：RMS > _ENERGY_THRESHOLD 视为语音，连续静音 _SILENCE_FRAMES
-        帧后切段送 ASR。Paraformer 接收语音段（不含前后静音）时识别效果最佳。
+        自适应 VAD：用平滑噪声底限动态计算阈值，环境噪音变化时自动适应。
+        最长语音段 10s 强制切段（防持续噪音导致永不识别）。
 
         Args:
             audio: float32 数组，16kHz 单声道
@@ -92,40 +104,34 @@ class ASREngine:
             转写后的中文文本，或无语音时返回 None
         """
         rms = float(np.sqrt(np.mean(audio.astype(np.float64) ** 2)))
+        # 平滑更新噪声底限（只追踪低能量帧）
+        if rms < 0.05:
+            self._noise_floor = (self._NOISE_FLOOR_ALPHA * rms +
+                                 (1 - self._NOISE_FLOOR_ALPHA) * self._noise_floor)
+        threshold = self._effective_threshold
+        self._total_frames += 1
 
-        if self._energy_threshold == 0:
-            # 阈值=0：调试模式，每秒输出一次电平，不触发识别
-            if not hasattr(self, '_last_rms_log'):
-                self._last_rms_log = 0.0
-            now = __import__('time').monotonic()
-            if now - self._last_rms_log > 1.0:
-                bar = '█' * int(rms * 200)  # 0.05 = 10格满
-                _logger.debug("🔊 RMS %.4f %s", rms, bar)
-                self._last_rms_log = now
-            return None
-
-        if rms > self._energy_threshold:
-            # 检测到语音
+        if rms > threshold:
             if not self._is_speaking:
                 self._is_speaking = True
-                self._buffer = []  # 丢弃之前的静音
+                self._speech_start_frame = self._total_frames
+                self._buffer = []
             self._silence_count = 0
             self._buffer.append(audio)
         elif self._is_speaking:
-            # 语音中但当前帧静音 → 计数
             self._silence_count += 1
             self._buffer.append(audio)
-            # 连续静音达到阈值 → 切段送 ASR
-            if self._silence_count >= self._SILENCE_FRAMES:
+            # 条件 1：静音达到阈值 → 正常切段
+            # 条件 2：语音超过 10s → 强制切段（高噪声环境）
+            speech_duration = (self._total_frames - self._speech_start_frame) * 0.04
+            if self._silence_count >= self._SILENCE_FRAMES or speech_duration > 10:
                 self._is_speaking = False
                 return self._transcribe()
-        # 静音且未在说话 → 丢弃（不累积静音数据）
 
-        # 缓冲区过长保护
+        # 缓冲区保护
         total_len = sum(len(b) for b in self._buffer)
         if total_len > self._MAX_BUFFER_SAMPLES:
-            self._buffer = []
-            self._is_speaking = False
+            self._buffer = self._buffer[-self._MAX_BUFFER_SAMPLES:]
 
         return None
 
