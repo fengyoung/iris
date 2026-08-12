@@ -263,20 +263,11 @@ class MeetingLiveAssistant:
 
         worker = None
         try:
-            # vocotype 热键缺失仅警告，不阻塞（可手动粘贴文本测试）
-            try:
-                from iris.wiki.asr.corrector import _load_vocotype_hotkey
-                mask, keycode = _load_vocotype_hotkey()
-                if not (mask or keycode):
-                    _logger.warning("未检测到 vocotype 热键，仍可手动复制文本进行测试")
-            except Exception:
-                pass
-
             if not self._writer.initial_write(self._session.state):
                 return 1
 
             _logger.info("实时会议助理已启动，过程文档: %s", self._doc_path)
-            _logger.info("按住 vocotype 热键说话，松开即转写并分析（Ctrl+C 退出）")
+            _logger.info("正在聆听…（说完自动识别，Ctrl+C 退出）")
 
             self._panel.render(PanelDisplay(status="等待语音…", state=self._session.state))
 

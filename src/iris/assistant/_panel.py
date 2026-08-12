@@ -190,7 +190,7 @@ class PanelRenderer:
         else:
             # 等待语音
             lines.append(_fill_line("", w))
-            lines.append(_fill_line("按住 vocotype 热键说话，松开即转写并分析", w))
+            lines.append(_fill_line("正在聆听…（说完自动识别，Ctrl+C 退出）", w))
 
         # 累计统计行（紧凑一行）
         lines.append(_fill_line("", w))
