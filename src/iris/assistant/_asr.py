@@ -35,7 +35,7 @@ class ASREngine:
     _PUNC_LABEL_MAP = {0: "", 1: "", 2: "，", 3: "。", 4: "？", 5: "！"}
 
     def __init__(self, model_dir: str, hotwords: str = "", device: str = "cpu",
-                 energy_threshold: float = 0.005):
+                 energy_threshold: float = 0.002):
         """初始化 ASR 引擎。
 
         Args:

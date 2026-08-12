@@ -36,7 +36,7 @@ _logger = logging.getLogger(__name__)
 # 模块加载时即添加控制台 handler + 提升日志级别。
 # 只加到父 logger（子 logger 通过 propagation 继承），避免重复输出。
 _console = logging.StreamHandler()
-_console.setLevel(logging.INFO)
+_console.setLevel(logging.DEBUG)
 _console.setFormatter(logging.Formatter("[Iris] %(message)s"))
 _iris_logger = logging.getLogger("iris.assistant")
 _iris_logger.setLevel(logging.INFO)
@@ -312,22 +312,34 @@ class MeetingLiveAssistant:
         mic = AudioCapture(sample_rate=self._asr_cfg.local.sample_rate)
         mic.start()
         _silent_ticks = 0
+        _heartbeat_at = time.monotonic()
+        _peak_rms = 0.0
         try:
             while not self._session.stop.is_set():
                 chunk = mic.read()
                 if chunk is None:
                     _silent_ticks += 1
-                    # 5 秒无数据 → 提示检查麦克风权限
-                    if _silent_ticks == 250:  # 250 × 20ms = 5s
+                    if _silent_ticks == 250:
                         _logger.warning(
-                            "⚠ 5 秒未收到音频数据！请检查：\n"
-                            "  1. 系统偏好设置 → 安全性与隐私 → 麦克风 → 终端/iTerm 已勾选\n"
-                            "  2. 是否有其他 App 独占麦克风\n"
-                            "  3. 运行 python -c \"import sounddevice; print(sounddevice.query_devices())\" 检查设备"
+                            "⚠ 5 秒未收到音频！请检查系统麦克风权限："
+                            "偏好设置→安全性与隐私→麦克风→终端已勾选"
                         )
                     time.sleep(0.02)
                     continue
                 _silent_ticks = 0
+                # 追踪峰值（供心跳日志）
+                import numpy as np
+                rms = float(np.sqrt(np.mean(chunk.astype(np.float64) ** 2)))
+                if rms > _peak_rms:
+                    _peak_rms = rms
+                # 每 10 秒输出一次心跳（让用户知道系统在监听）
+                now = time.monotonic()
+                if now - _heartbeat_at > 10:
+                    bar = "█" * int(_peak_rms * 500)
+                    _logger.debug("🔊 峰值 %.4f %s（阈值 %.3f）",
+                                  _peak_rms, bar, self._asr_engine._energy_threshold)
+                    _peak_rms = 0.0
+                    _heartbeat_at = now
                 text = self._asr_engine.feed(chunk)
                 if text:
                     fast = self._corrector.fast(text)
