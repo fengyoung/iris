@@ -44,8 +44,11 @@ class ASREngine:
         self._punc_session, self._punc_char_to_id = self._init_punc_model(model_dir)
 
     def _init_model(self):
+        import logging as _logging
         from funasr import AutoModel
         _logger.info("加载 Paraformer 模型…")
+        # 抑制 funasr 的热词 INFO 日志（618 词全量打印太吵）
+        _logging.getLogger("funasr").setLevel(_logging.WARNING)
         model = AutoModel(model=_MODEL_ID, device=self._device, disable_pbar=True)
         _logger.info("Paraformer 就绪（热词 %d 字）", len(self._hotwords))
         return model
