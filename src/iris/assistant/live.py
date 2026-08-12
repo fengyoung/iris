@@ -33,20 +33,15 @@ from .models import AsrConfig, AssistantConfig, VoiceSegment
 
 _logger = logging.getLogger(__name__)
 
-# 模块加载时即添加控制台 handler，确保初始化日志（模型加载等）可见。
-# run() 中 setup_session_logger 会补充文件 handler。
-if not _logger.handlers:
-    _console = logging.StreamHandler()
-    _console.setLevel(logging.INFO)
-    _console.setFormatter(logging.Formatter("[Iris] %(message)s"))
-    _logger.addHandler(_console)
-# 同时为子模块（_asr / _audio / _corrector）添加 handler
-for _name in ("iris.assistant._asr", "iris.assistant._audio",
-               "iris.assistant._corrector", "iris.assistant._clipboard",
-               "iris.assistant._retriever"):
-    _sub = logging.getLogger(_name)
-    if not _sub.handlers:
-        _sub.addHandler(_console)
+# 模块加载时即添加控制台 handler + 提升日志级别。
+# 只加到父 logger（子 logger 通过 propagation 继承），避免重复输出。
+_console = logging.StreamHandler()
+_console.setLevel(logging.INFO)
+_console.setFormatter(logging.Formatter("[Iris] %(message)s"))
+_iris_logger = logging.getLogger("iris.assistant")
+_iris_logger.setLevel(logging.INFO)
+_iris_logger.addHandler(_console)
+_iris_logger.propagate = False  # 不传播到 root（root 为 WARNING，会重复）
 
 # 段处理并行等待窗：LLM 深度校正与检索共享，超时各自降级
 _PARALLEL_WAIT_SEC = 10.0

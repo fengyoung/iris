@@ -109,13 +109,24 @@ class TestMaxLen:
              patch(_RICH, return_value=False):
             assert watcher.poll() == _ASR_TEXT
 
-    def test_over_max_len_warns(self, caplog):
-        watcher = ClipboardWatcher(max_len=20)
-        _warm(watcher)
-        long_text = "我们今天讨论一下下半年的目标和预算安排需要确认"
-        with patch(_READ, return_value=long_text):
-            watcher.poll()
-        assert any("请分段说" in r.message for r in caplog.records)
+    def test_over_max_len_warns(self):
+        import logging, io
+        # 临时捕获 _clipboard 模块的日志（v3.25 后不传播到 root logger）
+        buf = io.StringIO()
+        handler = logging.StreamHandler(buf)
+        handler.setLevel(logging.WARNING)
+        clip_logger = logging.getLogger("iris.assistant._clipboard")
+        clip_logger.addHandler(handler)
+        try:
+            watcher = ClipboardWatcher(max_len=20)
+            _warm(watcher)
+            long_text = "我们今天讨论一下下半年的目标和预算安排需要确认"
+            with patch(_READ, return_value=long_text):
+                watcher.poll()
+            handler.flush()
+            assert "请分段说" in buf.getvalue()
+        finally:
+            clip_logger.removeHandler(handler)
 
 
 class TestDedupWindow:
