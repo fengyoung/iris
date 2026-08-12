@@ -20,10 +20,14 @@ class AudioCapture:
     使用 InputStream 回调模式：音频帧到达时自动追加到内部缓冲区，
     主循环通过 read() 取走累积数据。回调在独立的高优先级线程中执行，
     确保音频不丢帧。
+
+    v3.25.1 增加设备热插拔容错：连续错误回调标记 _device_lost，
+    read() 检测到设备丢失时日志告警，避免静默无输出。
     """
 
     SAMPLE_RATE = 16000   # 16kHz
     BLOCK_SIZE = 640      # 40ms @ 16kHz
+    _MAX_CONSECUTIVE_ERRORS = 50  # 连续错误阈值（≈2s @ 40ms/帧）
 
     def __init__(self, sample_rate: int = 16000):
         import sounddevice as sd  # noqa: F811 — 延迟导入，剪贴板模式不需要
@@ -31,6 +35,8 @@ class AudioCapture:
         self._sample_rate = sample_rate
         self._stream: Optional[sd.InputStream] = None
         self._buffer: list[np.ndarray] = []
+        self._consecutive_errors = 0
+        self._device_lost = False
 
     # ── 公开接口 ──────────────────────────────────────────
 
@@ -66,11 +72,17 @@ class AudioCapture:
         """取走缓冲区内所有音频帧，返回合并后的 float32 数组。
 
         无新数据时返回 None（调用方自行 sleep 后重试）。
+        设备丢失时日志告警一次（避免洪水日志）。
         """
+        if self._device_lost:
+            _logger.warning("⚠ 音频设备已断开，请检查麦克风连接")
+            self._device_lost = False  # 重置，允许恢复后重新检测
         if not self._buffer:
             return None
         data = np.concatenate(self._buffer)
         self._buffer = []
+        # 重置连续错误计数（有数据到达说明设备恢复）
+        self._consecutive_errors = 0
         return data.flatten()
 
     def stop(self) -> None:
@@ -88,4 +100,9 @@ class AudioCapture:
         """音频回调（sounddevice 高优先级线程中执行）。"""
         if status:
             _logger.warning("音频采集异常: %s", status)
+            self._consecutive_errors += 1
+            if self._consecutive_errors >= self._MAX_CONSECUTIVE_ERRORS:
+                self._device_lost = True
+        else:
+            self._consecutive_errors = 0
         self._buffer.append(indata.copy())

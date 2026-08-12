@@ -1,6 +1,6 @@
-# iris meeting-live-assistant — 实时会议助理 方案设计 v1.0
+# iris meeting-live-assistant — 实时会议助理 方案设计 v2.0
 
-**日期**：2026-08-10 · **状态**：已实现（v3.23.0 落地，v3.23.3 全量优化：双段流水线/短段门控/退出加固/结束总结/检索 deadline/长段支持，v3.24.0 全面加固：写回机制重构/预取原子化/LLM 治理/交叉冲突防护，v3.24.2 真机验证修正：full 模式一次写回 + 全场景逐字符删除，v3.24.3 全面优化：并发安全/信息完整性/质量天花板/工程卫生/性能架构 13 项）· **最终版本**：产品 3.24.3 / 协议 3.18
+**日期**：2026-08-12 · **状态**：已实现（v3.23.0 落地 → v3.25.0 本地音频 ASR → v3.26.0 四层能力+说话人区分）· **当前版本**：产品 3.26.0 / 协议 3.19
 
 ---
 
@@ -9,13 +9,13 @@
 会议中语音信息密度高、转瞬即逝。本功能在会议进行中**实时**将你的语音转写为文本，逐段提炼**关键要点、风险、问题、决策点**，并提示你「此刻值得追问什么」，让与会者在会议当下就抓住关键，而不是会后补课。
 
 ### 定位
-- **独立命令**：`iris meeting-live-assistant`，常驻进程，与 asr-corrector 运行时互斥
+- **独立命令**：`iris meeting-live-assistant`，常驻进程，本地麦克风采集（不依赖第三方 App）
 - **差异化**：与 `transcribe-meeting`（事后批量转写纪要）互补——本功能服务**会议当下**
 - **复用优先**：ASR 校正、知识库检索、LLM 全部复用现有资产，新代码只写编排与分析
 
 ### 输入输出
-- 输入：vocotype 按住右 Option 说话（原生行为不变），松开转写写入剪贴板
-- 输出：终端实时面板 + Markdown 过程文档（实时增量）
+- 输入：sounddevice 麦克风 16kHz 采集 → FunASR Paraformer 实时转写（VAD+ASR+标点+热词）
+- 输出：终端实时面板（含洞察推送区）+ Markdown 过程文档（按话题结构化）
 
 ---
 
@@ -23,71 +23,78 @@
 
 | # | 需求 | 说明 |
 |---|------|------|
-| 1 | 独立 CLI 命令 | `iris meeting-live-assistant`（59→60 命令），新模块 `src/iris/assistant/` |
-| 2 | 语音输入 | vocotype 右 Option 按住说话（原生），松开转写写剪贴板 = 一个语音段 |
-| 3 | 采集层 | 剪贴板轮询监听（0.5s），内容特征判定（`_is_asr_text` + 富文本检查）过滤非语音变化 |
-| 4 | 校正层 | 复用 AsrCorrector：替换词典快速校正（Aho-Corasick 毫秒级）+ LLM 深度校正 |
+| 1 | 独立 CLI 命令 | `iris meeting-live-assistant`，新模块 `src/iris/assistant/` |
+| 2 | 语音输入 | sounddevice 麦克风采集（16kHz mono float32，blocksize 40ms） |
+| 3 | ASR 层 | FunASR Paraformer（PyTorch）：RMS VAD + 转写 + CT-Transformer 标点 + 热词注入 |
+| 4 | 校正层 | CorrectorAdapter：AC 词典快速校正（毫秒级）+ LLM 深度校正（per-speaker 上下文） |
 | 5 | 检索层 | 每段校正文本 → EnhancedRetriever（top_k=5，可配） |
-| 6 | 理解层 | LLM 逐段分析：要点/风险/问题/决策点/建议提问（结构化 JSON） |
-| 7 | 呈现层 | 终端面板：本段校正文本 + 分析 + 建议提问 + 会议累计清单 |
-| 8 | 会议上下文 | 全场段落/要点/决策/风险累积为「会议状态」，供后续段分析引用 |
-| 9 | 互斥 | 启动检测 asr-corrector 实例（ProcessRegistry），存在则提示让位退出；自身防重复实例 |
-| 10 | 自动化测试 | 热键注入（CGEventPost 右 Option 61，已验证）驱动端到端测试 |
-| 11 | 配置 | app.json 新增 `assistant` 段（output_dir/top_k/llm_model/poll_interval），带 example |
-| 12 | 过程文档输出 | 实时增量写 Markdown：`--output <path>` > `assistant.output_dir` > `data/meeting-live/YYYYMMDD-HHMMSS-会议记录.md`；frontmatter + 逐段记录 + 会议累计清单（原子重写保证累计区实时准确） |
-| 13 | 文档同步 | CHANGELOG/CLAUDE/README + 测试数更新 |
+| 6 | 理解层 | LLM 批量分析：要点/风险/问题/决策点/建议提问/话题/说话人/待办（结构化 JSON） |
+| 7 | 呈现层 | 终端面板：话题标签 + 本段文本 + 分析 + 洞察推送区 + 会议累计；热键交互 |
+| 8 | 会议上下文 | 全场段落/要点/决策/风险/话题/说话人累积为「会议状态」，供后续段分析引用 |
+| 9 | 进程管理 | ProcessRegistry 防重复实例；Ctrl+C 优雅退出（文档最终写 + 统计帧） |
+| 10 | 自动化测试 | 单元 185 用例（assistant 模块）+ 集成端到端 |
+| 11 | 配置 | app.json 新增 `assistant` 段（output_dir/top_k/agenda/…）+ `assistant.asr` 段 |
+| 12 | 过程文档输出 | 按话题结构化：概览 → 话题卡 → 决策/待办/风险汇总 → 附录折叠 |
+| 13 | 文档同步 | CHANGELOG/CLAUDE/README/design/usage + 测试数更新 |
 
-**v1 不做**：会后纪要生成 · 连续自动录音 · 自定义触发键 · macOS 通知 · SOURCE 自动归档（`--output` 可指到 SOURCE 目录，归不归用户决定）
+**v2 不做**：会后纪要自动生成 · FunASR 声纹说话人识别（当前为 LLM 语义推断）· macOS 通知 · 知识库自动回写（M 项，暂缓）
 
-**积压策略**：丢弃积压——处理中到达的新段暂存为「最新待处理」，当前段完成后只处理最新段，中间段直接丢弃（会议节奏下 LLM 分析 3-8s 必然慢于说话，排队会失控，丢弃保证实时性）
+**积压策略**：丢弃积压——处理中到达的新段暂存为「最新待处理」，当前批完成后只处理最新批，中间段直接丢弃（LLM 分析必然慢于说话，丢弃保证实时性）
 
 ---
 
-## 3. 总体架构（5 层流水线）
+## 3. 总体架构（4 层流水线）
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  采集层  _clipboard.py                                       │
-│  剪贴板轮询 0.5s · vocotype 转写检测（文本特征+富文本）       │
+│  采集层  _audio.py + _asr.py                                  │
+│  sounddevice 麦克风 16kHz → VAD（RMS 40ms 帧级判定）          │
+│  → FunASR Paraformer 转写（热词+标点）→ 噪音门控 _is_noise    │
 └──────────────────────┬──────────────────────────────────────┘
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  校正层  _corrector.py（复用 wiki/asr/corrector.py）          │
-│  Aho-Corasick 替换词典（毫秒级）→ LLM 深度校正（近期上下文）  │
+│  合并层  live.py _audio_loop（merge buffer）                  │
+│  内容感知合并（短段 6s 窗口）+ 说话人间隙门控（0.8s/2.0s）     │
+│  → 提交 VoiceSegment（speaker_change_signal 标记）            │
 └──────────────────────┬──────────────────────────────────────┘
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  检索层  _retriever.py（复用 qa/retrieval）                   │
-│  EnhancedRetriever top_k=5：Wiki 页面/文档/记忆/图谱上下文    │
+│  校正层  _corrector.py                                       │
+│  AC 替换词典（毫秒级）→ LLM 深度校正（per-speaker 上下文）     │
+│  预取：音频线程提交 deep/检索 futures（与上一批分析并行）       │
 └──────────────────────┬──────────────────────────────────────┘
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  理解层  _analyzer.py                                        │
-│  LLM 分析：关键要点 / 风险 / 问题 / 决策点 / 建议提问          │
-│  输入 = 校正文本 + 检索上下文 + 会议状态（JSON 结构化输出）    │
+│  理解层  _analyzer.py + live.py _process_batch               │
+│  批处理（最多 5 段 / 2s）：合并文本一次 LLM 分析              │
+│  输出：要点/风险/问题/决策(置信度)/建议提问/话题/说话人/待办    │
+│  + 冲突检测 + 跑偏检测 + 洞察推送                              │
 └──────────────────────┬──────────────────────────────────────┘
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  输出层  _panel.py + _doc_writer.py                          │
-│  ① 终端面板：本段校正文本+分析+建议提问+累计清单              │
-│  ② 过程文档：Markdown 原子重写（frontmatter+逐段+累计区）     │
+│  输出层  _panel.py + _doc_writer.py + _insight.py            │
+│  ① 终端面板：话题标签+本段+分析+洞察推送区+累计+热键          │
+│  ② 过程文档：按话题结构化（概览→话题卡→汇总→附录折叠）        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**积压丢弃实现在调度器（live.py）**：单工作线程 + 「最新段指针」——处理中若新段到达，仅覆盖 pending 指针，完成后只消费最新指针。
+**线程模型**：
+- **音频线程**（主）：sounddevice 回调采集 → VAD feed（40ms 帧切片）→ merge buffer → submit
+- **工作线程**：批处理消费段（等 futures → 合并分析 → 落账），与音频线程通过 `_futures_lock` 同步
+- **键盘线程**：`select` 非阻塞单键监听（?dtaq）
 
 ---
 
-## 4. 核心时序（每段处理）
+## 4. 核心时序（每批处理）
 
 ```
-t0  剪贴板变化 → 内容特征判定通过 → 生成 VoiceSegment(seq+1)
-t1  词典快速校正（毫秒级）→ 立即面板显示校正文本（实时反馈）
-t2  LLM 深度校正（线程池，≤8s 降级链）
-t3  校正文本 → EnhancedRetriever 检索（与 LLM 校正并行）
-t4  校正文本 + 检索上下文 + 会议状态 → LLM 分析（结构化 JSON）
-t5  解析校验 → 更新会议状态 → 面板渲染 → 文档原子重写
-t6  回到轮询；若 t0 后又有新段 → 覆盖 pending，丢弃中间段
+t0  VAD 输出文本 → 噪音门控 → merge buffer（内容感知 + 说话人边界）
+t1  merge 刷新 → AC 校正（毫秒级）→ submit（on_publish 预取：deep/检索 futures 入池）
+t2  工作线程取批（最多 5 段 / 2s）→ 批量收集 deep/检索（一次性 wait ≤10s）
+t3  合并文本 + 检索上下文 + 会议状态 + 说话人历史 + 议程 → LLM 分析（15s deadline）
+t4  解析 → 话题追踪（2-gram 去重）→ 冲突检测 → 说话人登记 → 洞察推送
+t5  落账（跳过段先 → MERGED 段 → 首段）→ 面板渲染 → 文档重写
+t6  回到取批；若期间新段到达 → 覆盖 pending，丢弃中间段
 ```
 
 **失败降级链**：LLM 不可用 → 仅词典校正 + 无分析（面板显示原文+「分析不可用」）→ 会议继续不中断。
@@ -99,15 +106,18 @@ t6  回到轮询；若 t0 后又有新段 → 覆盖 pending，丢弃中间段
 ```
 src/iris/assistant/
 ├── __init__.py        # 导出 MeetingLiveAssistant 主类
-├── models.py          # VoiceSegment / SegmentAnalysis / MeetingState / AssistantConfig（Pydantic）
-├── _clipboard.py      # ClipboardWatcher：轮询 + vocotype 转写检测（复用 corrector 特征判定）
-├── _corrector.py      # CorrectorAdapter：包装 AsrCorrector 双通道，复用热词/词典加载
+├── models.py          # SpeakerLabel/DecisionItem/TodoItem/TopicInfo/VoiceSegment/
+│                      #   SegmentAnalysis/MeetingState/AssistantConfig/AsrConfig（Pydantic）
+├── _audio.py          # AudioCapture：sounddevice 采集（设备热插拔容错）
+├── _asr.py            # ASREngine：VAD（40ms 帧切片）+ Paraformer 转写 + 标点 + 热词
+├── _corrector.py      # CorrectorAdapter：AC 词典 + LLM 深度校正（per-speaker 上下文）
 ├── _retriever.py      # RetrieverAdapter：包装 EnhancedRetriever，top_k 可配
-├── _analyzer.py       # SegmentAnalyzer：LLM 结构化分析 + JSON 解析校验 + 失败降级
-├── _session.py        # MeetingSession：会议状态累积 + 段落序号 + 积压指针
-├── _doc_writer.py     # DocWriter：Markdown 原子重写（frontmatter/逐段/累计区）
-├── _panel.py          # PanelRenderer：终端面板渲染（ANSI 清屏 + 分区布局）
-└── live.py            # MeetingLiveAssistant：主循环编排 + 互斥 + 信号处理
+├── _analyzer.py       # SegmentAnalyzer：LLM 批量分析 + JSON 解析 + 话题/说话人/待办
+├── _session.py        # MeetingSession：会议状态累积 + 话题追踪 + 说话人历史
+├── _doc_writer.py     # DocWriter：按话题结构化渲染 + 原子重写
+├── _panel.py          # PanelRenderer：终端面板（话题标签+分析+洞察推送区+统计帧）
+├── _insight.py        # InsightFeed：洞察推送引擎（决策/话题/风险/冲突/待办/说话人）
+└── live.py            # MeetingLiveAssistant：主循环编排 + merge buffer + 批处理 + 热键
 
 src/iris/app/cli/_handlers/_assistant.py   # CLI handler（注册命令+参数解析）
 ```
@@ -118,26 +128,48 @@ src/iris/app/cli/_handlers/_assistant.py   # CLI handler（注册命令+参数�
 
 ```python
 # models.py（Pydantic v2）
+class SpeakerLabel:
+    speaker_id: str         # "speaker_A" / "speaker_B"（LLM 语义推断）
+    role_hint: str          # 主持人 / 汇报人 / 提问者
+    is_turn_change: bool    # 本段是否切换说话人
+
+class DecisionItem:
+    text: str               # 决策内容
+    confidence: str         # confirmed(✅已拍板) / proposed(💬提议) / tentative(❓待定)
+    speaker: str            # 谁拍的板
+
+class TodoItem:
+    text: str               # 待办内容
+    assignee: str           # 责任人
+    deadline: str           # 时间节点
+
 class VoiceSegment:
-    seq: int                    # 段序号（1-based）
-    started_at: datetime        # 检测时刻
-    raw_text: str               # 剪贴板原文
-    corrected_text: str | None  # 校正后文本（词典/LLM）
+    seq: int                # 段序号（1-based）
+    started_at: datetime
+    raw_text: str           # ASR 原文
+    corrected_text: str     # 校正后文本（词典/LLM）
+    analysis: SegmentAnalysis | None
+    analysis_status: str    # pending/done/failed/skipped/merged
+    speaker: SpeakerLabel   # 说话人（LLM 后验填充）
+    speaker_change_signal: bool  # VAD 检测到可能切换
 
 class SegmentAnalysis:
-    key_points: list[str]       # 关键要点
-    risks: list[str]            # 风险
-    questions: list[str]        # 讨论中的问题
-    decisions: list[str]        # 决策点
-    suggested_questions: list[str]  # 建议你追问的提问
+    key_points / risks / questions / suggested_questions / resolved_questions
+    decisions: list[DecisionItem]
+    topic: str              # 话题标签
+    topic_change: bool      # 是否切换话题
+    topic_summary: str      # 话题一句话摘要
+    todos: list[TodoItem]
+    speaker: SpeakerLabel
 
 class MeetingState:
     segments: list[VoiceSegment]
-    analyses: list[SegmentAnalysis]
-    key_points: list[str]       # 累计（去重）
-    risks: list[str]
-    decisions: list[str]
-    open_questions: list[str]   # 待解决问题（会被后续段回答）
+    key_points / risks / decisions / open_questions   # 累计（去重+25 条上限）
+    current_topic: str      # 当前话题
+    topics: list[dict]      # 已关闭话题（label/start_seq/end_seq/summary）
+    speakers: list[dict]    # 说话人统计（id/role/segments）
+    todos: list[str]        # 待办去重累计
+    summary: str            # 退出时 AI 会议总结
 ```
 
 ---
@@ -151,8 +183,26 @@ class MeetingState:
     "output_dir": "",          // 默认 data/meeting-live/
     "top_k": 5,                // 知识库检索条数
     "llm_model": "",           // 空 = 走全局 LLMService 路由
-    "poll_interval": 0.5,      // 剪贴板轮询间隔（秒）
-    "doc_rewrite_every": 1     // 每 N 段重写文档（1 = 每段）
+    "poll_interval": 0.5,      // 段轮询间隔（秒）
+    "doc_rewrite_every": 1,    // 每 N 段重写文档（1 = 每段）
+    "short_segment_chars": 15, // 短段门控阈值
+    "suggest_every": 3,        // 建议提问生成间隔
+    "summary_enabled": true,   // 退出时生成 AI 会议总结
+    "agenda": "",              // 预设议题（分号分隔），注入分析 prompt + 跑偏检测
+    "save_knowledge": false    // 退出时回写知识库（预留，M 项暂缓）
+  },
+  "asr": {
+    "mode": "local",
+    "local": {
+      "model_dir": "",         // 空 = 自动检测 ModelScope 缓存
+      "device": "cpu",
+      "sample_rate": 16000,
+      "energy_threshold": 0    // 0 = 自动适应噪声地板
+    },
+    "hotwords_file": "data/assistant/asr_hotwords.txt",
+    "replace_dict_file": "data/assistant/asr_replace_dict.json",
+    "llm_correct_enabled": true,
+    "llm_correct_timeout_ms": 8000
   }
 }
 ```
@@ -161,113 +211,118 @@ class MeetingState:
 
 ---
 
-## 8. 过程文档格式
+## 8. 过程文档格式（按话题结构化）
 
 ```markdown
 ---
-title: 实时会议记录 2026-08-10 11:50
-date: 2026-08-10 11:50
+title: 实时会议记录 2026-08-12 12:00
 type: 实时会议记录
 source: meeting-live-assistant
 ---
 
-# 实时会议记录 2026-08-10 11:50
+# 实时会议记录 2026-08-12 12:00
 
-## 📋 会议累计（实时更新）
-### 关键要点
-- …
-### 决策点
-- …
-### 风险
-- …
-### 待解决问题
-- …
+**概览**：8 个话题 · 30 分钟 · 5 决策 · 3 待办 · 12 风险
 
-## 🎙 段 1（11:50:23）
+## 📌 话题 1：售后归拢到校（段 1-28）
+**讨论**：提出中仓售后归拢到校需求，先介绍方案看能否满足
+**决策**：✅ 先介绍方案，不满足再联动解决
+
+## ✅ 决策汇总
+- 重质量检率替代客观差异率（speaker_B）
+
+## 📋 待办汇总
+- 方案方介绍归拢方案（assignee: 方案方）
+
+## 📎 附录：完整逐段转写
+<details><summary>270 段 · 展开查看</summary>
+## 🎙 段 1（12:01:18）· speaker_A
 **校正文本**：……
-**要点**：- …
-**风险**：- …
-**问题**：- …
-**决策点**：- …
-**💡 建议提问**：- …
-
-## 🎙 段 2（11:52:01）
-…
+</details>
 ```
 
-写入策略：**原子整体重写**（写临时文件 + rename）——每段处理完重写一次（≤100KB 毫秒级，段间隔 ≥10s，无性能风险），保证「会议累计」区实时准确；进程中断时临时文件安全。
+**写入策略**：原子整体重写（临时文件 + rename）。会议进行中为线性增量（实时可读）；退出 force 时全量渲染为话题结构化（最终形态）。
 
 ---
 
-## 9. 互斥与进程管理
+## 9. 说话人区分（v3.26.0）
+
+**原理**：LLM 语义推断为主 + VAD 间隙辅助，零额外 LLM 成本、不做声纹识别。
+
+```
+VAD 间隙 > 0.8s     → 可能切换（弱信号，merge 不跨人）
+VAD 间隙 > 2.0s     → 几乎一定切换（强信号，强制刷新 + 标记）
+静音 > 3s           → 最强信号（merge 过期刷新 + 标记）
+LLM 分析（后验）     → 确认是否真换人：speaker_id + is_turn_change
+```
+
+- **跨批一致性**：`summary_for_prompt` 注入「已识别说话人」历史，LLM 复用既有 ID
+- **per-speaker 校正上下文**：`CorrectorAdapter._speaker_ctx` 按说话人隔离（首轮全局兜底）
+- **决策归属**：`DecisionItem.speaker` 记录拍板人
+
+---
+
+## 10. 洞察推送与热键（v3.26.0）
+
+**洞察事件**（面板下半屏滚动推送，最多 50 条历史 / 显示 8 条）：
+
+| 事件 | 图标 | 触发 |
+|------|:---:|------|
+| 决策确认 | ✅ | decisions.confidence == confirmed |
+| 话题切换 | 📌 | current_topic 变化 |
+| 风险检出 | ⚠ | risks 非空（前 2 条） |
+| 语义冲突 | 🔥 | check_conflict 返回非空 |
+| 待办识别 | 📋 | todos 非空（前 2 条） |
+| 说话人切换 | 🗣 | is_turn_change |
+
+**热键**（select 非阻塞监听，daemon 线程）：
+
+| 按键 | 功能 |
+|:---:|------|
+| `?` | 显示帮助 |
+| `d` | 显示已确认决策（confirmed） |
+| `t` | 显示当前话题 / 已讨论话题 |
+| `a` | 显示待解决问题 |
+| `q` | 优雅退出 |
+
+---
+
+## 11. 核心修复记录（v3.26.0）
+
+| 问题 | 根因 | 修复 |
+|------|------|------|
+| VAD 尾部内容丢失 | feed() 整块平均 RMS 判定，转写阻塞期间语音被静音稀释 | 40ms 帧切片逐帧判定 |
+| LLM 降级链失效 | deadline 约束 HTTP timeout 冲突 + `_dispatch` 否决放行 | deadline 压入 timeout（2s 下限）+ 超时后继续尝试剩余模型 |
+| 话题碎片化 | LLM 对同一讨论不同措辞（76 话题/15 分钟） | 2-gram 语义去重（≥2 共享或 ≥33% 重叠） |
+| 冲突误报 | 单向否定 + 关键词重叠 | 双向否定 + 仅明确推翻词触发（宁漏报不误报） |
+| 话题状态机 | 连续切换提前 return 丢话题；摘要拼接错误 | 关闭后必创建新话题；保留自身摘要 |
+| 批处理超时放大 | 逐段 wait futures（5 段最坏 50s） | 一次性 wait 全部（≤10s） |
+
+---
+
+## 12. 互斥与进程管理
 
 | 场景 | 行为 |
 |------|------|
-| asr-corrector 在运行 | 检测到实例 → 提示「请先退出 asr-corrector（独占剪贴板）」→ 退出 |
+| asr-corrector 在运行 | **不冲突**（v3.25.0 起本地音频，无剪贴板依赖，可同时运行） |
 | 本命令重复启动 | ProcessRegistry 拒绝，提示已有实例 |
-| Ctrl+C | 优雅退出：最后重写一次文档 → 面板显示会议统计（段数/决策数/风险数） |
-| vocotype 未安装/无热键 | 启动检查 ui_settings.json，缺失则警告「仍可手动粘贴文本测试」不阻塞启动 |
+| Ctrl+C | 优雅退出：merge 残留刷新 → worker 有界 join → 会议总结 → 文档最终写 → 统计帧 → 池关闭 → pid 清理 |
 
 ---
 
-## 10. 测试计划
+## 13. 测试计划
 
 | 层级 | 内容 | 依赖 |
 |------|------|------|
-| 单元 | models 校验 / analyzer JSON 解析与容错 / session 累积去重 / doc_writer 重写与中断安全 / 积压丢弃逻辑 | mock LLM |
-| 集成 | 剪贴板写入 → 校正 → 检索 → 分析 → 文档全链路（mock LLM + 真实剪贴板/检索） | 无 vocotype |
-| 端到端 | **热键注入**（CGEventPost 右 Option 61，verify_hotkey_inject.py 已验证）：注入按住-松开 → vocotype 真实转写 → 剪贴板 → 全链路；真机手动验证 | vocotype 运行中 |
+| 单元（185 用例） | VAD 状态机/帧切片/chunk 不丢失/噪音门控/容量控制/话题状态机/冲突检测/corrector AC/面板渲染/批量 wait/说话人 | mock LLM + mock ASR |
+| 集成 | 多段全链路 → 校正 → 检索 → 分析 → 文档（mock LLM） | 无麦克风 |
+| 端到端 | 真机验证：本地麦克风 → 真实转写 → 面板/文档/推送 | 麦克风 + 模型缓存 |
 
 ---
 
-## 11. 风险与对策
+## 14. 版本与交付
 
-| 风险 | 对策 |
-|------|------|
-| LLM 分析延迟拖垮节奏 | 丢弃积压 + 并行化（校正/检索并行）+ 分析超时降级 |
-| 与 asr-corrector 剪贴板冲突 | 启动互斥 + 文档中明确使用说明 |
-| 面板渲染混乱 | ANSI 清屏 + 分区固定布局；stderr 日志与面板分离 |
-| 检索噪音干扰分析 | top_k 可配 + Prompt 中「无关上下文忽略」指令 |
-| 剪贴板被非语音内容污染 | 内容特征判定（复用 corrector 成熟逻辑） |
-
----
-
-## 12. 版本与交付
-
-- **初版**：产品 3.22.5 → 3.23.0（新功能），协议 3.15 → 3.16（新增 1 命令）
-- **v3.23.3**：全量优化（双段流水线/短段门控/退出加固/结束总结/检索 deadline/长段支持）
-- **v3.24.0**：全面加固（写回机制重构/预取原子化/LLM 治理/交叉冲突防护）
-- **v3.24.2**：真机验证修正（full 模式一次写回 + 全场景逐字符删除）
-- **v3.24.3**（当前）：全面优化 13 项（并发安全/信息完整性/质量天花板/工程卫生/性能架构），协议 3.18（不变）
-
----
-
-## 13. v3.24.3 优化详情
-
-### 并发安全加固
-- `_futures` 显式 `threading.Lock` 保护（poll 写 + worker 读/pop + peek），锁顺序文档化
-- 超时未完成的 future 显式 `cancel()` 释放线程池槽位（`_collect_results`）
-- `_publish_prefetch` bare `except Exception` 改为 `_logger.warning(exc_info=True)`
-
-### 信息完整性
-- **丢弃段原文保留**：`MeetingState.dropped_texts`（上限 20 条），文档以 `<details>` 折叠附录呈现
-- **总结截断头+尾策略**：保留开场 1000 字（背景）+ 尾部 3000 字（结论/行动项），换行边界对齐
-- **分析 Prompt few-shot 示例**：展示 key_points / decisions / risks / suggested_questions 的边界
-
-### 质量天花板
-- **LLM 语义关闭待解决问题**：`SegmentAnalysis.resolved_questions` 字段，Prompt 传入当前 open_questions → LLM 标记已回答项 → fuzzy match 关闭（+ 精确匹配 fallback）
-- **fuzzy dedup**：`_dedup_append` 用 `SequenceMatcher`（≥0.85 阈值），短文本（<8 字）保持精确匹配防误伤
-
-### 工程卫生
-- AsrCorrector 公开 `push_context()` 方法（替代 `_push_context` 私有 API 访问）
-- 结构化 logging（`_logging.py`）：文件 DEBUG + 控制台 INFO 双输出，会话日志写入过程文档同目录
-- `VoiceSegment` 新增 `analysis_started_at` / `analysis_done_at` 耗时元数据
-- 面板统计帧含 LLM 分析次数 / 总耗时 / 平均耗时
-
-### 建议提问高温度独立生成
-- 新模板 `meeting_live_suggest.md`（temperature=0.5），仅采样段调用
-- `SegmentAnalyzer.suggest_questions()`：deadline 预算检查（remaining ≥ 2s），失败静默降级
-
-### 性能与架构
-- **DocWriter 增量渲染缓存**：`_rendered_segments` 列表缓存段渲染块 → 单段 O(1) 组装，`force=True` 退出前全量渲染自愈
-- **乐观并发批处理**：收集 seg(N) deep/检索后 peek `_futures[N+1]`，均已 done → `take_pending_if(N+1)` 原子消费 → 双段 LLM 分析并发提交 pool → 按 seq 顺序落账
+- **v3.23.0**：初版（剪贴板采集 + vocotype）
+- **v3.24.x**：写回机制重构 / 并发安全 / 信息完整性 / 性能架构
+- **v3.25.0**：本地音频 ASR（sounddevice + FunASR Paraformer），去除 vocotype 依赖
+- **v3.26.0**（当前）：四层 12 项能力（防御/理解/交互/沉淀）+ 说话人区分 + LLM 降级链 + VAD 尾部丢失修复，协议 3.19（不变）

@@ -37,8 +37,13 @@ class CorrectorAdapter:
         self._llm_prompt = llm_prompt
         self._llm_timeout_ms = llm_timeout_ms
         self._llm: Optional[object] = None
-        # 近期上下文窗口：（句子, 时间戳）
+        # 近期上下文窗口：（句子, 时间戳）——全局兜底
         self._recent: deque = deque(maxlen=self._CONTEXT_SIZE)
+        # v3.25.5 per-speaker 上下文：{speaker_id: deque(maxlen=3)}
+        # 生效路径：prefetch 阶段 speaker 尚未被 LLM 后验填充（为空 → 全局上下文）；
+        # 分析后 speaker 回填，后续同 speaker 段的校正才走隔离上下文。
+        # 是渐进增强而非全量隔离——首轮校正始终用全局上下文兜底。
+        self._speaker_ctx: Dict[str, deque] = {}
         self._build_ac()
 
     # ── 公开接口 ──────────────────────────────────────────
@@ -53,11 +58,14 @@ class CorrectorAdapter:
             return text
         return self._ac_replace(text)
 
-    def deep(self, text: str) -> str:
-        """LLM 深度校正；无 LLM 或无 Prompt 时降级返回 fast 原文。"""
+    def deep(self, text: str, speaker_id: str = "") -> str:
+        """LLM 深度校正；无 LLM 或无 Prompt 时降级返回 fast 原文。
+
+        v3.25.5: speaker_id 用于隔离上下文——同说话人上下文优先。
+        """
         if not self._llm or not self._llm_prompt:
             return text
-        context = self._build_context()
+        context = self._build_context(speaker_id=speaker_id)
         # 简单模板替换（兼容 asr-corrector 的 prompt 格式）
         prompt = (self._llm_prompt
                   .replace("{{context}}", context)
@@ -81,9 +89,17 @@ class CorrectorAdapter:
             _logger.warning("LLM 深度校正异常，保留原文: %s", e)
             return text
 
-    def push_context(self, text: str) -> None:
-        """将校正后文本推入近期上下文窗口。"""
+    def push_context(self, text: str, speaker_id: str = "") -> None:
+        """将校正后文本推入近期上下文窗口。
+
+        v3.25.5: 若提供 speaker_id，同时写入 per-speaker 上下文（maxlen=3），
+        后续同说话人校正时优先使用隔离上下文，避免混入他人文本。
+        """
         self._recent.append((text, time.monotonic()))
+        if speaker_id:
+            ctx = self._speaker_ctx.setdefault(speaker_id,
+                                               deque(maxlen=self._CONTEXT_SIZE))
+            ctx.append((text, time.monotonic()))
 
     # ── Aho-Corasick ──────────────────────────────────────
 
@@ -118,14 +134,17 @@ class CorrectorAdapter:
 
     # ── 上下文 ────────────────────────────────────────────
 
-    def _build_context(self) -> str:
+    def _build_context(self, speaker_id: str = "") -> str:
         """构建注入 Prompt 的近期上下文文本块。
 
         双重过滤：deque maxlen（数量）+ 时间过期（防止长时间暂停后旧语境残留）。
+        v3.25.5: 优先同说话人上下文（隔离噪音），无 speaker_id 时回退全局。
         """
         now = time.monotonic()
+        source = self._speaker_ctx.get(speaker_id) if speaker_id else None
+        ctx_deque = source if source else self._recent
         valid = [
-            text for text, ts in tuple(self._recent)
+            text for text, ts in tuple(ctx_deque)
             if now - ts <= self._CONTEXT_EXPIRE_SEC
         ]
         if not valid:
@@ -135,7 +154,14 @@ class CorrectorAdapter:
     # ── 辅助 ──────────────────────────────────────────────
 
     @staticmethod
-    def _is_similar(a: str, b: str, threshold: float = 0.5) -> bool:
-        """检查两个字符串是否相似（ratio ≥ threshold）。防止 LLM 幻觉完全改写。"""
+    def _is_similar(a: str, b: str, threshold: Optional[float] = None) -> bool:
+        """检查两个字符串是否相似（ratio ≥ threshold）。防止 LLM 幻觉完全改写。
+
+        threshold=None 时自适应选择：短文本（< 20 字符）0.5，长文本 0.35。
+        长文本降低阈值是因为 LLM 修正时可能调整语序/增加连接词，
+        SequenceMatcher 对长文本的编辑距离比短文本敏感。
+        """
         from difflib import SequenceMatcher
+        if threshold is None:
+            threshold = 0.5 if len(a) < 20 else 0.35
         return SequenceMatcher(None, a, b).ratio() >= threshold

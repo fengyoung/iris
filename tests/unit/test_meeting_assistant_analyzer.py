@@ -50,7 +50,8 @@ class TestAnalyze:
         assert result.key_points == ["要点A"]
         assert result.risks == ["风险1"]
         assert result.questions == []
-        assert result.decisions == ["决策X"]
+        assert [d.text for d in result.decisions] == ["决策X"]
+        assert result.decisions[0].confidence == "proposed"  # 纯字符串默认 proposed
         assert result.suggested_questions == ["追问？"]
 
     def test_json_with_fence(self):

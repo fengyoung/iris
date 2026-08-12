@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os as _os
 import threading
@@ -158,8 +157,12 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         if deadline is not None:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise LLMProviderError("LLM 调用 deadline 已到期，跳过当前模型")
-            timeout = min(timeout, max(1, int(remaining)))
+                # v3.25.5: deadline 已过不再直接 raise——由 _fallback_loop 的
+                # 剩余模型数检查做最终控制（还有未尝试模型时给最短 2s 机会）。
+                # 此前直接 raise 会否决降级链放行，导致后续模型从未被尝试。
+                timeout = 2
+            else:
+                timeout = min(timeout, max(1, int(remaining)))
         effective_retries = max_retries if max_retries is not None else cfg.get("max_retries", 0)
         if provider_name in self.OPENAI_COMPATIBLE_PROVIDERS:
             return self._call_openai_compatible(
@@ -317,11 +320,16 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
 
         for role, model_id, model_config in fallback_chain:
             # ── deadline 检查：每次模型尝试前确认剩余时间 ──
+            # v3.25.5 修复：即使 deadline 已过，若仍有未尝试的模型则再给一次机会
+            # （最短 2s timeout），防止首个模型耗尽全部 deadline 导致降级链形同虚设。
             if deadline is not None and time.monotonic() > deadline:
-                raise LLMProviderError(
-                    f"{error_label} 降级链总超时，已尝试: "
-                    f"{', '.join(tried_models) if tried_models else '(无)'}"
-                )
+                remaining_models = len(fallback_chain) - len(tried_models)
+                if remaining_models <= 1:
+                    raise LLMProviderError(
+                        f"{error_label} 降级链总超时，已尝试: "
+                        f"{', '.join(tried_models) if tried_models else '(无)'}"
+                    )
+                # 还有未尝试模型 → 继续，但后续 timeout 会被压到很短
 
             if model_filter and not model_filter(model_config):
                 continue
@@ -345,8 +353,20 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
                 last_error = LLMProviderError(f"熔断器开路: {model_key}")
                 continue
 
+            # ── deadline 约束 HTTP timeout ──
+            # 模型配置的 timeout_seconds（如 60s）可能远超降级链 deadline（如 8s），
+            # 导致第一次尝试就把 deadline 耗尽，后续模型无机会被尝试。
+            # 将 deadline 剩余时间作为 HTTP timeout 上限，让超时模型快速失败，
+            # 降级链中的后续模型（同 role 低 priority + fallback_role）真正有机会被调用。
+            cfg = dict(model_config)  # 浅拷贝，避免修改共享配置
+            effective_timeout = cfg.get("timeout_seconds", 60)
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining < effective_timeout:
+                    cfg["timeout_seconds"] = max(int(remaining), 2)
+
             try:
-                text, pt, ct = call_fn(api_base_url, api_key, model_config["model"], model_config)
+                text, pt, ct = call_fn(api_base_url, api_key, cfg["model"], cfg)
 
                 self._circuit_breaker.record_success(model_key)
 

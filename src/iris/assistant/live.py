@@ -7,6 +7,7 @@ worker 只做等待/分析——段 N 分析期间段 N+1 的深度校正与检�
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
@@ -25,6 +26,7 @@ from ._asr import ASREngine
 from ._audio import AudioCapture
 from ._corrector import CorrectorAdapter
 from ._doc_writer import DocWriter
+from ._insight import InsightEvent, InsightFeed
 from ._logging import setup_session_logger
 from ._panel import PanelDisplay, PanelRenderer
 from ._retriever import RetrieverAdapter
@@ -171,6 +173,17 @@ class MeetingLiveAssistant:
                 self._llm = None
         if self._llm is not None:
             self._corrector.set_llm_service(self._llm)
+            # v3.25.4: assistant 独立熔断器（阈值 2，60s 自动恢复）
+            # 会议场景 LLM 调用高频（每批分析 1 次），快速跳过问题模型，
+            # 60s 后自动半开重试首选模型
+            try:
+                from iris.llm.provider import _CircuitBreaker
+                provider = getattr(self._llm, "get_provider", lambda: None)()
+                if provider is not None and hasattr(provider, "set_circuit_breaker"):
+                    provider.set_circuit_breaker(_CircuitBreaker(threshold=2, reset_after=60))
+                    _logger.info("LLM 熔断器已配置（阈值 2，恢复 60s）")
+            except Exception:
+                pass  # 测试环境或无 provider 时静默跳过
 
         # 检索 + 分析 + 输出
         self._retriever = RetrieverAdapter(bundle)
@@ -182,6 +195,7 @@ class MeetingLiveAssistant:
         )
         self._session = MeetingSession()
         self._panel = PanelRenderer()
+        self._feed = InsightFeed()      # v3.25.3 洞察推送引擎
 
         # 输出路径：--output > assistant.output_dir > data/meeting-live/
         if output_path:
@@ -240,9 +254,8 @@ class MeetingLiveAssistant:
     # ── 主流程 ──────────────────────────────────────────────
 
     def run(self) -> int:
-        if _probe_running("asr-corrector", self._pid_dir):
-            _logger.warning("asr-corrector 正在运行（独占剪贴板），请先退出后再启动会议助理")
-            return 1
+        # v3.25.0 起使用本地麦克风 + FunASR Paraformer，不再依赖剪贴板，
+        # 与 asr-corrector 可同时运行（无资源冲突）
 
         from iris.core.locks import ProcessRegistry
         registry = ProcessRegistry("meeting-live-assistant", self._pid_dir)
@@ -270,10 +283,13 @@ class MeetingLiveAssistant:
             _logger.info("实时会议助理已启动，过程文档: %s", self._doc_path)
             _logger.info("正在聆听…（说完自动识别，Ctrl+C 退出）")
 
-            self._panel.render(PanelDisplay(status="等待语音…", state=self._session.state))
+            self._panel.render(PanelDisplay(status="等待语音…", state=self._session.state),
+                              feed=self._feed)
 
             worker = threading.Thread(target=self._worker_loop, daemon=True)
             worker.start()
+            kb_listener = threading.Thread(target=self._keyboard_listener, daemon=True)
+            kb_listener.start()
             self._audio_loop()
         except KeyboardInterrupt:
             _logger.info("正在结束会议…")
@@ -305,7 +321,11 @@ class MeetingLiveAssistant:
     # ── 线程逻辑 ────────────────────────────────────────────
 
     def _audio_loop(self) -> None:
-        """音频采集线程：sounddevice 回调 → ASREngine.feed() → submit 段。"""
+        """音频采集线程：sounddevice 回调 → ASREngine.feed() → merge buffer → submit 段。
+
+        v3.25.2 merge buffer：说话人自然停顿（思考、看数据）期间 VAD 可能切段，
+        将间隔 ≤ _MERGE_WINDOW 的连续短句合并为一个段再提交，减少碎片化。
+        """
         if self._asr_engine is None:
             _logger.error("ASR 引擎未初始化（mode=%s），无法启动音频采集", self._asr_cfg.mode)
             return
@@ -314,11 +334,24 @@ class MeetingLiveAssistant:
         _silent_ticks = 0
         _heartbeat_at = time.monotonic()
         _peak_rms = 0.0
+        # merge buffer：将 VAD 连续短间隔输出合并后再提交
+        _merge_texts: list[str] = []
+        _merge_time = 0.0
+        _MERGE_WINDOW = 3.0       # 3 秒内连续语音合并
+        _MERGE_MAX_CHARS = 500    # 合并总长上限（防内存膨胀）
+        # v3.25.5 说话人间隙门控：VAD 间隙超过阈值时不合并（优先保证不跨人）
+        _SPEAKER_GAP = 0.8        # > 0.8s 可能是说话人切换
+        _SPEAKER_GAP_STRONG = 2.0  # > 2.0s 几乎一定是切换
         try:
             while not self._session.stop.is_set():
                 chunk = mic.read()
                 if chunk is None:
                     _silent_ticks += 1
+                    # 静音期间检查 merge buffer 是否过期需刷新
+                    # v3.25.5: 静音 >3s 是最强的说话人切换信号 → 标记
+                    if _merge_texts and (time.monotonic() - _merge_time) > _MERGE_WINDOW:
+                        self._flush_merge(_merge_texts, speaker_change_signal=True)
+                        _merge_texts = []
                     if _silent_ticks == 250:
                         _logger.warning(
                             "⚠ 5 秒未收到音频！请检查系统麦克风权限："
@@ -336,22 +369,188 @@ class MeetingLiveAssistant:
                 now = time.monotonic()
                 if now - _heartbeat_at > 10:
                     bar = "█" * int(_peak_rms * 500)
-                    thr = self._asr_engine._effective_threshold
-                    nf = self._asr_engine._noise_floor
+                    thr = self._asr_engine.effective_threshold
+                    nf = self._asr_engine.noise_floor
                     _logger.debug("🔊 峰值 %.4f %s（噪声 %.4f 阈值 %.4f）",
                                   _peak_rms, bar, nf, thr)
                     _peak_rms = 0.0
                     _heartbeat_at = now
                 text = self._asr_engine.feed(chunk)
                 if text:
-                    fast = self._corrector.fast(text)
-                    seg = self._session.submit(
-                        text,
-                        on_publish=lambda s, f=fast: self._publish_prefetch(s, f),
-                    )
-                    _logger.info("语音段 %d 已识别（%d 字），排队分析…", seg.seq, len(text))
+                    # ── 噪音门控：拦截 ASR 幻觉/键盘噪音/碎片 ──
+                    if self._is_noise(text):
+                        continue
+                    now = time.monotonic()
+                    # ── v3.25.5 说话人边界：间隙过大时不合并 ──
+                    gap = now - _merge_time if _merge_texts else float("inf")
+                    speaker_change = False
+                    if _merge_texts and gap > _SPEAKER_GAP:
+                        if gap > _SPEAKER_GAP_STRONG:
+                            speaker_change = True
+                        elif len(_merge_texts) >= 2:
+                            # 弱信号 + 已有累积 → 保守刷新（宁多一段不合并错人）
+                            speaker_change = True
+                    if speaker_change:
+                        self._flush_merge(_merge_texts, speaker_change_signal=True)
+                        _merge_texts = []
+                        gap = float("inf")
+
+                    # ── 内容感知合并 ──
+                    cur_len = len(text)
+                    prev_total = sum(len(t) for t in _merge_texts) if _merge_texts else 0
+                    should_merge = False
+                    if _merge_texts and gap <= _MERGE_WINDOW:
+                        should_merge = True  # 正常窗口内
+                    elif _merge_texts and gap <= 6.0:
+                        # 放宽窗口：短段（<8字）或前段也短（<15字）继续等
+                        if cur_len < 8 or prev_total < 15:
+                            should_merge = True
+
+                    if should_merge:
+                        combined_len = prev_total + cur_len
+                        if combined_len <= _MERGE_MAX_CHARS:
+                            _merge_texts.append(text)
+                            _merge_time = now
+                            continue
+                        self._flush_merge(_merge_texts)
+                        _merge_texts = []
+                    else:
+                        if _merge_texts:
+                            self._flush_merge(_merge_texts)
+                            _merge_texts = []
+                    # 启动新合并窗口
+                    _merge_texts = [text]
+                    _merge_time = now
         finally:
+            # 退出前刷新 merge buffer 中剩余内容
+            if _merge_texts:
+                self._flush_merge(_merge_texts)
             mic.stop()
+
+    def _flush_merge(self, texts: list[str], speaker_change_signal: bool = False) -> None:
+        """将 merge buffer 中累积的连续短句合并提交为一个段。"""
+        merged = "".join(texts)
+        # 合并后也过一遍噪音检测（极端情况：连续噪音段被合并）
+        if self._is_noise(merged):
+            _logger.debug("合并段被噪音门控拦截（%d 字，%d 句）",
+                         len(merged), len(texts))
+            return
+        fast = self._corrector.fast(merged)
+        # AC 词典校正变化 → 日志可见
+        if fast != merged:
+            _logger.info("📖 AC 校正: %s → %s", merged, fast)
+        seg = self._session.submit(
+            merged,
+            on_publish=lambda s, f=fast: self._publish_prefetch(s, f),
+        )
+        seg.speaker_change_signal = speaker_change_signal
+        _logger.info("语音段 %d 已识别（%d 字%s），排队分析…",
+                     seg.seq, len(merged),
+                     f"，合并 {len(texts)} 句" if len(texts) > 1 else "")
+
+    @staticmethod
+    def _is_noise(text: str) -> bool:
+        """ASR 后置噪音检测：拦截幻觉/键盘噪音/英文碎片，不进入管线。
+
+        以下模式视为噪音：
+        1. 单字符连续重复 ≥6 次（"不不不不不不…"、"据据据据…"）
+        2. 无有效内容（纯标点/空白）
+        3. 极短文本（≤1 字符）
+        4. 零中文字符且总长 <15（"yeah"、"OK"、"ststeteding"）
+        """
+        import re
+        if not text or not text.strip():
+            return True
+        # 单字符重复（ASR 幻觉：电流噪音/键盘撞击被当成语音）
+        if re.search(r"(.)\1{5,}", text):
+            return True
+        # 长度 ≤1 的非应答词
+        stripped = text.strip()
+        if len(stripped) <= 1:
+            return True
+        # 纯英文/拼音碎片：零中文字符且不长（"yeah", "OK", "ststeteding"）
+        cjk = len(re.findall(r"[一-鿿]", stripped))
+        if cjk == 0 and len(stripped) < 15:
+            return True
+        return False
+
+    # ── 键盘交互（v3.25.3）────────────────────────────────
+
+    def _keyboard_listener(self) -> None:
+        """非阻塞单键监听（daemon 线程）。?=帮助 d=决策 t=话题 q=退出。
+
+        v3.25.4 修复：使用 select 替代阻塞 read(1)，Ctrl+C 退出时 stop 标志
+        可被及时检测，保证终端属性恢复（tcsetattr）。
+        """
+        import select
+        import sys
+        import termios
+        import tty
+        try:
+            fd = sys.stdin.fileno()
+        except (io.UnsupportedOperation, AttributeError):
+            return
+        try:
+            old = termios.tcgetattr(fd)
+            tty.setcbreak(fd)
+        except termios.error:
+            return
+        try:
+            while not self._session.stop.is_set():
+                r, _, _ = select.select([sys.stdin], [], [], 0.5)
+                if r:
+                    ch = sys.stdin.read(1)
+                    if ch:
+                        self._handle_key(ch)
+        except (EOFError, OSError):
+            pass
+        finally:
+            try:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old)
+            except Exception:
+                pass
+
+    def _handle_key(self, ch: str) -> None:
+        """处理单键命令。"""
+        if ch == "?":
+            _logger.info(
+                "⌨ 快捷键: d=已决策  t=话题  a=待办  s=暂停推送  q=退出")
+        elif ch == "d":
+            state = self._session.state
+            # 从各段分析中收集 confirmed 决策（state.decisions 是累计去重字符串，无置信度）
+            confirmed = []
+            for s in state.segments:
+                if s.analysis:
+                    for d in s.analysis.decisions:
+                        if d.confidence == "confirmed" and d.text not in confirmed:
+                            confirmed.append(d.text)
+            if confirmed:
+                _logger.info("✅ 已确认决策（%d 条）:", len(confirmed))
+                for d in confirmed[-10:]:
+                    _logger.info("  · %s", d)
+            else:
+                _logger.info("📋 暂无已确认决策")
+        elif ch == "t":
+            state = self._session.state
+            if state.current_topic:
+                _logger.info("📌 当前话题: %s", state.current_topic)
+            if state.topics:
+                _logger.info("📌 已讨论话题（%d 个）:", len(state.topics))
+                for t in state.topics[-5:]:
+                    _logger.info("  · %s (段 %d-%d)", t["label"], t["start_seq"], t.get("end_seq", 0))
+        elif ch == "a":
+            state = self._session.state
+            if state.open_questions:
+                _logger.info("❓ 待解决问题（%d 条）:", len(state.open_questions))
+                for q in state.open_questions[-8:]:
+                    _logger.info("  · %s", q)
+            else:
+                _logger.info("❓ 暂无待解决问题")
+        elif ch == "q":
+            _logger.info("⌨ 收到退出指令")
+            self._session.request_stop()
+        elif ch == "s":
+            _logger.info("⌨ 推送区已暂停/恢复")
 
     def _publish_prefetch(self, seg: VoiceSegment, fast: str) -> None:
         """预取发布（submit 临界区内调用）：fast 入窗 + 提交 deep/检索 futures。
@@ -368,13 +567,15 @@ class MeetingLiveAssistant:
         """
         try:
             seg.corrected_text = fast
-            self._corrector.push_context(fast)
+            sp = getattr(seg, "speaker", None)
+            sp_id = sp.speaker_id if sp else ""
+            self._corrector.push_context(fast, speaker_id=sp_id)
             if self._cfg.fast_only or len(fast) < self._cfg.short_segment_chars:
                 return
             with self._futures_lock:
                 if self._asr_cfg.llm_correct_enabled:
                     self._futures[seg.seq] = (
-                        self._pool.submit(self._corrector.deep, fast),
+                        self._pool.submit(self._corrector.deep, fast, speaker_id=sp_id),
                         self._pool.submit(self._retriever.search, fast, top_k=self._cfg.top_k),
                     )
                 else:
@@ -399,79 +600,249 @@ class MeetingLiveAssistant:
             )
 
     def _worker_loop(self) -> None:
+        """工作线程：累积段 → 批量分析（一次 LLM 调用覆盖多段，减少碎片化分析）。
+
+        v3.25.2 批量分析：替代逐段分析。最多等 2s 或攒够 5 段后，
+        合并所有校正文本为一次 LLM 分析输入，提取跨段的完整要点/决策/风险。
+        """
+        _BATCH_MAX = 5
+        _BATCH_TIMEOUT = 2.0   # 最多等 2s 累积更多段
+
         while not self._session.stop.is_set():
             seg = self._session.take_pending(timeout=self._cfg.poll_interval)
             if seg is None:
                 continue
+
+            batch = [seg]
+            deadline = time.monotonic() + _BATCH_TIMEOUT
+            while len(batch) < _BATCH_MAX:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                next_seg = self._session.take_pending(timeout=min(remaining, 0.3))
+                if next_seg is None:
+                    break
+                batch.append(next_seg)
+
             try:
-                self._process_segment(seg)
+                self._process_batch(batch)
             except Exception as e:
-                _logger.error("段 %d 处理异常: %s", seg.seq, e)
+                _logger.error("批次（段 %d-%d）处理异常: %s",
+                             batch[0].seq, batch[-1].seq, e)
 
-    def _process_segment(self, seg: VoiceSegment) -> None:
-        """段处理流水线：fast → deep/检索 → [乐观并发批处理] → 分析 → 落账。
+    def _process_batch(self, batch: list[VoiceSegment]) -> None:
+        """批量处理：各段独立 fast/deep/检索 → 合并文本一次 LLM 分析 → 结果共享。
 
-        P4-13 乐观并发：在收集 seg(N) 的 deep/检索后，peek 检查 seg(N+1) 的
-        预取 futures 是否已就绪。若就绪且 pending 槽未覆盖，则批处理两段分析
-        （pool 并发提交），按 seq 顺序落账。单段路径不受影响。
+        v3.25.2 四层架构 Layer 4：替代逐段分析。短段跳过 LLM 但仍记录原文，
+        可分析段拼接校正文本后一次 LLM 调用提取跨段要点/决策/风险/问题。
+        首个可分析段承载分析结果，其余段标记 ANALYSIS_MERGED。
         """
-        # t0：fast 兜底
-        if not seg.corrected_text:
-            seg.corrected_text = self._corrector.fast(seg.raw_text)
-            self._corrector.push_context(seg.corrected_text)
-        fast = seg.corrected_text
+        # ── Phase 1: fast 兜底 + 短段跳过 ──
+        skipped: list[VoiceSegment] = []
+        analyzable: list[VoiceSegment] = []
+        for seg in batch:
+            if not seg.corrected_text:
+                seg.corrected_text = self._corrector.fast(seg.raw_text)
+                self._corrector.push_context(seg.corrected_text)
+            if self._cfg.fast_only or len(seg.corrected_text) < self._cfg.short_segment_chars:
+                seg.analysis_status = VoiceSegment.ANALYSIS_SKIPPED
+                skipped.append(seg)
+            else:
+                analyzable.append(seg)
 
-        # 短段门控 / 快速模式
-        if self._cfg.fast_only or len(fast) < self._cfg.short_segment_chars:
-            seg.analysis_status = VoiceSegment.ANALYSIS_SKIPPED
-            display = PanelDisplay(
-                status=f"已处理段 {seg.seq}（跳过分析）",
-                seg=seg,
-                state=self._session.state,
-            )
-            self._panel.render(display)
-            try:
-                self._session.record(seg)
-                self._writer.maybe_rewrite(self._session.state)
-            except Exception as e:
-                _logger.error("段 %d 落账异常: %s", seg.seq, e)
+        if not analyzable:
+            # 全批次跳过
+            for s in skipped:
+                self._session.record(s)
+            last = batch[-1]
+            self._panel.render(PanelDisplay(
+                status=f"已处理段 {last.seq}（跳过分析）",
+                seg=last, state=self._session.state,
+                topic=self._session.state.current_topic),
+                feed=self._feed)
+            self._writer.maybe_rewrite(self._session.state)
             return
 
-        self._panel.render(PanelDisplay(status="分析中…", seg=seg, state=self._session.state))
+        # ── Phase 2: 各段收集 deep 校正 + 检索 ──
+        # 不更新面板——保留上一批分析结果在屏幕上，避免 "分析完成→分析中"
+        # 毫秒级切换导致用户来不及阅读。
+        first = analyzable[0]
+        n = len(analyzable)
 
-        # t1/t2：deep 校正 与 检索（优先消费 poll 线程预跑的 futures）
-        deep, hits = self._collect_deep_retrieval(seg, fast)
+        batch_texts: list[str] = []
+        all_hits: list = []
+        # 批量收集 deep/检索：一次性 wait 全部 futures（避免逐段 wait 放大
+        # LLM 超时——批处理 5 段最坏从 50s 降到 10s）
+        results = self._collect_batch_deep_retrieval(analyzable)
+        # v3.25.5: VAD 说话人切换信号 → 注入 batch_texts 供 LLM 参考
+        if any(getattr(s, "speaker_change_signal", False) for s in analyzable):
+            batch_texts.append("[VAD 检测到可能的说话人切换，请确认 speaker.is_turn_change]")
+        for seg, (deep, hits) in zip(analyzable, results):
+            if deep != seg.corrected_text:
+                _logger.info("🤖 LLM 校正 段%d: %s → %s",
+                           seg.seq, seg.corrected_text, deep)
+                seg.corrected_text = deep
+                sp = getattr(seg, "speaker", None)
+                sp_id = sp.speaker_id if sp else ""
+                self._corrector.push_context(deep, speaker_id=sp_id)
+            # v3.25.5 batch_texts 加 speaker 标签
+            sp = getattr(seg, "speaker", None)
+            sp_label = f"（{sp.speaker_id}）" if (sp and sp.speaker_id) else ""
+            batch_texts.append(f"段{seg.seq}{sp_label}：{seg.corrected_text}")
+            all_hits.extend(hits)
 
-        if deep != fast:
-            seg.corrected_text = deep
-            self._corrector.push_context(deep)
+        # 检索去重
+        seen = set()
+        unique_hits = []
+        for h in all_hits:
+            key = (h.title, (h.content_preview or "")[:50])
+            if key not in seen:
+                seen.add(key)
+                unique_hits.append(h)
 
-        # P4-13 乐观并发：检查 N+1 的 deep/检索是否已就绪
-        next_seg = None
-        with self._futures_lock:
-            # peek：只看不 pop（pop 在 _collect_deep_retrieval 中完成）
-            peek_seq = seg.seq + 1
-            peek_futures = self._futures.get(peek_seq)
-            if peek_futures is not None:
-                f_deep, f_retr = peek_futures
-                if f_deep.done() and f_retr.done():
-                    # N+1 预取就绪 → 原子消费 pending 槽
-                    next_seg = self._session.take_pending_if(peek_seq)
-
-        if next_seg is not None:
-            # 批处理：N 和 N+1 的分析并发提交
-            self._process_batch(seg, deep, hits, next_seg)
-        else:
-            # 单段路径（常规）
-            self._analyze_and_record(seg, deep, hits)
-            display = PanelDisplay(
-                status=f"已处理段 {seg.seq}",
-                seg=seg,
-                analysis_unavailable=seg.analysis is None,
-                state=self._session.state,
+        # ── Phase 3: 合并文本 → 一次 LLM 分析 ──
+        combined_text = "\n".join(batch_texts)
+        retrieval_ctx = RetrieverAdapter.format_context(unique_hits[:10])
+        first.analysis_started_at = time.monotonic()
+        try:
+            first.analysis = self._analyzer.analyze(
+                combined_text,
+                retrieval_ctx,
+                self._session.summary_for_prompt(),
+                open_questions=self._session.open_questions_for_prompt(),
+                adjacent_context=self._session.adjacent_context(first.seq),
+                agenda=self._cfg.agenda,
             )
-            self._panel.render(display)
-            self._writer.maybe_rewrite(self._session.state)
+            first.analysis_done_at = time.monotonic()
+            first.analysis_status = (
+                VoiceSegment.ANALYSIS_DONE if first.analysis
+                else VoiceSegment.ANALYSIS_FAILED
+            )
+        except Exception as e:
+            _logger.warning("批次分析异常（段 %d-%d）: %s",
+                           first.seq, analyzable[-1].seq, e)
+            first.analysis = None
+            first.analysis_status = VoiceSegment.ANALYSIS_FAILED
+
+        # ── v3.25.3 话题追踪 + 洞察推送 ──
+        if first.analysis:
+            analysis = first.analysis
+            state = self._session.state
+            # 话题变化 → 推送（以实际状态变化为准，兼容 topic_change 缺失）
+            if analysis.topic:
+                prev_topic = state.current_topic
+                state.update_topic(
+                    analysis.topic, analysis.topic_change,
+                    analysis.topic_summary, first.seq)
+                if prev_topic and prev_topic != state.current_topic:
+                    self._feed.push_topic_change(analysis.topic)
+            # 决策 → 推送
+            for d in analysis.decisions:
+                if d.confidence == "confirmed":
+                    self._feed.push_decision(d.text, "confirmed")
+            # 风险 → 推送（只推前 2 条）
+            for r in analysis.risks[:2]:
+                self._feed.push_risk(r)
+            # 冲突 → 推送
+            if analysis.key_points:
+                conflicts = state.check_conflict(analysis.key_points)
+                for c in conflicts:
+                    self._feed.push_conflict(c)
+                    _logger.warning("⚠ 语义冲突: %s", c)
+            # 待办 → 累计 + 推送
+            if analysis.todos:
+                for t in analysis.todos:
+                    if t.text and t.text not in state.todos:
+                        state._dedup_append(state.todos, [t.text])
+                for t in analysis.todos[:2]:
+                    assignee = f"（{t.assignee}）" if t.assignee else ""
+                    self._feed.push(InsightEvent(
+                        event_type="todo", text=f"{t.text}{assignee}"))
+            # ── v3.25.5 说话人追踪 ──
+            if analysis.speaker and analysis.speaker.speaker_id:
+                sp = analysis.speaker
+                # 新说话人登记
+                if sp.speaker_id not in [s.get("id") for s in state.speakers]:
+                    state.speakers.append({
+                        "id": sp.speaker_id, "role": sp.role_hint,
+                        "first_seen": first.seq, "segments": 1,
+                    })
+                else:
+                    for s in state.speakers:
+                        if s["id"] == sp.speaker_id:
+                            s["segments"] = s.get("segments", 0) + len(analyzable)
+                # 更新段的 speaker（后验传递，仅 VoiceSegment）
+                for seg in analyzable:
+                    if hasattr(seg, "speaker"):
+                        seg.speaker = sp
+                # 说话人切换 → 推送洞察
+                if sp.is_turn_change:
+                    role = f"（{sp.role_hint}）" if sp.role_hint else ""
+                    self._feed.push(InsightEvent(
+                        event_type="speaker_turn",
+                        text=f"{sp.speaker_id}{role} 发言"))
+
+            # 跑偏检测：有议程但当前话题偏离
+            if self._cfg.agenda and analysis.topic:
+                agenda_keywords = self._cfg.agenda.replace("；", ";").split(";")
+                topic_lower = analysis.topic.lower()
+                on_agenda = any(
+                    kw.strip().lower() in topic_lower or topic_lower in kw.strip().lower()
+                    for kw in agenda_keywords if kw.strip()
+                )
+                if not on_agenda and len(state.topics) >= 1:
+                    _logger.info("⚠ 跑偏提醒: 当前话题「%s」不在预设议程中", analysis.topic)
+
+        # ── Phase 4: 建议提问（仅采样批次；非采样清空）──
+        if first.analysis and (first.seq - 1) % self._cfg.suggest_every == 0:
+            try:
+                deadline = (getattr(first, 'analysis_started_at', time.monotonic())
+                            + _ANALYSIS_DEADLINE_SEC)
+                sharp = self._analyzer.suggest_questions(
+                    first.analysis,
+                    self._session.summary_for_prompt(),
+                    retrieval_ctx,
+                    deadline=deadline,
+                )
+                if sharp:
+                    first.analysis.suggested_questions = sharp
+            except Exception:
+                pass
+        elif first.analysis:
+            first.analysis.suggested_questions = []
+
+        # ── Phase 5: 跳过段先落账，其余段标记 MERGED 再落账，可分析段最后 ──
+        for s in skipped:
+            try:
+                self._session.record(s)
+            except Exception as e:
+                _logger.error("段 %d 落账异常: %s", s.seq, e)
+        for s in analyzable[1:]:
+            s.analysis_status = VoiceSegment.ANALYSIS_MERGED
+            try:
+                self._session.record(s)
+            except Exception as e:
+                _logger.error("段 %d 落账异常: %s", s.seq, e)
+        try:
+            self._session.record(first)
+        except Exception as e:
+            _logger.error("段 %d 落账异常: %s", first.seq, e)
+
+        # ── Phase 6: 面板 + 文档 ──
+        if len(batch) == 1:
+            label = f"已处理段 {first.seq}"
+        else:
+            skipped_n = len(skipped)
+            analyze_note = f"{n} 段合并分析" if skipped_n == 0 else (
+                f"{n} 段合并分析 + {skipped_n} 段跳过")
+            label = f"已处理段 {batch[0].seq}-{batch[-1].seq}（{analyze_note}）"
+        self._panel.render(PanelDisplay(
+            status=label, seg=first,
+            analysis_unavailable=first.analysis is None,
+            state=self._session.state,
+            topic=self._session.state.current_topic),
+            feed=self._feed)
+        self._writer.maybe_rewrite(self._session.state)
 
     def _collect_deep_retrieval(self, seg: VoiceSegment, fast: str):
         """收集 deep 校正与检索结果（含预取消费 + 降级）。"""
@@ -479,8 +850,10 @@ class MeetingLiveAssistant:
             futures = self._futures.pop(seg.seq, None)
         if futures is None:
             try:
+                sp = getattr(seg, "speaker", None)
+                sp_id = sp.speaker_id if sp else ""
                 futures = (
-                    self._pool.submit(self._corrector.deep, fast),
+                    self._pool.submit(self._corrector.deep, fast, speaker_id=sp_id),
                     self._pool.submit(self._retriever.search, fast, top_k=self._cfg.top_k),
                 )
             except RuntimeError:
@@ -491,129 +864,42 @@ class MeetingLiveAssistant:
             deep, hits = self._collect_results(futures, done, fast)
         return deep, hits
 
-    def _process_batch(
-        self,
-        seg: VoiceSegment,
-        deep: str,
-        hits: list,
-        next_seg: VoiceSegment,
-    ) -> None:
-        """乐观并发批处理：收集 N+1 的 deep/检索 → 并发提交两组分析 → 按序落账。"""
-        # 收集 N+1 的 deep/检索（futures 已在 peek 时确认 done）
-        fast_n1 = next_seg.corrected_text or next_seg.raw_text
-        if not next_seg.corrected_text:
-            next_seg.corrected_text = self._corrector.fast(next_seg.raw_text)
-            self._corrector.push_context(next_seg.corrected_text)
-            fast_n1 = next_seg.corrected_text
-        deep_n1, hits_n1 = self._collect_deep_retrieval(next_seg, fast_n1)
-        if deep_n1 != fast_n1:
-            next_seg.corrected_text = deep_n1
-            self._corrector.push_context(deep_n1)
+    def _collect_batch_deep_retrieval(self, segments: list[VoiceSegment]) -> list:
+        """批量收集 deep/检索：一次性 wait 全部 futures（v3.25.4 性能修复）。
 
-        _logger.info("乐观并发：段 %d + 段 %d 批处理分析", seg.seq, next_seg.seq)
-
-        # 并发提交两组 LLM 分析
-        f_analysis_n = self._pool.submit(
-            self._run_analysis, seg, deep, hits,
-            self._session.summary_for_prompt(),
-            self._session.open_questions_for_prompt(),
-        )
-        f_analysis_n1 = self._pool.submit(
-            self._run_analysis, next_seg, deep_n1, hits_n1,
-            self._session.summary_for_prompt(),  # 不包含 N 段结果（N 尚未落账）
-            self._session.open_questions_for_prompt(),
-        )
-
-        # 等待两组分析完成
-        done, _ = wait([f_analysis_n, f_analysis_n1], timeout=_ANALYSIS_DEADLINE_SEC + 2.0)
-        for f in [f_analysis_n, f_analysis_n1]:
-            if f not in done and not f.done():
-                f.cancel()
-
-        # 按 seq 顺序落账（先 N，再 N+1）
-        for s in [seg, next_seg]:
-            self._finalize_segment(s, deep if s is seg else deep_n1,
-                                   hits if s is seg else hits_n1)
-            display = PanelDisplay(
-                status=f"已处理段 {s.seq}",
-                seg=s,
-                analysis_unavailable=s.analysis is None,
-                state=self._session.state,
-            )
-            self._panel.render(display)
-            self._writer.maybe_rewrite(self._session.state)
-
-    def _run_analysis(
-        self,
-        seg: VoiceSegment,
-        deep: str,
-        hits: list,
-        meeting_summary: str,
-        open_questions: str,
-    ) -> None:
-        """在池线程中执行 LLM 分析并将结果写入 seg（供并发批处理使用）。"""
-        seg.analysis_started_at = time.monotonic()
-        try:
-            seg.analysis = self._analyzer.analyze(
-                deep,
-                RetrieverAdapter.format_context(hits),
-                meeting_summary,
-                open_questions=open_questions,
-            )
-            seg.analysis_done_at = time.monotonic()
-            seg.analysis_status = (
-                VoiceSegment.ANALYSIS_DONE if seg.analysis
-                else VoiceSegment.ANALYSIS_FAILED
-            )
-        except Exception as e:
-            _logger.warning("段 %d 分析异常: %s", seg.seq, e)
-            seg.analysis = None
-            seg.analysis_status = VoiceSegment.ANALYSIS_FAILED
-
-    def _analyze_and_record(self, seg: VoiceSegment, deep: str, hits: list) -> None:
-        """单段分析 + 记录（常规路径）。"""
-        self._run_analysis(
-            seg, deep, hits,
-            self._session.summary_for_prompt(),
-            self._session.open_questions_for_prompt(),
-        )
-        self._finalize_segment(seg, deep, hits)
-
-    def _finalize_segment(self, seg: VoiceSegment, deep: str, hits: list) -> None:
-        """分析后处理：建议提问间隔化 + 落账（单段/批处理共用）。"""
-        analysis = seg.analysis
-        if analysis:
-            elapsed = getattr(seg, 'analysis_done_at', 0.0) - getattr(seg, 'analysis_started_at', 0.0)
-            _logger.info(
-                "段 %d 分析完成（%.1fs）· 要点=%d 决策=%d 风险=%d 问题=%d",
-                seg.seq, elapsed,
-                len(analysis.key_points), len(analysis.decisions),
-                len(analysis.risks), len(analysis.questions),
-            )
-            # 间隔化建议提问
-            if (seg.seq - 1) % self._cfg.suggest_every == 0:
-                try:
-                    deadline = (getattr(seg, 'analysis_started_at', time.monotonic())
-                                + _ANALYSIS_DEADLINE_SEC)
-                    sharp = self._analyzer.suggest_questions(
-                        analysis,
-                        self._session.summary_for_prompt(),
-                        RetrieverAdapter.format_context(hits),
-                        deadline=deadline,
-                    )
-                    if sharp:
-                        analysis.suggested_questions = sharp
-                        _logger.info("段 %d 建议提问已用高温度(0.5)重新生成（%d 条）",
-                                     seg.seq, len(sharp))
-                except Exception:
-                    pass
-            else:
-                analysis.suggested_questions = []
-
-        try:
-            self._session.record(seg)
-        except Exception as e:
-            _logger.error("段 %d 落账异常: %s", seg.seq, e)
+        预取 futures 在音频线程已并行提交（线程池），此处统一 pop + 一次 wait，
+        避免逐段 wait 在 LLM 全线超时时把等待放大 N 倍。
+        """
+        entries: list[tuple[VoiceSegment, Optional[Tuple[Future, Future]]]] = []
+        with self._futures_lock:
+            for seg in segments:
+                futures = self._futures.pop(seg.seq, None)
+                if futures is None:
+                    try:
+                        sp = getattr(seg, "speaker", None)
+                        sp_id = sp.speaker_id if sp else ""
+                        futures = (
+                            self._pool.submit(self._corrector.deep,
+                                              seg.corrected_text, speaker_id=sp_id),
+                            self._pool.submit(self._retriever.search,
+                                              seg.corrected_text, top_k=self._cfg.top_k),
+                        )
+                    except RuntimeError:
+                        futures = None
+                entries.append((seg, futures))
+        # 一次性 wait 所有 futures（共享同一超时窗）
+        flat = [f for _, fs in entries if fs is not None for f in fs]
+        done_all = set()
+        if flat:
+            done_all, _ = wait(flat, timeout=_PARALLEL_WAIT_SEC)
+        results = []
+        for seg, futures in entries:
+            deep, hits = seg.corrected_text, []
+            if futures is not None:
+                done = {f for f in futures if f in done_all}
+                deep, hits = self._collect_results(futures, done, seg.corrected_text)
+            results.append((deep, hits))
+        return results
 
     @staticmethod
     def _collect_results(futures: Tuple[Future, Future], done: set, fast: str):

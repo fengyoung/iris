@@ -25,6 +25,7 @@ class DocWriter:
         self._path = Path(path)
         self._rewrite_every = max(1, rewrite_every)
         self._last_segment_count = 0
+        self._last_dropped_count = 0   # 跟踪段丢弃，用于即时插入标记
         self._lock = threading.RLock()
         # 增量写入缓存：段渲染块（按 seq 顺序），供增量追加与退出全量校验
         self._rendered_segments: list[str] = []
@@ -38,6 +39,7 @@ class DocWriter:
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             self._rendered_segments = []  # 重置缓存
+            self._last_dropped_count = state.dropped_count
             return self._atomic_write(self._path, self.render(state))
         except Exception as e:
             _logger.warning("过程文档创建失败: %s", e)
@@ -48,6 +50,9 @@ class DocWriter:
 
         增量路径：新段追加渲染块到缓存 → 全量原子写入（header + cumulative +
         缓存的段块 + dropped）。单段渲染 O(1)，历史段块复用缓存。
+
+        结构说明：会议进行中为线性增量（实时可读）；退出 force 时全量渲染，
+        若已有话题则切换为话题结构化文档（最终形态）。
         """
         count = len(state.segments)
         if not force and count - self._last_segment_count < self._rewrite_every:
@@ -55,6 +60,17 @@ class DocWriter:
         # 增量渲染：仅当有新段时追加渲染块到缓存
         new_count = count - len(self._rendered_segments)
         if new_count > 0:
+            # 段丢弃即时标记：段号断层时在文档正文中插标记，避免用户困惑
+            new_drops = state.dropped_count - self._last_dropped_count
+            if new_drops > 0:
+                recent = state.dropped_texts[-new_drops:] if state.dropped_texts else []
+                preview = "、".join(
+                    f'"{t[:30]}{"…" if len(t) > 30 else ""}"' for t in recent
+                )
+                self._rendered_segments.append(
+                    f"\n> ⚠ 积压丢弃 {new_drops} 段：{preview}\n"
+                )
+                self._last_dropped_count = state.dropped_count
             for seg in state.segments[-new_count:]:
                 self._rendered_segments.append(
                     "\n".join(self._render_segment(seg))
@@ -91,6 +107,14 @@ class DocWriter:
     @staticmethod
     def render(state: MeetingState) -> str:
         """全量渲染 Markdown 文档（供测试和首次写入使用）。"""
+        # v3.25.3: 优先按话题结构渲染
+        if state.topics:
+            return DocWriter._render_topic_structured(state)
+        return DocWriter._render_linear(state)
+
+    @staticmethod
+    def _render_linear(state: MeetingState) -> str:
+        """传统线性渲染（无话题时兼容）。"""
         parts = DocWriter._render_header(state)
         parts.append("")
         parts.extend(DocWriter._render_cumulative(state))
@@ -99,6 +123,86 @@ class DocWriter:
         parts.append("")
         for seg in state.segments:
             parts.extend(DocWriter._render_segment(seg))
+        parts.extend(DocWriter._render_dropped(state))
+        return "\n".join(parts)
+
+    @staticmethod
+    def _render_topic_structured(state: MeetingState) -> str:
+        """v3.25.3 按话题渲染：概览 → 话题卡 → 决策/待办汇总 → 附录转写。"""
+        parts = DocWriter._render_header(state)
+        parts.append("")
+        # 概览行
+        duration = ""
+        if state.segments:
+            first_ts = state.segments[0].started_at
+            last_ts = state.segments[-1].started_at
+            mins = int((last_ts - first_ts).total_seconds() / 60)
+            duration = f" · {mins} 分钟" if mins > 0 else ""
+        confirmed_decisions = sum(
+            1 for s in state.segments if s.analysis
+            for d in s.analysis.decisions if d.confidence == "confirmed"
+        )
+        parts.append(f"**概览**：{len(state.topics)} 个话题{duration}"
+                     f" · {confirmed_decisions} 决策"
+                     f" · {len(state.todos)} 待办"
+                     f" · {len(state.risks)} 风险")
+        parts.append("")
+        # 话题卡片
+        last_seq = state.segments[-1].seq if state.segments else 0
+        for i, t in enumerate(state.topics, 1):
+            label = t.get("label", f"话题{i}")
+            start_seq = t.get("start_seq", 0)
+            # 进行中话题（end_seq=0）回退到最后一个段的 seq（非段数量——有丢弃时 seq 不连续）
+            end_seq = t.get("end_seq", 0) or last_seq
+            summary = t.get("summary", "")
+            # 找到该话题范围内的段
+            topic_segs = [s for s in state.segments
+                         if start_seq <= s.seq <= end_seq]
+            parts.append(f"## 📌 话题 {i}：{label}（段 {start_seq}-{end_seq}）")
+            if summary:
+                parts.append(f"**讨论**：{summary}")
+            # 收集该话题的决策
+            topic_decisions = []
+            for s in topic_segs:
+                if s.analysis:
+                    for d in s.analysis.decisions:
+                        if d.confidence == "confirmed":
+                            topic_decisions.append(f"✅ {d.text}")
+                        elif d.confidence == "proposed":
+                            topic_decisions.append(f"💬 {d.text}")
+            if topic_decisions:
+                parts.append("**决策**：" + "；".join(topic_decisions))
+            parts.append("")
+        # 决策汇总
+        if state.decisions:
+            parts.append("## ✅ 决策汇总")
+            for d in state.decisions:
+                parts.append(f"- {d}")
+            parts.append("")
+        # 待办汇总
+        if state.todos:
+            parts.append("## 📋 待办汇总")
+            for t in state.todos:
+                parts.append(f"- {t}")
+            parts.append("")
+        # 风险汇总（前 10 条）
+        if state.risks:
+            parts.append("## ⚠ 风险汇总")
+            for r in state.risks[:10]:
+                parts.append(f"- {r}")
+            parts.append("")
+        # 会议总结
+        if state.summary:
+            parts += ["## 📝 会议总结（AI 生成）", state.summary.strip(), ""]
+        # 附录：逐段转写（折叠）
+        parts.append("## 📎 附录：完整逐段转写")
+        parts.append("<details>")
+        parts.append(f"<summary>{len(state.segments)} 段 · 展开查看</summary>")
+        parts.append("")
+        for seg in state.segments:
+            parts.extend(DocWriter._render_segment(seg))
+        parts.append("")
+        parts.append("</details>")
         parts.extend(DocWriter._render_dropped(state))
         return "\n".join(parts)
 
@@ -151,14 +255,18 @@ class DocWriter:
 
     @staticmethod
     def _render_segment(seg: VoiceSegment) -> list[str]:
+        sp = f" · {seg.speaker.speaker_id}" if (
+            seg.speaker and seg.speaker.speaker_id) else ""
         lines = [
             "",
-            f"## 🎙 段 {seg.seq}（{seg.started_at:%H:%M:%S}）",
+            f"## 🎙 段 {seg.seq}（{seg.started_at:%H:%M:%S}）{sp}",
             f"**校正文本**：{seg.corrected_text or seg.raw_text}",
         ]
         analysis: Optional[SegmentAnalysis] = seg.analysis
         if seg.analysis_status == VoiceSegment.ANALYSIS_SKIPPED:
             lines.append("**分析**：⏭（短反馈/快速模式，跳过分析）")
+        elif seg.analysis_status == VoiceSegment.ANALYSIS_MERGED:
+            lines.append("**分析**：🔗 合并分析（见批次首段）")
         elif analysis is None:
             lines.append("**分析**：⚠ 分析不可用（LLM 调用失败或超时）")
         else:
@@ -170,7 +278,13 @@ class DocWriter:
                 ("建议提问", analysis.suggested_questions),
             ):
                 if field:
-                    lines.append(f"**{label}**：" + "；".join(field))
+                    if label == "决策点":
+                        # DecisionItem → 带置信度标注的字符串
+                        conf_map = {"confirmed": "✅", "proposed": "💬", "tentative": "❓"}
+                        parts = [f"{conf_map.get(d.confidence, '')}{d.text}" for d in field]
+                        lines.append(f"**{label}**：" + "；".join(parts))
+                    else:
+                        lines.append(f"**{label}**：" + "；".join(field))
         return lines
 
     def _atomic_write(self, path: Path, content: str) -> bool:

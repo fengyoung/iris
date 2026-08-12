@@ -110,7 +110,8 @@ class TestMaxLen:
             assert watcher.poll() == _ASR_TEXT
 
     def test_over_max_len_warns(self):
-        import logging, io
+        import logging
+        import io
         # 临时捕获 _clipboard 模块的日志（v3.25 后不传播到 root logger）
         buf = io.StringIO()
         handler = logging.StreamHandler(buf)

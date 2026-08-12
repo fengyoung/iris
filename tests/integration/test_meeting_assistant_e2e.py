@@ -49,9 +49,9 @@ def _make_assistant(config_bundle, tmp_path, *, llm, pid_dir=None):
 
 
 def _process_drained(assistant, seg):
-    """直调 _process_segment 后清空 pending 槽（真实运行由 worker take_pending 消费，
+    """直调 _process_batch([seg]) 后清空 pending 槽（真实运行由 worker take_pending 消费，
     测试直调不经过 worker，残留 pending 会让下一次 submit 误计 dropped_count）。"""
-    assistant._process_segment(seg)
+    assistant._process_batch([seg])
     assistant._session.take_pending(timeout=0)
 
 
@@ -134,17 +134,15 @@ class TestMutexStartup:
              patch("iris.assistant.live.AudioCapture", autospec=True):
             yield
 
-    def test_asr_corrector_running_yields(self, config_bundle, tmp_path):
+    def test_asr_corrector_no_longer_blocks(self, config_bundle, tmp_path):
+        """v3.25.0 本地音频 ASR 不再依赖剪贴板，asr-corrector 可同时运行。"""
         pid_dir = tmp_path / "pids"
         pid_dir.mkdir(exist_ok=True)
         (pid_dir / "asr-corrector.pid").write_text(str(os.getpid()))
         assistant = _make_assistant(config_bundle, tmp_path, llm=_FakeLLM(),
                                     pid_dir=pid_dir)
-        # v3.24: _probe_running 含 ps 命令行校验（当前 pytest 进程命令行不含 iris，
-        # 直接探测会判定无实例而进入主循环）→ mock 互斥探测通过
-        with patch("iris.assistant.live._probe_running", return_value=True):
-            assert assistant.run() == 1
-        assert not assistant._doc_path.exists()  # 让位未创建文档
+        with patch.object(assistant, "_audio_loop", side_effect=KeyboardInterrupt):
+            assert assistant.run() == 0  # 启动成功，不再被 asr-corrector 阻塞
 
     def test_dead_pid_allows_start(self, config_bundle, tmp_path):
         pid_dir = tmp_path / "pids"

@@ -119,6 +119,11 @@ class MeetingSession:
         recent = [seg.corrected_text or seg.raw_text for seg in s.segments[-3:]]
         if recent:
             parts.append("最近讨论: " + " / ".join(recent))
+        # v3.25.5 说话人历史：注入已识别的说话人，帮助 LLM 跨批保持 speaker_id 一致
+        if s.speakers:
+            sp_parts = [f'{sp["id"]}（{sp.get("role", "") or "参与者"}）'
+                        for sp in s.speakers[-4:]]
+            parts.append("已识别说话人: " + " / ".join(sp_parts))
         block = "\n".join(parts)
         if len(block) > max_chars:
             block = block[:max_chars] + "…"
@@ -129,6 +134,33 @@ class MeetingSession:
         if not self._state.open_questions:
             return "（暂无）"
         return "\n".join(f"- {q}" for q in self._state.open_questions)
+
+    def adjacent_context(self, current_seq: int) -> str:
+        """当前段紧邻上文（原始校正文本），供 LLM 理解碎片化短句的语境。
+
+        返回当前段之前 1-2 个已记录段的校正文本；段间间隔超过 30s 则只取最近 1 段。
+        """
+        segments = self._state.segments
+        if not segments:
+            return ""
+        # 取当前段之前的段（按 seq 排序，最近的在最后）
+        prev = [s for s in segments if s.seq < current_seq]
+        if not prev:
+            return ""
+        # 最多取 2 段，时间跨度 ≤ 30s
+        recent = []
+        now = prev[-1].started_at
+        for s in reversed(prev):
+            if len(recent) >= 2:
+                break
+            if (now - s.started_at).total_seconds() > 30:
+                break
+            text = s.corrected_text or s.raw_text
+            if text.strip():
+                recent.insert(0, text)
+        if not recent:
+            return ""
+        return "上文：" + " / ".join(recent)
 
     @property
     def state(self) -> MeetingState:

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from iris.feed._topic_detector import _parse_json_safe
 
-from .models import SegmentAnalysis
+from .models import SegmentAnalysis, SpeakerLabel
 
 _logger = logging.getLogger(__name__)
 
@@ -40,6 +40,8 @@ class SegmentAnalyzer:
         meeting_summary: str,
         *,
         open_questions: str = "",
+        adjacent_context: str = "",
+        agenda: str = "",
     ) -> Optional[SegmentAnalysis]:
         prompt = self._loader.render(
             "meeting_live_analyze.md",
@@ -48,6 +50,8 @@ class SegmentAnalyzer:
                 "retrieval_context": retrieval_context,
                 "meeting_summary": meeting_summary,
                 "open_questions": open_questions or "（暂无）",
+                "adjacent_context": adjacent_context or "",
+                "agenda": agenda or "",
             },
         )
         try:
@@ -68,7 +72,20 @@ class SegmentAnalyzer:
             data = _parse_json_safe(result.text, "会议段分析")
             if not data:
                 return None
-            return SegmentAnalysis(**self._normalize(data))
+            norm = self._normalize(data)
+            return SegmentAnalysis(
+                key_points=norm["key_points"],
+                risks=norm["risks"],
+                questions=norm["questions"],
+                decisions=norm["decisions"],
+                suggested_questions=norm["suggested_questions"],
+                resolved_questions=norm["resolved_questions"],
+                topic=norm["topic"],
+                topic_change=norm["topic_change"],
+                topic_summary=norm["topic_summary"],
+                todos=norm["todos"],
+                speaker=norm["speaker"] or SpeakerLabel(),
+            )
         except Exception as e:
             _logger.warning("会议段分析失败: %s", e)
             return None
@@ -179,23 +196,36 @@ class SegmentAnalyzer:
             return []  # 失败静默降级，保留主分析的 suggested_questions
 
     @staticmethod
-    def _normalize(data: Any) -> Dict[str, List[str]]:
+    def _normalize(data: Any) -> Dict[str, Any]:
         """容错归一化：非 dict → 空；字段缺失/非 list → 空列表；元素非 str → str()。
 
         每条截断 _MAX_ITEM_CHARS，每字段最多 _MAX_ITEMS 条。
+        decisions 支持新旧两种格式：["str"] 或 [{"text":"str","confidence":"confirmed"}]
         """
-        fields = (
+        list_fields = (
             "key_points",
             "risks",
             "questions",
-            "decisions",
             "suggested_questions",
             "resolved_questions",
         )
-        result: Dict[str, List[str]] = {f: [] for f in fields}
+        result: Dict[str, Any] = {f: [] for f in list_fields}
+        result["decisions"] = []  # List[DecisionItem]
+        result["todos"] = []  # List[TodoItem]
+        result["topic"] = ""
+        result["topic_change"] = False
+        result["topic_summary"] = ""
+        result["speaker"] = None  # SpeakerLabel or None
         if not isinstance(data, dict):
             return result
-        for field in fields:
+        # 标量字段
+        for f in ("topic", "topic_summary"):
+            v = data.get(f, "")
+            if isinstance(v, str):
+                result[f] = v.strip()[:200]
+        result["topic_change"] = bool(data.get("topic_change", False))
+        # 列表字段
+        for field in list_fields:
             value = data.get(field)
             if not isinstance(value, list):
                 continue
@@ -204,9 +234,54 @@ class SegmentAnalyzer:
                 if len(items) >= _MAX_ITEMS:
                     break
                 if item is None:
-                    continue  # None 跳过（str(None)="None" 是噪音）
+                    continue
                 text = item.strip() if isinstance(item, str) else str(item).strip()
                 if text:
                     items.append(text[:_MAX_ITEM_CHARS])
             result[field] = items
+        # decisions 字段：支持 {"text":"...","confidence":"confirmed"} 或纯字符串
+        decisions_data = data.get("decisions")
+        if isinstance(decisions_data, list):
+            from iris.assistant.models import DecisionItem
+            decisions = []
+            for item in decisions_data:
+                if len(decisions) >= _MAX_ITEMS:
+                    break
+                if isinstance(item, dict):
+                    text = str(item.get("text", "")).strip()
+                    conf = str(item.get("confidence", "proposed")).strip()
+                    if text and conf in ("confirmed", "proposed", "tentative"):
+                        decisions.append(DecisionItem(text=text[:_MAX_ITEM_CHARS], confidence=conf))
+                elif isinstance(item, str):
+                    decisions.append(DecisionItem(text=item.strip()[:_MAX_ITEM_CHARS]))
+            result["decisions"] = decisions
+        # todos 字段：支持 {"text":"...","assignee":"...","deadline":"..."} 或纯字符串
+        todos_data = data.get("todos")
+        if isinstance(todos_data, list):
+            from iris.assistant.models import TodoItem
+            todos = []
+            for item in todos_data:
+                if len(todos) >= _MAX_ITEMS:
+                    break
+                if isinstance(item, dict):
+                    text = str(item.get("text", "")).strip()
+                    if text:
+                        todos.append(TodoItem(
+                            text=text[:_MAX_ITEM_CHARS],
+                            assignee=str(item.get("assignee", "")).strip()[:50],
+                            deadline=str(item.get("deadline", "")).strip()[:50],
+                        ))
+                elif isinstance(item, str):
+                    todos.append(TodoItem(text=item.strip()[:_MAX_ITEM_CHARS]))
+            result["todos"] = todos
+        # speaker 字段
+        speaker_data = data.get("speaker")
+        if isinstance(speaker_data, dict):
+            from iris.assistant.models import SpeakerLabel
+            result["speaker"] = SpeakerLabel(
+                speaker_id=str(speaker_data.get("speaker_id", "")).strip()[:20],
+                role_hint=str(speaker_data.get("role_hint", "")).strip()[:20],
+                turn_index=int(speaker_data.get("turn_index", 0)) if speaker_data.get("turn_index") else 0,
+                is_turn_change=bool(speaker_data.get("is_turn_change", False)),
+            )
         return result

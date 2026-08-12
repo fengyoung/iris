@@ -99,12 +99,14 @@ def _make_assistant(tmp_path, bundle=None, **kwargs):
 
 
 def _seg(seq=1, raw="今天讨论下半年的目标", **kw):
+    from iris.assistant.models import SpeakerLabel
     return SimpleNamespace(
         seq=seq,
         started_at=datetime(2026, 8, 10, 12, 0),
         raw_text=raw,
         corrected_text="",
         analysis=None,
+        speaker=SpeakerLabel(),
         **kw,
     )
 
@@ -126,7 +128,7 @@ class TestPipelineParallel:
     def test_process_segment_full_pipeline(self, tmp_path):
         assistant = _make_assistant(tmp_path)
         seg = _seg(seq=1)
-        assistant._process_segment(seg)
+        assistant._process_batch([seg])
         assert seg.analysis is not None
         assert seg.analysis.key_points == ["要点X"]
         assert seg.analysis_status == VoiceSegment.ANALYSIS_DONE
@@ -144,9 +146,9 @@ class TestPipelineParallel:
                 self.context: list[str] = []
             def fast(self, text: str) -> str:
                 return text
-            def deep(self, text: str) -> str:
+            def deep(self, text: str, speaker_id: str = "") -> str:
                 return "深度校正后文本"
-            def push_context(self, text: str) -> None:
+            def push_context(self, text: str, speaker_id: str = "") -> None:
                 self.context.append(text)
 
         assistant = _make_assistant(tmp_path)
@@ -154,9 +156,9 @@ class TestPipelineParallel:
         seg = _seg(seq=1, raw="原始")
         with patch.object(assistant._analyzer, "analyze",
                           wraps=assistant._analyzer.analyze) as mock_analyze:
-            assistant._process_segment(seg)
+            assistant._process_batch([seg])
             called_text = mock_analyze.call_args[0][0]
-            assert called_text == "深度校正后文本"
+            assert called_text == "段1：深度校正后文本"
         assert assistant._corrector.context == ["原始", "深度校正后文本"]
 
     def test_analyzer_failure_degrades_gracefully(self, tmp_path):
@@ -166,22 +168,23 @@ class TestPipelineParallel:
                 return None
         assistant._analyzer = _FailingAnalyzer()
         seg = _seg(seq=1, raw="原始")
-        assistant._process_segment(seg)
+        assistant._process_batch([seg])
         assert seg.analysis is None
         assert seg.analysis_status == VoiceSegment.ANALYSIS_FAILED
         assert len(assistant._session.state.segments) == 1
         content = assistant._doc_path.read_text(encoding="utf-8")
         assert "分析不可用" in content
 
-    def test_run_blocked_by_asr_corrector(self, tmp_path):
+    def test_asr_corrector_no_longer_blocks(self, tmp_path):
+        """v3.25.0 本地音频 ASR 不再依赖剪贴板，asr-corrector 运行时不阻止启动。"""
         pid_dir = tmp_path / "pids"
         pid_dir.mkdir(exist_ok=True)
         (pid_dir / "asr-corrector.pid").write_text(str(os.getpid()))
         assistant = _make_assistant(tmp_path)
         with patch("subprocess.run", return_value=SimpleNamespace(
-                stdout="python /Users/fengyoung/MyProjects/iris3/src/iris/app/main.py")):
-            assert assistant.run() == 1
-        assert not assistant._doc_path.exists()
+                stdout="python /Users/fengyoung/MyProjects/iris3/src/iris/app/main.py")), \
+             patch.object(assistant, "_audio_loop", side_effect=KeyboardInterrupt):
+            assert assistant.run() == 0  # 不再返回 1，正常执行
 
     def test_run_blocks_duplicate_instance(self, tmp_path):
         assistant = _make_assistant(tmp_path)
@@ -219,7 +222,7 @@ class TestShortGate:
         seg = _seg(seq=1, raw="好的")
         with patch.object(assistant._analyzer, "analyze") as mock_analyze, \
              patch.object(assistant._pool, "submit") as mock_submit:
-            assistant._process_segment(seg)
+            assistant._process_batch([seg])
             mock_analyze.assert_not_called()
             mock_submit.assert_not_called()
         assert seg.analysis is None
@@ -247,9 +250,9 @@ class TestPrefetch:
                 self.context: list[str] = []
             def fast(self, text: str) -> str:
                 return text
-            def deep(self, text: str) -> str:
+            def deep(self, text: str, speaker_id: str = "") -> str:
                 return "预取深度校正结果"
-            def push_context(self, text: str) -> None:
+            def push_context(self, text: str, speaker_id: str = "") -> None:
                 self.context.append(text)
 
         assistant = _make_assistant(tmp_path)
@@ -262,7 +265,7 @@ class TestPrefetch:
         assert seg.seq in assistant._futures
         f_deep, f_retr = assistant._futures[seg.seq]
         with patch.object(assistant._pool, "submit") as mock_submit:
-            assistant._process_segment(seg)
+            assistant._process_batch([seg])
             mock_submit.assert_not_called()
         assert seg.seq not in assistant._futures
         assert seg.analysis is not None
@@ -333,7 +336,7 @@ class TestPhaseGuards:
         f_deep.set_exception(RuntimeError("deep 挂"))
         assistant._futures[1] = (f_deep, Future())
         seg = _seg(seq=1, raw="今天讨论下半年目标预算")
-        assistant._process_segment(seg)
+        assistant._process_batch([seg])
         assert len(assistant._session.state.segments) == 1
         assert seg.analysis_status == VoiceSegment.ANALYSIS_DONE or seg.analysis is None
 
@@ -342,7 +345,7 @@ class TestPhaseGuards:
         seg = _seg(seq=1, raw="今天讨论下半年目标预算")
         with patch.object(assistant._session, "record", side_effect=RuntimeError("落账失败")), \
              patch("sys.stderr.write"):
-            assistant._process_segment(seg)
+            assistant._process_batch([seg])
         assert seg.analysis is not None
 
 
@@ -365,19 +368,19 @@ class TestSuggestEvery:
     def test_non_sample_segment_clears_questions(self, tmp_path):
         assistant = _make_assistant(tmp_path, bundle=self._bundle_with_suggest(tmp_path, every=3))
         seg2 = _seg(seq=2)
-        assistant._process_segment(seg2)
+        assistant._process_batch([seg2])
         assert seg2.analysis.suggested_questions == []
 
     def test_sample_segment_keeps_questions(self, tmp_path):
         assistant = _make_assistant(tmp_path, bundle=self._bundle_with_suggest(tmp_path, every=3))
         seg4 = _seg(seq=4)
-        assistant._process_segment(seg4)
+        assistant._process_batch([seg4])
         assert seg4.analysis.suggested_questions == ["追问Z"]
 
     def test_first_segment_keeps_questions(self, tmp_path):
         assistant = _make_assistant(tmp_path, bundle=self._bundle_with_suggest(tmp_path, every=3))
         seg1 = _seg(seq=1)
-        assistant._process_segment(seg1)
+        assistant._process_batch([seg1])
         assert seg1.analysis.suggested_questions == ["追问Z"]
 
 
@@ -397,7 +400,7 @@ class TestExitSummary:
     def test_exit_summary_written_to_doc(self, tmp_path):
         assistant = _make_assistant(tmp_path)
         seg = _seg(seq=1, raw="今天讨论下半年目标预算")
-        assistant._process_segment(seg)
+        assistant._process_batch([seg])
         with patch.object(assistant, "_audio_loop", side_effect=KeyboardInterrupt), \
              patch.object(assistant._analyzer, "summarize",
                           return_value="## 会议主题\n本场会议讨论了下半年目标") as mock_sum:
@@ -410,7 +413,7 @@ class TestExitSummary:
     def test_exit_summary_failure_skips(self, tmp_path):
         assistant = _make_assistant(tmp_path)
         seg = _seg(seq=1, raw="今天讨论下半年目标预算")
-        assistant._process_segment(seg)
+        assistant._process_batch([seg])
         with patch.object(assistant, "_audio_loop", side_effect=KeyboardInterrupt), \
              patch.object(assistant._analyzer, "summarize", return_value=None) as mock_sum:
             assert assistant.run() == 0
@@ -424,3 +427,63 @@ class TestExitSummary:
              patch.object(assistant._analyzer, "summarize") as mock_sum:
             assert assistant.run() == 0
             mock_sum.assert_not_called()
+
+
+# ── Phase 1 新增：噪音门控 ──────────────────────────────
+
+class TestNoiseGate:
+    """_is_noise：拦截 ASR 幻觉/键盘噪音/英文碎片。"""
+
+    def test_repeating_char_detected(self):
+        from iris.assistant.live import MeetingLiveAssistant
+        assert MeetingLiveAssistant._is_noise("不不不不不不不不不不不")
+        assert MeetingLiveAssistant._is_noise("据据据据据据据据据据据据")
+        assert MeetingLiveAssistant._is_noise("这这这这这这这这这")
+
+    def test_single_char_detected(self):
+        from iris.assistant.live import MeetingLiveAssistant
+        assert MeetingLiveAssistant._is_noise("有")
+        assert MeetingLiveAssistant._is_noise("呃")
+
+    def test_english_fragment_detected(self):
+        from iris.assistant.live import MeetingLiveAssistant
+        assert MeetingLiveAssistant._is_noise("yeah")
+        assert MeetingLiveAssistant._is_noise("OK")
+        assert MeetingLiveAssistant._is_noise("ststeteding")
+
+    def test_valid_chinese_passes(self):
+        from iris.assistant.live import MeetingLiveAssistant
+        assert not MeetingLiveAssistant._is_noise("今天讨论下半年目标")
+        assert not MeetingLiveAssistant._is_noise("好的感谢高明")
+        assert not MeetingLiveAssistant._is_noise("重质量检率统一")
+        assert not MeetingLiveAssistant._is_noise("iPhone17入仓战略")  # 混合中英文，合法
+
+    def test_empty_text_detected(self):
+        from iris.assistant.live import MeetingLiveAssistant
+        assert MeetingLiveAssistant._is_noise("")
+        assert MeetingLiveAssistant._is_noise("   ")
+
+
+# ── Phase 1 新增：累计区容量控制 ────────────────────────
+
+class TestCumulativeCap:
+    """MeetingState 累计列表上限 25，超限淘汰最旧条目。"""
+
+    def test_cap_enforced_on_key_points(self):
+        from iris.assistant.models import MeetingState
+        state = MeetingState()
+        # 添加 30 条不同要点
+        for i in range(30):
+            state._dedup_append(state.key_points, [f"要点{i}"])
+        assert len(state.key_points) == 25
+        # 最旧的 5 条被淘汰
+        assert "要点0" not in state.key_points
+        assert "要点29" in state.key_points  # 最新的保留
+
+    def test_dedup_before_cap(self):
+        from iris.assistant.models import MeetingState
+        state = MeetingState()
+        # 25 条去重后只有 1 条（不会被截断）
+        for _ in range(30):
+            state._dedup_append(state.key_points, ["同一个要点"])
+        assert len(state.key_points) == 1

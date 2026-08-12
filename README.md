@@ -1,10 +1,10 @@
-# Iris 3.24.3
+# Iris 3.26.0
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
 
-**v3.24.3** — [meeting-live-assistant 全面优化](CHANGELOG.md)（13 项 / 14 文件）：并发安全加固（`_futures` Lock + 超时 cancel + bare except 日志）· 信息完整性（丢弃段原文保留 + 总结头+尾截断 + few-shot Prompt）· 质量天花板（LLM 语义关闭待解决问题 + fuzzy dedup）· 工程卫生（AsrCorrector 公开 API + 结构化日志 + 段耗时元数据 + 面板统计）· 建议提问高温度独立生成 · 增量文档缓存 + 乐观并发批处理。协议版本 3.18（不变）。
+**v3.26.0** — [meeting-live-assistant 升级为「实时 AI 会议参谋」](CHANGELOG.md)：四层 12 项能力（防御层：噪音门控/容量控制/内容感知合并 · 理解层：话题检测+去重/决策置信度/冲突检测 · 交互层：洞察推送/热键 · 沉淀层：议程注入/待办提取/按话题文档）+ 说话人区分全模块（SpeakerLabel + VAD 间隙门控 + LLM 后验 + per-speaker 上下文）+ 核心修复（VAD 尾部丢失 40ms 帧切片、LLM 降级链 deadline 压入 timeout + 熔断器阈值 2）。测试 2,858 全通过。协议版本 3.19（不变）。产品版本 3.24.3→**3.26.0**。
 
 **v3.24.2** — asr-corrector 写回修正：full 模式跳过词典写回仅 LLM 最终结果一次输出（消除两次写回闪烁）；取消 Cmd+A 全选覆盖、全场景恢复逐字符 Delete 删除（Cmd+A 跨 App 不可靠导致原文残留+校正追加=文本重复）。协议版本 3.18（不变）。
 
@@ -105,7 +105,7 @@ python scripts/run_cli.py daily-start
 | 提醒 | `reminders` | 主动提醒：栏目断供 / 成员周报缺失 / 项目停滞（零 LLM 成本，daily-start 已集成） |
 | 系统 | `daily-start`, `check-config`, `status`, `diagnose` | 日常维护（含图谱增量刷新）/ 配置检查 |
 | ASR 校正 | `asr-corrector`, `asr-audit`, `asr-report` | vocotype 实时语音转写纠错润色（[使用指南](docs/asr-corrector-usage.md)） |
-| 会议助理 | `meeting-live-assistant` | 实时会议助理：逐段提炼要点/风险/决策点 + 提示关键提问 + 过程文档（[使用指南](docs/meeting-live-assistant-usage.md) · [方案设计](docs/meeting-live-assistant-design.md)） |
+| 会议助理 | `meeting-live-assistant` | 实时 AI 会议参谋：本地麦克风转写（FunASR）+ 逐段提炼要点/风险/决策/建议提问 + 话题追踪 + 说话人区分 + 洞察推送 + 热键 + 按话题过程文档（[使用指南](docs/meeting-live-assistant-usage.md) · [方案设计](docs/meeting-live-assistant-design.md)） |
 
 ## 知识库结构
 

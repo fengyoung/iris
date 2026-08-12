@@ -52,7 +52,7 @@ class TestRender:
         assert "## 🎙 段 1（12:01:01）" in content
         assert "**校正文本**：讨论内容" in content
         assert "**要点**：要点A" in content
-        assert "**决策点**：决策X" in content
+        assert "决策X" in content  # 决策文本（含置信度图标 💬）
         assert "**建议提问**：追问？" in content
         assert "**风险**：" not in content  # 空字段不输出
 

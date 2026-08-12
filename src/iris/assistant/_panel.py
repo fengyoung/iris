@@ -65,6 +65,7 @@ class PanelDisplay:
     seg: Optional[VoiceSegment] = None
     analysis_unavailable: bool = False      # LLM 降级标记
     state: Optional[MeetingState] = None
+    topic: str = ""                         # v3.25.3 当前话题标签
 
 
 def _wrap(text: str, width: int) -> list[str]:
@@ -108,7 +109,7 @@ def _bold(text: str) -> str:
 
 
 class PanelRenderer:
-    """整帧渲染；内部锁保证多线程下帧内容不交错。日志走 stderr 互不污染。"""
+    """整帧渲染 + 洞察推送区；内部锁保证多线程下帧内容不交错。"""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -116,9 +117,9 @@ class PanelRenderer:
 
     # ── 公开接口 ──────────────────────────────────────────
 
-    def render(self, display: PanelDisplay) -> None:
+    def render(self, display: PanelDisplay, feed: object = None) -> None:
         with self._lock:
-            sys.stdout.write(_CLEAR + self._build(display))
+            sys.stdout.write(_CLEAR + self._build(display, feed))
             sys.stdout.flush()
 
     def render_final(self, state: MeetingState, doc_path: Path) -> None:
@@ -143,6 +144,9 @@ class PanelRenderer:
             f"  ·  风险 {len(state.risks)}  ·  待解决 {len(state.open_questions)}", w))
         if state.dropped_count:
             lines.append(_fill_line(f"积压丢弃 {state.dropped_count} 段", w))
+        if state.speakers:
+            sp_parts = [f'{s["id"]}({s["segments"]}段)' for s in state.speakers[:5]]
+            lines.append(_fill_line("发言：" + " · ".join(sp_parts), w))
         lines.append(_fill_line(
             f"会议总结 {'✅ 已生成' if state.summary else '— 未生成'}", w))
         lines.append(_fill_line(_dim(str(doc_path)), w))
@@ -154,19 +158,20 @@ class PanelRenderer:
 
     # ── 帧渲染 ────────────────────────────────────────────
 
-    def _build(self, d: PanelDisplay) -> str:
+    def _build(self, d: PanelDisplay, feed: object = None) -> str:
         w = self._w
         cw = w - 4  # 内容宽度
         state = d.state
         seg_count = len(state.segments) if state else 0
         dropped = state.dropped_count if state else 0
 
-        # 标题行（CJK 感知宽度）
+        # 标题行（CJK 感知宽度）—— v3.25.3 话题标签
+        topic_label = f"📌 {d.topic} · " if d.topic else ""
         if seg_count == 0:
-            title = "实时会议助理 · 等待语音…"
+            title = f"{topic_label}实时会议助理 · 等待语音…"
         else:
             drop_part = f" · 丢 {dropped}" if dropped else ""
-            title = f"实时会议助理 · {seg_count} 段{drop_part}"
+            title = f"{topic_label}实时会议助理 · {seg_count} 段{drop_part}"
         title_dw = _display_width(title)
         pad_right = w - 2 - title_dw - 2  # ╔╗ + 两边空格
         if pad_right > 0:
@@ -183,8 +188,12 @@ class PanelRenderer:
 
             # 状态后缀
             suffix_parts = [f"{timestamp} · {char_count} 字"]
+            if d.seg.speaker and d.seg.speaker.speaker_id:
+                suffix_parts.append(d.seg.speaker.speaker_id)
             if d.seg.analysis_status == VoiceSegment.ANALYSIS_SKIPPED:
                 suffix_parts.append("⏭ 跳过分析")
+            elif d.seg.analysis_status == VoiceSegment.ANALYSIS_MERGED:
+                suffix_parts.append("🔗 合并分析")
             elif d.analysis_unavailable:
                 suffix_parts.append("⚠ 分析不可用")
             elif d.seg.analysis is None:
@@ -207,7 +216,9 @@ class PanelRenderer:
                 if a.key_points:
                     tags.append("✦ " + " · ".join(a.key_points[:3]))
                 if a.decisions:
-                    tags.append("✔ " + " · ".join(a.decisions[:3]))
+                    conf_icon = {"confirmed": "✅", "proposed": "💬", "tentative": "❓"}
+                    d_parts = [f"{conf_icon.get(d.confidence, '')}{d.text}" for d in a.decisions[:3]]
+                    tags.append(" · ".join(d_parts))
                 if a.risks:
                     tags.append("⚠ " + " · ".join(a.risks[:2]))
                 if a.questions:
@@ -216,9 +227,10 @@ class PanelRenderer:
                     combined = "  ".join(tags)
                     for line in _wrap(combined, cw):
                         lines.append(_fill_line(line, w))
-                # 建议提问 — 单独一行高亮
+                # 建议提问 — 间隔线 + 高亮
                 if a.suggested_questions:
-                    sq = "💡 追问：" + "  ·  ".join(a.suggested_questions[:3])
+                    lines.append(_fill_line(_dim(" ── 追问 ──"), w))
+                    sq = "💡 " + "  ·  ".join(a.suggested_questions[:3])
                     for line in _wrap(sq, cw):
                         lines.append(_fill_line(line, w))
             elif d.seg.analysis_status == VoiceSegment.ANALYSIS_SKIPPED:
@@ -231,6 +243,13 @@ class PanelRenderer:
             # 等待语音
             lines.append(_fill_line("", w))
             lines.append(_fill_line("正在聆听…（说完自动识别，Ctrl+C 退出）", w))
+
+        # ── 洞察推送区（v3.25.3）──
+        if feed is not None and not feed.empty:
+            lines.append(_fill_line("", w))
+            lines.append(_fill_line("─" * 4 + " 洞察推送 " + "─" * (cw - 10), w))
+            for evt_line in feed.render_lines(cw):
+                lines.append(_fill_line(evt_line, w))
 
         # 累计统计行（紧凑一行）
         lines.append(_fill_line("", w))
