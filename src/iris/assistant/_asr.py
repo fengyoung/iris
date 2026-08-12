@@ -44,14 +44,8 @@ class ASREngine:
         self._punc_session, self._punc_char_to_id = self._init_punc_model(model_dir)
 
     def _init_model(self):
-        import logging as _logging
         from funasr import AutoModel
         _logger.info("加载 Paraformer 模型…")
-        # 抑制 funasr 的热词解析 INFO 日志（618 词全量打印泄露隐私+噪音）
-        for _name in ("funasr", "funasr.models.contextual_paraformer",
-                       "funasr.models.contextual_paraformer.model",
-                       "modelscope"):
-            _logging.getLogger(_name).setLevel(_logging.WARNING)
         model = AutoModel(model=_MODEL_ID, device=self._device, disable_pbar=True)
         _logger.info("Paraformer 就绪（热词 %d 字）", len(self._hotwords))
         return model
@@ -111,6 +105,11 @@ class ASREngine:
             return None
         rms = float(np.sqrt(np.mean(total.astype(np.float64) ** 2)))
         _logger.info("🎙 转写中… (%.1fs, RMS=%.4f)", speech_len, rms)
+        # 临时屏蔽 funasr 的热词 INFO 日志（直写 root logger，绕过了子 logger）
+        import logging as _logging
+        _root = _logging.getLogger()
+        _prev_level = _root.level
+        _root.setLevel(_logging.WARNING)
         try:
             result = self._model.generate(
                 input=total.flatten(),
@@ -121,6 +120,8 @@ class ASREngine:
             _logger.warning("ASR 转写异常: %s", e)
             self._buffer = []
             return None
+        finally:
+            _root.setLevel(_prev_level)
         self._buffer = []
         if result and result[0].get("text"):
             text = result[0]["text"].strip()

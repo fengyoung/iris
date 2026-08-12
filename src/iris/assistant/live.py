@@ -36,7 +36,7 @@ _logger = logging.getLogger(__name__)
 # 模块加载时即添加控制台 handler + 提升日志级别。
 # 只加到父 logger（子 logger 通过 propagation 继承），避免重复输出。
 _console = logging.StreamHandler()
-_console.setLevel(logging.DEBUG)
+_console.setLevel(logging.INFO)
 _console.setFormatter(logging.Formatter("[Iris] %(message)s"))
 _iris_logger = logging.getLogger("iris.assistant")
 _iris_logger.setLevel(logging.INFO)
