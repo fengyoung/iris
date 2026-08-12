@@ -56,6 +56,29 @@ class TestRender:
         assert "**建议提问**：追问？" in content
         assert "**风险**：" not in content  # 空字段不输出
 
+    def test_mini_summaries_rendered_in_linear(self):
+        """v3.26.1 阶段性总结渲染（线性文档）。"""
+        state = _state_with([])
+        state.mini_summaries = ["[12:15] 当前讨论核心是搜索体验优化", "[12:30] 转向 AI 巡检"]
+        content = DocWriter.render(state)
+        assert "## 📌 阶段性总结（会议中自动生成）" in content
+        assert "- [12:15] 当前讨论核心是搜索体验优化" in content
+        assert "- [12:30] 转向 AI 巡检" in content
+
+    def test_mini_summaries_empty_not_rendered(self):
+        """无阶段性总结时不输出该区。"""
+        content = DocWriter.render(_state_with([]))
+        assert "阶段性总结" not in content
+
+    def test_mini_summaries_rendered_in_topic_structured(self):
+        """v3.26.1 阶段性总结渲染（话题结构化文档，退出 force 形态）。"""
+        state = _state_with([_seg(1, analysis=SegmentAnalysis(key_points=["A"]))])
+        state.update_topic("话题A", True, "讨论话题A", 1)  # 构造 topics → 走话题渲染
+        state.mini_summaries = ["[12:15] 当前讨论核心是搜索体验优化"]
+        content = DocWriter.render(state)
+        assert "## 📌 阶段性总结（会议中自动生成）" in content
+        assert "- [12:15] 当前讨论核心是搜索体验优化" in content
+
     def test_segment_analysis_unavailable(self):
         content = DocWriter.render(_state_with([_seg(1, analysis=None)]))
         assert "**分析**：⚠ 分析不可用" in content

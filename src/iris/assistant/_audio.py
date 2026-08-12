@@ -23,11 +23,13 @@ class AudioCapture:
 
     v3.25.1 增加设备热插拔容错：连续错误回调标记 _device_lost，
     read() 检测到设备丢失时日志告警，避免静默无输出。
+    v3.26.1 设备丢失后每 5s 自动尝试重新连接到默认输入设备。
     """
 
     SAMPLE_RATE = 16000   # 16kHz
     BLOCK_SIZE = 640      # 40ms @ 16kHz
     _MAX_CONSECUTIVE_ERRORS = 50  # 连续错误阈值（≈2s @ 40ms/帧）
+    _RECONNECT_INTERVAL = 5.0     # 设备重连尝试间隔（秒）
 
     def __init__(self, sample_rate: int = 16000):
         import sounddevice as sd  # noqa: F811 — 延迟导入，剪贴板模式不需要
@@ -37,6 +39,8 @@ class AudioCapture:
         self._buffer: list[np.ndarray] = []
         self._consecutive_errors = 0
         self._device_lost = False
+        self._device_lost_warned = False
+        self._last_reconnect_attempt = 0.0
 
     # ── 公开接口 ──────────────────────────────────────────
 
@@ -72,11 +76,19 @@ class AudioCapture:
         """取走缓冲区内所有音频帧，返回合并后的 float32 数组。
 
         无新数据时返回 None（调用方自行 sleep 后重试）。
-        设备丢失时日志告警一次（避免洪水日志）。
+        设备丢失时日志告警一次 + 周期性自动重连尝试。
         """
         if self._device_lost:
-            _logger.warning("⚠ 音频设备已断开，请检查麦克风连接")
-            self._device_lost = False  # 重置，允许恢复后重新检测
+            if not self._device_lost_warned:
+                _logger.warning("⚠ 音频设备已断开，将自动尝试重连…")
+                self._device_lost_warned = True
+            now = time.monotonic()
+            if now - self._last_reconnect_attempt > self._RECONNECT_INTERVAL:
+                self._last_reconnect_attempt = now
+                try:
+                    self._reconnect()
+                except Exception as e:
+                    _logger.warning("设备重连失败: %s", e)
         if not self._buffer:
             return None
         data = np.concatenate(self._buffer)
@@ -92,6 +104,35 @@ class AudioCapture:
             self._stream.close()
             self._stream = None
             _logger.info("麦克风已停止")
+
+    def _reconnect(self) -> None:
+        """尝试重新连接到默认输入设备（v3.26.1 热插拔恢复）。"""
+        if self._stream is not None:
+            try:
+                self._stream.stop()
+                self._stream.close()
+            except Exception:
+                pass
+            self._stream = None
+        try:
+            self._stream = self._sd.InputStream(
+                samplerate=self._sample_rate,
+                channels=1,
+                dtype=np.float32,
+                blocksize=self.BLOCK_SIZE,
+                callback=self._on_audio,
+            )
+            self._stream.start()
+            self._device_lost = False
+            self._device_lost_warned = False
+            self._consecutive_errors = 0
+            # 清空可能残留的旧缓冲区
+            self._buffer = []
+            _logger.info("✅ 已重新连接到音频设备")
+        except Exception:
+            # 重连失败，保持 _device_lost 状态等待下次重试
+            self._stream = None
+            raise
 
     # ── 回调 ──────────────────────────────────────────────
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -47,6 +48,7 @@ class ASREngine:
     _MAX_BUFFER_SAMPLES = int(SAMPLE_RATE * 30)
     _SILENCE_FRAMES = 35   # 35 帧 × 40ms = 1.4s 静音触发切段（v3.25.1 从 15 放宽）
     _NOISE_FLOOR_ALPHA = 0.02
+    _MAX_CONSECUTIVE_FAILURES = 3  # 连续 ASR 失败阈值，超限触发模型重初始化
 
     _PUNC_LABEL_MAP = {0: "", 1: "", 2: "，", 3: "。", 4: "？", 5: "！"}
 
@@ -57,10 +59,14 @@ class ASREngine:
         self._base_threshold = energy_threshold
         self._noise_floor = 0.0
         self._buffer: list[np.ndarray] = []
+        self._buffer_total = 0            # 增量追踪 buffer 总样本数（v3.26.1 O(n²)→O(1)）
         self._silence_count = 0
         self._is_speaking = False
         self._speech_start_frame = 0
         self._total_frames = 0
+        self._consecutive_failures = 0  # ASR 连续失败计数（成功时重置）
+        self._reinit_attempted = False   # 防止重复尝试重初始化（失败后不再重试）
+        self._last_speech_at = time.monotonic()  # 初始化时允许噪声地板自适应（v3.26.1）
         self._model = self._init_model()
         self._punc_session, self._punc_char_to_id = self._init_punc_model(model_dir)
 
@@ -132,19 +138,24 @@ class ASREngine:
     def _feed_frame(self, audio: np.ndarray) -> Optional[str]:
         """单帧（40ms）VAD 判定。原 feed 逐帧逻辑。"""
         rms = float(np.sqrt(np.mean(audio.astype(np.float64) ** 2)))
-        if rms < 0.05:
+        # v3.26.1: 长时间静音（>30s）时冻结噪声地板，防止环境噪声逐渐抬升阈值
+        _NOISE_FREEZE_SEC = 30.0
+        if rms < 0.05 and (time.monotonic() - self._last_speech_at) < _NOISE_FREEZE_SEC:
             self._noise_floor = (self._NOISE_FLOOR_ALPHA * rms +
                                  (1 - self._NOISE_FLOOR_ALPHA) * self._noise_floor)
         threshold = self._effective_threshold
         self._total_frames += 1
 
         if rms > threshold:
+            self._last_speech_at = time.monotonic()  # 追踪最后语音时刻
             if not self._is_speaking:
                 self._is_speaking = True
                 self._speech_start_frame = self._total_frames
                 self._buffer = []
+                self._buffer_total = 0
             self._silence_count = 0
             self._buffer.append(audio)
+            self._buffer_total += len(audio)
             # 连续说话超过 15s 也强制切段（此前仅在静音分支检查，连续说话永不触发）
             speech_duration = (self._total_frames - self._speech_start_frame) * 0.04
             if speech_duration > 15:
@@ -153,17 +164,20 @@ class ASREngine:
         elif self._is_speaking:
             self._silence_count += 1
             self._buffer.append(audio)
+            self._buffer_total += len(audio)
             speech_duration = (self._total_frames - self._speech_start_frame) * 0.04
             if self._silence_count >= self._SILENCE_FRAMES or speech_duration > 15:
                 self._is_speaking = False
                 return self._transcribe()
 
-        total_len = sum(len(b) for b in self._buffer)
-        if total_len > self._MAX_BUFFER_SAMPLES:
-            # 从头部丢弃整块，直到总样本数 ≤ 上限（避免按样本索引切片
-            # 把块数当样本数用的 bug）
-            while self._buffer and sum(len(b) for b in self._buffer) > self._MAX_BUFFER_SAMPLES:
-                self._buffer.pop(0)
+        # v3.26.1: 使用增量追踪替代 sum(len(b) for b in self._buffer)（O(1)）
+        # 若 _buffer_total 与 buffer 不同步（直接操作 _buffer 时），回退到实际求和
+        if self._buffer_total <= 0 and self._buffer:
+            self._buffer_total = sum(len(b) for b in self._buffer)
+        if self._buffer_total > self._MAX_BUFFER_SAMPLES:
+            while self._buffer and self._buffer_total > self._MAX_BUFFER_SAMPLES:
+                dropped = self._buffer.pop(0)
+                self._buffer_total -= len(dropped)
         return None
 
     def _transcribe(self) -> Optional[str]:
@@ -173,6 +187,7 @@ class ASREngine:
         speech_len = len(total) / self.SAMPLE_RATE
         if speech_len < 0.5:
             self._buffer = []
+            self._buffer_total = 0
             return None
         rms = float(np.sqrt(np.mean(total.astype(np.float64) ** 2)))
         _logger.info("🎙 转写中… (%.1fs, RMS=%.4f)", speech_len, rms)
@@ -184,10 +199,28 @@ class ASREngine:
                 batch_size_s=60,
             )
         except Exception as e:
-            _logger.warning("ASR 转写异常: %s", e)
+            self._consecutive_failures += 1
+            _logger.warning("ASR 转写异常 (%d/%d): %s",
+                           self._consecutive_failures, self._MAX_CONSECUTIVE_FAILURES, e)
             self._buffer = []
+            self._buffer_total = 0
+            if self._consecutive_failures >= self._MAX_CONSECUTIVE_FAILURES:
+                if not self._reinit_attempted:
+                    self._reinit_attempted = True
+                    _logger.error("ASR 连续失败 %d 次，尝试重新初始化模型…", self._consecutive_failures)
+                    try:
+                        self._model = self._init_model()
+                        self._consecutive_failures = 0
+                        self._reinit_attempted = False
+                        _logger.info("ASR 模型已重新初始化")
+                    except Exception as re_exc:
+                        _logger.critical("ASR 模型重初始化失败，请重启会议助理: %s", re_exc)
+                # 重初始化尝试过（成功或失败）后不再重复尝试
             return None
+        self._consecutive_failures = 0  # 成功转写，重置失败计数
+        self._reinit_attempted = False   # 允许未来的重试
         self._buffer = []
+        self._buffer_total = 0
         if result and result[0].get("text"):
             text = result[0]["text"].strip()
             if text:

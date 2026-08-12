@@ -78,20 +78,6 @@ class MeetingSession:
             self._pending = None
             return seg
 
-    def take_pending_if(self, seq: int) -> Optional[VoiceSegment]:
-        """原子检查 pending 的 seq 是否匹配，匹配则消费返回，不匹配返回 None。
-
-        用于 P4-13 乐观并发：worker 在消费段 N 后发现段 N+1 的预取 futures 已就绪，
-        通过本方法原子消费——若 N+1 在此期间被 N+2 覆盖（pending seq 不匹配），
-        返回 None 表示已过期，跳过处理。覆盖时的 dropped_count 递增已在 submit 完成。
-        """
-        with self._cond:
-            if self._pending is not None and self._pending.seq == seq:
-                seg = self._pending
-                self._pending = None
-                return seg
-            return None
-
     def request_stop(self) -> None:
         """请求停止：唤醒工作线程，在段边界退出。"""
         with self._cond:
@@ -125,7 +111,11 @@ class MeetingSession:
                         for sp in s.speakers[-4:]]
             parts.append("已识别说话人: " + " / ".join(sp_parts))
         block = "\n".join(parts)
-        if len(block) > max_chars:
+        # v3.26.1: 硬上限 3000 字符保护（防止累积项过多导致分析 prompt 过大）
+        _HARD_CAP = 3000
+        if len(block) > _HARD_CAP:
+            block = block[:_HARD_CAP // 2] + "\n…\n" + block[-_HARD_CAP // 2:]
+        elif len(block) > max_chars:
             block = block[:max_chars] + "…"
         return block
 
@@ -147,9 +137,9 @@ class MeetingSession:
         prev = [s for s in segments if s.seq < current_seq]
         if not prev:
             return ""
-        # 最多取 2 段，时间跨度 ≤ 30s
+        # 最多取 2 段，时间跨度 ≤ 30s（以当前真实时间为基准，v3.26.1 修正）
         recent = []
-        now = prev[-1].started_at
+        now = datetime.now()
         for s in reversed(prev):
             if len(recent) >= 2:
                 break

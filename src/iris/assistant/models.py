@@ -177,6 +177,7 @@ class VoiceSegment(BaseModel):
     analysis_done_at: Optional[float] = Field(default=None, description="分析完成时刻")
     speaker: SpeakerLabel = Field(default_factory=SpeakerLabel, description="说话人（LLM 后验）")
     speaker_change_signal: bool = Field(default=False, description="VAD 检测到可能切换")
+    forced_cut: bool = Field(default=False, description="v3.26.1 ASR 15s 强制切段（非自然停顿）")
 
 
 class MeetingState(BaseModel):
@@ -194,6 +195,8 @@ class MeetingState(BaseModel):
     dropped_texts: List[str] = Field(default_factory=list,
                                     description="被丢弃段的原文（最多 20 条，供事后追溯）")
     summary: str = Field(default="", description="退出时 AI 生成的会议总结（Markdown 文本）")
+    mini_summaries: list[str] = Field(default_factory=list,
+                                       description="v3.26.1 阶段性总结（每 15 分钟生成一次）")
     todos: List[str] = Field(default_factory=list, description="结构化待办（去重后）")
     # ── v3.25.3 话题追踪 ──
     current_topic: str = Field(default="", description="当前讨论的话题标签")
@@ -205,6 +208,7 @@ class MeetingState(BaseModel):
     _recent_claims: list = PrivateAttr(default_factory=list)  # list[(str, float)]
 
     _MAX_CUMULATIVE_ITEMS: ClassVar[int] = 25  # 每类累计项上限（防信息爆炸）
+    _MAX_SEGMENTS: ClassVar[int] = 5000         # 段数上限（超限自动合并旧段，v3.26.1）
     _FUZZY_THRESHOLD: ClassVar[float] = 0.85   # 编辑距离相似度阈值（≥0.85 视为重复）
     _FUZZY_MIN_LEN: ClassVar[int] = 8          # 短于此长度的文本仍用精确匹配
 
@@ -345,6 +349,16 @@ class MeetingState(BaseModel):
                 q for q in self.open_questions if q.strip() not in answered
             ]
         self.segments.append(segment)
+        # v3.26.1 段数上限保护：超限时合并最旧的 500 段为摘要段
+        if len(self.segments) > self._MAX_SEGMENTS:
+            old = self.segments[:500]
+            merged = " ".join(
+                s.corrected_text or s.raw_text for s in old if s.corrected_text or s.raw_text
+            )
+            self.segments = self.segments[500:]
+            if merged:
+                self._merged_archive = (getattr(self, '_merged_archive', '') +
+                                       f"\n[已归档前 500 段] {merged[:2000]}")
 
     def _remove_answered(self, resolved: List[str]) -> None:
         """移除被 LLM 标记为已回答的旧问题（fuzzy match，与 _dedup_append 同阈值）。"""
@@ -372,20 +386,22 @@ class AssistantConfig(BaseModel):
     output_dir: str = Field(default="", description="过程文档输出目录，空=默认 data/meeting-live/")
     top_k: int = Field(default=5, gt=0, description="知识库检索条数")
     llm_model: str = Field(default="", description="分析 LLM 模型，空=走全局路由")
-    poll_interval: float = Field(default=0.5, gt=0, description="剪贴板轮询间隔（秒）")
+    poll_interval: float = Field(default=0.5, gt=0,
+                                 description="[废弃·v3.25.0] 剪贴板轮询间隔，音频模式不使用")
     doc_rewrite_every: int = Field(default=1, gt=0, description="每 N 段重写文档（1=每段）")
     fast_only: bool = Field(default=False, description="仅词典校正模式：跳过所有 LLM（deep 校正/检索/分析）")
     short_segment_chars: int = Field(default=15, gt=0,
                                      description="短段门控：校正后短于该长度视为确认语，跳过 LLM 深度校正/检索/分析")
     max_segment_chars: int = Field(default=2000, gt=0,
-                                   description="单段长度上限（超长丢弃并警告，默认 2000 覆盖 120s 长语音场景）")
+                                   description="单段长度上限（超长截断并警告，默认 2000 覆盖 120s 长语音场景）")
     dedup_window_seconds: float = Field(default=30.0, ge=0,
-                                        description="相同文本去重窗口：窗口内重复不触发，超窗视为新段")
+                                        description="[废弃·v3.25.0] 剪贴板去重窗口，音频模式不使用")
     suggest_every: int = Field(default=3, gt=0,
                                description="建议提问生成间隔：每 N 段生成一次（省 token 减重复噪音）")
     summary_enabled: bool = Field(default=True, description="退出时生成 AI 会议总结（失败自动跳过）")
     agenda: str = Field(default="", description="预设议题（分号分隔），注入分析 prompt 并用于跑偏检测")
-    save_knowledge: bool = Field(default=False, description="退出时自动回写知识库（决策→Wiki/待办→Trello）")
+    save_knowledge: bool = Field(default=False,
+                                 description="[预留·v3.27.0] 退出时自动回写知识库（决策→Wiki/待办→Trello），当前版本不生效")
 
     @classmethod
     def from_app_config(cls, cfg: Dict[str, Any]) -> "AssistantConfig":

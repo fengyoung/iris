@@ -19,7 +19,11 @@ class DocWriter:
 
     原子写：同目录唯一名 .tmp + os.replace —— 进程中断时旧文件安全、tmp 残留无害。
     并发防御：实例 RLock 串行化 + tempfile 唯一 tmp 名 —— 即使出现并发写也不交错损坏。
+
+    v3.26.1: 连续写入失败追踪 + is_failing 公开属性，供面板告警。
     """
+
+    _MAX_CONSECUTIVE_FAILURES = 3  # 连续失败阈值，超限触发面板告警
 
     def __init__(self, path: Path, rewrite_every: int = 1):
         self._path = Path(path)
@@ -29,6 +33,14 @@ class DocWriter:
         self._lock = threading.RLock()
         # 增量写入缓存：段渲染块（按 seq 顺序），供增量追加与退出全量校验
         self._rendered_segments: list[str] = []
+        # v3.26.1 写入健康追踪
+        self._consecutive_failures = 0
+        self._total_failures = 0
+
+    @property
+    def is_failing(self) -> bool:
+        """连续写入失败是否达到告警阈值。"""
+        return self._consecutive_failures >= self._MAX_CONSECUTIVE_FAILURES
 
     @property
     def path(self) -> Path:
@@ -84,9 +96,19 @@ class DocWriter:
             ok = self._atomic_write(self._path, content)
         except Exception as e:
             _logger.warning("过程文档写入失败: %s", e)
+            self._consecutive_failures += 1
+            self._total_failures += 1
+            if self.is_failing:
+                _logger.error("⚠ 文档写入连续失败 %d 次（磁盘空间不足？）", self._consecutive_failures)
             return False
         if ok:
             self._last_segment_count = count
+            self._consecutive_failures = 0  # 成功则重置失败计数
+        else:
+            self._consecutive_failures += 1
+            self._total_failures += 1
+            if self.is_failing:
+                _logger.error("⚠ 文档写入连续失败 %d 次（磁盘空间不足？）", self._consecutive_failures)
         return ok
 
     def _assemble_from_cache(self, state: MeetingState) -> str:
@@ -94,6 +116,7 @@ class DocWriter:
         parts = self._render_header(state)
         parts.append("")
         parts.extend(self._render_cumulative(state))
+        parts.extend(self._render_mini_summaries(state))
         if state.summary:
             parts += ["", "## 📝 会议总结（AI 生成）", state.summary.strip()]
         parts.append("")
@@ -118,6 +141,7 @@ class DocWriter:
         parts = DocWriter._render_header(state)
         parts.append("")
         parts.extend(DocWriter._render_cumulative(state))
+        parts.extend(DocWriter._render_mini_summaries(state))
         if state.summary:
             parts += ["", "## 📝 会议总结（AI 生成）", state.summary.strip()]
         parts.append("")
@@ -191,6 +215,10 @@ class DocWriter:
             for r in state.risks[:10]:
                 parts.append(f"- {r}")
             parts.append("")
+        # 阶段性总结（v3.26.1）
+        parts.extend(DocWriter._render_mini_summaries(state))
+        if parts and parts[-1] != "":
+            parts.append("")
         # 会议总结
         if state.summary:
             parts += ["## 📝 会议总结（AI 生成）", state.summary.strip(), ""]
@@ -217,6 +245,18 @@ class DocWriter:
             "---",
             "",
             f"# 实时会议记录 {state.started_at:%Y-%m-%d %H:%M}",
+        ]
+
+    @staticmethod
+    def _render_mini_summaries(state: MeetingState) -> list[str]:
+        """v3.26.1 阶段性总结渲染（会议中每 15 分钟生成的轻量总结）。"""
+        if not state.mini_summaries:
+            return []
+        return [
+            "",
+            "## 📌 阶段性总结（会议中自动生成）",
+            *[f"- {s}" for s in state.mini_summaries],
+            "",
         ]
 
     @staticmethod

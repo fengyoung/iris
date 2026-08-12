@@ -131,6 +131,7 @@ class TestVAD:
         engine._is_speaking = True
         # 30s = 750 帧 @ 40ms/帧 = 480,000 samples
         engine._buffer = [np.zeros(500_000, dtype=np.float32)]
+        engine._buffer_total = 500_000  # v3.26.1 增量追踪
         engine.feed(_speech_frame(0.1))
         total = sum(len(b) for b in engine._buffer)
         assert total <= ASREngine._MAX_BUFFER_SAMPLES

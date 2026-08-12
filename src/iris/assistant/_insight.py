@@ -40,16 +40,44 @@ class InsightEvent:
 
 
 class InsightFeed:
-    """滚动推送历史（环形缓冲，最多 50 条；面板显示最近 8 条）。"""
+    """滚动推送历史（环形缓冲，最多 50 条；面板显示最近 8 条）。
+
+    v3.26.1: 支持暂停/恢复——暂停期间新事件进入 pending 队列（最多 20 条），
+    恢复时一次性刷入主队列，避免信息丢失。
+    """
 
     MAX_HISTORY = 50
     VISIBLE_LINES = 8
+    _MAX_PENDING = 20  # 暂停期间最多保留的待刷入事件
 
     def __init__(self):
         self._events: list[InsightEvent] = []
+        self._paused: bool = False
+        self._pending: list[InsightEvent] = []
+
+    @property
+    def paused(self) -> bool:
+        return self._paused
+
+    def toggle_pause(self) -> bool:
+        """切换暂停状态；恢复时刷入 pending 事件。返回新的暂停状态。"""
+        self._paused = not self._paused
+        if not self._paused and self._pending:
+            for evt in self._pending:
+                self._events.append(evt)
+            self._pending.clear()
+            # 超容量时保留最新
+            if len(self._events) > self.MAX_HISTORY:
+                self._events = self._events[-self.MAX_HISTORY:]
+        return self._paused
 
     def push(self, event: InsightEvent) -> None:
-        """追加一条洞察。超过容量时淘汰最旧的。"""
+        """追加一条洞察。暂停时进入 pending 队列；超过容量时淘汰最旧的。"""
+        if self._paused:
+            self._pending.append(event)
+            if len(self._pending) > self._MAX_PENDING:
+                self._pending = self._pending[-self._MAX_PENDING:]
+            return
         self._events.append(event)
         if len(self._events) > self.MAX_HISTORY:
             self._events = self._events[-self.MAX_HISTORY:]

@@ -1,4 +1,4 @@
-# Iris 3.25.0 — 项目执行说明
+# Iris 3.26.1 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -9,7 +9,7 @@
 
 ### 当前规模
 
-~35,000 行 / 166 文件 / 26 模块 · CLI 65 命令 · 单元测试 2,858（139 文件）· 覆盖率 62%+ · 10 个项目级 Skill · Wiki 222 页 · 知识图谱节点 220 / 关系边 1,858（wikilink 1,225 + LLM 633） · 数据源 822 文档 / 5,939 Chunk（text-embedding-v3 / 1,024 维）
+~35,000 行 / 166 文件 / 26 模块 · CLI 65 命令 · 单元测试 2,852（139 文件）· 覆盖率 62%+ · 10 个项目级 Skill · Wiki 222 页 · 知识图谱节点 220 / 关系边 1,858（wikilink 1,225 + LLM 633） · 数据源 822 文档 / 5,939 Chunk（text-embedding-v3 / 1,024 维）
 
 **近期新增能力**：实时会议助理（`assistant/`，逐段提炼要点/风险/决策点 + 实时提示关键提问 + 过程文档）· YAML frontmatter 标准化注入（`core/frontmatter.py`）· 批量 frontmatter 补全（`core/frontmatter_batch.py`，正则+LLM+wikilink+备份恢复）· wikilink 自动注入引擎（`wiki/wikilink_injector.py`，零 LLM 成本）· LLM 用量追踪（SQLite WAL + embedding 纳入）· LLM 响应缓存 + embedding 向量缓存（LRU + TTL）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（`memory_updater.py` + `session_miner.py`，双通道架构）· 多 Agent 并发安全（FileLock + SQLite WAL + Agent 隔离）· ASR 实时校正引擎（Aho-Corasick + LLM 编辑助手 + 反馈反向优化）· CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit · constraints.txt 可复现构建
 
@@ -122,8 +122,8 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.25.0 | 软件发布版本 |
-| **协议版本** | `src/iris/__init__.py` | 3.18 | CLI 命令集 / agent-spec 格式 |
+| **产品版本** | `pyproject.toml` | 3.26.1 | 软件发布版本 |
+| **协议版本** | `src/iris/__init__.py` | 3.19 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.5 | 配置文件 Schema |
 
 > 只有真正发生变化的层才递增版本号。
@@ -143,9 +143,9 @@ iris3/
 ├── src/iris/          # 26 模块（见下）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
-├── tests/             # 2,713 用例，138 文件
-│   ├── unit/          #   纯逻辑单元测试（1,362 用例，<10s）
-│   └── integration/   #   集成测试（239 用例）
+├── tests/             # 2,852 用例，139 文件
+│   ├── unit/          #   纯逻辑单元测试（1,498 用例，<10s）
+│   └── integration/   #   集成测试（240 用例）
 ├── config/            # *.json gitignored，*.example 版本控制
 ├── data/              # 运行时数据（全 gitignore）
 ├── .claude/skills/    # 项目级 Skill（10 个）
@@ -155,7 +155,7 @@ iris3/
 └── pyproject.toml · README · CLAUDE · CHANGELOG.md
 ```
 
-**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配/共享线程池）· `memory`（记忆 6 子模块：含 `session_miner.py` 会话模式挖掘）· `qa`（检索问答+图谱注入+`memory_updater.py` 双通道记忆提取）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF+BM25缓存）· `wiki`（Wiki 体系 + backlink/graph + ASR 校正引擎，最大模块；`wiki/asr/` 含 corrector/coverage/feedback/prompt_optimizer/_progress 等 10 个子模块）· `feed`（信息汇聚管道：飞书聊天记录→话题检测→简报生成，11 文件 / 9 命令）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估 + 引用解析）· `complex_input`（多模态三阶段：图片/PDF/DOCX/VIDEO）· `output`（格式化+DOCX）· `assistant`（实时会议助理：剪贴板采集+校正+检索+逐段分析+面板/文档，9 文件）· `app/cli`（65 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py / shared.py）· `trello`（看板）。
+**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配/共享线程池）· `memory`（记忆 6 子模块：含 `session_miner.py` 会话模式挖掘）· `qa`（检索问答+图谱注入+`memory_updater.py` 双通道记忆提取）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF+BM25缓存）· `wiki`（Wiki 体系 + backlink/graph + ASR 校正引擎，最大模块；`wiki/asr/` 含 corrector/coverage/feedback/prompt_optimizer/_progress 等 10 个子模块）· `feed`（信息汇聚管道：飞书聊天记录→话题检测→简报生成，11 文件 / 9 命令）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估 + 引用解析）· `complex_input`（多模态三阶段：图片/PDF/DOCX/VIDEO）· `output`（格式化+DOCX）· `assistant`（实时 AI 会议参谋：本地音频 ASR+校正+检索+批量分析+话题/说话人+洞察推送+面板/文档，12 文件）· `app/cli`（65 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py / shared.py）· `trello`（看板）。
 
 ---
 
@@ -167,7 +167,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.26.0 (2026-08-12)** — meeting-live-assistant 升级为「实时 AI 会议参谋」（12 项能力 + 说话人区分 + 核心修复）：① 防御层 — 噪音门控 `_is_noise`（复读/英文碎片拦截）、累计区容量控制（25 条上限+语义去重）、内容感知合并（短段 6s 窗口）；② 理解层 — 话题边界检测（LLM 输出 topic + 2-gram 去重防碎片化）、决策置信度（✅确认/💬提议/❓待定）、语义冲突检测（双向否定保守判定）、结论持久化；③ 交互层 — 实时洞察推送（`_insight.py` 决策/话题/风险/冲突/待办/说话人滚动推送）、热键交互（?dtaq，select 非阻塞）；④ 沉淀层 — 议程注入+跑偏提醒、结构化待办（TodoItem）、按话题文档（概览→话题卡→汇总→附录折叠）；⑤ 说话人区分 — SpeakerLabel + VAD 间隙门控（0.8s/2.0s 不跨人合并）+ per-speaker 校正上下文 + LLM 后验判定（历史注入跨批一致）；⑥ 核心修复 — VAD 尾部丢失（feed 40ms 帧切片，修复整块 RMS 稀释）、LLM 降级链（deadline 压入 HTTP timeout + 超时后继续尝试 + 熔断器阈值 2）、话题状态机/冲突误报/批量 wait。验证：全量 2,858 通过，ruff 零告警。协议版本 3.19（不变）。产品版本 3.24.3→**3.26.0**（补齐 3.25.0 未同步的 pyproject 快照）。
+**当前 v3.26.1 (2026-08-12)** — meeting-live-assistant 深度审查后全量优化（29 项四阶段 + 3 项评估修复 / 12 文件 / +5 测试）：① P0 可用性 — ASR 连续失败自动重初始化（阈值 3 + 防重复重试）、`s` 热键真正暂停/恢复洞察推送（暂停期事件入 pending 队列最多 20 条，恢复刷入）、面板 LLM 处理阶段指示（prefetch/analyze + 系统告警区）、文档写入失败连续告警（3 次触发面板提示磁盘空间）；② P1 体验/健壮性 — 面板宽度每帧动态计算（终端缩放自适应）、音频电平 VU 条（🎤 可视化）、USB 麦克风热插拔自动重连（5s 间隔）、超长会议保护（5000 段自动归档 + summary_for_prompt 3000 字符硬上限）、删除 `_clipboard.py` 遗留（音频模式废弃，poll_interval/dedup_window 标注废弃）、`adjacent_context` 时间基准修正（改用真实当前时间）；③ P2 能力/清理 — 建议提问事件驱动触发（tentative 决策/新问题 + 统一节流 ≥suggest_every 防高频 LLM）、批内多说话人切换强化提示、热词总长校验（10000 字符截断）、长时间静音噪声地板冻结（30s 防阈值漂移）、空会议自动清理（仅自动生成路径）、移除 `take_pending_if` 死代码、`max_segment_chars` 音频模式实际生效（截断+警告）；④ P3 工程完善 — buffer 溢出 O(n²)→O(1) 增量追踪、键盘监听捕获 stdin 关闭 ValueError、面板会议时长显示、每 15 分钟增量阶段性总结（`mini_summarize` + 时间戳 + 文档「阶段性总结」区可见化）、`m` 热键手动标记话题边界（注入分析 prompt）、长段 `forced_cut` 连续发言标注、混合文本噪音判定（cjk≤2 且占比<10%）；⑤ 评估修复 — 删除 `_collect_deep_retrieval` 死代码（v3.25.2 批量重构遗留）、事件驱动建议统一节流、`mini_summaries` 渲染进线性/话题/增量三种文档形态（原生成即丢失）。验证：assistant 专项 178（+5）全过，全量 unit 1,428 全过，ruff 零告警。协议版本 3.19（不变）。产品版本 3.26.0→**3.26.1**。
+
+**v3.26.0 (2026-08-12)** — meeting-live-assistant 升级为「实时 AI 会议参谋」（12 项能力 + 说话人区分 + 核心修复）：① 防御层 — 噪音门控 `_is_noise`（复读/英文碎片拦截）、累计区容量控制（25 条上限+语义去重）、内容感知合并（短段 6s 窗口）；② 理解层 — 话题边界检测（LLM 输出 topic + 2-gram 去重防碎片化）、决策置信度（✅确认/💬提议/❓待定）、语义冲突检测（双向否定保守判定）、结论持久化；③ 交互层 — 实时洞察推送（`_insight.py` 决策/话题/风险/冲突/待办/说话人滚动推送）、热键交互（?dtaq，select 非阻塞）；④ 沉淀层 — 议程注入+跑偏提醒、结构化待办（TodoItem）、按话题文档（概览→话题卡→汇总→附录折叠）；⑤ 说话人区分 — SpeakerLabel + VAD 间隙门控（0.8s/2.0s 不跨人合并）+ per-speaker 校正上下文 + LLM 后验判定（历史注入跨批一致）；⑥ 核心修复 — VAD 尾部丢失（feed 40ms 帧切片，修复整块 RMS 稀释）、LLM 降级链（deadline 压入 HTTP timeout + 超时后继续尝试 + 熔断器阈值 2）、话题状态机/冲突误报/批量 wait。验证：全量 2,858 通过，ruff 零告警。协议版本 3.19（不变）。产品版本 3.24.3→**3.26.0**（补齐 3.25.0 未同步的 pyproject 快照）。
 
 **v3.24.3 (2026-08-11)** — meeting-live-assistant 全面优化（14 项 / 14 文件）：① 并发安全加固 — `_futures` 显式 Lock 保护 + 超时 future cancel 释放线程池槽位 + bare except 加 exc_info 日志；② 信息完整性 — 积压丢弃段原文保留到 `<details>` 附录 + 总结截断改头+尾策略（保留开场背景与最新结论）+ 分析 Prompt few-shot 示例；③ 质量天花板 — LLM 语义关闭待解决问题（`resolved_questions` + fuzzy match）+ `_dedup_append` SequenceMatcher 模糊去重（≥0.85）；④ 工程卫生 — AsrCorrector 公开 `push_context()` + 结构化 logging（双输出）+ 段耗时元数据 + 面板 LLM 统计；⑤ 建议提问高温度独立生成（t=0.5）+ `meeting_live_suggest.md`；⑥ 性能架构 — DocWriter 增量渲染缓存（O(1)）+ 乐观并发批处理（双段并发分析）；⑦ 遗留修复 — finally 块 `signal(SIGINT, SIG_IGN)` 防二次 Ctrl+C 穿透清理（与 asr-corrector 同模式）。验证：全量 2,762 通过，ruff 零告警。协议版本 3.18（不变）。产品版本 3.24.2→3.24.3。
 

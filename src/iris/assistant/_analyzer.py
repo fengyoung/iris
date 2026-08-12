@@ -195,6 +195,42 @@ class SegmentAnalyzer:
         except Exception:
             return []  # 失败静默降级，保留主分析的 suggested_questions
 
+    def mini_summarize(self, state: Any) -> Optional[str]:
+        """v3.26.1 阶段性迷你总结（轻量 prompt，max_tokens=200，8s deadline）。
+        失败静默降级返回 None。"""
+        if not self._llm:
+            return None
+        parts = []
+        if state.key_points:
+            parts.append("要点: " + "；".join(state.key_points[-10:]))
+        if state.decisions:
+            parts.append("决策: " + "；".join(state.decisions[-5:]))
+        if state.current_topic:
+            parts.append(f"当前话题: {state.current_topic}")
+        context = "\n".join(parts) or "（暂无）"
+        prompt = (
+            "你是会议实时参谋。根据以下会议进展，用 2-3 句话总结当前讨论的核心议题和关键进展。\n"
+            f"会议状态：\n{context}\n"
+            "输出纯文本（不要 markdown 标记，不要编号）。"
+        )
+        try:
+            result = self._llm.generate(
+                prompt,
+                route_context={
+                    "task_type": "meeting_summary",
+                    "input_type": "text",
+                },
+                temperature=0.1,
+                max_tokens=200,
+                max_retries=0,
+                extra_body={"thinking": {"type": "disabled"}},
+                _deadline=time.monotonic() + 8.0,
+            )
+            text = (result.text or "").strip()
+            return text or None
+        except Exception:
+            return None
+
     @staticmethod
     def _normalize(data: Any) -> Dict[str, Any]:
         """容错归一化：非 dict → 空；字段缺失/非 list → 空列表；元素非 str → str()。

@@ -112,6 +112,18 @@ def _load_assistant_data(asr_cfg: AsrConfig) -> tuple[dict, str]:
                 lines = [ln.strip() for ln in path.read_text(encoding="utf-8").splitlines()
                          if ln.strip()]
                 hotwords = " ".join(lines)
+                # v3.26.1: 热词总长校验
+                _MAX_HOTWORDS_CHARS = 10000
+                if len(hotwords) > _MAX_HOTWORDS_CHARS:
+                    _logger.warning("热词过长（%d 字符），截断到 %d 字符", len(hotwords), _MAX_HOTWORDS_CHARS)
+                    truncated: list[str] = []
+                    current = 0
+                    for line in lines:
+                        if current + len(line) + 1 > _MAX_HOTWORDS_CHARS:
+                            break
+                        truncated.append(line)
+                        current += len(line) + 1
+                    hotwords = " ".join(truncated)
             except Exception as e:
                 _logger.warning("热词文件加载失败: %s", e)
         else:
@@ -200,11 +212,13 @@ class MeetingLiveAssistant:
         # 输出路径：--output > assistant.output_dir > data/meeting-live/
         if output_path:
             self._doc_path = Path(output_path).expanduser()
+            self._doc_path_auto = False  # 用户指定路径，不自动清理
         else:
             out_dir = self._cfg.output_dir or str(get_project_root() / "data" / "meeting-live")
             self._doc_path = (
                 Path(out_dir) / f"{datetime.now():%Y%m%d-%H%M%S}-会议记录.md"
             ).expanduser()
+            self._doc_path_auto = True   # 自动生成路径，空会议可清理
         self._writer = DocWriter(self._doc_path, rewrite_every=self._cfg.doc_rewrite_every)
 
         # ASR 引擎（local 模式）
@@ -234,6 +248,15 @@ class MeetingLiveAssistant:
         self._futures: Dict[int, Tuple[Future, Future]] = {}
         # _futures 并发保护：音频线程在 _audio_loop 中写，worker 在 _process_segment 中读/pop
         self._futures_lock = threading.Lock()
+        # v3.26.1 音频电平追踪（音频线程写，worker 线程读，单值替换无竞态）
+        self._last_rms: float = 0.0
+        self._last_threshold: float = 0.005
+        # v3.26.1 建议提问事件驱动追踪
+        self._last_suggest_seq: int = 0  # 上次生成建议的段号
+        # v3.26.1 增量总结追踪
+        self._last_mini_summary_at: float = time.monotonic()  # 上次迷你总结时间
+        # v3.26.1 手动话题边界标记
+        self._force_topic_boundary: bool = False
 
     def _load_llm_prompt(self) -> str:
         """加载 LLM 校正 Prompt；缺失时使用内嵌兜底 Prompt（不依赖 asr-corrector 的 build-asr-prompt 产物）。"""
@@ -315,6 +338,13 @@ class MeetingLiveAssistant:
             self._writer.maybe_rewrite(self._session.state, force=True)
             self._panel.render_final(self._session.state, self._doc_path)
             self._pool.shutdown(wait=True, cancel_futures=True)
+            # v3.26.1: 空会议清理——无语音段时删除自动生成的过程文档
+            if not self._session.state.segments and self._doc_path_auto:
+                try:
+                    self._doc_path.unlink(missing_ok=True)
+                    _logger.info("空会议（无语音段），已清理过程文档")
+                except Exception:
+                    pass
             registry.unregister()
         return 0
 
@@ -363,6 +393,8 @@ class MeetingLiveAssistant:
                 # 追踪峰值（供心跳日志）
                 import numpy as np
                 rms = float(np.sqrt(np.mean(chunk.astype(np.float64) ** 2)))
+                self._last_rms = rms
+                self._last_threshold = self._asr_engine.effective_threshold
                 if rms > _peak_rms:
                     _peak_rms = rms
                 # 每 10 秒输出一次心跳（让用户知道系统在监听）
@@ -430,6 +462,11 @@ class MeetingLiveAssistant:
     def _flush_merge(self, texts: list[str], speaker_change_signal: bool = False) -> None:
         """将 merge buffer 中累积的连续短句合并提交为一个段。"""
         merged = "".join(texts)
+        # v3.26.1: 单段长度上限检查（使用可配的 max_segment_chars）
+        if len(merged) > self._cfg.max_segment_chars:
+            _logger.warning("段过长（%d 字符 > %d），已截断",
+                           len(merged), self._cfg.max_segment_chars)
+            merged = merged[:self._cfg.max_segment_chars] + "…"
         # 合并后也过一遍噪音检测（极端情况：连续噪音段被合并）
         if self._is_noise(merged):
             _logger.debug("合并段被噪音门控拦截（%d 字，%d 句）",
@@ -444,6 +481,9 @@ class MeetingLiveAssistant:
             on_publish=lambda s, f=fast: self._publish_prefetch(s, f),
         )
         seg.speaker_change_signal = speaker_change_signal
+        # v3.26.1: 长段（>300 字）标记为可能非自然停顿
+        if len(merged) > 300:
+            seg.forced_cut = True
         _logger.info("语音段 %d 已识别（%d 字%s），排队分析…",
                      seg.seq, len(merged),
                      f"，合并 {len(texts)} 句" if len(texts) > 1 else "")
@@ -472,6 +512,11 @@ class MeetingLiveAssistant:
         cjk = len(re.findall(r"[一-鿿]", stripped))
         if cjk == 0 and len(stripped) < 15:
             return True
+        # v3.26.1: 混合文本噪音判定——少量中文+大量英文（疑似代码/日志误识别）
+        if cjk <= 2 and len(stripped) > 30:
+            cjk_ratio = cjk / len(stripped)
+            if cjk_ratio < 0.1:
+                return True
         return False
 
     # ── 键盘交互（v3.25.3）────────────────────────────────
@@ -502,7 +547,7 @@ class MeetingLiveAssistant:
                     ch = sys.stdin.read(1)
                     if ch:
                         self._handle_key(ch)
-        except (EOFError, OSError):
+        except (EOFError, OSError, ValueError):
             pass
         finally:
             try:
@@ -514,7 +559,7 @@ class MeetingLiveAssistant:
         """处理单键命令。"""
         if ch == "?":
             _logger.info(
-                "⌨ 快捷键: d=已决策  t=话题  a=待办  s=暂停推送  q=退出")
+                "⌨ 快捷键: d=已决策  t=话题  a=待办  m=标记话题  s=暂停推送  q=退出")
         elif ch == "d":
             state = self._session.state
             # 从各段分析中收集 confirmed 决策（state.decisions 是累计去重字符串，无置信度）
@@ -546,11 +591,16 @@ class MeetingLiveAssistant:
                     _logger.info("  · %s", q)
             else:
                 _logger.info("❓ 暂无待解决问题")
+        elif ch == "m":
+            # v3.26.1: 手动标记话题边界（下一批分析时注入提示）
+            self._force_topic_boundary = True
+            _logger.info("📌 已标记话题边界（下批分析生效）")
         elif ch == "q":
             _logger.info("⌨ 收到退出指令")
             self._session.request_stop()
         elif ch == "s":
-            _logger.info("⌨ 推送区已暂停/恢复")
+            paused = self._feed.toggle_pause()
+            _logger.info("⌨ 洞察推送已%s", "暂停" if paused else "恢复")
 
     def _publish_prefetch(self, seg: VoiceSegment, fast: str) -> None:
         """预取发布（submit 临界区内调用）：fast 入窗 + 提交 deep/检索 futures。
@@ -664,9 +714,13 @@ class MeetingLiveAssistant:
             return
 
         # ── Phase 2: 各段收集 deep 校正 + 检索 ──
-        # 不更新面板——保留上一批分析结果在屏幕上，避免 "分析完成→分析中"
-        # 毫秒级切换导致用户来不及阅读。
         first = analyzable[0]
+        # v3.26.1: 更新面板显示进度（让用户知道系统在做什么）
+        self._panel.render(PanelDisplay(
+            status="收集校正与检索…", seg=first,
+            analysis_phase="prefetch", analysis_elapsed=0.0,
+            state=self._session.state, topic=self._session.state.current_topic),
+            feed=self._feed)
         n = len(analyzable)
 
         batch_texts: list[str] = []
@@ -675,8 +729,24 @@ class MeetingLiveAssistant:
         # LLM 超时——批处理 5 段最坏从 50s 降到 10s）
         results = self._collect_batch_deep_retrieval(analyzable)
         # v3.25.5: VAD 说话人切换信号 → 注入 batch_texts 供 LLM 参考
-        if any(getattr(s, "speaker_change_signal", False) for s in analyzable):
-            batch_texts.append("[VAD 检测到可能的说话人切换，请确认 speaker.is_turn_change]")
+        # v3.26.1: 批内多 speaker_change_signal → 强化提示帮助 LLM 区分微话题
+        # v3.26.1: 手动话题边界标记（m 键）
+        if self._force_topic_boundary:
+            batch_texts.append("[用户标记：此处为话题边界，请将 topic_change 设为 true]")
+            self._force_topic_boundary = False
+        speaker_change_count = sum(1 for s in analyzable if getattr(s, "speaker_change_signal", False))
+        if speaker_change_count > 0:
+            if speaker_change_count >= 2:
+                batch_texts.append(
+                    "[注意：批内检测到多次说话人切换，以下段落可能涉及不同微话题，"
+                    "请分别为各说话人段标注 topic 和 speaker 信息]"
+                )
+            else:
+                batch_texts.append("[VAD 检测到可能的说话人切换，请确认 speaker.is_turn_change]")
+        # v3.26.1: 连续 forced_cut 段 → 标注可能是同一发言的延续
+        forced_count = sum(1 for s in analyzable if getattr(s, "forced_cut", False))
+        if forced_count >= 2:
+            batch_texts.append("[注意：以下多段为 ASR 强制切段（非自然停顿），可能属于同一人的连续发言]")
         for seg, (deep, hits) in zip(analyzable, results):
             if deep != seg.corrected_text:
                 _logger.info("🤖 LLM 校正 段%d: %s → %s",
@@ -686,6 +756,7 @@ class MeetingLiveAssistant:
                 sp_id = sp.speaker_id if sp else ""
                 self._corrector.push_context(deep, speaker_id=sp_id)
             # v3.25.5 batch_texts 加 speaker 标签
+            # v3.26.1: 连续 forced_cut 段标注连续性提示
             sp = getattr(seg, "speaker", None)
             sp_label = f"（{sp.speaker_id}）" if (sp and sp.speaker_id) else ""
             batch_texts.append(f"段{seg.seq}{sp_label}：{seg.corrected_text}")
@@ -704,6 +775,12 @@ class MeetingLiveAssistant:
         combined_text = "\n".join(batch_texts)
         retrieval_ctx = RetrieverAdapter.format_context(unique_hits[:10])
         first.analysis_started_at = time.monotonic()
+        # v3.26.1: 更新面板显示分析进度
+        self._panel.render(PanelDisplay(
+            status="LLM 分析中…", seg=first,
+            analysis_phase="analyze", analysis_elapsed=0.0,
+            state=self._session.state, topic=self._session.state.current_topic),
+            feed=self._feed)
         try:
             first.analysis = self._analyzer.analyze(
                 combined_text,
@@ -793,8 +870,24 @@ class MeetingLiveAssistant:
                 if not on_agenda and len(state.topics) >= 1:
                     _logger.info("⚠ 跑偏提醒: 当前话题「%s」不在预设议程中", analysis.topic)
 
-        # ── Phase 4: 建议提问（仅采样批次；非采样清空）──
-        if first.analysis and (first.seq - 1) % self._cfg.suggest_every == 0:
+        # ── Phase 4: 建议提问（固定间隔 + 事件驱动，v3.26.1）──
+        should_suggest = False
+        if first.analysis:
+            # 条件 1：固定间隔采样（保留原有逻辑）
+            if (first.seq - 1) % self._cfg.suggest_every == 0:
+                should_suggest = True
+            else:
+                # v3.26.1: 事件驱动条件（tentative 决策 / 新问题）统一节流——
+                # 距上次实际生成建议 ≥ suggest_every 段才触发，防止高频 LLM 调用
+                since_last = first.seq - self._last_suggest_seq
+                if since_last >= self._cfg.suggest_every:
+                    # 条件 2：检测到 tentative 决策 → 追问确认
+                    if any(d.confidence == "tentative" for d in first.analysis.decisions):
+                        should_suggest = True
+                    # 条件 3：有新的未解决问题
+                    elif first.analysis.questions:
+                        should_suggest = True
+        if should_suggest and first.analysis:
             try:
                 deadline = (getattr(first, 'analysis_started_at', time.monotonic())
                             + _ANALYSIS_DEADLINE_SEC)
@@ -806,6 +899,7 @@ class MeetingLiveAssistant:
                 )
                 if sharp:
                     first.analysis.suggested_questions = sharp
+                    self._last_suggest_seq = first.seq
             except Exception:
                 pass
         elif first.analysis:
@@ -836,33 +930,41 @@ class MeetingLiveAssistant:
             analyze_note = f"{n} 段合并分析" if skipped_n == 0 else (
                 f"{n} 段合并分析 + {skipped_n} 段跳过")
             label = f"已处理段 {batch[0].seq}-{batch[-1].seq}（{analyze_note}）"
+        # v3.26.1: 收集系统告警 + 音频电平
+        alerts = []
+        if self._writer.is_failing:
+            alerts.append("文档写入失败（磁盘空间不足？）")
+        if (hasattr(self, '_asr_engine') and self._asr_engine is not None
+                and getattr(self._asr_engine, '_consecutive_failures', 0) > 0):
+            alerts.append(f"ASR 异常 ({self._asr_engine._consecutive_failures} 次)")
+        # 音频电平（归一化到 0-1）
+        thr = self._last_threshold or 0.005
+        rms_level = min(1.0, self._last_rms / thr) if self._last_rms > 0 else 0.0
         self._panel.render(PanelDisplay(
             status=label, seg=first,
             analysis_unavailable=first.analysis is None,
             state=self._session.state,
-            topic=self._session.state.current_topic),
+            topic=self._session.state.current_topic,
+            alerts=alerts if alerts else None,
+            rms_level=rms_level),
             feed=self._feed)
         self._writer.maybe_rewrite(self._session.state)
 
-    def _collect_deep_retrieval(self, seg: VoiceSegment, fast: str):
-        """收集 deep 校正与检索结果（含预取消费 + 降级）。"""
-        with self._futures_lock:
-            futures = self._futures.pop(seg.seq, None)
-        if futures is None:
+        # v3.26.1: 每 15 分钟或每 30 段触发增量迷你总结
+        _MINI_SUMMARY_INTERVAL = 900.0  # 15 分钟
+        _MINI_SUMMARY_MIN_SEGMENTS = 10
+        if (time.monotonic() - self._last_mini_summary_at > _MINI_SUMMARY_INTERVAL
+                and len(self._session.state.segments) >= _MINI_SUMMARY_MIN_SEGMENTS):
             try:
-                sp = getattr(seg, "speaker", None)
-                sp_id = sp.speaker_id if sp else ""
-                futures = (
-                    self._pool.submit(self._corrector.deep, fast, speaker_id=sp_id),
-                    self._pool.submit(self._retriever.search, fast, top_k=self._cfg.top_k),
-                )
-            except RuntimeError:
-                futures = None
-        deep, hits = fast, []
-        if futures is not None:
-            done, _ = wait(futures, timeout=_PARALLEL_WAIT_SEC)
-            deep, hits = self._collect_results(futures, done, fast)
-        return deep, hits
+                mini = self._analyzer.mini_summarize(self._session.state)
+                if mini:
+                    # 带时间戳存储，渲染进文档时用户可看到生成时刻
+                    self._session.state.mini_summaries.append(
+                        f"[{datetime.now():%H:%M}] {mini}")
+                    _logger.info("📝 阶段性总结: %s", mini)
+                self._last_mini_summary_at = time.monotonic()
+            except Exception:
+                pass
 
     def _collect_batch_deep_retrieval(self, segments: list[VoiceSegment]) -> list:
         """批量收集 deep/检索：一次性 wait 全部 futures（v3.25.4 性能修复）。

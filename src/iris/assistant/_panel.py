@@ -13,6 +13,7 @@ import shutil
 import sys
 import threading
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -23,8 +24,12 @@ _BOLD = "\033[1m"
 _DIM = "\033[2m"
 _RESET = "\033[0m"
 
-# 盒宽：自适应终端宽度（最小 48，最大 80）
-_BOX_WIDTH = min(80, max(48, shutil.get_terminal_size().columns - 2))
+# 盒宽：自适应终端宽度（最小 48，最大 80）——每帧动态计算，适应终端缩放
+
+
+def _box_width() -> int:
+    """当前终端宽度（每帧重算，适应 SIGWINCH 缩放）。"""
+    return min(80, max(48, shutil.get_terminal_size().columns - 2))
 
 
 def _display_width(text: str) -> int:
@@ -66,6 +71,13 @@ class PanelDisplay:
     analysis_unavailable: bool = False      # LLM 降级标记
     state: Optional[MeetingState] = None
     topic: str = ""                         # v3.25.3 当前话题标签
+    # v3.26.1 分析进度指示
+    analysis_phase: str = ""                # prefetch / analyze / suggest
+    analysis_elapsed: float = 0.0           # 本轮分析已耗时（秒）
+    # v3.26.1 音频电平
+    rms_level: float = 0.0                 # 当前 RMS 相对阈值（0-1）
+    # v3.26.1 系统告警
+    alerts: list[str] = None                # 面板级告警消息列表
 
 
 def _wrap(text: str, width: int) -> list[str]:
@@ -109,11 +121,13 @@ def _bold(text: str) -> str:
 
 
 class PanelRenderer:
-    """整帧渲染 + 洞察推送区；内部锁保证多线程下帧内容不交错。"""
+    """整帧渲染 + 洞察推送区；内部锁保证多线程下帧内容不交错。
+
+    v3.26.1: 宽度每帧动态计算（_box_width()），适应终端缩放。
+    """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._w = _BOX_WIDTH
 
     # ── 公开接口 ──────────────────────────────────────────
 
@@ -128,7 +142,7 @@ class PanelRenderer:
                     if s.analysis_started_at and s.analysis_done_at]
         total_elapsed = sum(s.analysis_done_at - s.analysis_started_at for s in analyzed)
         avg_elapsed = total_elapsed / len(analyzed) if analyzed else 0
-        w = self._w
+        w = _box_width()
 
         lines = [
             "",
@@ -159,19 +173,27 @@ class PanelRenderer:
     # ── 帧渲染 ────────────────────────────────────────────
 
     def _build(self, d: PanelDisplay, feed: object = None) -> str:
-        w = self._w
+        w = _box_width()
         cw = w - 4  # 内容宽度
         state = d.state
         seg_count = len(state.segments) if state else 0
         dropped = state.dropped_count if state else 0
 
-        # 标题行（CJK 感知宽度）—— v3.25.3 话题标签
+        # 标题行（CJK 感知宽度）—— v3.25.3 话题标签 + v3.26.1 时长
         topic_label = f"📌 {d.topic} · " if d.topic else ""
+        # v3.26.1: 会议时长
+        elapsed_str = ""
+        if state and seg_count > 0:
+            elapsed = (datetime.now() - state.started_at).total_seconds()
+            if elapsed >= 60:
+                elapsed_str = f" · {int(elapsed // 60)}分"
+            else:
+                elapsed_str = f" · {int(elapsed)}秒"
         if seg_count == 0:
             title = f"{topic_label}实时会议助理 · 等待语音…"
         else:
             drop_part = f" · 丢 {dropped}" if dropped else ""
-            title = f"{topic_label}实时会议助理 · {seg_count} 段{drop_part}"
+            title = f"{topic_label}实时会议助理 · {seg_count} 段{elapsed_str}{drop_part}"
         title_dw = _display_width(title)
         pad_right = w - 2 - title_dw - 2  # ╔╗ + 两边空格
         if pad_right > 0:
@@ -238,7 +260,16 @@ class PanelRenderer:
             elif d.analysis_unavailable:
                 lines.append(_fill_line("⚠ LLM 调用失败或超时，已显示词典校正原文", w))
             elif d.seg.analysis is None:
-                pass  # 分析中：只显示文本
+                # v3.26.1 分析进度指示：显示当前阶段 + 耗时
+                if d.analysis_phase:
+                    phase_labels = {
+                        "prefetch": "🔍 校正+检索",
+                        "analyze": "🤖 LLM 分析",
+                        "suggest": "💡 建议生成",
+                    }
+                    label = phase_labels.get(d.analysis_phase, d.analysis_phase)
+                    elapsed_str = f" ({d.analysis_elapsed:.0f}s)" if d.analysis_elapsed > 0 else ""
+                    lines.append(_fill_line(f"⏳ {label}{elapsed_str}…", w))
         else:
             # 等待语音
             lines.append(_fill_line("", w))
@@ -250,6 +281,18 @@ class PanelRenderer:
             lines.append(_fill_line("─" * 4 + " 洞察推送 " + "─" * (cw - 10), w))
             for evt_line in feed.render_lines(cw):
                 lines.append(_fill_line(evt_line, w))
+
+        # ── 系统告警区（v3.26.1）──
+        if d.alerts:
+            for alert in d.alerts:
+                lines.append(_fill_line(f"⚠ {alert}", w))
+
+        # ── 音频电平指示器（v3.26.1）──
+        if d.rms_level > 0:
+            bar_width = max(4, cw - 6)
+            filled = int(d.rms_level * bar_width)
+            vu = "█" * filled + "░" * (bar_width - filled)
+            lines.append(_fill_line(_dim(f"🎤 {vu}"), w))
 
         # 累计统计行（紧凑一行）
         lines.append(_fill_line("", w))

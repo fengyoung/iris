@@ -1,6 +1,6 @@
 # iris meeting-live-assistant — 实时会议助理 方案设计 v2.0
 
-**日期**：2026-08-12 · **状态**：已实现（v3.23.0 落地 → v3.25.0 本地音频 ASR → v3.26.0 四层能力+说话人区分）· **当前版本**：产品 3.26.0 / 协议 3.19
+**日期**：2026-08-12 · **状态**：已实现（v3.23.0 落地 → v3.25.0 本地音频 ASR → v3.26.0 四层能力+说话人区分 → v3.26.1 全量优化+评估修复）· **当前版本**：产品 3.26.1 / 协议 3.19
 
 ---
 
@@ -108,15 +108,17 @@ src/iris/assistant/
 ├── __init__.py        # 导出 MeetingLiveAssistant 主类
 ├── models.py          # SpeakerLabel/DecisionItem/TodoItem/TopicInfo/VoiceSegment/
 │                      #   SegmentAnalysis/MeetingState/AssistantConfig/AsrConfig（Pydantic）
-├── _audio.py          # AudioCapture：sounddevice 采集（设备热插拔容错）
+├── _audio.py          # AudioCapture：sounddevice 采集（设备热插拔容错 + 自动重连）
 ├── _asr.py            # ASREngine：VAD（40ms 帧切片）+ Paraformer 转写 + 标点 + 热词
+│                      #   （崩溃自动重初始化 + 噪声地板冻结）
 ├── _corrector.py      # CorrectorAdapter：AC 词典 + LLM 深度校正（per-speaker 上下文）
 ├── _retriever.py      # RetrieverAdapter：包装 EnhancedRetriever，top_k 可配
 ├── _analyzer.py       # SegmentAnalyzer：LLM 批量分析 + JSON 解析 + 话题/说话人/待办
 ├── _session.py        # MeetingSession：会议状态累积 + 话题追踪 + 说话人历史
-├── _doc_writer.py     # DocWriter：按话题结构化渲染 + 原子重写
-├── _panel.py          # PanelRenderer：终端面板（话题标签+分析+洞察推送区+统计帧）
-├── _insight.py        # InsightFeed：洞察推送引擎（决策/话题/风险/冲突/待办/说话人）
+├── _doc_writer.py     # DocWriter：按话题结构化渲染 + 原子重写（含阶段性总结区）
+├── _panel.py          # PanelRenderer：终端面板（话题标签+分析+洞察推送区+电平+告警+统计帧）
+├── _insight.py        # InsightFeed：洞察推送引擎（决策/话题/风险/冲突/待办/说话人，支持暂停）
+├── _logging.py        # 会话文件日志（session_id 命名，双输出）
 └── live.py            # MeetingLiveAssistant：主循环编排 + merge buffer + 批处理 + 热键
 
 src/iris/app/cli/_handlers/_assistant.py   # CLI handler（注册命令+参数解析）
@@ -283,6 +285,8 @@ LLM 分析（后验）     → 确认是否真换人：speaker_id + is_turn_chan
 | `d` | 显示已确认决策（confirmed） |
 | `t` | 显示当前话题 / 已讨论话题 |
 | `a` | 显示待解决问题 |
+| `m` | 手动标记话题边界（v3.26.1，下批分析注入 topic_change 提示） |
+| `s` | 暂停/恢复洞察推送（v3.26.1，暂停期事件入 pending 队列恢复刷入） |
 | `q` | 优雅退出 |
 
 ---
@@ -325,4 +329,5 @@ LLM 分析（后验）     → 确认是否真换人：speaker_id + is_turn_chan
 - **v3.23.0**：初版（剪贴板采集 + vocotype）
 - **v3.24.x**：写回机制重构 / 并发安全 / 信息完整性 / 性能架构
 - **v3.25.0**：本地音频 ASR（sounddevice + FunASR Paraformer），去除 vocotype 依赖
-- **v3.26.0**（当前）：四层 12 项能力（防御/理解/交互/沉淀）+ 说话人区分 + LLM 降级链 + VAD 尾部丢失修复，协议 3.19（不变）
+- **v3.26.0**：四层 12 项能力（防御/理解/交互/沉淀）+ 说话人区分 + LLM 降级链 + VAD 尾部丢失修复，协议 3.19（不变）
+- **v3.26.1**（当前）：深度审查后全量优化（29 项四阶段 + 3 项评估修复）——P0 可用性（ASR 崩溃自动重初始化 / `s` 热键推送暂停恢复 / 面板阶段指示+系统告警区）· P1 体验（面板宽度自适应 / VU 电平条 / USB 热插拔重连 / 超长会议保护 / 剪贴板遗留清理）· P2 能力（建议提问事件驱动+节流 / 批内多说话人提示 / 热词校验 / 噪声地板冻结 / 空会议清理 / `max_segment_chars` 生效）· P3 工程（buffer O(n²)→O(1) / 增量阶段性总结可见化 / `m` 键手动话题边界 / forced_cut 连续发言标注 / 混合文本噪音判定）+ 评估修复（死代码删除 / 建议节流 / 总结渲染进文档）。测试 178 专项 / 1,428 全量，协议 3.19（不变）

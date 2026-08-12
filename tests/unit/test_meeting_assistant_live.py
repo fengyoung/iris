@@ -384,6 +384,48 @@ class TestSuggestEvery:
         assert seg1.analysis.suggested_questions == ["追问Z"]
 
 
+class _TentativeLLM:
+    """返回带 tentative 决策 + 建议提问的 stub（suggest 调用返回同一 JSON）。"""
+    def generate(self, prompt, route_context=None, **kwargs):
+        return SimpleNamespace(
+            text='{"key_points": ["要点X"], "questions": [],'
+                 ' "decisions": [{"text": "方案X", "confidence": "tentative"}],'
+                 ' "suggested_questions": ["追问Z"]}'
+        )
+
+
+class TestSuggestEventDriven:
+    """v3.26.1 事件驱动建议提问节流：距上次生成 < suggest_every 段不触发。"""
+
+    @pytest.fixture(autouse=True)
+    def _no_real_io(self):
+        with patch("iris.assistant.live._load_assistant_data", return_value=({}, "")), \
+             patch("iris.assistant.live.ASREngine", autospec=True), \
+             patch("iris.assistant.live.AudioCapture", autospec=True), \
+             patch("iris.assistant.live.RetrieverAdapter.search", return_value=[]), \
+             patch("iris.assistant.live.PanelRenderer.render"), \
+             patch("iris.assistant.live.PanelRenderer.render_final"):
+            yield
+
+    def test_tentative_throttled_when_recent(self, tmp_path):
+        """tentative 决策但距上次建议 < suggest_every（3）→ 不触发，清空。"""
+        assistant = _make_assistant(tmp_path, bundle=_make_bundle(tmp_path, suggest_every=3),
+                                    llm_service=_TentativeLLM())
+        assistant._last_suggest_seq = 1  # 上次建议在 seq 1
+        seg = _seg(seq=2)
+        assistant._process_batch([seg])
+        assert seg.analysis.suggested_questions == []
+
+    def test_tentative_triggered_after_gap(self, tmp_path):
+        """tentative 决策且距上次建议 ≥ suggest_every → 触发，保留建议。"""
+        assistant = _make_assistant(tmp_path, bundle=_make_bundle(tmp_path, suggest_every=3),
+                                    llm_service=_TentativeLLM())
+        assistant._last_suggest_seq = 1  # 上次建议在 seq 1
+        seg = _seg(seq=5)  # since_last=4 ≥ 3 → 触发
+        assistant._process_batch([seg])
+        assert seg.analysis.suggested_questions == ["追问Z"]
+
+
 class TestExitSummary:
     """退出总结：run() 结束时生成 AI 总结写入文档；失败自动跳过。"""
 
