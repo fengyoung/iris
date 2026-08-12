@@ -1,7 +1,7 @@
-"""ASR 引擎：faster-whisper 本地识别（VAD + ASR + 标点 + 热词）。
+"""ASR 引擎：FunASR Paraformer PyTorch 本地识别（VAD + ASR + 标点 + 热词）。
 
-使用 CTranslate2 加速的 Whisper 模型（small，~500MB），首次运行自动下载。
-Apple Silicon 上 int8 量化推理，速度接近实时。
+使用 funasr.AutoModel + ModelScope 缓存。首次运行下载 ~913MB PyTorch 模型
+到 ~/.cache/modelscope/，后续启动秒加载。完全独立于 vocotype（自管理模型）。
 """
 
 from __future__ import annotations
@@ -15,19 +15,17 @@ import numpy as np
 
 _logger = logging.getLogger(__name__)
 
-# 模型缓存目录
-_MODEL_CACHE = os.path.expanduser("~/.cache/iris/whisper-models")
-# 标点模型目录（复用 vocotype 缓存）
-_PUNC_MODEL_NAME = "punc_ct-transformer_zh-cn-common-vocab272727-onnx"
+_MODEL_ID = "iic/speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404"
+_PUNC_MODEL_DIR = "punc_ct-transformer_zh-cn-common-vocab272727-onnx"
 
 
 class ASREngine:
-    """faster-whisper 本地 ASR 引擎（CTranslate2 加速，Apple Silicon 优化）。"""
+    """FunASR Paraformer PyTorch 识别引擎（ContextualParaformer + 热词支持）。"""
 
     SAMPLE_RATE = 16000
-    _MAX_BUFFER_SAMPLES = int(SAMPLE_RATE * 30)     # 最长 30s
-    _SILENCE_FRAMES = 15                            # 静音切段帧数
-    _NOISE_FLOOR_ALPHA = 0.02                       # 噪声平滑系数
+    _MAX_BUFFER_SAMPLES = int(SAMPLE_RATE * 30)
+    _SILENCE_FRAMES = 15
+    _NOISE_FLOOR_ALPHA = 0.02
 
     _PUNC_LABEL_MAP = {0: "", 1: "", 2: "，", 3: "。", 4: "？", 5: "！"}
 
@@ -46,24 +44,14 @@ class ASREngine:
         self._punc_session, self._punc_char_to_id = self._init_punc_model(model_dir)
 
     def _init_model(self):
-        """初始化 faster-whisper 模型（首次自动下载 ~500MB 到 ~/.cache/iris/）。"""
-        from faster_whisper import WhisperModel
-
-        compute_type = "int8"  # M3 上 int8 量化，速度快
-        _logger.info("加载 Whisper 模型（small, %s）…", compute_type)
-        model = WhisperModel(
-            "small",
-            device="cpu",
-            compute_type=compute_type,
-            download_root=_MODEL_CACHE,
-            num_workers=2,
-        )
-        _logger.info("Whisper 模型就绪")
+        from funasr import AutoModel
+        _logger.info("加载 Paraformer 模型…")
+        model = AutoModel(model=_MODEL_ID, device=self._device, disable_pbar=True)
+        _logger.info("Paraformer 就绪（热词 %d 字）", len(self._hotwords))
         return model
 
     @staticmethod
     def auto_detect_model_dir() -> Optional[str]:
-        """检测标点模型目录（复用 vocotype 缓存）。"""
         path = os.path.expanduser(
             "~/.cache/modelscope/hub/models/iic/"
             "speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404-onnx"
@@ -118,29 +106,26 @@ class ASREngine:
         rms = float(np.sqrt(np.mean(total.astype(np.float64) ** 2)))
         _logger.info("🎙 转写中… (%.1fs, RMS=%.4f)", speech_len, rms)
         try:
-            segments, _ = self._model.transcribe(
-                total, language="zh", beam_size=5,
-                vad_filter=True,
-                vad_parameters=dict(
-                    threshold=0.5,
-                    min_speech_duration_ms=300,
-                    min_silence_duration_ms=400,
-                ),
+            result = self._model.generate(
+                input=total.flatten(),
+                hotword=self._hotwords or None,
+                batch_size_s=60,
             )
-            text = "".join(s.text for s in segments).strip()
         except Exception as e:
             _logger.warning("ASR 转写异常: %s", e)
             self._buffer = []
             return None
         self._buffer = []
-        if text:
-            punctuated = self._add_punctuation(text)
-            _logger.info("📝 识别: %s", punctuated)
-            return punctuated
+        if result and result[0].get("text"):
+            text = result[0]["text"].strip()
+            if text:
+                punctuated = self._add_punctuation(text)
+                _logger.info("📝 识别: %s", punctuated)
+                return punctuated
         _logger.debug("ASR 返回空 (%.1fs)", speech_len)
         return None
 
-    # ── 标点恢复（复用 vocotype CT-Transformer ONNX） ──────
+    # ── 标点恢复（可选，复用 vocotype ONNX 缓存） ─────────
 
     def _init_punc_model(self, model_dir: str = ""):
         import json
@@ -148,7 +133,7 @@ class ASREngine:
             base = Path(model_dir).parent
         else:
             base = Path(self.auto_detect_model_dir() or "")
-        punc_dir = base / _PUNC_MODEL_NAME if str(base) != "." else None
+        punc_dir = base / _PUNC_MODEL_DIR if str(base) != "." else None
         if not punc_dir or not punc_dir.is_dir():
             return None, {}
         try:
@@ -173,7 +158,8 @@ class ASREngine:
             token_ids = [self._punc_char_to_id.get(c, 0) for c in text]
             inputs = np.array([token_ids], dtype=np.int32)
             lengths = np.array([len(token_ids)], dtype=np.int32)
-            outputs = self._punc_session.run(None, {"inputs": inputs, "text_lengths": lengths})
+            outputs = self._punc_session.run(
+                None, {"inputs": inputs, "text_lengths": lengths})
             preds = outputs[0][0].argmax(axis=1)
             result = []
             for i, char in enumerate(text):
