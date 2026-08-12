@@ -311,12 +311,23 @@ class MeetingLiveAssistant:
             return
         mic = AudioCapture(sample_rate=self._asr_cfg.local.sample_rate)
         mic.start()
+        _silent_ticks = 0
         try:
             while not self._session.stop.is_set():
                 chunk = mic.read()
                 if chunk is None:
+                    _silent_ticks += 1
+                    # 5 秒无数据 → 提示检查麦克风权限
+                    if _silent_ticks == 250:  # 250 × 20ms = 5s
+                        _logger.warning(
+                            "⚠ 5 秒未收到音频数据！请检查：\n"
+                            "  1. 系统偏好设置 → 安全性与隐私 → 麦克风 → 终端/iTerm 已勾选\n"
+                            "  2. 是否有其他 App 独占麦克风\n"
+                            "  3. 运行 python -c \"import sounddevice; print(sounddevice.query_devices())\" 检查设备"
+                        )
                     time.sleep(0.02)
                     continue
+                _silent_ticks = 0
                 text = self._asr_engine.feed(chunk)
                 if text:
                     fast = self._corrector.fast(text)

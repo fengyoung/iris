@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Optional
 
 import numpy as np
@@ -36,6 +37,19 @@ class AudioCapture:
     def start(self) -> None:
         """启动音频流（回调线程采集）。"""
         self._buffer = []
+        # 检查可用设备
+        try:
+            devices = self._sd.query_devices()
+            input_devices = [d for d in devices if d['max_input_channels'] > 0]
+            if not input_devices:
+                _logger.warning("未检测到麦克风设备！请检查系统音频设置")
+            else:
+                default = self._sd.query_devices(kind='input')
+                _logger.info("麦克风: %s (%d Hz)",
+                             default['name'], int(default['default_samplerate']))
+        except Exception:
+            pass  # 查询失败不影响启动
+
         self._stream = self._sd.InputStream(
             samplerate=self._sample_rate,
             channels=1,
@@ -44,6 +58,7 @@ class AudioCapture:
             callback=self._on_audio,
         )
         self._stream.start()
+        self._start_time = time.monotonic()
         _logger.info("麦克风已启动（%d Hz, block %d samples）",
                      self._sample_rate, self.BLOCK_SIZE)
 
