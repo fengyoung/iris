@@ -8,11 +8,6 @@ from pathlib import Path
 _SESSION_LOGGER_NAME = "iris.assistant"
 
 
-def get_session_logger() -> logging.Logger:
-    """获取 assistant 专用 logger（模块级单例）。"""
-    return logging.getLogger(_SESSION_LOGGER_NAME)
-
-
 def setup_session_logger(output_dir: Path, session_id: str) -> logging.Logger:
     """添加文件 handler（DEBUG 级别，持久化到过程文档同目录）。
 
@@ -34,3 +29,12 @@ def setup_session_logger(output_dir: Path, session_id: str) -> logging.Logger:
     ))
     logger.addHandler(fh)
     return logger
+
+
+def teardown_session_logger() -> None:
+    """关闭并移除所有 FileHandler（e2e 测试：防止多次 run() 累积句柄）。"""
+    logger = logging.getLogger(_SESSION_LOGGER_NAME)
+    for h in list(logger.handlers):
+        if isinstance(h, logging.FileHandler):
+            h.close()
+            logger.removeHandler(h)

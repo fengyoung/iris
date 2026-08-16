@@ -53,10 +53,12 @@ class ASREngine:
     _PUNC_LABEL_MAP = {0: "", 1: "", 2: "，", 3: "。", 4: "？", 5: "！"}
 
     def __init__(self, model_dir: str = "", hotwords: str = "",
-                 device: str = "cpu", energy_threshold: float = 0):
+                 device: str = "cpu", energy_threshold: float = 0,
+                 batch_size_s: int = 60):
         self._hotwords = hotwords
         self._device = device
         self._base_threshold = energy_threshold
+        self._batch_size_s = batch_size_s
         self._noise_floor = 0.0
         self._buffer: list[np.ndarray] = []
         self._buffer_total = 0            # 增量追踪 buffer 总样本数（v3.26.1 O(n²)→O(1)）
@@ -196,7 +198,7 @@ class ASREngine:
             result = self._model.generate(
                 input=total.flatten(),
                 hotword=self._hotwords or None,
-                batch_size_s=60,
+                batch_size_s=self._batch_size_s,
             )
         except Exception as e:
             self._consecutive_failures += 1

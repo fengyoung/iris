@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Optional
 
@@ -37,6 +38,7 @@ class AudioCapture:
         self._sample_rate = sample_rate
         self._stream: Optional[sd.InputStream] = None
         self._buffer: list[np.ndarray] = []
+        self._buf_lock = threading.Lock()  # 保护 _buffer（回调线程 ↔ 主线程）
         self._consecutive_errors = 0
         self._device_lost = False
         self._device_lost_warned = False
@@ -91,8 +93,9 @@ class AudioCapture:
                     _logger.warning("设备重连失败: %s", e)
         if not self._buffer:
             return None
-        data = np.concatenate(self._buffer)
-        self._buffer = []
+        with self._buf_lock:
+            data = np.concatenate(self._buffer)
+            self._buffer = []
         # 重置连续错误计数（有数据到达说明设备恢复）
         self._consecutive_errors = 0
         return data.flatten()
@@ -127,7 +130,8 @@ class AudioCapture:
             self._device_lost_warned = False
             self._consecutive_errors = 0
             # 清空可能残留的旧缓冲区
-            self._buffer = []
+            with self._buf_lock:
+                self._buffer = []
             _logger.info("✅ 已重新连接到音频设备")
         except Exception:
             # 重连失败，保持 _device_lost 状态等待下次重试
@@ -146,4 +150,5 @@ class AudioCapture:
                 self._device_lost = True
         else:
             self._consecutive_errors = 0
-        self._buffer.append(indata.copy())
+        with self._buf_lock:
+            self._buffer.append(indata.copy())

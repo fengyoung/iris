@@ -88,9 +88,9 @@ DARK = Theme(
 LIGHT = Theme(
     name="light",
     bg=254, bg_alert=224,
-    fg_text=236, fg_dim=242, fg_border=248,
+    fg_text=236, fg_dim=240, fg_border=244,
     fg_title=25, fg_topic=24,
-    fg_ok=28, fg_proposed=94, fg_tentative=243,
+    fg_ok=28, fg_proposed=94, fg_tentative=241,
     fg_risk=130, fg_conflict=124,
     fg_todo=25, fg_speaker=90, fg_suggest=100,
     fg_alert=124,

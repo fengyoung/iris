@@ -1,4 +1,4 @@
-# Iris 3.26.2 — 项目执行说明
+# Iris 3.26.3 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -122,7 +122,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.26.2 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.26.3 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.19 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.5 | 配置文件 Schema |
 
@@ -167,7 +167,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.26.2 (2026-08-12)** — meeting-live-assistant 面板双主题视觉方案（dark/light，配置驱动）：① 新模块 `_theme.py` — `Theme` 数据类 + 两套 ANSI 256 色配色（兼容 Terminal.app/iTerm2/Warp）；② 整帧全区填充 — 底色 = 面板色（dark `#262626` / light `#E4E4E4`），所有行（含空行/分割条/框线/退出统计帧）统一铺底，形成「控制台仪表盘」沉浸观感；③ 语义色贯穿 — 要点✦/决策确认✅绿 · 提议💬黄 · 待定❓灰 · 风险⚠橙 · 冲突🔥红 · 话题📌青 · 待办📋蓝 · 说话人🗣紫 · 建议提问💡亮黄 · 告警红底亮黄字 · VU 低绿→中黄→高红渐变；④ 布局安全 — 宽度计算在纯文本上进行、ANSI 包裹在填充之后（colored=True 剥离转义序列补宽），分析块超宽自动降级纯文本折行；⑤ 配置 — `assistant.panel_theme: dark|light`（非法值回退 dark）。验证：assistant 专项 186（+8 主题测试）全过，ruff 零告警。协议版本 3.19（不变）。产品版本 3.26.1→**3.26.2**。
+**当前 v3.26.3 (2026-08-16)** — meeting-live-assistant 面板稳定化 + 并发加固（14 文件 / +323 -154）：① 面板稳定化 — 区域固高布局（语音 3 行/分析 2 行/建议提问 2 行/洞察推送 4 行，不足补空行、超出截断「…」，高度不再跳动）、alt-screen 进出（启动保留终端回滚历史、退出恢复）、折行算法 O(n²)→O(n)（预计算字符宽度数组）、洞察推送多行渲染（前缀着色+续行缩进）、长告警折行+标题过长截断（防边框断裂）、VU 电平 emoji 标签（🔈🔉🔊 色盲友好）、底部累计条 CJK 宽度修正；② 并发安全 — InsightFeed 加锁（worker↔键盘线程竞态，visible 返回 snapshot）+ CorrectorAdapter per-speaker 上下文加锁 LRU 淘汰（≤10 个 speaker）+ AudioCapture buffer 加锁（回调↔主线程）；③ 正确性修复 — 多段批次落账按 seq 升序（修复 first 段被最后 record 的乱序）、analysis_elapsed 实际耗时（原恒 0）、batch_size_s 配置真正生效、doc_rewrite_every 默认 1→3（降 I/O）；④ 工程收敛 — CONF_ICON/DECISION_FG 共享常量移入 models.py（_panel/_doc_writer 共用）+ TypedDict、teardown_session_logger（e2e 防句柄泄漏）、light 主题对比度微调。验证：assistant 专项 186 全过，ruff 零告警。协议版本 3.19（不变）。产品版本 3.26.2→**3.26.3**。
+
+**v3.26.2 (2026-08-12)** — meeting-live-assistant 面板双主题视觉方案（dark/light，配置驱动）：① 新模块 `_theme.py` — `Theme` 数据类 + 两套 ANSI 256 色配色（兼容 Terminal.app/iTerm2/Warp）；② 整帧全区填充 — 底色 = 面板色（dark `#262626` / light `#E4E4E4`），所有行（含空行/分割条/框线/退出统计帧）统一铺底，形成「控制台仪表盘」沉浸观感；③ 语义色贯穿 — 要点✦/决策确认✅绿 · 提议💬黄 · 待定❓灰 · 风险⚠橙 · 冲突🔥红 · 话题📌青 · 待办📋蓝 · 说话人🗣紫 · 建议提问💡亮黄 · 告警红底亮黄字 · VU 低绿→中黄→高红渐变；④ 布局安全 — 宽度计算在纯文本上进行、ANSI 包裹在填充之后（colored=True 剥离转义序列补宽），分析块超宽自动降级纯文本折行；⑤ 配置 — `assistant.panel_theme: dark|light`（非法值回退 dark）。验证：assistant 专项 186（+8 主题测试）全过，ruff 零告警。协议版本 3.19（不变）。产品版本 3.26.1→**3.26.2**。
 
 **v3.26.1 (2026-08-12)** — meeting-live-assistant 深度审查后全量优化（29 项四阶段 + 3 项评估修复 / 12 文件 / +5 测试）：① P0 可用性 — ASR 连续失败自动重初始化（阈值 3 + 防重复重试）、`s` 热键真正暂停/恢复洞察推送（暂停期事件入 pending 队列最多 20 条，恢复刷入）、面板 LLM 处理阶段指示（prefetch/analyze + 系统告警区）、文档写入失败连续告警（3 次触发面板提示磁盘空间）；② P1 体验/健壮性 — 面板宽度每帧动态计算（终端缩放自适应）、音频电平 VU 条（🎤 可视化）、USB 麦克风热插拔自动重连（5s 间隔）、超长会议保护（5000 段自动归档 + summary_for_prompt 3000 字符硬上限）、删除 `_clipboard.py` 遗留（音频模式废弃，poll_interval/dedup_window 标注废弃）、`adjacent_context` 时间基准修正（改用真实当前时间）；③ P2 能力/清理 — 建议提问事件驱动触发（tentative 决策/新问题 + 统一节流 ≥suggest_every 防高频 LLM）、批内多说话人切换强化提示、热词总长校验（10000 字符截断）、长时间静音噪声地板冻结（30s 防阈值漂移）、空会议自动清理（仅自动生成路径）、移除 `take_pending_if` 死代码、`max_segment_chars` 音频模式实际生效（截断+警告）；④ P3 工程完善 — buffer 溢出 O(n²)→O(1) 增量追踪、键盘监听捕获 stdin 关闭 ValueError、面板会议时长显示、每 15 分钟增量阶段性总结（`mini_summarize` + 时间戳 + 文档「阶段性总结」区可见化）、`m` 热键手动标记话题边界（注入分析 prompt）、长段 `forced_cut` 连续发言标注、混合文本噪音判定（cjk≤2 且占比<10%）；⑤ 评估修复 — 删除 `_collect_deep_retrieval` 死代码（v3.25.2 批量重构遗留）、事件驱动建议统一节流、`mini_summaries` 渲染进线性/话题/增量三种文档形态（原生成即丢失）。验证：assistant 专项 178（+5）全过，全量 unit 1,428 全过，ruff 零告警。协议版本 3.19（不变）。产品版本 3.26.0→**3.26.1**。
 

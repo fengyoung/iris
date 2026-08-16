@@ -42,8 +42,10 @@ def _make_assistant(config_bundle, tmp_path, *, llm, pid_dir=None):
         llm_service=llm,
         pid_dir=pid_dir or (tmp_path / "pids"),
     )
-    # 固定建议提问间隔=1：保证每段都生成，e2e 断言与用户 app.json 配置解耦
-    assistant._cfg = assistant._cfg.model_copy(update={"suggest_every": 1})
+    # 固定建议提问间隔=1 + 文档即时写入：保证 e2e 断言与用户 app.json 配置解耦
+    assistant._cfg = assistant._cfg.model_copy(
+        update={"suggest_every": 1, "doc_rewrite_every": 1})
+    assistant._writer._rewrite_every = 1  # DocWriter 已构造，需直接更新
     (tmp_path / "pids").mkdir(exist_ok=True)
     return assistant
 

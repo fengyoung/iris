@@ -27,7 +27,7 @@ from ._audio import AudioCapture
 from ._corrector import CorrectorAdapter
 from ._doc_writer import DocWriter
 from ._insight import InsightEvent, InsightFeed
-from ._logging import setup_session_logger
+from ._logging import setup_session_logger, teardown_session_logger
 from ._panel import PanelDisplay, PanelRenderer
 from ._retriever import RetrieverAdapter
 from ._session import MeetingSession
@@ -235,6 +235,7 @@ class MeetingLiveAssistant:
                 hotwords=hotwords,
                 device=self._asr_cfg.local.device,
                 energy_threshold=self._asr_cfg.local.energy_threshold,
+                batch_size_s=self._asr_cfg.local.batch_size_s,
             )
             if not self._asr_engine.is_available():
                 raise FileNotFoundError(f"ASR 模型不完整: {model_dir}")
@@ -347,6 +348,8 @@ class MeetingLiveAssistant:
                 except Exception:
                     pass
             registry.unregister()
+            # v3.26.3: 清理 session logger 文件 handler（e2e 测试防句柄泄漏）
+            teardown_session_logger()
         return 0
 
     # ── 线程逻辑 ────────────────────────────────────────────
@@ -716,12 +719,7 @@ class MeetingLiveAssistant:
 
         # ── Phase 2: 各段收集 deep 校正 + 检索 ──
         first = analyzable[0]
-        # v3.26.1: 更新面板显示进度（让用户知道系统在做什么）
-        self._panel.render(PanelDisplay(
-            status="收集校正与检索…", seg=first,
-            analysis_phase="prefetch", analysis_elapsed=0.0,
-            state=self._session.state, topic=self._session.state.current_topic),
-            feed=self._feed)
+        self._phase_start = time.monotonic()  # v3.26.3: 追踪分析实际耗时
         n = len(analyzable)
 
         batch_texts: list[str] = []
@@ -777,9 +775,11 @@ class MeetingLiveAssistant:
         retrieval_ctx = RetrieverAdapter.format_context(unique_hits[:10])
         first.analysis_started_at = time.monotonic()
         # v3.26.1: 更新面板显示分析进度
+        # v3.26.3: analysis_elapsed 传递实际耗时（不再恒为 0）
+        phase_elapsed = time.monotonic() - getattr(self, '_phase_start', time.monotonic())
         self._panel.render(PanelDisplay(
             status="LLM 分析中…", seg=first,
-            analysis_phase="analyze", analysis_elapsed=0.0,
+            analysis_phase="analyze", analysis_elapsed=phase_elapsed,
             state=self._session.state, topic=self._session.state.current_topic),
             feed=self._feed)
         try:
@@ -906,22 +906,17 @@ class MeetingLiveAssistant:
         elif first.analysis:
             first.analysis.suggested_questions = []
 
-        # ── Phase 5: 跳过段先落账，其余段标记 MERGED 再落账，可分析段最后 ──
-        for s in skipped:
+        # ── Phase 5: 按 seq 升序落账（保证 segments 列表严格时间有序）──
+        # v3.26.3: 修复多段批次中 first (seq最小) 被最后 record 导致的乱序
+        all_segs: list[VoiceSegment] = skipped + analyzable
+        all_segs.sort(key=lambda s: s.seq)
+        for s in all_segs:
+            if s in analyzable and s is not first:
+                s.analysis_status = VoiceSegment.ANALYSIS_MERGED
             try:
                 self._session.record(s)
             except Exception as e:
                 _logger.error("段 %d 落账异常: %s", s.seq, e)
-        for s in analyzable[1:]:
-            s.analysis_status = VoiceSegment.ANALYSIS_MERGED
-            try:
-                self._session.record(s)
-            except Exception as e:
-                _logger.error("段 %d 落账异常: %s", s.seq, e)
-        try:
-            self._session.record(first)
-        except Exception as e:
-            _logger.error("段 %d 落账异常: %s", first.seq, e)
 
         # ── Phase 6: 面板 + 文档 ──
         if len(batch) == 1:

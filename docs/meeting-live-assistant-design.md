@@ -1,6 +1,6 @@
 # iris meeting-live-assistant — 实时会议助理 方案设计 v2.0
 
-**日期**：2026-08-12 · **状态**：已实现（v3.23.0 落地 → v3.25.0 本地音频 ASR → v3.26.0 四层能力+说话人区分 → v3.26.1 全量优化+评估修复 → v3.26.2 面板双主题视觉方案）· **当前版本**：产品 3.26.2 / 协议 3.19
+**日期**：2026-08-12 · **状态**：已实现（v3.23.0 落地 → v3.25.0 本地音频 ASR → v3.26.0 四层能力+说话人区分 → v3.26.1 全量优化+评估修复 → v3.26.2 面板双主题视觉方案 → v3.26.3 面板稳定化+并发加固）· **当前版本**：产品 3.26.3 / 协议 3.19
 
 ---
 
@@ -93,7 +93,7 @@ t1  merge 刷新 → AC 校正（毫秒级）→ submit（on_publish 预取：de
 t2  工作线程取批（最多 5 段 / 2s）→ 批量收集 deep/检索（一次性 wait ≤10s）
 t3  合并文本 + 检索上下文 + 会议状态 + 说话人历史 + 议程 → LLM 分析（15s deadline）
 t4  解析 → 话题追踪（2-gram 去重）→ 冲突检测 → 说话人登记 → 洞察推送
-t5  落账（跳过段先 → MERGED 段 → 首段）→ 面板渲染 → 文档重写
+t5  落账（按 seq 升序，v3.26.3 修复首段最后落账的乱序）→ 面板渲染 → 文档重写
 t6  回到取批；若期间新段到达 → 覆盖 pending，丢弃中间段
 ```
 
@@ -116,9 +116,11 @@ src/iris/assistant/
 ├── _analyzer.py       # SegmentAnalyzer：LLM 批量分析 + JSON 解析 + 话题/说话人/待办
 ├── _session.py        # MeetingSession：会议状态累积 + 话题追踪 + 说话人历史
 ├── _doc_writer.py     # DocWriter：按话题结构化渲染 + 原子重写（含阶段性总结区）
-├── _panel.py          # PanelRenderer：终端面板（话题标签+分析+洞察推送区+电平+告警+统计帧）
-├── _insight.py        # InsightFeed：洞察推送引擎（决策/话题/风险/冲突/待办/说话人，支持暂停）
-├── _logging.py        # 会话文件日志（session_id 命名，双输出）
+├── _panel.py          # PanelRenderer：终端面板（话题标签+分析+洞察推送区+电平+告警+统计帧；
+│                      #   v3.26.3 区域固高布局 + alt-screen 进出 + 折行 O(n²)→O(n)）
+├── _insight.py        # InsightFeed：洞察推送引擎（决策/话题/风险/冲突/待办/说话人，支持暂停；
+│                      #   v3.26.3 加锁防 worker↔键盘线程竞态）
+├── _logging.py        # 会话文件日志（session_id 命名，双输出；teardown 防句柄泄漏）
 ├── _theme.py          # Theme + DARK/LIGHT 两套 ANSI 256 色配色（v3.26.2 双主题）
 └── live.py            # MeetingLiveAssistant：主循环编排 + merge buffer + 批处理 + 热键
 
@@ -187,7 +189,7 @@ class MeetingState:
     "top_k": 5,                // 知识库检索条数
     "llm_model": "",           // 空 = 走全局 LLMService 路由
     "poll_interval": 0.5,      // 段轮询间隔（秒）
-    "doc_rewrite_every": 1,    // 每 N 段重写文档（1 = 每段）
+    "doc_rewrite_every": 3,    // 每 N 段重写文档（3 = 每 3 段，降低 I/O）
     "short_segment_chars": 15, // 短段门控阈值
     "suggest_every": 3,        // 建议提问生成间隔
     "summary_enabled": true,   // 退出时生成 AI 会议总结
@@ -201,7 +203,8 @@ class MeetingState:
       "model_dir": "",         // 空 = 自动检测 ModelScope 缓存
       "device": "cpu",
       "sample_rate": 16000,
-      "energy_threshold": 0    // 0 = 自动适应噪声地板
+      "energy_threshold": 0,   // 0 = 自动适应噪声地板
+      "batch_size_s": 60       // 单次 VAD+ASR 最大音频长度（秒）
     },
     "hotwords_file": "data/assistant/asr_hotwords.txt",
     "replace_dict_file": "data/assistant/asr_replace_dict.json",
@@ -333,4 +336,5 @@ LLM 分析（后验）     → 确认是否真换人：speaker_id + is_turn_chan
 - **v3.25.0**：本地音频 ASR（sounddevice + FunASR Paraformer），去除 vocotype 依赖
 - **v3.26.0**：四层 12 项能力（防御/理解/交互/沉淀）+ 说话人区分 + LLM 降级链 + VAD 尾部丢失修复，协议 3.19（不变）
 - **v3.26.1**：深度审查后全量优化（29 项四阶段 + 3 项评估修复）——P0 可用性（ASR 崩溃自动重初始化 / `s` 热键推送暂停恢复 / 面板阶段指示+系统告警区）· P1 体验（面板宽度自适应 / VU 电平条 / USB 热插拔重连 / 超长会议保护 / 剪贴板遗留清理）· P2 能力（建议提问事件驱动+节流 / 批内多说话人提示 / 热词校验 / 噪声地板冻结 / 空会议清理 / `max_segment_chars` 生效）· P3 工程（buffer O(n²)→O(1) / 增量阶段性总结可见化 / `m` 键手动话题边界 / forced_cut 连续发言标注 / 混合文本噪音判定）+ 评估修复（死代码删除 / 建议节流 / 总结渲染进文档）。测试 178 专项 / 1,428 全量，协议 3.19（不变）
-- **v3.26.2**（当前）：面板双主题视觉方案——新模块 `_theme.py`（Theme + DARK/LIGHT 两套 ANSI 256 色配色）+ 整帧全区填充（底色 = 面板色，含空行/分割条/框线/退出统计帧）+ 语义色贯穿（要点/决策✅绿 · 提议💬黄 · 待定❓灰 · 风险⚠橙 · 冲突🔥红 · 话题📌青 · 待办📋蓝 · 说话人🗣紫 · 建议提问💡亮黄 · 告警红底亮黄字 · VU 低绿→中黄→高红渐变）+ 布局安全（纯文本算宽 + ANSI 后包裹，超宽降级纯文本折行）+ 配置 `assistant.panel_theme: dark|light`（非法回退 dark）。测试 186 专项（+8 主题测试），协议 3.19（不变）
+- **v3.26.3**（当前）：面板稳定化 + 并发加固——① 区域固高布局（语音 3/分析 2/建议提问 2/洞察推送 4 行，不足补空行、超出截断「…」，高度不再跳动）+ alt-screen 进出（保留/恢复终端回滚历史）+ 折行 O(n²)→O(n) + 洞察推送多行渲染 + 长告警/长标题截断（防边框断裂）+ VU emoji 标签（色盲友好）+ 底部累计条 CJK 宽度修正；② 并发加锁——InsightFeed（push/toggle_pause + visible snapshot）、CorrectorAdapter per-speaker 上下文（LRU ≤10 speaker）、AudioCapture buffer（回调↔主线程）；③ 修复——多段批次按 seq 升序落账（原首段最后落账乱序）、analysis_elapsed 实际耗时（原恒 0）、`asr.local.batch_size_s` 真正生效（原硬编码 60）、`doc_rewrite_every` 默认 3；④ 共享常量 CONF_ICON/DECISION_FG 收敛到 models.py + teardown_session_logger（e2e 防句柄泄漏）。测试 187 专项，协议 3.19（不变）
+- **v3.26.2**：面板双主题视觉方案——新模块 `_theme.py`（Theme + DARK/LIGHT 两套 ANSI 256 色配色）+ 整帧全区填充（底色 = 面板色，含空行/分割条/框线/退出统计帧）+ 语义色贯穿（要点/决策✅绿 · 提议💬黄 · 待定❓灰 · 风险⚠橙 · 冲突🔥红 · 话题📌青 · 待办📋蓝 · 说话人🗣紫 · 建议提问💡亮黄 · 告警红底亮黄字 · VU 低绿→中黄→高红渐变）+ 布局安全（纯文本算宽 + ANSI 后包裹，超宽降级纯文本折行）+ 配置 `assistant.panel_theme: dark|light`（非法回退 dark）。测试 186 专项（+8 主题测试），协议 3.19（不变）

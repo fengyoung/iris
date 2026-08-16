@@ -9,7 +9,7 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from .models import MeetingState, SegmentAnalysis, VoiceSegment
+from .models import CONF_ICON, MeetingState, SegmentAnalysis, VoiceSegment
 
 _logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ class DocWriter:
 
     _MAX_CONSECUTIVE_FAILURES = 3  # 连续失败阈值，超限触发面板告警
 
-    def __init__(self, path: Path, rewrite_every: int = 1):
+    def __init__(self, path: Path, rewrite_every: int = 3):
         self._path = Path(path)
         self._rewrite_every = max(1, rewrite_every)
         self._last_segment_count = 0
@@ -320,8 +320,10 @@ class DocWriter:
                 if field:
                     if label == "决策点":
                         # DecisionItem → 带置信度标注的字符串
-                        conf_map = {"confirmed": "✅", "proposed": "💬", "tentative": "❓"}
-                        parts = [f"{conf_map.get(d.confidence, '')}{d.text}" for d in field]
+                        parts = [
+                            f"{CONF_ICON.get(d.confidence, '')}{d.text}"
+                            for d in field
+                        ]
                         lines.append(f"**{label}**：" + "；".join(parts))
                     else:
                         lines.append(f"**{label}**：" + "；".join(field))

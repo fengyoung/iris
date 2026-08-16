@@ -2,11 +2,42 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime
 from difflib import SequenceMatcher
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Dict, List, Optional, TypedDict
 
 from pydantic import BaseModel, Field, PrivateAttr, field_validator
+
+
+# ── 共享常量：置信度图标 + 颜色映射（_panel / _doc_writer 共用，避免重复定义） ──
+
+CONF_ICON: dict[str, str] = {"confirmed": "✅", "proposed": "💬", "tentative": "❓"}
+"""决策置信度 → 展示图标。"""
+
+DECISION_FG: dict[str, str] = {
+    "confirmed": "fg_ok",
+    "proposed": "fg_proposed",
+    "tentative": "fg_tentative",
+}
+"""决策置信度 → 语义色字段名（Theme 属性）。"""
+
+
+# ── TypedDict：MeetingState 中无类型 dict 列表的结构约束 ──
+
+class TopicRecord(TypedDict, total=False):
+    """话题记录（MeetingState.topics 元素）。"""
+    label: str
+    start_seq: int
+    end_seq: int
+    summary: str
+
+
+class SpeakerRecord(TypedDict, total=False):
+    """说话人记录（MeetingState.speakers 元素）。"""
+    id: str
+    segments: int
+    role_hint: str
 
 
 # ── 冲突检测辅助（模块级，避免 Pydantic 序列化） ──
@@ -200,9 +231,9 @@ class MeetingState(BaseModel):
     todos: List[str] = Field(default_factory=list, description="结构化待办（去重后）")
     # ── v3.25.3 话题追踪 ──
     current_topic: str = Field(default="", description="当前讨论的话题标签")
-    topics: list[dict] = Field(default_factory=list, description="已关闭的话题列表")
+    topics: List[TopicRecord] = Field(default_factory=list, description="已关闭的话题列表")
     # ── v3.25.5 说话人追踪 ──
-    speakers: list[dict] = Field(default_factory=list, description="说话人统计")
+    speakers: List[SpeakerRecord] = Field(default_factory=list, description="说话人统计")
     speaker_seq: int = Field(default=0, description="自增说话人编号")
     # ── v3.25.3 冲突检测（PrivateAttr 避免 pydantic 下划线限制）──
     _recent_claims: list = PrivateAttr(default_factory=list)  # list[(str, float)]
@@ -314,7 +345,7 @@ class MeetingState(BaseModel):
                 if _is_conflicting(point, claim):
                     conflicts.append(f'"{point}" vs 此前"{claim}"')
         # 更新最近结论缓存
-        now = __import__("time").monotonic()
+        now = time.monotonic()
         for p in new_points:
             self._recent_claims.append((p, now))
         if len(self._recent_claims) > 10:
@@ -388,7 +419,7 @@ class AssistantConfig(BaseModel):
     llm_model: str = Field(default="", description="分析 LLM 模型，空=走全局路由")
     poll_interval: float = Field(default=0.5, gt=0,
                                  description="[废弃·v3.25.0] 剪贴板轮询间隔，音频模式不使用")
-    doc_rewrite_every: int = Field(default=1, gt=0, description="每 N 段重写文档（1=每段）")
+    doc_rewrite_every: int = Field(default=3, gt=0, description="每 N 段重写文档（3=每3段，降低 I/O）")
     fast_only: bool = Field(default=False, description="仅词典校正模式：跳过所有 LLM（deep 校正/检索/分析）")
     short_segment_chars: int = Field(default=15, gt=0,
                                      description="短段门控：校正后短于该长度视为确认语，跳过 LLM 深度校正/检索/分析")

@@ -20,9 +20,11 @@ from pathlib import Path
 from typing import Optional
 
 from ._theme import DARK, THEMES, Theme
-from .models import MeetingState, VoiceSegment
+from .models import CONF_ICON, DECISION_FG, MeetingState, VoiceSegment
 
 _CLEAR = "\033[2J\033[H"  # 清屏 + 光标归位
+_ENTER_ALT = "\033[?1049h"  # 进入 alternate screen（保留回滚历史）
+_EXIT_ALT = "\033[?1049l"   # 退出 alternate screen
 
 # 盒宽：自适应终端宽度（最小 48，最大 80）——每帧动态计算，适应终端缩放
 
@@ -88,30 +90,62 @@ class PanelDisplay:
 
 
 def _wrap(text: str, width: int) -> list[str]:
-    """CJK 感知的文本折行。width 为显示列数。"""
+    """CJK 感知的文本折行。width 为显示列数。
+
+    v3.26.3: 预计算字符宽度数组，避免每行重复扫描整段文本（O(n²)→O(n)）。
+    """
+    # 预计算每个字符的显示宽度（只算一次）
+    char_widths = [_display_width(ch) for ch in text]
     lines = []
-    while _display_width(text) > width:
+    pos = 0
+    n = len(text)
+    while pos < n:
+        # 剩余字符总宽度
+        remaining_w = sum(char_widths[pos:])
+        if remaining_w <= width:
+            lines.append(text[pos:].rstrip())
+            break
         # 累积显示宽度找到断点
         w = 0
-        cut = 0
-        for i, ch in enumerate(text):
-            dw = 2 if _display_width(ch) == 2 else 1  # noqa: PLR2004
-            if w + dw > width:
+        cut = pos
+        for i in range(pos, n):
+            w += char_widths[i]
+            if w > width:
                 cut = i
                 break
-            w += dw
         else:
-            cut = len(text)
-        # 回退到最近的空格/标点
-        for i in range(min(cut, len(text) - 1), max(0, cut - 12), -1):
+            cut = n
+        # 回退到最近的空格/标点（在 cut-12..cut 范围内）
+        for i in range(min(cut, n - 1), max(pos, cut - 12), -1):
             if text[i] in " ，。、；：！？\n-,.;:!?":
                 cut = i + 1
                 break
-        lines.append(text[:cut].rstrip())
-        text = text[cut:].lstrip()
-    if text:
-        lines.append(text)
+        lines.append(text[pos:cut].rstrip())
+        # 跳过前导空白
+        pos = cut
+        while pos < n and text[pos] in " \t":
+            pos += 1
     return lines
+
+
+def _fill_section(lines: list[str], target: int, width: int, theme: Theme) -> list[str]:
+    """用空行填充到 target 高度，使区域高度固定。
+
+    少于 target → 底部补空行（带背景色）；等于或多于 target → 原样返回。
+    这样面板在绝大多数情况下高度一致，只有内容异常多时才突破。
+    """
+    result = list(lines)
+    while len(result) < target:
+        result.append(_fill_line("", width, theme=theme))
+    return result
+
+
+# ── 面板各区域固高（v3.26.3 固高布局：空行填充，大概率不变）──
+_VOICE_HEIGHT = 3       # 语音文本区
+_ANALYSIS_HEIGHT = 2    # 分析结果区
+_SUGGEST_HEIGHT = 2     # 建议提问区（含分隔线）
+_FEED_HEIGHT = 4        # 洞察推送区（不含标题行）
+_ALERT_HEIGHT = 2       # 系统告警区
 
 
 def _fill_line(text: str, width: int, *, theme: Theme, fg: int = None,
@@ -130,7 +164,7 @@ def _fill_line(text: str, width: int, *, theme: Theme, fg: int = None,
     return theme.style(inner, fg=fg, bg=bg, bold=bold, dim=dim)
 
 
-# 洞察事件 → 语义色映射
+# 洞察事件 → 语义色映射（与 models.DECISION_FG 正交——事件类型 ≠ 决策置信度）
 _EVENT_FG = {
     "decision_confirmed": "fg_ok",
     "decision_proposed": "fg_proposed",
@@ -140,15 +174,6 @@ _EVENT_FG = {
     "todo": "fg_todo",
     "speaker_turn": "fg_speaker",
 }
-
-# 决策置信度 → 语义色
-_DECISION_FG = {
-    "confirmed": "fg_ok",
-    "proposed": "fg_proposed",
-    "tentative": "fg_tentative",
-}
-
-_CONF_ICON = {"confirmed": "✅", "proposed": "💬", "tentative": "❓"}
 
 
 class PanelRenderer:
@@ -161,6 +186,7 @@ class PanelRenderer:
     def __init__(self, theme: str = "dark") -> None:
         self._lock = threading.Lock()
         self._theme = THEMES.get(theme, DARK)
+        self._alt_screen_active = False
 
     @property
     def theme(self) -> Theme:
@@ -170,11 +196,14 @@ class PanelRenderer:
 
     def render(self, display: PanelDisplay, feed: object = None) -> None:
         with self._lock:
+            if not self._alt_screen_active:
+                sys.stdout.write(_ENTER_ALT)
+                self._alt_screen_active = True
             sys.stdout.write(_CLEAR + self._build(display, feed))
             sys.stdout.flush()
 
     def render_final(self, state: MeetingState, doc_path: Path) -> None:
-        """退出统计帧（不清屏，保留面板历史输出；整帧全区填充）。"""
+        """退出统计帧（退出 alt-screen，恢复终端回滚历史；整帧全区填充）。"""
         analyzed = [s for s in state.segments
                     if s.analysis_started_at and s.analysis_done_at]
         total_elapsed = sum(s.analysis_done_at - s.analysis_started_at for s in analyzed)
@@ -210,8 +239,11 @@ class PanelRenderer:
             fg=t.fg_ok if state.summary else t.fg_tentative))
         lines.append(_fill_line(str(doc_path), w, theme=t, fg=t.fg_dim, dim=True))
         lines.append(t.style(f"╚{'═' * (w - 2)}╝", fg=t.fg_border))
+        # v3.26.3: 退出 alt-screen 恢复终端回滚历史
+        lines.append(_EXIT_ALT)
         lines.append("")
         with self._lock:
+            self._alt_screen_active = False
             sys.stdout.write("\n".join(lines))
             sys.stdout.flush()
 
@@ -246,7 +278,19 @@ class PanelRenderer:
             b_l = "═" * (pad_right // 2)
             b_r = "═" * (pad_right - pad_right // 2)
         else:
-            b_l = b_r = ""
+            # v3.26.3: 标题过长时截断（防止边框断裂），保留前 w-6 字符 + "…"
+            b_l = "═"
+            b_r = "═"
+            max_title_w = w - 6
+            truncated = ""
+            tw = 0
+            for ch in title_text:
+                dw = 2 if _display_width(ch) == 2 else 1
+                if tw + dw > max_title_w:
+                    break
+                truncated += ch
+                tw += dw
+            title_text = truncated + "…"
         # 分段包裹：边框 FG_BORDER · 话题 FG_TOPIC · 标题 FG_TITLE(bold)
         title = (
             t.style(f"╔{b_l} ", fg=t.fg_border)
@@ -279,22 +323,36 @@ class PanelRenderer:
 
             lines.append(_fill_line("", w, theme=t))  # 空行
 
-            # 语音文本（折行处理）—— 亮白主色
-            for line in _wrap(text, cw):
-                lines.append(_fill_line(f"💬 {line}", w, theme=t, fg=t.fg_text))
+            # ── 语音文本（固高 3 行，不足补空行，超出截断加 "…"）──
+            voice_content = _wrap(text, cw - 2)  # -2 给 "💬 "
+            if not voice_content:
+                voice_content = [""]
+            if len(voice_content) > _VOICE_HEIGHT:
+                voice_content = voice_content[:_VOICE_HEIGHT]
+                last = voice_content[-1]
+                if _display_width(last) + 2 > cw - 2:
+                    cut = len(last)
+                    while cut > 0 and _display_width(last[:cut]) + 2 > cw - 2:
+                        cut -= 1
+                    last = last[:cut]
+                voice_content[-1] = last.rstrip() + "…"
+            voice_content = _fill_section(voice_content, _VOICE_HEIGHT, w, t)
+            for vline in voice_content:
+                label = f"💬 {vline}" if vline.strip() else ""
+                lines.append(_fill_line(label, w, theme=t, fg=t.fg_text))
             # 状态后缀 —— 暗灰
             lines.append(_fill_line(
                 " ── " + " · ".join(suffix_parts), w, theme=t, fg=t.fg_dim))
 
-            # 分析结果（语义色块，v3.26.2）
+            # ── 分析结果（语义色块，固高 2 行 + 可选追问 2 行）──
             if d.seg.analysis is not None and d.seg.analysis.has_content:
                 a = d.seg.analysis
-                blocks: list[tuple[str, str]] = []  # (纯文本, 颜色字段名)
+                blocks: list[tuple[str, str]] = []
                 if a.key_points:
                     blocks.append((f"✦ {' · '.join(a.key_points[:3])}", "fg_ok"))
                 for dec in a.decisions[:3]:
-                    icon = _CONF_ICON.get(dec.confidence, "")
-                    blocks.append((f"{icon}{dec.text}", _DECISION_FG.get(
+                    icon = CONF_ICON.get(dec.confidence, "")
+                    blocks.append((f"{icon}{dec.text}", DECISION_FG.get(
                         dec.confidence, "fg_text")))
                 if a.risks:
                     blocks.append((f"⚠ {' · '.join(a.risks[:2])}", "fg_risk"))
@@ -302,33 +360,41 @@ class PanelRenderer:
                     blocks.append((f"❓ {' · '.join(a.questions[:2])}", "fg_todo"))
                 if blocks:
                     combined_plain = "  ".join(txt for txt, _ in blocks)
-                    if _display_width(combined_plain) <= cw:
-                        # 全部语义色块可容纳 → 逐块着色拼接
-                        colored = "  ".join(
-                            t.style(txt, fg=getattr(t, fg_field))
-                            for txt, fg_field in blocks
-                        )
-                        lines.append(_fill_line(colored, w, theme=t,
-                                                fg=t.fg_text, colored=True))
-                    else:
-                        # 超宽 → 降级纯文本折行（保证布局正确）
-                        for line in _wrap(combined_plain, cw):
-                            lines.append(_fill_line(line, w, theme=t))
-                # 建议提问 — 间隔线 + 亮黄高亮
+                    alines = _wrap(combined_plain, cw)
+                    if len(alines) > _ANALYSIS_HEIGHT:
+                        alines = alines[:_ANALYSIS_HEIGHT]
+                        alines[-1] = alines[-1].rstrip() + "…"
+                    alines = _fill_section(alines, _ANALYSIS_HEIGHT, w, t)
+                    for aline in alines:
+                        lines.append(_fill_line(aline, w, theme=t))
+                else:
+                    for _ in range(_ANALYSIS_HEIGHT):
+                        lines.append(_fill_line("", w, theme=t))
+                # 建议提问 — 固高（分隔线 + 内容）
                 if a.suggested_questions:
                     lines.append(_fill_line(
                         " ── 追问 ──", w, theme=t, fg=t.fg_border))
                     sq = "💡 " + "  ·  ".join(a.suggested_questions[:3])
-                    for line in _wrap(sq, cw):
+                    sq_lines = _wrap(sq, cw)
+                    if len(sq_lines) > _SUGGEST_HEIGHT:
+                        sq_lines = sq_lines[:_SUGGEST_HEIGHT]
+                        sq_lines[-1] = sq_lines[-1].rstrip() + "…"
+                    sq_lines = _fill_section(sq_lines, _SUGGEST_HEIGHT, w, t)
+                    for line in sq_lines:
                         lines.append(_fill_line(line, w, theme=t, fg=t.fg_suggest))
+                else:
+                    # 无追问时也占固高（可选：不占位更紧凑）
+                    pass
             elif d.seg.analysis_status == VoiceSegment.ANALYSIS_SKIPPED:
-                pass  # 跳过：不额外输出
+                for _ in range(_ANALYSIS_HEIGHT):
+                    lines.append(_fill_line("", w, theme=t))
             elif d.analysis_unavailable:
                 lines.append(_fill_line(
                     "⚠ LLM 调用失败或超时，已显示词典校正原文",
                     w, theme=t, fg=t.fg_risk))
+                for _ in range(_ANALYSIS_HEIGHT - 1):
+                    lines.append(_fill_line("", w, theme=t))
             elif d.seg.analysis is None:
-                # v3.26.1 分析进度指示：显示当前阶段 + 耗时
                 if d.analysis_phase:
                     phase_labels = {
                         "prefetch": "🔍 校正+检索",
@@ -339,43 +405,76 @@ class PanelRenderer:
                     elapsed_str = f" ({d.analysis_elapsed:.0f}s)" if d.analysis_elapsed > 0 else ""
                     lines.append(_fill_line(
                         f"⏳ {label}{elapsed_str}…", w, theme=t, fg=t.fg_todo))
+                # 占满固高
+                for _ in range(_ANALYSIS_HEIGHT - 1):
+                    lines.append(_fill_line("", w, theme=t))
         else:
-            # 等待语音
+            # 等待语音：占满固高区域，保持后续布局不变
             lines.append(_fill_line("", w, theme=t))
-            lines.append(_fill_line(
-                "正在聆听…（说完自动识别，Ctrl+C 退出）", w, theme=t))
+            voice_placeholder = _fill_section(
+                ["正在聆听…（说完自动识别，Ctrl+C 退出）"],
+                _VOICE_HEIGHT, w, t)
+            for vline in voice_placeholder:
+                lines.append(_fill_line(vline, w, theme=t))
+            for _ in range(_ANALYSIS_HEIGHT):
+                lines.append(_fill_line("", w, theme=t))
 
-        # ── 洞察推送区（v3.25.3 / v3.26.2 按事件类型着色）──
+        # ── 洞察推送区（固高 4 行，不足补空行）──
         if feed is not None and not feed.empty:
             lines.append(_fill_line("", w, theme=t))
-            lines.append(_fill_line(
-                "─" * 4 + " 洞察推送 " + "─" * (cw - 10), w,
-                theme=t, fg=t.fg_border))
+            feed_header = "─" * 4 + " 洞察推送 " + "─" * (cw - 10)
+            lines.append(_fill_line(feed_header, w, theme=t, fg=t.fg_border))
+            feed_content: list[str] = []
             for evt in feed.visible:
                 icon = evt.TYPE_ICONS.get(evt.event_type, "🔔")
                 fg_field = _EVENT_FG.get(evt.event_type, "fg_text")
-                colored = (
+                prefix = (
                     t.style(f"🔔 {evt.timestamp} ", fg=t.fg_dim)
                     + t.style(f"{icon}  ", fg=getattr(t, fg_field))
-                    + t.style(evt.text, fg=t.fg_text)
                 )
-                lines.append(_fill_line(colored, w, theme=t,
-                                        fg=t.fg_text, colored=True))
+                event_lines = _wrap(evt.text, cw - 6) or [""]
+                for i, eline in enumerate(event_lines):
+                    if i == 0:
+                        colored = prefix + t.style(eline, fg=t.fg_text)
+                    else:
+                        colored = t.style(" " * 6, fg=t.fg_dim) + t.style(eline, fg=t.fg_text)
+                    feed_content.append(colored)
+            # 截断到固高
+            if len(feed_content) > _FEED_HEIGHT:
+                feed_content = feed_content[:_FEED_HEIGHT]
+                last = feed_content[-1]
+                feed_content[-1] = _ANSI_RE.sub("", last).rstrip() + "…"
+            # 补空行
+            feed_content = _fill_section(feed_content, _FEED_HEIGHT, w, t)
+            for fline in feed_content:
+                is_colored = bool(_ANSI_RE.search(fline))
+                lines.append(_fill_line(fline, w, theme=t,
+                                        fg=t.fg_text, colored=is_colored))
 
         # ── 系统告警区（v3.26.1 / v3.26.2 红底亮黄字）──
         if d.alerts:
             for alert in d.alerts:
-                lines.append(_fill_line(
-                    f"⚠ {alert}", w, theme=t,
-                    bg=t.bg_alert, fg=t.fg_alert, bold=True))
+                # v3.26.3: 长告警文本折行（防止超宽溢出）
+                alert_lines = _wrap(f"⚠ {alert}", cw)
+                for aline in alert_lines:
+                    lines.append(_fill_line(
+                        aline, w, theme=t,
+                        bg=t.bg_alert, fg=t.fg_alert, bold=True))
 
         # ── 音频电平指示器（v3.26.1 / v3.26.2 渐变色）──
         if d.rms_level > 0:
-            bar_width = max(4, cw - 6)
+            bar_width = max(4, cw - 10)
             filled = int(d.rms_level * bar_width)
             vu_color = t.vu_color(d.rms_level)
+            # v3.26.3: emoji 标签提供非颜色冗余信息（色盲友好）
+            if d.rms_level >= 0.7:
+                vu_label = "🔊"
+            elif d.rms_level >= 0.35:
+                vu_label = "🔉"
+            else:
+                vu_label = "🔈"
             colored = (
-                t.style("🎤 ", fg=t.fg_dim)
+                t.style(f"{vu_label} ", fg=t.fg_dim)
                 + t.style("█" * filled, fg=vu_color)
                 + t.style("░" * (bar_width - filled), fg=t.fg_border)
             )
@@ -396,7 +495,15 @@ class PanelRenderer:
                 t.style(f" {txt}", fg=getattr(t, fld)) for txt, fld in cum_blocks
             )
             hint = "Ctrl+C 退出"
-            spaces = cw - sum(_display_width(txt) + 2 for txt, _ in cum_blocks) - len(hint) - 2
+            # 计算各部分显示宽度（CJK 用 _display_width，ASCII 用 len）
+            cum_prefix_dw = _display_width("累计")          # "累计" 显示宽度 4
+            # 每个 block: " " + txt，块间 "  "（2 空格）
+            cum_inner_dw = sum(1 + _display_width(txt) for txt, _ in cum_blocks)
+            cum_sep_dw = (len(cum_blocks) - 1) * 2
+            cum_total_dw = cum_prefix_dw + cum_inner_dw + cum_sep_dw
+            hint_dw = _display_width(hint)                   # "Ctrl+C 退出" 显示宽度 11
+            # _fill_line(colored=True) 填充到 w-2，可用空间 = w-2 - cum_total - hint
+            spaces = max(0, w - 2 - cum_total_dw - hint_dw)
             if spaces > 0:
                 footer = (
                     t.style("累计", fg=t.fg_dim)

@@ -6,14 +6,19 @@
 
 from __future__ import annotations
 
+from ._logging import teardown_session_logger
 from .live import MeetingLiveAssistant, _probe_running
 from .models import (
+    CONF_ICON,
+    DECISION_FG,
     AsrConfig,
     AsrLocalConfig,
     AsrRemoteConfig,
     AssistantConfig,
     MeetingState,
     SegmentAnalysis,
+    SpeakerRecord,
+    TopicRecord,
     VoiceSegment,
 )
 from ._session import MeetingSession
@@ -23,10 +28,15 @@ __all__ = [
     "AsrLocalConfig",
     "AsrRemoteConfig",
     "AssistantConfig",
+    "CONF_ICON",
+    "DECISION_FG",
     "MeetingLiveAssistant",
     "MeetingSession",
     "MeetingState",
     "SegmentAnalysis",
+    "SpeakerRecord",
+    "TopicRecord",
     "VoiceSegment",
     "_probe_running",
+    "teardown_session_logger",
 ]

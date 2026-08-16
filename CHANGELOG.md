@@ -1,3 +1,33 @@
+## v3.26.3 (2026-08-16)
+
+meeting-live-assistant 面板稳定化 + 并发加固（14 文件 / +323 -154）。验证：assistant 专项 186 全过，ruff 零告警。
+
+### 面板稳定化（区域固高 + 终端体验）
+- **区域固高布局**：语音 3 行 / 分析 2 行 / 建议提问 2 行 / 洞察推送 4 行各区域固定高度——不足补空行、超出截断加「…」，面板高度不再随内容跳动（`_fill_section` + `_VOICE_HEIGHT` 等常量）
+- **alt-screen 进出**：启动进入 alternate screen 保留终端回滚历史，退出统计帧恢复（不再清屏抹掉历史输出）
+- **折行算法 O(n²)→O(n)**：`_wrap` 预计算字符宽度数组，避免每行重复扫描整段文本
+- **洞察推送多行渲染**：事件文本折行（前缀着色 + 续行缩进），截断到固高 4 行
+- **长告警文本折行**：超宽告警不再撑破边框；**标题过长截断**（保留前 w-6 字符 + 「…」防边框断裂）
+- **VU 电平 emoji 标签**：🔈/🔉/🔊 提供非颜色冗余信息（色盲友好）；底部累计条宽度计算改用 CJK 显示宽度（修正错位）
+
+### 并发安全（跨线程竞态根治）
+- **InsightFeed 加锁**：push/toggle_pause 全量锁保护（worker ↔ 键盘线程竞态），`visible` 返回 snapshot copy 防外部迭代期间被修改；删除死代码 `line` 属性/`render_lines`
+- **CorrectorAdapter per-speaker 上下文加锁 + LRU 淘汰**：`push_context` 被音频线程 + Worker 线程并发调用，加锁 + 最多 10 个 speaker（最旧淘汰）
+- **AudioCapture buffer 加锁**：回调线程 ↔ 主线程并发访问保护
+
+### 正确性修复
+- **多段批次落账乱序修复**：`_process_batch` 落账改为按 seq 升序（原 first 段最后 record，导致 segments 列表乱序）
+- **analysis_elapsed 实际耗时**：prefetch 阶段不再渲染面板，`_phase_start` 追踪并传递真实耗时（原恒为 0）
+- **batch_size_s 配置真正生效**：`asr.local.batch_size_s` 传入 ASREngine（原硬编码 60）
+- **`doc_rewrite_every` 默认 1→3**：降低文档重写 I/O（可配置）
+
+### 工程收敛
+- **共享常量收敛**：`CONF_ICON`/`DECISION_FG` 移入 models.py（_panel/_doc_writer 共用，消除重复定义）+ `TopicRecord`/`SpeakerRecord` TypedDict
+- **teardown_session_logger**：退出清理 session logger 文件 handler（e2e 测试防多次 run() 句柄累积泄漏）
+- **light 主题对比度微调**：fg_dim/fg_border/fg_tentative 加深
+
+协议版本 3.19（不变）。产品版本 3.26.2→**3.26.3**。
+
 ## v3.26.2 (2026-08-12)
 
 meeting-live-assistant 面板双主题视觉方案（5 文件 +8 测试）。验证：assistant 专项 186（+8）全过，ruff 零告警。

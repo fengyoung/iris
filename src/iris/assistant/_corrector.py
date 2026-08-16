@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections import deque
 from typing import Dict, Optional
@@ -25,6 +26,7 @@ class CorrectorAdapter:
     # 上下文窗口配置
     _CONTEXT_SIZE = 5          # 最多保留最近 N 句
     _CONTEXT_EXPIRE_SEC = 600  # 上下文过期时间（10 分钟）
+    _MAX_SPEAKER_CTX = 10      # per-speaker 上下文最多保留 N 个 speaker（LRU 淘汰）
 
     def __init__(
         self,
@@ -43,7 +45,10 @@ class CorrectorAdapter:
         # 生效路径：prefetch 阶段 speaker 尚未被 LLM 后验填充（为空 → 全局上下文）；
         # 分析后 speaker 回填，后续同 speaker 段的校正才走隔离上下文。
         # 是渐进增强而非全量隔离——首轮校正始终用全局上下文兜底。
+        # v3.26.3: 加锁（push_context 被音频线程+Worker 线程并发调用）+ LRU 淘汰
         self._speaker_ctx: Dict[str, deque] = {}
+        self._speaker_ctx_lock = threading.Lock()
+        self._speaker_ctx_order: list[str] = []  # LRU 追踪（最近使用的 speaker 在末尾）
         self._build_ac()
 
     # ── 公开接口 ──────────────────────────────────────────
@@ -94,12 +99,23 @@ class CorrectorAdapter:
 
         v3.25.5: 若提供 speaker_id，同时写入 per-speaker 上下文（maxlen=3），
         后续同说话人校正时优先使用隔离上下文，避免混入他人文本。
+        v3.26.3: per-speaker 上下文加锁 + LRU 淘汰（最多 10 个 speaker）。
         """
         self._recent.append((text, time.monotonic()))
         if speaker_id:
-            ctx = self._speaker_ctx.setdefault(speaker_id,
-                                               deque(maxlen=self._CONTEXT_SIZE))
-            ctx.append((text, time.monotonic()))
+            with self._speaker_ctx_lock:
+                if speaker_id in self._speaker_ctx:
+                    # LRU: 移到末尾
+                    self._speaker_ctx_order.remove(speaker_id)
+                else:
+                    # 新 speaker: 超过上限时淘汰最旧的
+                    while len(self._speaker_ctx) >= self._MAX_SPEAKER_CTX:
+                        old = self._speaker_ctx_order.pop(0)
+                        del self._speaker_ctx[old]
+                self._speaker_ctx_order.append(speaker_id)
+                ctx = self._speaker_ctx.setdefault(speaker_id,
+                                                   deque(maxlen=self._CONTEXT_SIZE))
+                ctx.append((text, time.monotonic()))
 
     # ── Aho-Corasick ──────────────────────────────────────
 
@@ -141,7 +157,8 @@ class CorrectorAdapter:
         v3.25.5: 优先同说话人上下文（隔离噪音），无 speaker_id 时回退全局。
         """
         now = time.monotonic()
-        source = self._speaker_ctx.get(speaker_id) if speaker_id else None
+        with self._speaker_ctx_lock:
+            source = self._speaker_ctx.get(speaker_id) if speaker_id else None
         ctx_deque = source if source else self._recent
         valid = [
             text for text, ts in tuple(ctx_deque)

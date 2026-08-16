@@ -107,7 +107,7 @@ class TestAssistantConfig:
         assert cfg.top_k == 5
         assert cfg.llm_model == ""
         assert cfg.poll_interval == 0.5
-        assert cfg.doc_rewrite_every == 1
+        assert cfg.doc_rewrite_every == 3
         # v3.23.3 新增
         assert cfg.fast_only is False
         assert cfg.short_segment_chars == 15

@@ -62,6 +62,7 @@ def _make_bundle(tmp_path, **overrides):
     cfg = {
         "top_k": 3, "poll_interval": 0.05, "output_dir": "",
         "short_segment_chars": 1,
+        "doc_rewrite_every": 1,  # 单段测试需要即时写入
     }
     cfg.update(overrides)
     return SimpleNamespace(
