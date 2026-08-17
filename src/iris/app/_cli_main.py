@@ -37,6 +37,7 @@ COMMANDS = [
     # ── 委托命令 ──
     "trello", "extract-weekly-reports", "extract-travel-invoice",
     "sync-memory", "feishu-doc-convert", "chat-digest",
+    "task-panel",
     # ── 信息汇聚 ──
     "feed-setup", "feed-list", "feed-add", "feed-remove",
     "feed-config", "feed-collect", "feed-pending",
@@ -49,13 +50,18 @@ _DELEGATED_SCRIPTS = {
     "extract-weekly-reports": "extract_weekly_reports.py",
     "extract-travel-invoice": "extract_travel_invoice.py",
     "sync-memory": "sync_memory.py",
+    "task-panel": "task_panel.py",
 }
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Iris 命令行入口")
     parser.add_argument("command", choices=COMMANDS, help="执行的命令")
-    parser.add_argument("--project-root", default=".", help="Iris 项目根目录")
+    # 默认按代码位置推断项目根（src/iris/app/ 向上 4 级），
+    # 任意 cwd 运行 iris 均可用；多项目场景仍可显式 --project-root 覆盖（v3.27.0）
+    parser.add_argument("--project-root",
+                        default=str(Path(__file__).resolve().parent.parent.parent.parent),
+                        help="Iris 项目根目录")
     parser.add_argument("--workspace", default="", help="工作空间名称（覆盖 config/workspaces.json 中的路径配置）")
     parser.add_argument("--context", default="{}", help="route-model 使用的 JSON 上下文")
     parser.add_argument("--pretty", action="store_true", help="人类可读输出")

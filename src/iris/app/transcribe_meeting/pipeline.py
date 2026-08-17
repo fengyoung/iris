@@ -63,85 +63,94 @@ class TranscribeMeetingPipeline:
         meeting_type, meeting_topic = self._parse_filename(stem, date_part)
         print(f"[0/3] 识别会议类型={meeting_type}, 主题={meeting_topic}", file=sys.stderr)
 
-        # Step 1: 获取转写文本
-        if has_audio:
-            audio = source
-            transcript_save_path = self._temp_dir / f"{stem}_raw.txt"
-            if not force_retranscribe and transcript_save_path.exists():
-                raw_text = transcript_save_path.read_text(encoding="utf-8")
-                word_count = len(raw_text)
-                print(f"[1/3] 跳过 Whisper，使用已有转写（{word_count} 字）", file=sys.stderr)
+        # 任务埋点：文件解析成功后开始（参数错误属瞬时失败，不产生任务记录）
+        from iris.taskpanel.reporter import TaskReporter
+        with TaskReporter("transcribe-meeting", command="transcribe-meeting") as _tr:
+            _tr.report_phase("parse", f"类型: {meeting_type} / {meeting_topic}", progress=0.2)
+
+            # Step 1: 获取转写文本
+            if has_audio:
+                audio = source
+                transcript_save_path = self._temp_dir / f"{stem}_raw.txt"
+                if not force_retranscribe and transcript_save_path.exists():
+                    raw_text = transcript_save_path.read_text(encoding="utf-8")
+                    word_count = len(raw_text)
+                    print(f"[1/3] 跳过 Whisper，使用已有转写（{word_count} 字）", file=sys.stderr)
+                else:
+                    print(f"[1/3] Whisper 转写中（model={whisper_model}）...", file=sys.stderr)
+                    word_count = self._transcribe(audio, transcript_save_path, whisper_model)
+                    print(f"     完成：{word_count} 字 → {transcript_save_path.name}", file=sys.stderr)
+                raw_transcript = transcript_save_path.read_text(encoding="utf-8")
             else:
-                print(f"[1/3] Whisper 转写中（model={whisper_model}）...", file=sys.stderr)
-                word_count = self._transcribe(audio, transcript_save_path, whisper_model)
-                print(f"     完成：{word_count} 字 → {transcript_save_path.name}", file=sys.stderr)
-            raw_transcript = transcript_save_path.read_text(encoding="utf-8")
-        else:
-            raw_transcript = source.read_text(encoding="utf-8")
-            word_count = len(raw_transcript)
-            print(f"[1/3] 跳过 Whisper，直接使用转写文本（{word_count} 字）", file=sys.stderr)
+                raw_transcript = source.read_text(encoding="utf-8")
+                word_count = len(raw_transcript)
+                print(f"[1/3] 跳过 Whisper，直接使用转写文本（{word_count} 字）", file=sys.stderr)
+            _tr.report_phase("transcribe", f"转写完成（{word_count} 字）", progress=0.5)
 
-        # Step 2: Wiki 上下文（适配新结构）
-        print("[2/3] 检索 Wiki 上下文...", file=sys.stderr)
-        wiki_context, page_count = self._load_wiki_context()
-        print(f"     完成：加载 {page_count} 个 Wiki 页面", file=sys.stderr)
+            # Step 2: Wiki 上下文（适配新结构）
+            print("[2/3] 检索 Wiki 上下文...", file=sys.stderr)
+            wiki_context, page_count = self._load_wiki_context()
+            print(f"     完成：加载 {page_count} 个 Wiki 页面", file=sys.stderr)
+            _tr.report_phase("wiki_context", f"加载 {page_count} 个 Wiki 页面", progress=0.7)
 
-        # 计算会议日期和时长
-        meeting_date = self._format_meeting_date(date_part)
-        duration = self._calc_duration(raw_transcript)
+            # 计算会议日期和时长
+            meeting_date = self._format_meeting_date(date_part)
+            duration = self._calc_duration(raw_transcript)
 
-        # Step 3: LLM 生成会议纪要
-        print("[3/3] base_model 生成会议纪要...", file=sys.stderr)
-        source_filename = source.name  # 来源文件，供输出标识和未来排重
-        minutes = self._call_llm(raw_transcript, wiki_context, meeting_type, meeting_topic,
-                                 source_filename=source_filename,
-                                 meeting_date=meeting_date, duration=duration,
-                                 model=model)
+            # Step 3: LLM 生成会议纪要
+            print("[3/3] base_model 生成会议纪要...", file=sys.stderr)
+            _tr.report_phase("llm_minutes", "LLM 生成会议纪要", progress=0.85)
+            source_filename = source.name  # 来源文件，供输出标识和未来排重
+            minutes = self._call_llm(raw_transcript, wiki_context, meeting_type, meeting_topic,
+                                     source_filename=source_filename,
+                                     meeting_date=meeting_date, duration=duration,
+                                     model=model)
 
-        # Step 3b: 路由判定（--to-source 模式）
-        route_result = None
-        if to_source and not output_path:
-            route_result = self._classify_target(raw_transcript, meeting_type, meeting_topic)
-            output_path = str(self._resolve_routed_output(route_result, stem))
-            route_name = route_result.get("route", "05-会议纪要")
-            print(f"     📂 路由归档: {route_name} ← {route_result.get('reason', '')}", file=sys.stderr)
+            # Step 3b: 路由判定（--to-source 模式）
+            route_result = None
+            if to_source and not output_path:
+                route_result = self._classify_target(raw_transcript, meeting_type, meeting_topic)
+                output_path = str(self._resolve_routed_output(route_result, stem))
+                route_name = route_result.get("route", "05-会议纪要")
+                print(f"     📂 路由归档: {route_name} ← {route_result.get('reason', '')}", file=sys.stderr)
 
-        # ── 注入 frontmatter 元数据 ──────────────────────
-        try:
-            from iris.core.frontmatter import inject_frontmatter
-            _fm_fields = {
-                "title": f"会议纪要 - {meeting_topic}" if meeting_topic else f"会议纪要 - {meeting_type}",
-                "date": meeting_date,
-                "type": "会议纪要",
-                "meeting_type": meeting_type or "",
-                "duration": duration or "",
-                "source": source_filename,
-                "generated": time.strftime("%Y-%m-%d"),
-                "route": route_result.get("route", "") if route_result else "",
-            }
-            # 尝试从 LLM 输出中提取参会人员
-            _participants = self._extract_participants(minutes)
-            if _participants:
-                _fm_fields["participants"] = _participants
-            minutes = inject_frontmatter(minutes, _fm_fields)
-        except Exception:
-            pass  # frontmatter 注入失败不应阻塞纪要生成
+            # ── 注入 frontmatter 元数据 ──────────────────────
+            try:
+                from iris.core.frontmatter import inject_frontmatter
+                _fm_fields = {
+                    "title": f"会议纪要 - {meeting_topic}" if meeting_topic else f"会议纪要 - {meeting_type}",
+                    "date": meeting_date,
+                    "type": "会议纪要",
+                    "meeting_type": meeting_type or "",
+                    "duration": duration or "",
+                    "source": source_filename,
+                    "generated": time.strftime("%Y-%m-%d"),
+                    "route": route_result.get("route", "") if route_result else "",
+                }
+                # 尝试从 LLM 输出中提取参会人员
+                _participants = self._extract_participants(minutes)
+                if _participants:
+                    _fm_fields["participants"] = _participants
+                minutes = inject_frontmatter(minutes, _fm_fields)
+            except Exception:
+                pass  # frontmatter 注入失败不应阻塞纪要生成
 
-        if output_path:
-            out = Path(output_path).resolve()
-        else:
-            out = self._temp_dir / f"{stem}.md"
-        from iris.core.write_guard import safe_write_text
-        safe_write_text(out, minutes, self._bundle, allow_existing_outside=True)
-        print(f"     完成 → {out.name}", file=sys.stderr)
+            if output_path:
+                out = Path(output_path).resolve()
+            else:
+                out = self._temp_dir / f"{stem}.md"
+            from iris.core.write_guard import safe_write_text
+            safe_write_text(out, minutes, self._bundle, allow_existing_outside=True)
+            print(f"     完成 → {out.name}", file=sys.stderr)
+            _tr.report_phase("done", f"输出: {out.name}", progress=1.0)
 
-        reported_model = model if model else self._llm.get_provider().get_active_model_config("base_model")["model"]
-        result = {"audio_file": str(source) if has_audio else "", "transcript_file": str(source) if has_text else "",
-                  "source_type": source_type, "word_count": word_count, "wiki_pages_loaded": page_count,
-                  "output_file": str(out), "model": reported_model}
-        if route_result:
-            result["route"] = route_result.get("route", "")
-            result["route_reason"] = route_result.get("reason", "")
+            reported_model = model if model else self._llm.get_provider().get_active_model_config("base_model")["model"]
+            result = {"audio_file": str(source) if has_audio else "", "transcript_file": str(source) if has_text else "",
+                      "source_type": source_type, "word_count": word_count, "wiki_pages_loaded": page_count,
+                      "output_file": str(out), "model": reported_model}
+            if route_result:
+                result["route"] = route_result.get("route", "")
+                result["route_reason"] = route_result.get("reason", "")
         return result
 
     # ── 日期与时长计算 ──────────────────────────────────────────

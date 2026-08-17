@@ -28,57 +28,67 @@ from iris.app.cli.helpers import (
 def handle_daily_start(args, bundle, logger) -> int:
     from iris.memory import MemoryLifecycle
     from iris.app.cli.helpers import _run_sync_memory
+    from iris.taskpanel.reporter import TaskReporter
 
-    # 1. 记忆同步
-    sync_result = _run_sync_memory(bundle)
-    if sync_result.get("synced"):
-        logger.log("sync_memory", {"corrections_added": sync_result.get("corrections_added", 0)})
+    with TaskReporter("daily-start", command="daily-start") as _tr:
+        # 1. 记忆同步
+        _tr.report_phase("memory_sync", "第1/8阶段：记忆同步", progress=1 / 8)
+        sync_result = _run_sync_memory(bundle)
+        if sync_result.get("synced"):
+            logger.log("sync_memory", {"corrections_added": sync_result.get("corrections_added", 0)})
 
-    # 2. 记忆自治维护（Phase 3：自动老化归档）
-    lifecycle = MemoryLifecycle(bundle)
-    maintenance_report = lifecycle.maintenance()
-    age_result = lifecycle.age()  # Phase 3：默认自动老化，无需 --auto-age
-    maintenance_report["age_result"] = age_result
+        # 2. 记忆自治维护（Phase 3：自动老化归档）
+        _tr.report_phase("memory_maintenance", "第2/8阶段：记忆自治维护", progress=2 / 8)
+        lifecycle = MemoryLifecycle(bundle)
+        maintenance_report = lifecycle.maintenance()
+        age_result = lifecycle.age()  # Phase 3：默认自动老化，无需 --auto-age
+        maintenance_report["age_result"] = age_result
 
-    # 3. 会话模式挖掘（Phase 2：daily-start 兜底，Q&A 懒触发没跑到时补上）
-    try:
-        session_mine_result = SessionPatternMiner(bundle).mine_and_promote()
-    except Exception:
-        session_mine_result = {"mined": False, "reason": "会话挖掘异常"}
+        # 3. 会话模式挖掘（Phase 2：daily-start 兜底，Q&A 懒触发没跑到时补上）
+        _tr.report_phase("session_mine", "第3/8阶段：会话模式挖掘", progress=3 / 8)
+        try:
+            session_mine_result = SessionPatternMiner(bundle).mine_and_promote()
+        except Exception:
+            session_mine_result = {"mined": False, "reason": "会话挖掘异常"}
 
-    # 4. 扫描 + 切块 + 向量索引
-    scan_info, chunk_summaries, vector_index_result = _daily_scan_and_chunk(bundle)
+        # 4. 扫描 + 切块 + 向量索引
+        _tr.report_phase("scan_chunk", "第4/8阶段：扫描+切块+向量索引", progress=4 / 8)
+        scan_info, chunk_summaries, vector_index_result = _daily_scan_and_chunk(bundle)
 
-    # 5. Wiki 自动发现 + 索引维护 + 增量更新
-    wiki_update_result, person_enrich_result = _daily_wiki_maintenance(
-        bundle, chunk_summaries,
-    )
+        # 5. Wiki 自动发现 + 索引维护 + 增量更新
+        _tr.report_phase("wiki_maintenance", "第5/8阶段：Wiki 维护", progress=5 / 8)
+        wiki_update_result, person_enrich_result = _daily_wiki_maintenance(
+            bundle, chunk_summaries,
+        )
 
-    # 6. LLM 用量概要（今日/本周/本月 + 预算预警）
-    usage_summary = _compute_daily_usage_summary(bundle)
+        # 6. LLM 用量概要（今日/本周/本月 + 预算预警）
+        _tr.report_phase("usage_summary", "第6/8阶段：LLM 用量概要", progress=6 / 8)
+        usage_summary = _compute_daily_usage_summary(bundle)
 
-    # 7. ASR 审计（纯本地，零 LLM 成本；无产物时静默跳过）
-    asr_audit_result = _daily_asr_audit(bundle)
+        # 7. ASR 审计（纯本地，零 LLM 成本；无产物时静默跳过）
+        _tr.report_phase("asr_audit", "第7/8阶段：ASR 审计", progress=7 / 8)
+        asr_audit_result = _daily_asr_audit(bundle)
 
-    # 8. 主动提醒（栏目断供/周报缺失/项目停滞，零 LLM 成本）
-    reminders_result = _daily_reminders(bundle)
+        # 8. 主动提醒（栏目断供/周报缺失/项目停滞，零 LLM 成本）
+        _tr.report_phase("reminders", "第8/8阶段：主动提醒", progress=8 / 8)
+        reminders_result = _daily_reminders(bundle)
 
-    payload = {"memory_sync": {"scanned": sync_result.get("scanned", 0), "skipped": sync_result.get("skipped", 0),
-                                "corrections_added": sync_result.get("corrections_added", 0)},
-               "memory_maintenance": maintenance_report,
-               "session_mine": session_mine_result,
-               "scan": scan_info,
-               "chunks": [{"source_name": cs.source_name, "chunk_count": cs.chunk_count,
-                            "reused_documents": cs.build_stats.get("reused_documents", 0),
-                            "rebuilt_documents": cs.build_stats.get("rebuilt_documents", 0)} for cs in chunk_summaries],
-               "vector_index": vector_index_result,
-               "wiki_discover": _auto_discover_wiki_for_daily(bundle, chunk_summaries),
-               "wiki_update": wiki_update_result,
-               "person_enrich": person_enrich_result,
-               "usage_summary": usage_summary,
-               "asr_audit": asr_audit_result,
-               "reminders": reminders_result}
-    _emit_output(args.command, payload, pretty=args.pretty)
+        payload = {"memory_sync": {"scanned": sync_result.get("scanned", 0), "skipped": sync_result.get("skipped", 0),
+                                    "corrections_added": sync_result.get("corrections_added", 0)},
+                   "memory_maintenance": maintenance_report,
+                   "session_mine": session_mine_result,
+                   "scan": scan_info,
+                   "chunks": [{"source_name": cs.source_name, "chunk_count": cs.chunk_count,
+                                "reused_documents": cs.build_stats.get("reused_documents", 0),
+                                "rebuilt_documents": cs.build_stats.get("rebuilt_documents", 0)} for cs in chunk_summaries],
+                   "vector_index": vector_index_result,
+                   "wiki_discover": _auto_discover_wiki_for_daily(bundle, chunk_summaries),
+                   "wiki_update": wiki_update_result,
+                   "person_enrich": person_enrich_result,
+                   "usage_summary": usage_summary,
+                   "asr_audit": asr_audit_result,
+                   "reminders": reminders_result}
+        _emit_output(args.command, payload, pretty=args.pretty)
     return 0
 
 

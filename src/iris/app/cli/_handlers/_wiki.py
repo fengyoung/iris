@@ -48,28 +48,38 @@ def handle_discover_wiki_auto(args, bundle, logger) -> int:
 
 def handle_build_wiki(args, bundle, logger) -> int:
     from iris.wiki import WikiGenerator
+    from iris.taskpanel.reporter import TaskReporter
 
     generator = WikiGenerator(bundle)
-    if args.review_file:
-        items = _load_review_items(Path(args.review_file))
-        result = generator.build_pages(items, write=args.write, overwrite=args.overwrite, backup=args.backup)
-        _emit_output(args.command, {"items": result.items}, pretty=args.pretty)
-        return 0
-    if args.batch_file:
-        items = _load_batch_items(Path(args.batch_file))
-        result = generator.build_pages(items, write=args.write, overwrite=args.overwrite, backup=args.backup)
-        _emit_output(args.command, {"items": result.items}, pretty=args.pretty)
-        return 0
 
-    title = args.title or args.query
-    draft = generator.build_page(query=args.query, page_type=args.page_type, title=title)
-    payload = {"page_type": draft.page_type, "title": draft.title, "slug": draft.slug,
-               "output_path": draft.output_path, "markdown": draft.markdown}
-    if args.write:
-        write_result = generator.write_page(draft, overwrite=args.overwrite, backup=args.backup)
-        payload["write_result"] = {"path": write_result.path, "action": write_result.action,
-                                   "backup_path": write_result.backup_path}
-    _emit_output(args.command, payload, pretty=args.pretty)
+    def _on_page(done: int, total: int) -> None:
+        _tr.report_phase("build", f"生成 Wiki 页面 {done}/{total}",
+                         progress=done / max(total, 1))
+
+    with TaskReporter("build-wiki", command="build-wiki") as _tr:
+        if args.review_file:
+            items = _load_review_items(Path(args.review_file))
+            result = generator.build_pages(items, write=args.write, overwrite=args.overwrite,
+                                           backup=args.backup, progress_callback=_on_page)
+            _emit_output(args.command, {"items": result.items}, pretty=args.pretty)
+            return 0
+        if args.batch_file:
+            items = _load_batch_items(Path(args.batch_file))
+            result = generator.build_pages(items, write=args.write, overwrite=args.overwrite,
+                                           backup=args.backup, progress_callback=_on_page)
+            _emit_output(args.command, {"items": result.items}, pretty=args.pretty)
+            return 0
+
+        title = args.title or args.query
+        _tr.report_phase("build_page", f"生成单页：{args.page_type} {title}")
+        draft = generator.build_page(query=args.query, page_type=args.page_type, title=title)
+        payload = {"page_type": draft.page_type, "title": draft.title, "slug": draft.slug,
+                   "output_path": draft.output_path, "markdown": draft.markdown}
+        if args.write:
+            write_result = generator.write_page(draft, overwrite=args.overwrite, backup=args.backup)
+            payload["write_result"] = {"path": write_result.path, "action": write_result.action,
+                                       "backup_path": write_result.backup_path}
+        _emit_output(args.command, payload, pretty=args.pretty)
     return 0
 
 

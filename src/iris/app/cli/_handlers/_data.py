@@ -53,25 +53,35 @@ def handle_scan_source(args, bundle, logger) -> int:
 
 def handle_build_chunks(args, bundle, logger) -> int:
     from iris.ingest import MarkdownChunker
+    from iris.taskpanel.reporter import TaskReporter
     incremental = getattr(args, "incremental", False)
     chunker = MarkdownChunker(bundle)
-    if args.source:
-        summaries = [chunker.build_source_chunks(args.source, incremental=incremental)]
-    else:
-        summaries = chunker.build_all_enabled_sources_chunks(incremental=incremental)
-    payloads = []
-    for summary in summaries:
-        p = _chunk_payload(summary, summary_only=args.summary_only)
-        if args.write_summary:
-            p["summary_path"] = str(chunker.write_summary(summary))
-        payloads.append(p)
-        stats = summary.build_stats
-        logger.log("build_chunks", {"source_name": summary.source_name,
-                                     "chunk_count": summary.chunk_count,
-                                     "build_stats": {"reused_documents": stats.get("reused_documents", 0),
-                                                     "rebuilt_documents": stats.get("rebuilt_documents", 0),
-                                                     "cleaned_documents": stats.get("cleaned_documents", 0)}})
-    _emit_output(args.command, {"sources": payloads}, pretty=args.pretty)
+
+    def _on_doc(done: int, total: int, source_name: str) -> None:
+        _tr.report_phase("chunk", f"{source_name}：切块 {done}/{total}",
+                         progress=done / max(total, 1))
+
+    with TaskReporter("build-chunks", command="build-chunks") as _tr:
+        if args.source:
+            summaries = [chunker.build_source_chunks(
+                args.source, incremental=incremental, progress_callback=_on_doc)]
+        else:
+            _tr.report_phase("scan", "扫描全部数据源")
+            summaries = chunker.build_all_enabled_sources_chunks(
+                incremental=incremental, progress_callback=_on_doc)
+        payloads = []
+        for summary in summaries:
+            p = _chunk_payload(summary, summary_only=args.summary_only)
+            if args.write_summary:
+                p["summary_path"] = str(chunker.write_summary(summary))
+            payloads.append(p)
+            stats = summary.build_stats
+            logger.log("build_chunks", {"source_name": summary.source_name,
+                                         "chunk_count": summary.chunk_count,
+                                         "build_stats": {"reused_documents": stats.get("reused_documents", 0),
+                                                         "rebuilt_documents": stats.get("rebuilt_documents", 0),
+                                                         "cleaned_documents": stats.get("cleaned_documents", 0)}})
+        _emit_output(args.command, {"sources": payloads}, pretty=args.pretty)
     return 0
 
 

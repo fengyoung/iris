@@ -8,7 +8,7 @@ from concurrent.futures import as_completed, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from iris.config.loader import ConfigBundle
 from iris.llm import LLMProviderError, LLMService
@@ -112,9 +112,14 @@ class WikiGenerator:
         return draft
 
     def build_pages(self, items: Iterable[BatchWikiItem], *, top_k: int = 5,
-                    write: bool = False, overwrite: bool = False, backup: bool = False) -> BatchWikiResult:
+                    write: bool = False, overwrite: bool = False, backup: bool = False,
+                    progress_callback: Optional[Callable[[int, int], None]] = None
+                    ) -> BatchWikiResult:
         results: List[dict] = []
-        for item in items:
+        item_list = list(items)  # 转 list 以获取总数（供进度回调）
+        for idx, item in enumerate(item_list):
+            if progress_callback:
+                progress_callback(idx + 1, len(item_list))
             draft = self.build_page(query=item.query, page_type=item.page_type, title=item.title, top_k=top_k)
             payload = {"query": item.query, "page_type": draft.page_type, "title": draft.title,
                        "slug": draft.slug, "output_path": draft.output_path, "markdown": draft.markdown}

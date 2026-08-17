@@ -7,7 +7,7 @@ import logging
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from iris.config.loader import ConfigBundle
 from iris.ingest.scanner import DocumentRecord, MarkdownScanner, ScanSummary
@@ -110,21 +110,34 @@ class MarkdownChunker:
             incremental=incremental,
         )
 
-    def build_source_chunks(self, source_name: str, *, incremental: bool = False) -> ChunkSummary:
+    def build_source_chunks(self, source_name: str, *, incremental: bool = False,
+                            progress_callback: Optional[Callable[[int, int, str], None]] = None
+                            ) -> ChunkSummary:
+        """构建单数据源 chunk。
+
+        :param progress_callback: 逐文档进度回调 (done, total, source_name)，
+            供任务面板埋点（默认 None 零行为变化）。
+        """
         return self._build_chunks_from_scan(
             self._scanner.scan_source_by_name(source_name, incremental=incremental),
             incremental=incremental,
+            progress_callback=progress_callback,
         )
 
-    def build_all_enabled_sources_chunks(self, *, incremental: bool = False) -> List[ChunkSummary]:
+    def build_all_enabled_sources_chunks(self, *, incremental: bool = False,
+                                         progress_callback: Optional[Callable[[int, int, str], None]] = None
+                                         ) -> List[ChunkSummary]:
         summaries: List[ChunkSummary] = []
         for source_name, cfg in self._config.data_source["sources"].items():
             if cfg.get("enabled", True):
-                summaries.append(self.build_source_chunks(source_name, incremental=incremental))
+                summaries.append(self.build_source_chunks(
+                    source_name, incremental=incremental,
+                    progress_callback=progress_callback))
         return summaries
 
     def _build_chunks_from_scan(
-        self, scan_summary: ScanSummary, *, incremental: bool = False
+        self, scan_summary: ScanSummary, *, incremental: bool = False,
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
     ) -> ChunkSummary:
         previous = self._load_previous_chunks_for_source(scan_summary.source_name)
         reused_documents = 0
@@ -140,7 +153,10 @@ class MarkdownChunker:
             for rp in deleted_paths:
                 previous.pop(rp, None)
 
-        for document in scan_summary.documents:
+        for idx, document in enumerate(scan_summary.documents):
+            if progress_callback:
+                progress_callback(idx + 1, max(scan_summary.document_count, 1),
+                                  scan_summary.source_name)
             cached_chunks = previous.get(document.relative_path)
             if cached_chunks and all(chunk.document_hash == document.file_hash for chunk in cached_chunks):
                 all_chunks.extend(cached_chunks)

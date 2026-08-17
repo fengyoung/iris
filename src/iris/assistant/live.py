@@ -288,68 +288,78 @@ class MeetingLiveAssistant:
             _logger.warning("meeting-live-assistant 已有实例在运行，退出")
             return 1
 
-        # Python 3.13 中默认 SIGINT 处理无法中断 time.sleep（主线程睡眠时不抛
-        # KeyboardInterrupt），显式注册 handler 保证 Ctrl+C 可靠进入优雅退出
-        def _sigint_handler(signum, frame):
-            raise KeyboardInterrupt
+        # 任务埋点：register 成功即开始（面板实时显示会议进度；
+        # Ctrl+C 正常结束 → success，进程被杀 → probe 兜底 interrupted）
+        from iris.taskpanel.reporter import TaskReporter
+        with TaskReporter("meeting-live-assistant", command="meeting-live-assistant",
+                          data_root=self._pid_dir.parent) as _tr:
+            self._task_reporter = _tr
 
-        signal.signal(signal.SIGINT, _sigint_handler)
+            # Python 3.13 中默认 SIGINT 处理无法中断 time.sleep（主线程睡眠时不抛
+            # KeyboardInterrupt），显式注册 handler 保证 Ctrl+C 可靠进入优雅退出
+            def _sigint_handler(signum, frame):
+                raise KeyboardInterrupt
 
-        # 会话日志：文件输出到过程文档同目录（session_id 取自文档文件名去扩展名）
-        session_id = self._doc_path.stem
-        setup_session_logger(self._doc_path.parent, session_id)
-        _logger.info("会话日志已启动: %s.log", session_id)
+            signal.signal(signal.SIGINT, _sigint_handler)
 
-        worker = None
-        try:
-            if not self._writer.initial_write(self._session.state):
-                return 1
+            # 会话日志：文件输出到过程文档同目录（session_id 取自文档文件名去扩展名）
+            session_id = self._doc_path.stem
+            setup_session_logger(self._doc_path.parent, session_id)
+            _logger.info("会话日志已启动: %s.log", session_id)
 
-            _logger.info("实时会议助理已启动，过程文档: %s", self._doc_path)
-            _logger.info("正在聆听…（说完自动识别，Ctrl+C 退出）")
+            worker = None
+            try:
+                if not self._writer.initial_write(self._session.state):
+                    return 1
 
-            self._panel.render(PanelDisplay(status="等待语音…", state=self._session.state),
-                              feed=self._feed)
+                _logger.info("实时会议助理已启动，过程文档: %s", self._doc_path)
+                _logger.info("正在聆听…（说完自动识别，Ctrl+C 退出）")
+                _tr.report_phase("listening", f"聆听中… 过程文档: {self._doc_path.name}")
 
-            worker = threading.Thread(target=self._worker_loop, daemon=True)
-            worker.start()
-            kb_listener = threading.Thread(target=self._keyboard_listener, daemon=True)
-            kb_listener.start()
-            self._audio_loop()
-        except KeyboardInterrupt:
-            _logger.info("正在结束会议…")
-        finally:
-            # 安全关闭：SIG_IGN 防止清理过程被二次 Ctrl+C 中断。
-            # 清理完成后直接退出，不恢复 handler（进程即将结束）。
-            signal.signal(signal.SIGINT, signal.SIG_IGN)
-            self._session.request_stop()
-            if worker is not None:
-                worker.join(timeout=_EXIT_JOIN_SEC)
-                if worker.is_alive():
-                    _logger.warning("退出等待超时，当前段可能未完成")
-            if self._cfg.summary_enabled and self._session.state.segments:
-                try:
-                    summary = self._analyzer.summarize(self._session.state)
-                    if summary:
-                        self._session.state.summary = summary
-                        _logger.info("会议总结已生成")
-                    else:
-                        _logger.warning("会议总结生成失败（跳过）")
-                except Exception:
-                    _logger.warning("会议总结异常（跳过）")
-            self._writer.maybe_rewrite(self._session.state, force=True)
-            self._panel.render_final(self._session.state, self._doc_path)
-            self._pool.shutdown(wait=True, cancel_futures=True)
-            # v3.26.1: 空会议清理——无语音段时删除自动生成的过程文档
-            if not self._session.state.segments and self._doc_path_auto:
-                try:
-                    self._doc_path.unlink(missing_ok=True)
-                    _logger.info("空会议（无语音段），已清理过程文档")
-                except Exception:
-                    pass
-            registry.unregister()
-            # v3.26.3: 清理 session logger 文件 handler（e2e 测试防句柄泄漏）
-            teardown_session_logger()
+                self._panel.render(PanelDisplay(status="等待语音…", state=self._session.state),
+                                  feed=self._feed)
+
+                worker = threading.Thread(target=self._worker_loop, daemon=True)
+                worker.start()
+                kb_listener = threading.Thread(target=self._keyboard_listener, daemon=True)
+                kb_listener.start()
+                self._audio_loop()
+            except KeyboardInterrupt:
+                _logger.info("正在结束会议…")
+            finally:
+                # 安全关闭：SIG_IGN 防止清理过程被二次 Ctrl+C 中断。
+                # 清理完成后直接退出，不恢复 handler（进程即将结束）。
+                signal.signal(signal.SIGINT, signal.SIG_IGN)
+                self._session.request_stop()
+                if worker is not None:
+                    worker.join(timeout=_EXIT_JOIN_SEC)
+                    if worker.is_alive():
+                        _logger.warning("退出等待超时，当前段可能未完成")
+                if self._cfg.summary_enabled and self._session.state.segments:
+                    try:
+                        summary = self._analyzer.summarize(self._session.state)
+                        if summary:
+                            self._session.state.summary = summary
+                            _logger.info("会议总结已生成")
+                            _tr.report_phase("summary", "会议总结已生成")
+                        else:
+                            _logger.warning("会议总结生成失败（跳过）")
+                    except Exception:
+                        _logger.warning("会议总结异常（跳过）")
+                self._writer.maybe_rewrite(self._session.state, force=True)
+                self._panel.render_final(self._session.state, self._doc_path)
+                self._pool.shutdown(wait=True, cancel_futures=True)
+                # v3.26.1: 空会议清理——无语音段时删除自动生成的过程文档
+                if not self._session.state.segments and self._doc_path_auto:
+                    try:
+                        self._doc_path.unlink(missing_ok=True)
+                        _logger.info("空会议（无语音段），已清理过程文档")
+                    except Exception:
+                        pass
+                registry.unregister()
+                # v3.26.3: 清理 session logger 文件 handler（e2e 测试防句柄泄漏）
+                teardown_session_logger()
+            self._task_reporter = None
         return 0
 
     # ── 线程逻辑 ────────────────────────────────────────────
@@ -945,6 +955,10 @@ class MeetingLiveAssistant:
             rms_level=rms_level),
             feed=self._feed)
         self._writer.maybe_rewrite(self._session.state)
+        # 任务埋点：每批处理后上报累计段数（常驻任务无总量，progress 留空）
+        _tr = getattr(self, "_task_reporter", None)
+        if _tr is not None:
+            _tr.report_phase("analyze", f"已处理 {len(self._session.state.segments)} 段")
 
         # v3.26.1: 每 15 分钟或每 30 段触发增量迷你总结
         _MINI_SUMMARY_INTERVAL = 900.0  # 15 分钟
