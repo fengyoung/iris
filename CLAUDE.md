@@ -1,4 +1,4 @@
-# Iris 3.26.3 — 项目执行说明
+# Iris 3.27.0 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -9,9 +9,9 @@
 
 ### 当前规模
 
-~35,000 行 / 166 文件 / 26 模块 · CLI 65 命令 · 单元测试 2,852（139 文件）· 覆盖率 62%+ · 10 个项目级 Skill · Wiki 222 页 · 知识图谱节点 220 / 关系边 1,858（wikilink 1,225 + LLM 633） · 数据源 822 文档 / 5,939 Chunk（text-embedding-v3 / 1,024 维）
+~36,000 行 / 170 文件 / 27 模块 · CLI 66 命令 · 测试 2,929（148 文件，unit 1,872）· 覆盖率 62%+ · 10 个项目级 Skill · Wiki 222 页 · 知识图谱节点 220 / 关系边 1,858（wikilink 1,225 + LLM 633） · 数据源 822 文档 / 5,939 Chunk（text-embedding-v3 / 1,024 维）
 
-**近期新增能力**：实时会议助理（`assistant/`，逐段提炼要点/风险/决策点 + 实时提示关键提问 + 过程文档）· YAML frontmatter 标准化注入（`core/frontmatter.py`）· 批量 frontmatter 补全（`core/frontmatter_batch.py`，正则+LLM+wikilink+备份恢复）· wikilink 自动注入引擎（`wiki/wikilink_injector.py`，零 LLM 成本）· LLM 用量追踪（SQLite WAL + embedding 纳入）· LLM 响应缓存 + embedding 向量缓存（LRU + TTL）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（`memory_updater.py` + `session_miner.py`，双通道架构）· 多 Agent 并发安全（FileLock + SQLite WAL + Agent 隔离）· ASR 实时校正引擎（Aho-Corasick + LLM 编辑助手 + 反馈反向优化）· CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit · constraints.txt 可复现构建
+**近期新增能力**：任务面板（`taskpanel/`，Web 只读展示任务状态 + TaskReporter 埋点 + 探测兜底 + 常驻守护）· 实时会议助理（`assistant/`，逐段提炼要点/风险/决策点 + 实时提示关键提问 + 过程文档）· YAML frontmatter 标准化注入（`core/frontmatter.py`）· 批量 frontmatter 补全（`core/frontmatter_batch.py`，正则+LLM+wikilink+备份恢复）· wikilink 自动注入引擎（`wiki/wikilink_injector.py`，零 LLM 成本）· LLM 用量追踪（SQLite WAL + embedding 纳入）· LLM 响应缓存 + embedding 向量缓存（LRU + TTL）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（`memory_updater.py` + `session_miner.py`，双通道架构）· 多 Agent 并发安全（FileLock + SQLite WAL + Agent 隔离）· ASR 实时校正引擎（Aho-Corasick + LLM 编辑助手 + 反馈反向优化）· CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit · constraints.txt 可复现构建
 
 ### 关键路径
 
@@ -122,8 +122,8 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.26.3 | 软件发布版本 |
-| **协议版本** | `src/iris/__init__.py` | 3.19 | CLI 命令集 / agent-spec 格式 |
+| **产品版本** | `pyproject.toml` | 3.27.0 | 软件发布版本 |
+| **协议版本** | `src/iris/__init__.py` | 3.20 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.5 | 配置文件 Schema |
 
 > 只有真正发生变化的层才递增版本号。
@@ -136,11 +136,17 @@ Python 3.9+ · OpenAI 兼容 LLM API（DeepSeek / 百炼 / Qwen）· Pydantic v2
 
 ---
 
+## 开发约定
+
+- **长任务埋点规则（v3.27.0 起）**：新增长任务/常驻命令（运行时间分钟级以上）必须评估是否接入 `taskpanel.TaskReporter` 埋点——启动注册、关键阶段 `report_phase()`、结束写终态；不接埋点需在需求讨论时说明理由（如依赖探测兜底即可）。
+
+---
+
 ## 项目结构
 
 ```
 iris3/
-├── src/iris/          # 26 模块（见下）
+├── src/iris/          # 27 模块（见下）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
 ├── tests/             # 2,852 用例，139 文件
@@ -155,7 +161,7 @@ iris3/
 └── pyproject.toml · README · CLAUDE · CHANGELOG.md
 ```
 
-**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配/共享线程池）· `memory`（记忆 6 子模块：含 `session_miner.py` 会话模式挖掘）· `qa`（检索问答+图谱注入+`memory_updater.py` 双通道记忆提取）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF+BM25缓存）· `wiki`（Wiki 体系 + backlink/graph + ASR 校正引擎，最大模块；`wiki/asr/` 含 corrector/coverage/feedback/prompt_optimizer/_progress 等 10 个子模块）· `feed`（信息汇聚管道：飞书聊天记录→话题检测→简报生成，11 文件 / 9 命令）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估 + 引用解析）· `complex_input`（多模态三阶段：图片/PDF/DOCX/VIDEO）· `output`（格式化+DOCX）· `assistant`（实时 AI 会议参谋：本地音频 ASR+校正+检索+批量分析+话题/说话人+洞察推送+面板/文档，12 文件）· `app/cli`（65 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py / shared.py）· `trello`（看板）。
+**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配/共享线程池）· `memory`（记忆 6 子模块：含 `session_miner.py` 会话模式挖掘）· `qa`（检索问答+图谱注入+`memory_updater.py` 双通道记忆提取）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF+BM25缓存）· `wiki`（Wiki 体系 + backlink/graph + ASR 校正引擎，最大模块；`wiki/asr/` 含 corrector/coverage/feedback/prompt_optimizer/_progress 等 10 个子模块）· `feed`（信息汇聚管道：飞书聊天记录→话题检测→简报生成，11 文件 / 9 命令）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估 + 引用解析）· `complex_input`（多模态三阶段：图片/PDF/DOCX/VIDEO）· `output`（格式化+DOCX）· `assistant`（实时 AI 会议参谋：本地音频 ASR+校正+检索+批量分析+话题/说话人+洞察推送+面板/文档，12 文件）· `app/cli`（65 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（含 paths.py / shared.py）· `trello`（看板）· `taskpanel`（任务面板：任务埋点 + Web 只读展示 + 常驻守护进程，7 文件）。
 
 ---
 
@@ -167,7 +173,11 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.26.3 (2026-08-16)** — meeting-live-assistant 面板稳定化 + 并发加固（14 文件 / +323 -154）：① 面板稳定化 — 区域固高布局（语音 3 行/分析 2 行/建议提问 2 行/洞察推送 4 行，不足补空行、超出截断「…」，高度不再跳动）、alt-screen 进出（启动保留终端回滚历史、退出恢复）、折行算法 O(n²)→O(n)（预计算字符宽度数组）、洞察推送多行渲染（前缀着色+续行缩进）、长告警折行+标题过长截断（防边框断裂）、VU 电平 emoji 标签（🔈🔉🔊 色盲友好）、底部累计条 CJK 宽度修正；② 并发安全 — InsightFeed 加锁（worker↔键盘线程竞态，visible 返回 snapshot）+ CorrectorAdapter per-speaker 上下文加锁 LRU 淘汰（≤10 个 speaker）+ AudioCapture buffer 加锁（回调↔主线程）；③ 正确性修复 — 多段批次落账按 seq 升序（修复 first 段被最后 record 的乱序）、analysis_elapsed 实际耗时（原恒 0）、batch_size_s 配置真正生效、doc_rewrite_every 默认 1→3（降 I/O）；④ 工程收敛 — CONF_ICON/DECISION_FG 共享常量移入 models.py（_panel/_doc_writer 共用）+ TypedDict、teardown_session_logger（e2e 防句柄泄漏）、light 主题对比度微调。验证：assistant 专项 186 全过，ruff 零告警。协议版本 3.19（不变）。产品版本 3.26.2→**3.26.3**。
+**当前 v3.27.1 (2026-08-17)** — 双周报生成 w31 风格固化（3 文件 / +6 测试）：① 重写 `templates/prompt/biweekly_stage3_direction.md` — 总结段改为 w31 式**逐项目「目标→思考→决策→下一步」**（项目目标→思考主线/归因（事实简短带过）→决策→下一步，「我们」视角，含正/反示例）；关键进展**项目级聚合**（每 sub_area 1 个加粗条目 + ≤3 子项，严禁拆散、挑选最关键，无素材标「本期无重要进展」）；② `_biweekly_helpers.py` DEFAULT_STYLE_GUIDE 同步（默认生成即 w31 风格）；③ 防回归测试 `TestW31StyleFrozen` +6。背景：w33 首版总结宽泛空洞 + 关键进展过细；Stage 3 合成 240s 超时会静默丢弃末方向（素材未缺却输出「无实质进展」，w33 首版搜推方向即中招，重跑修复）。验证：biweekly 相关 133 全过，ruff 零告警。协议版本 3.20（不变）。产品版本 3.27.0→**3.27.1**。
+
+**当前 v3.27.0 (2026-08-16)** — 任务面板 `iris task-panel`（新模块 `src/iris/taskpanel/` 7 文件 + scripts/task_panel.py + 埋点接入 5 命令 + 测试 69）：① 定位 — Web 只读展示层查看 iris 任务状态与进程，操作仍在 CC CLI；② 形态 — 常驻守护（`iris task-panel start/stop/status/install`，install 生成 launchd LaunchAgent：KeepAlive SuccessfulExit=false 崩溃自动拉起）+ 零新依赖（stdlib ThreadingHTTPServer + 单 HTML + 原生 JS 2s 轮询 + 深色主题）；③ 数据 — 混合式：TaskReporter 埋点（上下文管理器，磁盘错误全静默 + `IRIS_TASK_PANEL_DISABLED` 开关）+ ps 探测兜底 + stale 判定（每次 /api/state 顺带执行：running 但 pid 死 → interrupted）；存储 `data/tasks/current/*.json` + `history.jsonl`（flock + 幂等守卫 + 250 截断留 200）；④ 埋点接入 — daily-start（8 阶段）/ build-chunks（chunker 逐文档回调）/ build-wiki（generator 逐页回调）/ transcribe-meeting（5 阶段对齐 [n/3]）/ meeting-live-assistant（listening/analyze/summary）；asr-corrector 靠 watchdog 探测兜底；⑤ 页面 — 顶端汇总区（运行中/类型分布/成功率）+ 任务卡片（阶段徽标/进度条/耗时/pid/agent）+ 历史区（绿/红/黄）+ 多 Agent 过滤 + textContent 防 XSS；⑥ 端口 — 默认 8765，`--port` > `IRIS_TASK_PANEL_PORT` 可改，守护进程 --project-root 显式传参。验证：taskpanel 专项 69 全过，全量 unit 1,506 全过，ruff 零告警。协议版本 3.19→**3.20**。产品版本 3.26.3→**3.27.0**。
+
+**v3.26.3 (2026-08-16)** — meeting-live-assistant 面板稳定化 + 并发加固（14 文件 / +323 -154）：① 面板稳定化 — 区域固高布局（语音 3 行/分析 2 行/建议提问 2 行/洞察推送 4 行，不足补空行、超出截断「…」，高度不再跳动）、alt-screen 进出（启动保留终端回滚历史、退出恢复）、折行算法 O(n²)→O(n)（预计算字符宽度数组）、洞察推送多行渲染（前缀着色+续行缩进）、长告警折行+标题过长截断（防边框断裂）、VU 电平 emoji 标签（🔈🔉🔊 色盲友好）、底部累计条 CJK 宽度修正；② 并发安全 — InsightFeed 加锁（worker↔键盘线程竞态，visible 返回 snapshot）+ CorrectorAdapter per-speaker 上下文加锁 LRU 淘汰（≤10 个 speaker）+ AudioCapture buffer 加锁（回调↔主线程）；③ 正确性修复 — 多段批次落账按 seq 升序（修复 first 段被最后 record 的乱序）、analysis_elapsed 实际耗时（原恒 0）、batch_size_s 配置真正生效、doc_rewrite_every 默认 1→3（降 I/O）；④ 工程收敛 — CONF_ICON/DECISION_FG 共享常量移入 models.py（_panel/_doc_writer 共用）+ TypedDict、teardown_session_logger（e2e 防句柄泄漏）、light 主题对比度微调。验证：assistant 专项 186 全过，ruff 零告警。协议版本 3.19（不变）。产品版本 3.26.2→**3.26.3**。
 
 **v3.26.2 (2026-08-12)** — meeting-live-assistant 面板双主题视觉方案（dark/light，配置驱动）：① 新模块 `_theme.py` — `Theme` 数据类 + 两套 ANSI 256 色配色（兼容 Terminal.app/iTerm2/Warp）；② 整帧全区填充 — 底色 = 面板色（dark `#262626` / light `#E4E4E4`），所有行（含空行/分割条/框线/退出统计帧）统一铺底，形成「控制台仪表盘」沉浸观感；③ 语义色贯穿 — 要点✦/决策确认✅绿 · 提议💬黄 · 待定❓灰 · 风险⚠橙 · 冲突🔥红 · 话题📌青 · 待办📋蓝 · 说话人🗣紫 · 建议提问💡亮黄 · 告警红底亮黄字 · VU 低绿→中黄→高红渐变；④ 布局安全 — 宽度计算在纯文本上进行、ANSI 包裹在填充之后（colored=True 剥离转义序列补宽），分析块超宽自动降级纯文本折行；⑤ 配置 — `assistant.panel_theme: dark|light`（非法值回退 dark）。验证：assistant 专项 186（+8 主题测试）全过，ruff 零告警。协议版本 3.19（不变）。产品版本 3.26.1→**3.26.2**。
 

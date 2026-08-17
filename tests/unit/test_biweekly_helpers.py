@@ -326,3 +326,45 @@ class TestS3CheckSubareaOrder:
     def test_single_sub_area_no_warning(self, caplog):
         _s3_check_subarea_order("方向一", "搜索体验", [{"name": "搜索体验"}])
         assert caplog.records == []
+
+
+class TestW31StyleFrozen:
+    """防回归：Stage 3 模板与默认风格指南必须保持 w31 风格
+    （总结段「思考→决策」+ 关键进展项目级聚合 ≤3 子项）。"""
+
+    @staticmethod
+    def _template_text() -> str:
+        from pathlib import Path
+        p = Path(__file__).resolve().parents[2] / "templates" / "prompt" / "biweekly_stage3_direction.md"
+        return p.read_text(encoding="utf-8")
+
+    def test_summary_requires_think_decision_chain(self):
+        text = self._template_text()
+        assert "思考" in text and "决策" in text
+        assert "最主要的目标" in text
+        assert "我们的思考主线" in text
+        assert "以「我们」视角行文" in text
+        assert "事实仅作判断依据" in text
+
+    def test_summary_forbids_flow_account(self):
+        text = self._template_text()
+        assert "禁止流水账" in text or "错误（流水账）" in text
+
+    def test_progress_requires_project_aggregation(self):
+        text = self._template_text()
+        assert "项目级聚合" in text
+        assert "最多 3 个子 bullet" in text
+        assert "严禁拆散" in text
+        assert "挑选最关键" in text
+
+    def test_progress_requires_covered_subareas(self):
+        text = self._template_text()
+        assert "子方向覆盖" in text
+        assert "本期无重要进展" in text
+
+    def test_default_style_guide_matches_w31(self):
+        from iris.analysis._biweekly_helpers import DEFAULT_STYLE_GUIDE
+        assert "逐项目" in DEFAULT_STYLE_GUIDE["paragraph_structure"]
+        assert "思考→决策" in "".join(DEFAULT_STYLE_GUIDE["strategic_patterns"])
+        assert "关键进展按项目聚合" in "".join(DEFAULT_STYLE_GUIDE["strategic_patterns"])
+        assert "禁止流水账式事实罗列" in "".join(DEFAULT_STYLE_GUIDE["writing_rules"])

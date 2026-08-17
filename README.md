@@ -1,8 +1,12 @@
-# Iris 3.26.2
+# Iris 3.27.1
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
+
+**v3.27.1** — [双周报生成 w31 风格固化](CHANGELOG.md)：重写 Stage 3 合成模板 — 总结段改 w31 式逐项目「目标→思考→决策→下一步」（「我们」视角，含正/反示例）；关键进展项目级聚合（每 sub_area 1 个加粗条目 + ≤3 子项，挑选最关键进展）；DEFAULT_STYLE_GUIDE 同步（默认生成即 w31 风格）+ 防回归测试 +6。背景：w33 首版总结宽泛空洞、关键进展过细；Stage 3 合成 240s 超时静默丢弃末方向（素材未缺却输出「无实质进展」）。验证：biweekly 相关 133 全过，ruff 零告警。协议版本 3.20（不变）。产品版本 3.27.0→**3.27.1**。
+
+**v3.27.0** — [任务面板 `iris task-panel`](CHANGELOG.md)：Web 只读展示层查看 iris 任务状态与进程（操作仍在 CC CLI）。常驻守护（start/stop/status/install，launchd 崩溃自动拉起）+ 零新依赖（stdlib ThreadingHTTPServer + 单 HTML + 原生 JS 轮询 + 深色主题）+ 混合数据源（TaskReporter 埋点上下文管理器 + ps 探测兜底 + stale 判定，存储 `data/tasks/` 原子写 + flock 历史）+ 首批埋点接入 5 命令（daily-start 8 阶段 / build-chunks / build-wiki / transcribe-meeting / meeting-live-assistant）。端口默认 8765，`--port` > `IRIS_TASK_PANEL_PORT`。测试 taskpanel 专项 69 全过。协议版本 3.19→**3.20**。产品版本 3.26.3→**3.27.0**。
 
 **v3.26.2** — [meeting-live-assistant 面板双主题视觉方案](CHANGELOG.md)：新模块 `_theme.py`（Theme + DARK/LIGHT 两套 ANSI 256 色配色）· 整帧全区填充（底色 dark `#262626` / light `#E4E4E4`，形成「控制台仪表盘」沉浸观感）· 语义色贯穿（要点/决策✅绿 · 提议💬黄 · 待定❓灰 · 风险⚠橙 · 冲突🔥红 · 话题📌青 · 待办📋蓝 · 说话人🗣紫 · 建议提问💡亮黄 · 告警红底亮黄字 · VU 渐变）· 布局安全（纯文本算宽 + ANSI 后包裹，超宽自动降级）· 配置 `assistant.panel_theme: dark|light`。测试 assistant 专项 186（+8），ruff 零告警。协议版本 3.19（不变）。产品版本 3.26.1→**3.26.2**。
 
@@ -110,6 +114,7 @@ python scripts/run_cli.py daily-start
 | 系统 | `daily-start`, `check-config`, `status`, `diagnose` | 日常维护（含图谱增量刷新）/ 配置检查 |
 | ASR 校正 | `asr-corrector`, `asr-audit`, `asr-report` | vocotype 实时语音转写纠错润色（[使用指南](docs/asr-corrector-usage.md)） |
 | 会议助理 | `meeting-live-assistant` | 实时 AI 会议参谋：本地麦克风转写（FunASR）+ 逐段提炼要点/风险/决策/建议提问 + 话题追踪 + 说话人区分 + 洞察推送 + 热键 + 按话题过程文档（[使用指南](docs/meeting-live-assistant-usage.md) · [方案设计](docs/meeting-live-assistant-design.md)） |
+| 任务面板 | `task-panel` | Web 只读展示 iris 任务状态与进程：常驻守护 + 任务埋点 + 探测兜底（[使用指南](docs/task-panel-usage.md) · [方案设计](docs/task-panel-design.md)） |
 
 ## 知识库结构
 

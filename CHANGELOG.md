@@ -1,3 +1,34 @@
+## v3.27.1 (2026-08-17)
+
+双周报生成 w31 风格固化（3 文件 / +1 测试类）：① 重写 `templates/prompt/biweekly_stage3_direction.md` — 总结段由「4 段式机械结构」改为 w31 式**逐项目「目标→思考→决策→下一步」**（项目目标 → 思考主线/归因（事实简短带过）→ 决策 → 下一步，以「我们」视角行文，含正/反示例）；关键进展改为**项目级聚合**（每 sub_area 1 个加粗聚合条目 + ≤3 子项，严禁拆散并列，挑选最关键进展，无素材标注「本期无重要进展」）；② `_biweekly_helpers.py` DEFAULT_STYLE_GUIDE 同步更新（默认生成不带 --style-from 也保持 w31 风格）；③ 防回归测试 +6（`TestW31StyleFrozen`：模板关键规则 + 默认风格指南断言）。背景：w33 首版总结宽泛空洞、关键进展过细（同项目拆多条），且 Stage 3 合成 240s 超时会静默丢弃末方向（素材未缺却输出「无实质进展」）。验证：biweekly 相关 133 全过，ruff 零告警。协议版本 3.20（不变）。产品版本 3.27.0→**3.27.1**。
+
+## v3.27.0 (2026-08-16)
+
+任务面板 `iris task-panel` — Web 只读展示层查看 iris 任务状态与进程，操作仍在 CC CLI（新模块 `src/iris/taskpanel/` 7 文件 + scripts/task_panel.py + 埋点接入 5 命令 + 测试 69）。验证：taskpanel 专项 69 全过，全量 unit 1,506 全过，ruff 零告警（项目惯例 ignore F401/E402）。
+
+### 核心架构（常驻守护 + 混合式数据来源 + 零新依赖）
+- **常驻守护进程**：`iris task-panel start/stop/status/install`——start 以 subprocess.Popen + start_new_session daemonize（日志重定向 data/tasks/panel.log，就绪轮询 5s）；stop 读 pid + SIGTERM + 5s 轮询；status 只读探测 + /api/state 取 uptime；install 生成 launchd LaunchAgent plist（KeepAlive SuccessfulExit=false：优雅退出不复活、崩溃自动拉起）
+- **零新依赖**：stdlib ThreadingHTTPServer（daemon_threads + log_message 静默）+ 单 HTML 页 + 原生 JS 2s 轮询（visibilitychange 省电）+ 深色主题（#0f1115，呼应会议面板）
+- **混合式数据来源**：
+  - **TaskReporter 埋点**（`reporter.py`）：`with TaskReporter("daily-start") as r: r.report_phase(...)` 上下文管理器——正常退出 success / 异常 failed（重抛不吞）/ 进程被杀由 probe 兜底 interrupted；task_id 含 pid（并发多实例天然隔离）；**全部磁盘错误静默**绝不阻断业务命令；`IRIS_TASK_PANEL_DISABLED=1` 全局禁用开关
+  - **存储**（`store.py`）：data/tasks/current/<task_id>.json（原子写）+ history.jsonl（flock 串行追加 + 锁内幂等守卫 + 250 条截断留 200）
+  - **探测兜底**（`probe.py`）：每次 /api/state 请求顺带 stale 判定（running 但 pid 死 → interrupted 归档）；asr-corrector 等未埋点进程 watchdog 只读探测（ps -p 禁用 ps aux 解析）
+- **Web 面板**：顶端汇总区（运行中总数/类型分布/历史成功率）+ 运行中任务卡片（阶段徽标/进度条/耗时实时重算/pid/agent/命令）+ 历史区（绿成功/红失败/黄中断）+ 多 Agent 下拉过滤（localStorage 记忆）+ 中断 toast 提示 + textContent 防 XSS；服务停止时页面显示恢复指引横幅
+
+### 首批埋点接入（5+1 命令）
+- **daily-start**：with 包裹 + 8 阶段 report_phase（记忆同步/维护/会话挖掘/扫描切块/Wiki/用量/ASR 审计/提醒，progress i/8）
+- **build-chunks**：chunker 加可选 progress_callback（(done, total, source_name)，默认 None 零行为变化），逐文档进度 + 阶段细节带数据源名
+- **build-wiki**：generator.build_pages 加同款回调，批量模式逐页进度；单页模式单阶段
+- **transcribe-meeting**：pipeline.run() 埋点与现有 [n/3] 打印对齐（parse/transcribe/wiki_context/llm_minutes/done 5 阶段）；参数校验快速失败不产生任务记录
+- **meeting-live-assistant**：register 成功后开始（listening/analyze 每批段数/summary 3 阶段），Ctrl+C 正常结束 → success
+- **asr-corrector**：零埋点，watchdog 探测兜底展示
+
+### CLI 与配置
+- CLI 注册走委托脚本路线：`_cli_main.py` COMMANDS + _DELEGATED_SCRIPTS 加 "task-panel" → scripts/task_panel.py（add_subparsers，仿 trello.py）
+- 端口：默认 8765，`--port` > `IRIS_TASK_PANEL_PORT` 环境变量覆盖（1024-65535 校验）；守护进程 --project-root 显式传参（不依赖包位置推断，launchd 同传）
+
+协议版本 3.19→**3.20**（新增 task-panel 命令集）。产品版本 3.26.3→**3.27.0**。
+
 ## v3.26.3 (2026-08-16)
 
 meeting-live-assistant 面板稳定化 + 并发加固（14 文件 / +323 -154）。验证：assistant 专项 186 全过，ruff 零告警。
