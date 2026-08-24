@@ -1,3 +1,7 @@
+## v3.27.2 (2026-08-24)
+
+LLM 配置修复与新视觉模型默认（4 文件 / +85 -11 + 测试 +1）：① `find_model_by_name` Pydantic 兼容修复 — 门控 `isinstance(cfg, dict)` 改为 `hasattr(cfg, "get")`（兼容 RoleModels/ModelItem 配置模型），api_key 为 SecretStr 时显式解包（与 get_active_model_config 同款处理）；回归：v3.11 Pydantic 迁移后 force_model 对真实配置（load_config_bundle）永远返回 None；② adv_model 新默认 `deepseek-v4-flash-vision-exp` — 实验性视觉模型（multimodal text+image，100 万上下文，priority 70 最高优先级），qwen3.8-max 降为第 2 优先级；③ iris-feishu-import SKILL.md 批量导入用法修正 — `--url` 不可重复传参（重复时只保留最后一个），改为逗号分隔；④ 顺带清零 2 文件 4 处 ruff 遗留告警（HEAD 已有）。验证：LLM 相关 107 全过（test_provider_fallback 14，含新增 `test_find_with_pydantic_config`），ruff 零告警。协议版本 3.20（不变）。产品版本 3.27.1→**3.27.2**。
+
 ## v3.27.1 (2026-08-17)
 
 双周报生成 w31 风格固化（3 文件 / +1 测试类）：① 重写 `templates/prompt/biweekly_stage3_direction.md` — 总结段由「4 段式机械结构」改为 w31 式**逐项目「目标→思考→决策→下一步」**（项目目标 → 思考主线/归因（事实简短带过）→ 决策 → 下一步，以「我们」视角行文，含正/反示例）；关键进展改为**项目级聚合**（每 sub_area 1 个加粗聚合条目 + ≤3 子项，严禁拆散并列，挑选最关键进展，无素材标注「本期无重要进展」）；② `_biweekly_helpers.py` DEFAULT_STYLE_GUIDE 同步更新（默认生成不带 --style-from 也保持 w31 风格）；③ 防回归测试 +6（`TestW31StyleFrozen`：模板关键规则 + 默认风格指南断言）。背景：w33 首版总结宽泛空洞、关键进展过细（同项目拆多条），且 Stage 3 合成 240s 超时会静默丢弃末方向（素材未缺却输出「无实质进展」）。验证：biweekly 相关 133 全过，ruff 零告警。协议版本 3.20（不变）。产品版本 3.27.0→**3.27.1**。

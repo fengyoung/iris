@@ -2,9 +2,9 @@
 
 import pytest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-from iris.llm.provider import LLMProviderError, LLMRequest, LLMResponse
+from iris.llm.provider import LLMProviderError, LLMRequest
 from iris.llm.router import RoutingDecision
 
 
@@ -54,7 +54,7 @@ class TestFallbackLoop:
 
     def _make_provider(self, tmp_path):
         from iris.llm.provider import EnvironmentConfiguredLLMProvider
-        from iris.config.loader import ConfigBundle, make_config_bundle
+        from iris.config.loader import make_config_bundle
 
         config = make_config_bundle(
             root=Path("/tmp"),
@@ -305,3 +305,37 @@ class TestFindModelByName:
         cfg = mgr.find_model_by_name("deepseek-chat")
         assert "_model_id" in cfg
         assert cfg["_model_id"] == "m1"
+
+    def test_find_with_pydantic_config(self):
+        """真实配置路径：Pydantic RoleModels/ModelItem 对象也应可查找。
+
+        回归：v3.11 迁移 Pydantic 后 isinstance(dict) 门控导致 force_model
+        对真实配置（load_config_bundle）永远返回 None。
+        """
+        from pathlib import Path
+        import tempfile
+        from iris.config.models import ModelItem, RoleModels
+        from iris.llm.model_manager import ModelManager
+
+        models = {
+            "adv_model": RoleModels(
+                enabled=True,
+                default_model_id="m2",
+                models={
+                    "m2": ModelItem(
+                        provider="deepseek",
+                        model="deepseek-v4-flash-vision-exp",
+                        api_base_url="https://api.deepseek.com/v1",
+                        api_key="sk-vision",
+                    ),
+                },
+            ),
+        }
+        with tempfile.TemporaryDirectory() as d:
+            mgr = ModelManager(models, Path(d))
+            cfg = mgr.find_model_by_name("deepseek-v4-flash-vision-exp")
+            assert cfg is not None
+            assert cfg["model"] == "deepseek-v4-flash-vision-exp"
+            assert cfg["api_key"] == "sk-vision"  # SecretStr 已解包
+            assert cfg["_model_id"] == "m2"
+

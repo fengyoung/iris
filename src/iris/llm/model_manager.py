@@ -168,15 +168,25 @@ class ModelManager:
     def find_model_by_name(self, model_name: str) -> Optional[Dict[str, Any]]:
         """在所有角色中按 model 字段或 model_id 查找模型配置（含 api_key）。
 
+        兼容两种配置形态：raw dict（测试/直载）与 Pydantic 配置模型
+        （BaseConfigModel 提供 dict 风格 get 访问，dict() 构造时
+        __getitem__ 会自动解包 SecretStr）。
+
         Returns:
             包含 api_key 的完整配置（附 _model_id 字段），未找到返回 None。
         """
         for role, role_container in self._models.items():
-            models = role_container.get("models", {}) if isinstance(role_container, dict) else {}
+            models = role_container.get("models", {}) if hasattr(role_container, "get") else {}
             for model_id, cfg in models.items():
-                cfg_model = cfg.get("model") if isinstance(cfg, dict) else None
+                cfg_model = cfg.get("model") if hasattr(cfg, "get") else None
                 if cfg_model == model_name or model_id == model_name:
-                    return dict(cfg, _model_id=model_id)
+                    result = dict(cfg, _model_id=model_id)
+                    # 与 get_active_model_config 同款处理：dict() 迭代
+                    # Pydantic 模型时 api_key 为 SecretStr，需显式解包
+                    from pydantic import SecretStr as _SecretStr
+                    if "api_key" in result and isinstance(result["api_key"], _SecretStr):
+                        result["api_key"] = result["api_key"].get_secret_value()
+                    return result
         return None
 
     # -- 内部方法 -----------------------------------------------------------
@@ -191,7 +201,7 @@ class ModelManager:
             if not isinstance(data, dict):
                 return self._build_default_state()
             return data
-        except (json.JSONDecodeError, OSError) as exc:
+        except (json.JSONDecodeError, OSError):
             logger.exception("读取 active_model.json 失败")
             return self._build_default_state()
 

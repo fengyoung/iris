@@ -22,8 +22,8 @@ metadata:
 # 单篇文档
 python3 scripts/run_cli.py --call-source skill feishu-doc-convert --url "<飞书文档URL>"
 
-# 批量
-python3 scripts/run_cli.py --call-source skill feishu-doc-convert --url "<URL1>" --url "<URL2>"
+# 批量（逗号分隔；注意：--url 不可重复传参，重复时只保留最后一个）
+python3 scripts/run_cli.py --call-source skill feishu-doc-convert --url "<URL1>,<URL2>"
 
 # 从配置文件批量导入
 python3 scripts/run_cli.py --call-source skill feishu-doc-convert --from-config

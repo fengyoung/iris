@@ -1,8 +1,10 @@
-# Iris 3.27.1
+# Iris 3.27.2
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
+
+**v3.27.2** — [LLM 配置修复与新视觉模型默认](CHANGELOG.md)：`find_model_by_name` Pydantic 兼容修复（回归修复 v3.11 迁移后 force_model 对真实配置失效 + SecretStr 显式解包）；adv_model 新默认 `deepseek-v4-flash-vision-exp`（实验性视觉模型，priority 70 最高优先级，qwen3.8-max 降为第 2 优先级）；iris-feishu-import 批量导入用法修正（`--url` 不可重复传参，改逗号分隔）。验证：LLM 相关 107 全过，ruff 零告警。协议版本 3.20（不变）。产品版本 3.27.1→**3.27.2**。
 
 **v3.27.1** — [双周报生成 w31 风格固化](CHANGELOG.md)：重写 Stage 3 合成模板 — 总结段改 w31 式逐项目「目标→思考→决策→下一步」（「我们」视角，含正/反示例）；关键进展项目级聚合（每 sub_area 1 个加粗条目 + ≤3 子项，挑选最关键进展）；DEFAULT_STYLE_GUIDE 同步（默认生成即 w31 风格）+ 防回归测试 +6。背景：w33 首版总结宽泛空洞、关键进展过细；Stage 3 合成 240s 超时静默丢弃末方向（素材未缺却输出「无实质进展」）。验证：biweekly 相关 133 全过，ruff 零告警。协议版本 3.20（不变）。产品版本 3.27.0→**3.27.1**。
 

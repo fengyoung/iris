@@ -1,4 +1,4 @@
-# Iris 3.27.0 — 项目执行说明
+# Iris 3.27.2 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -122,7 +122,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.27.0 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.27.2 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.20 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | 3.3/3.5 | 配置文件 Schema |
 
@@ -173,9 +173,11 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.27.1 (2026-08-17)** — 双周报生成 w31 风格固化（3 文件 / +6 测试）：① 重写 `templates/prompt/biweekly_stage3_direction.md` — 总结段改为 w31 式**逐项目「目标→思考→决策→下一步」**（项目目标→思考主线/归因（事实简短带过）→决策→下一步，「我们」视角，含正/反示例）；关键进展**项目级聚合**（每 sub_area 1 个加粗条目 + ≤3 子项，严禁拆散、挑选最关键，无素材标「本期无重要进展」）；② `_biweekly_helpers.py` DEFAULT_STYLE_GUIDE 同步（默认生成即 w31 风格）；③ 防回归测试 `TestW31StyleFrozen` +6。背景：w33 首版总结宽泛空洞 + 关键进展过细；Stage 3 合成 240s 超时会静默丢弃末方向（素材未缺却输出「无实质进展」，w33 首版搜推方向即中招，重跑修复）。验证：biweekly 相关 133 全过，ruff 零告警。协议版本 3.20（不变）。产品版本 3.27.0→**3.27.1**。
+**当前 v3.27.2 (2026-08-24)** — LLM 配置修复与新视觉模型默认（4 文件 / +1 测试）：① `find_model_by_name` Pydantic 兼容修复 — `isinstance(cfg, dict)` → `hasattr(cfg, "get")` + api_key SecretStr 显式解包（回归：v3.11 Pydantic 迁移后 force_model 对真实配置永远返回 None）；② adv_model 新默认 `deepseek-v4-flash-vision-exp`（实验性视觉模型，multimodal text+image，100 万上下文，priority 70 最高优先级），qwen3.8-max 降为第 2 优先级；③ iris-feishu-import SKILL.md 批量导入用法修正（`--url` 不可重复传参，改逗号分隔）；④ 顺带清零 2 文件 4 处 ruff 遗留告警。验证：LLM 相关 107 全过，ruff 零告警。协议版本 3.20（不变）。产品版本 3.27.1→**3.27.2**。
 
-**当前 v3.27.0 (2026-08-16)** — 任务面板 `iris task-panel`（新模块 `src/iris/taskpanel/` 7 文件 + scripts/task_panel.py + 埋点接入 5 命令 + 测试 69）：① 定位 — Web 只读展示层查看 iris 任务状态与进程，操作仍在 CC CLI；② 形态 — 常驻守护（`iris task-panel start/stop/status/install`，install 生成 launchd LaunchAgent：KeepAlive SuccessfulExit=false 崩溃自动拉起）+ 零新依赖（stdlib ThreadingHTTPServer + 单 HTML + 原生 JS 2s 轮询 + 深色主题）；③ 数据 — 混合式：TaskReporter 埋点（上下文管理器，磁盘错误全静默 + `IRIS_TASK_PANEL_DISABLED` 开关）+ ps 探测兜底 + stale 判定（每次 /api/state 顺带执行：running 但 pid 死 → interrupted）；存储 `data/tasks/current/*.json` + `history.jsonl`（flock + 幂等守卫 + 250 截断留 200）；④ 埋点接入 — daily-start（8 阶段）/ build-chunks（chunker 逐文档回调）/ build-wiki（generator 逐页回调）/ transcribe-meeting（5 阶段对齐 [n/3]）/ meeting-live-assistant（listening/analyze/summary）；asr-corrector 靠 watchdog 探测兜底；⑤ 页面 — 顶端汇总区（运行中/类型分布/成功率）+ 任务卡片（阶段徽标/进度条/耗时/pid/agent）+ 历史区（绿/红/黄）+ 多 Agent 过滤 + textContent 防 XSS；⑥ 端口 — 默认 8765，`--port` > `IRIS_TASK_PANEL_PORT` 可改，守护进程 --project-root 显式传参。验证：taskpanel 专项 69 全过，全量 unit 1,506 全过，ruff 零告警。协议版本 3.19→**3.20**。产品版本 3.26.3→**3.27.0**。
+**v3.27.1 (2026-08-17)** — 双周报生成 w31 风格固化（3 文件 / +6 测试）：① 重写 `templates/prompt/biweekly_stage3_direction.md` — 总结段改为 w31 式**逐项目「目标→思考→决策→下一步」**（项目目标→思考主线/归因（事实简短带过）→决策→下一步，「我们」视角，含正/反示例）；关键进展**项目级聚合**（每 sub_area 1 个加粗条目 + ≤3 子项，严禁拆散、挑选最关键，无素材标「本期无重要进展」）；② `_biweekly_helpers.py` DEFAULT_STYLE_GUIDE 同步（默认生成即 w31 风格）；③ 防回归测试 `TestW31StyleFrozen` +6。背景：w33 首版总结宽泛空洞 + 关键进展过细；Stage 3 合成 240s 超时会静默丢弃末方向（素材未缺却输出「无实质进展」，w33 首版搜推方向即中招，重跑修复）。验证：biweekly 相关 133 全过，ruff 零告警。协议版本 3.20（不变）。产品版本 3.27.0→**3.27.1**。
+
+**v3.27.0 (2026-08-16)** — 任务面板 `iris task-panel`（新模块 `src/iris/taskpanel/` 7 文件 + scripts/task_panel.py + 埋点接入 5 命令 + 测试 69）：① 定位 — Web 只读展示层查看 iris 任务状态与进程，操作仍在 CC CLI；② 形态 — 常驻守护（`iris task-panel start/stop/status/install`，install 生成 launchd LaunchAgent：KeepAlive SuccessfulExit=false 崩溃自动拉起）+ 零新依赖（stdlib ThreadingHTTPServer + 单 HTML + 原生 JS 2s 轮询 + 深色主题）；③ 数据 — 混合式：TaskReporter 埋点（上下文管理器，磁盘错误全静默 + `IRIS_TASK_PANEL_DISABLED` 开关）+ ps 探测兜底 + stale 判定（每次 /api/state 顺带执行：running 但 pid 死 → interrupted）；存储 `data/tasks/current/*.json` + `history.jsonl`（flock + 幂等守卫 + 250 截断留 200）；④ 埋点接入 — daily-start（8 阶段）/ build-chunks（chunker 逐文档回调）/ build-wiki（generator 逐页回调）/ transcribe-meeting（5 阶段对齐 [n/3]）/ meeting-live-assistant（listening/analyze/summary）；asr-corrector 靠 watchdog 探测兜底；⑤ 页面 — 顶端汇总区（运行中/类型分布/成功率）+ 任务卡片（阶段徽标/进度条/耗时/pid/agent）+ 历史区（绿/红/黄）+ 多 Agent 过滤 + textContent 防 XSS；⑥ 端口 — 默认 8765，`--port` > `IRIS_TASK_PANEL_PORT` 可改，守护进程 --project-root 显式传参。验证：taskpanel 专项 69 全过，全量 unit 1,506 全过，ruff 零告警。协议版本 3.19→**3.20**。产品版本 3.26.3→**3.27.0**。
 
 **v3.26.3 (2026-08-16)** — meeting-live-assistant 面板稳定化 + 并发加固（14 文件 / +323 -154）：① 面板稳定化 — 区域固高布局（语音 3 行/分析 2 行/建议提问 2 行/洞察推送 4 行，不足补空行、超出截断「…」，高度不再跳动）、alt-screen 进出（启动保留终端回滚历史、退出恢复）、折行算法 O(n²)→O(n)（预计算字符宽度数组）、洞察推送多行渲染（前缀着色+续行缩进）、长告警折行+标题过长截断（防边框断裂）、VU 电平 emoji 标签（🔈🔉🔊 色盲友好）、底部累计条 CJK 宽度修正；② 并发安全 — InsightFeed 加锁（worker↔键盘线程竞态，visible 返回 snapshot）+ CorrectorAdapter per-speaker 上下文加锁 LRU 淘汰（≤10 个 speaker）+ AudioCapture buffer 加锁（回调↔主线程）；③ 正确性修复 — 多段批次落账按 seq 升序（修复 first 段被最后 record 的乱序）、analysis_elapsed 实际耗时（原恒 0）、batch_size_s 配置真正生效、doc_rewrite_every 默认 1→3（降 I/O）；④ 工程收敛 — CONF_ICON/DECISION_FG 共享常量移入 models.py（_panel/_doc_writer 共用）+ TypedDict、teardown_session_logger（e2e 防句柄泄漏）、light 主题对比度微调。验证：assistant 专项 186 全过，ruff 零告警。协议版本 3.19（不变）。产品版本 3.26.2→**3.26.3**。
 

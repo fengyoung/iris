@@ -70,8 +70,38 @@
     },
     "adv_model": {
       "enabled": true,
-      "default_model_id": "qwen3.8-max",
+      "default_model_id": "deepseek-v4-flash-vision-exp",
       "models": {
+        "deepseek-v4-flash-vision-exp": {
+          "provider": "Deepseek",
+          "model": "deepseek-v4-flash-vision-exp",
+          "display_name": "DeepSeek V4 Flash Vision (Exp)",
+          "multimodal": true,
+          "max_context_tokens": 1000000,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 120,
+          "max_retries": 2,
+          "priority": 70,
+          "cost_level": "low",
+          "reasoning_level": "standard",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "wiki_extract_multimodal",
+            "wiki_rebuild",
+            "analysis_complex",
+            "image_understanding",
+            "conflict_resolution"
+          ],
+          "notes": "实验性视觉模型，最高优先级，adv_model 新默认",
+          "api_base_url": "https://api.deepseek.com/v1",
+          "api_key": "${YOUR_API_KEY}"
+        },
         "qwen3.8-max": {
           "provider": "Bailian",
           "model": "qwen3.8-max",
@@ -98,7 +128,7 @@
             "image_understanding",
             "conflict_resolution"
           ],
-          "notes": "旗舰模型，最高优先级，多模态",
+          "notes": "旗舰模型，第 2 优先级（deepseek-v4-flash-vision-exp 之后），多模态",
           "api_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
           "api_key": "${YOUR_API_KEY}"
         },
