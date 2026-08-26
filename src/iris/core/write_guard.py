@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import List
 
 from iris.config.loader import ConfigBundle
+from iris.utils.shared import atomic_write_bytes, atomic_write_text
 
 
 class WriteGuardError(PermissionError):
@@ -21,6 +22,15 @@ class WriteGuardError(PermissionError):
 
 
 _ESSENTIAL_SUBDIRS = ("data", "temp", "output", "memory", "logs")
+
+
+def is_write_guard_enabled(bundle: ConfigBundle) -> bool:
+    """读取写入守卫开关，并兼容 v3.27 之前的旧字段名。"""
+    safety = bundle.app.get("safety", {})
+    value = safety.get("enforce_write_guard", None)
+    if value is None:
+        value = safety.get("deny_write_outside_allowed_paths", True)
+    return bool(value)
 
 
 def resolve_allowed_paths(bundle: ConfigBundle) -> List[Path]:
@@ -112,8 +122,24 @@ def safe_write_text(
         写入后的路径
     """
     target = Path(str(path))
-    if not (allow_existing_outside and target.exists()):
+    if is_write_guard_enabled(bundle) and not (allow_existing_outside and target.exists()):
         validate_write_path(target, bundle)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding=encoding)
+    atomic_write_text(target, content, encoding=encoding)
+    return target
+
+
+def safe_write_bytes(
+    path: Path | str,
+    content: bytes,
+    bundle: ConfigBundle,
+    *,
+    allow_existing_outside: bool = False,
+) -> Path:
+    """安全、原子地写入二进制文件。"""
+    target = Path(str(path))
+    if is_write_guard_enabled(bundle) and not (allow_existing_outside and target.exists()):
+        validate_write_path(target, bundle)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_bytes(target, content)
     return target

@@ -285,7 +285,6 @@ class TestSanitizeLogPayload:
     """analysis/service.py _sanitize_log_payload 安全截断测试。"""
 
     def test_markdown_truncated(self):
-        from iris.analysis.service import AnalysisReportService
         long_md = "A" * 500
         payload = {"markdown": long_md, "blocks": [], "query": "q"}
         result = AnalysisReportService._sanitize_log_payload(payload)
@@ -293,13 +292,11 @@ class TestSanitizeLogPayload:
         assert result["markdown"].endswith("…")
 
     def test_short_markdown_unchanged(self):
-        from iris.analysis.service import AnalysisReportService
         payload = {"markdown": "短内容", "blocks": [], "query": "q"}
         result = AnalysisReportService._sanitize_log_payload(payload)
         assert result["markdown"] == "短内容"
 
     def test_blocks_stripped_to_path_and_score(self):
-        from iris.analysis.service import AnalysisReportService
         payload = {
             "markdown": "md",
             "blocks": [
@@ -315,13 +312,11 @@ class TestSanitizeLogPayload:
             assert "title" not in b
 
     def test_no_markdown_key(self):
-        from iris.analysis.service import AnalysisReportService
         payload = {"query": "q", "blocks": []}
         result = AnalysisReportService._sanitize_log_payload(payload)
         assert "markdown" not in result
 
     def test_non_string_markdown_ignored(self):
-        from iris.analysis.service import AnalysisReportService
         payload = {"markdown": 12345, "blocks": []}
         result = AnalysisReportService._sanitize_log_payload(payload)
         assert result["markdown"] == 12345

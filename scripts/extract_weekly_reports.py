@@ -286,7 +286,7 @@ class LarkMailScanner:
                 capture_output=True, text=True, timeout=30,
             )
             if result.returncode != 0:
-                print(f"   ⚠️ 获取文件夹列表失败，将使用原始名称")
+                print("   ⚠️ 获取文件夹列表失败，将使用原始名称")
                 return {}
 
             data = json.loads(result.stdout) if result.stdout.strip() else {}
@@ -901,7 +901,7 @@ class FeishuDocFetcher:
                 # XML → 纯文本（用 BeautifulSoup 解析）
                 text = cls._xml_to_text(xml_content)
             else:
-                print(f"      ⚠️ 飞书文档内容为空")
+                print("      ⚠️ 飞书文档内容为空")
                 return None
 
             if title and not markdown:
@@ -913,7 +913,7 @@ class FeishuDocFetcher:
             return text
 
         except subprocess.TimeoutExpired:
-            print(f"      ⚠️ 飞书文档拉取超时")
+            print("      ⚠️ 飞书文档拉取超时")
             return None
         except json.JSONDecodeError as e:
             print(f"      ⚠️ 飞书文档输出解析失败: {e}")
@@ -1003,7 +1003,6 @@ class AIReportProcessor:
         extracted = email_data.get("extracted", {})
         content = extracted.get("content", "")
         needs_advanced = extracted.get("needs_advanced_model", False)
-        has_images = extracted.get("has_images", False)
         subject = email_data.get("subject", "")
         sender_name = email_data.get("sender_name", "Unknown")
 
@@ -1013,20 +1012,20 @@ class AIReportProcessor:
         model_used = "base"
 
         if needs_advanced:
-            print(f"         使用 adv_model...")
+            print("         使用 adv_model...")
             prompt = self._build_prompt(content, subject, sender_name, has_images=True,
                                         project_context=project_context)
             result = self._call_llm(prompt, use_advanced=True)
             model_used = "advanced"
             # 高级模型失败时回退基础模型
             if not result and content:
-                print(f"         adv_model 失败，回退 base_model...")
+                print("         adv_model 失败，回退 base_model...")
                 prompt = self._build_prompt(content, subject, sender_name,
                                             project_context=project_context)
                 result = self._call_llm(prompt, use_advanced=False)
                 model_used = "base"
         else:
-            print(f"         使用 base_model...")
+            print("         使用 base_model...")
             prompt = self._build_prompt(content, subject, sender_name,
                                         project_context=project_context)
             result = self._call_llm(prompt, use_advanced=False)
@@ -1038,7 +1037,7 @@ class AIReportProcessor:
         if result:
             print(f"         AI 处理成功 ({model_used})")
         else:
-            print(f"         AI 处理失败，使用原始内容")
+            print("         AI 处理失败，使用原始内容")
 
         return email_data
 
@@ -1399,7 +1398,7 @@ def cmd_run(args: argparse.Namespace) -> None:
 
             # ── 飞书文档链接检测与内容拉取 ─────────────────
             if FeishuDocFetcher.is_link_only_email(content):
-                print(f"    检测到飞书链接型邮件，尝试拉取文档内容...")
+                print("    检测到飞书链接型邮件，尝试拉取文档内容...")
                 feishu_url = FeishuDocFetcher.extract_feishu_url(content)
                 if feishu_url:
                     doc_content = FeishuDocFetcher.fetch_doc_content(feishu_url)
@@ -1420,11 +1419,11 @@ def cmd_run(args: argparse.Namespace) -> None:
                 prev = state.get("processed_ids", {}).get(msg_id)
                 prev_hash = prev.get("content_hash", "") if isinstance(prev, dict) else ""
                 if prev and current_hash == prev_hash:
-                    print(f"     ⏭️  内容未变化，跳过")
+                    print("     ⏭️  内容未变化，跳过")
                     skipped_by_dedup += 1
                     continue
                 if prev and current_hash != prev_hash:
-                    print(f"     🔁 内容已变化，重新提取")
+                    print("     🔁 内容已变化，重新提取")
 
             # AI 处理
             if ai_processor and not args.skip_ai:

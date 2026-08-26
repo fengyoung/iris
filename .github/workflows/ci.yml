@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13"]
       fail-fast: false
 
     steps:
@@ -37,12 +37,10 @@ jobs:
           pip install -e ".[dev]" -c constraints.txt
 
       - name: Lint with ruff
-        run: ruff check --ignore F401,E402 src/
+        run: ruff check src scripts tests
 
       - name: Dependency security audit
-        run: |
-          pip install pip-audit
-          pip-audit
+        run: pip-audit
 
       - name: Unit tests
         run: pytest tests/ -m unit --cov=src/iris --cov-append --cov-report= -x --tb=short -q

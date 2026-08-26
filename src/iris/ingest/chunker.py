@@ -188,7 +188,8 @@ class MarkdownChunker:
     def write_summary(self, summary: ChunkSummary) -> Path:
         self._metadata_dir.mkdir(parents=True, exist_ok=True)
         summary_path = self._metadata_dir / f"{summary.source_name}_chunk_summary.json"
-        summary_path.write_text(json.dumps(summary.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+        from iris.utils.shared import atomic_write_json
+        atomic_write_json(summary_path, summary.to_dict())
         self.write_hash_index(summary)
         return summary_path
 
@@ -219,7 +220,8 @@ class MarkdownChunker:
                 # 供 Wiki source_fingerprint 过时判定使用
                 if entry is None or entry.get("hash") != chunk.document_hash:
                     index[rp] = {"hash": chunk.document_hash, "modified_at": scan_modified.get(rp, summary.scanned_at)}
-            index_path.write_text(json.dumps(index, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+            from iris.utils.shared import atomic_write_json
+            atomic_write_json(index_path, index)
         return index_path
 
     @staticmethod

@@ -142,7 +142,7 @@ class ChunkStore:
                          json.dumps(chunk.get("extracted_fields", {})),
                          chunk.get("token_count", 0), json.dumps(chunk.get("token_freq", {})), now))
                     inserted += 1
-                except sqlite3.Error as exc:
+                except sqlite3.Error:
                     errors += 1
                     logger.exception("ChunkStore insert 失败 chunk_id=%s", chunk.get("chunk_id", "?"))
         return inserted, errors
@@ -157,7 +157,7 @@ class ChunkStore:
         """加载全部 chunks 为 ChunkRecord 列表（供 LocalRetriever 使用）。"""
         try:
             from iris.ingest.chunker import ChunkRecord
-        except ImportError as exc:
+        except ImportError:
             logger.exception("无法加载 ChunkRecord，load_all() 返回空列表")
             return []
         conn = self._get_conn()

@@ -15,17 +15,17 @@ test-integration:
 test-cov:
 	pytest tests/ --cov=src/iris --cov-report=term --cov-report=html -x --tb=short
 
-# Ruff 代码检查（忽略重新导出 F401 和有意延迟导入 E402）
+# Ruff 代码检查（规则由 pyproject.toml 统一管理）
 lint:
-	ruff check --ignore F401,E402 src/
+	ruff check src scripts tests
 
 # Ruff 自动修复
 lint-fix:
-	ruff check --fix --ignore F401 src/
+	ruff check --fix src scripts tests
 
 # 代码格式化
 format:
-	ruff format src/ tests/
+	ruff format src scripts tests
 
 # 依赖安全审计（需安装 pip-audit: pip install pip-audit）
 audit:

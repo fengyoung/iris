@@ -15,6 +15,8 @@ from typing import Dict
 
 logger = logging.getLogger(__name__)
 
+from iris.utils.shared import atomic_write_json
+
 
 class BiweeklyCache:
     """双周报 Stage 缓存管理器。
@@ -60,10 +62,10 @@ class BiweeklyCache:
 
     def save_op_directions(self, content_hash: str, directions: list) -> None:
         path = self._root / "op_directions.json"
-        path.write_text(json.dumps({
+        atomic_write_json(path, {
             "content_hash": content_hash,
             "directions": directions,
-        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        })
         logger.info("  OP 解析完成: %d 个方向 → 已缓存", len(directions))
 
     # ── Stage 1 过滤缓存 ───────────────────────────────────────
@@ -88,11 +90,11 @@ class BiweeklyCache:
 
     def save_stage1_filter(self, inv_hash: str, dir_hash: str, dir_file_map: dict) -> None:
         path = self._root / "stage1_filter.json"
-        path.write_text(json.dumps({
+        atomic_write_json(path, {
             "inv_hash": inv_hash,
             "dir_hash": dir_hash,
             "dir_file_map": dir_file_map,
-        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        })
         logger.info("  Stage 1 完成，结果已缓存")
 
     # ── 风格指南缓存 ───────────────────────────────────────────
@@ -109,7 +111,7 @@ class BiweeklyCache:
 
     def save_style_guide(self, guide: dict) -> None:
         path = self._root / "style_guide.json"
-        path.write_text(json.dumps(guide, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_json(path, guide)
 
     # ── File Briefs 缓存 ───────────────────────────────────────
 
@@ -143,8 +145,7 @@ class BiweeklyCache:
     def save_brief(self, label: str, content_hash: str, brief: dict,
                    brief_index: dict) -> None:
         """写入 brief 文件并更新索引字典（不自动 flush，由调用方统一 flush）。"""
-        (self.briefs_dir / f"{content_hash}.json").write_text(
-            json.dumps(brief, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_json(self.briefs_dir / f"{content_hash}.json", brief)
         brief_index[label] = content_hash
 
     def flush_brief_index(self, brief_index: dict) -> None:
@@ -152,8 +153,7 @@ class BiweeklyCache:
         from iris.core.locks import FileLock
         index_path = self.briefs_dir / "index.json"
         with FileLock(index_path):
-            index_path.write_text(json.dumps(brief_index, ensure_ascii=False, indent=2),
-                                   encoding="utf-8")
+            atomic_write_json(index_path, brief_index)
             cutoff = (datetime.now() - timedelta(days=30)).timestamp()
             valid_hashes = set(brief_index.values())
             for f in self.briefs_dir.glob("*.json"):

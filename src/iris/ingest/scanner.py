@@ -67,7 +67,8 @@ class MarkdownScanner:
         metadata_dir = self._config.root / "data" / "metadata"
         metadata_dir.mkdir(parents=True, exist_ok=True)
         output_path = metadata_dir / f"{summary.source_name}_scan_summary.json"
-        output_path.write_text(json.dumps(summary.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+        from iris.utils.shared import atomic_write_json
+        atomic_write_json(output_path, summary.to_dict())
         return output_path
 
     def scan_source_by_name(self, source_name: str, *, incremental: bool = False) -> ScanSummary:

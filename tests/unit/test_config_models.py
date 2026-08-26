@@ -125,6 +125,14 @@ class TestSafetyConfig:
         s = SafetyConfig(allowed_write_paths=["/data", "/output"])
         assert len(s.allowed_write_paths) == 2
 
+    def test_legacy_guard_field_is_accepted(self):
+        s = SafetyConfig(deny_write_outside_allowed_paths=False)
+        assert s.enforce_write_guard is False
+
+    def test_unknown_safety_field_is_rejected(self):
+        with pytest.raises(ValidationError):
+            SafetyConfig(enforce_write_guar=True)
+
 
 # ── AppConfig ──────────────────────────────────────────────────────
 

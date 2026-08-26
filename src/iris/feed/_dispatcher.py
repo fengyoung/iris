@@ -55,8 +55,7 @@ class Dispatcher:
         """
         result = DispatchResult()
 
-        # 建立话题 ID → 文件路径映射
-        topic_map: Dict[str, DetectedTopic] = {t.topic_id: t for t in topics}
+        # 建立话题文件路径映射
         file_map: Dict[str, Path] = {}
         for f in brief_files:
             # 从 frontmatter 提取 topic_id

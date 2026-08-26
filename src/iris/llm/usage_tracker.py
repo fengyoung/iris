@@ -8,9 +8,10 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -113,12 +114,18 @@ class UsageTracker:
             logger.warning("UsageTracker 初始化失败（用量统计将不可用）: %s", exc)
             return False
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        """创建并在上下文退出时关闭一次性连接。"""
         conn = sqlite3.connect(str(self._db_path))
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=5000")
-        conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=5000")
+            conn.row_factory = sqlite3.Row
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     # ── 写入 ─────────────────────────────────────────────────
 

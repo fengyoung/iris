@@ -231,16 +231,18 @@ def _parse_image_list(raw: str) -> List[str]:
 
 
 def _write_text_file(raw_path: str, text: str) -> Path:
+    from iris.utils.shared import atomic_write_text
+
     output_path = Path(raw_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(text, encoding="utf-8")
+    atomic_write_text(output_path, text)
     return output_path
 
 
 def _write_bytes_file(raw_path: str, data: bytes) -> Path:
+    from iris.utils.shared import atomic_write_bytes
+
     output_path = Path(raw_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_bytes(data)
+    atomic_write_bytes(output_path, data)
     return output_path
 
 

@@ -21,6 +21,7 @@ from .write_guard import (
     WriteGuardError,
     resolve_allowed_paths,
     safe_write_text,
+    safe_write_bytes,
     validate_write_path,
 )
 
@@ -43,6 +44,7 @@ __all__ = [
     "WriteGuardError",
     "resolve_allowed_paths",
     "safe_write_text",
+    "safe_write_bytes",
     "validate_write_path",
     "build_frontmatter",
     "get_frontmatter_field",

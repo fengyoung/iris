@@ -1,3 +1,7 @@
+## v3.28.0 (2026-08-26)
+
+全项目工程治理：① 可靠性 — SQLite 一次性连接退出即关闭，检索存储显式释放；`FileLock` 保留稳定锁文件，消除 unlink 导致的 inode 双锁竞态；文本、二进制和 JSON 写入统一原子发布；② 索引与缓存 — 向量索引使用完整 generation + 原子 current 指针，读写共享文件锁；LLM 响应缓存启动时重建磁盘 LRU、清理 TTL/超限项，跨进程加锁并持久化访问时间；③ 安全与配置 — `enforce_write_guard` 成为规范字段，兼容旧 `deny_write_outside_allowed_paths`，关闭守卫时行为真正生效，新增安全二进制写入；④ 可观测性与 CLI — daily-start 返回图谱成功/失败状态并记录异常，修复不可达的 `iris workspace list|current`；⑤ 工程工具 — CI、Makefile、pre-commit 统一检查 `src scripts tests`，开发依赖固定 Ruff/pip-audit/pre-commit；⑥ 运行模型 — `IRIS_PROJECT_ROOT` 成为项目根显式入口，模板和委托命令统一解析，异步 API 文档与同步 Provider 的线程池适配行为一致；最低 Python 版本统一为 3.11，修复 NumPy/PyMuPDF 锁定版本与原 3.9 声明、CI、Docker 不可安装的矛盾；⑦ 文档 — 全量同步项目总览、贡献规范与现行设计/使用指南，新增工程可靠性设计及运维指南。验证：全量 2,945 通过，覆盖率 65.82%，ruff 零告警，task-panel 沙箱外 29 通过，精确锁定顶层依赖无已知漏洞。协议版本 3.20→**3.21**；app 配置版本 3.5→**3.6**；产品版本 3.27.2→**3.28.0**。
+
 ## v3.27.2 (2026-08-24)
 
 LLM 配置修复与新视觉模型默认（4 文件 / +85 -11 + 测试 +1）：① `find_model_by_name` Pydantic 兼容修复 — 门控 `isinstance(cfg, dict)` 改为 `hasattr(cfg, "get")`（兼容 RoleModels/ModelItem 配置模型），api_key 为 SecretStr 时显式解包（与 get_active_model_config 同款处理）；回归：v3.11 Pydantic 迁移后 force_model 对真实配置（load_config_bundle）永远返回 None；② adv_model 新默认 `deepseek-v4-flash-vision-exp` — 实验性视觉模型（multimodal text+image，100 万上下文，priority 70 最高优先级），qwen3.8-max 降为第 2 优先级；③ iris-feishu-import SKILL.md 批量导入用法修正 — `--url` 不可重复传参（重复时只保留最后一个），改为逗号分隔；④ 顺带清零 2 文件 4 处 ruff 遗留告警（HEAD 已有）。验证：LLM 相关 107 全过（test_provider_fallback 14，含新增 `test_find_with_pydantic_config`），ruff 零告警。协议版本 3.20（不变）。产品版本 3.27.1→**3.27.2**。

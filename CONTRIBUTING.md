@@ -38,7 +38,7 @@
 - 遵循已有代码风格
 - 注释和文档使用中文
 - 新增功能需包含单元测试
-- 保持 Python 3.9+ 兼容性
+- 保持 Python 3.11+ 兼容性，并在 3.11、3.12、3.13 上通过 CI
 
 ### 开发环境
 
@@ -81,6 +81,8 @@ python -m pytest tests/ -q --cov=iris --cov-report=term
 2. 更新 `src/iris/__init__.py` 中的 `__version__`（仅在 CLI 命令集变更时）
 3. 更新 `CHANGELOG.md`，记录本版本的全部变更
 4. 提交变更：`git commit -m "chore: 升级产品版本 X.Y.Z → X.Y.Z+1"`
+
+涉及持久化或并发逻辑时，同时检查 [工程可靠性设计](docs/engineering-reliability-design.md) 中的锁、原子发布和资源生命周期约定。
 5. 打 tag：`git tag -a vX.Y.Z+1 -m "Iris X.Y.Z+1"`
 6. 推送 tag：`git push origin vX.Y.Z+1`
 7. 在 GitHub Releases 页面基于 tag 创建 Release

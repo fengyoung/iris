@@ -116,7 +116,23 @@ class TestVectorIndexUpsert:
     def test_save_with_empty_data(self, tmp_path):
         vi = VectorIndex(tmp_path / "vi.json")
         vi.save()  # should not crash
-        assert not vi._binary_dir().exists() or not (vi._binary_dir() / "vectors.npy").exists()
+        loaded = VectorIndex(tmp_path / "vi.json")
+        assert loaded.load() is True
+        assert loaded.size() == 0
+
+    def test_incomplete_generation_is_not_published(self, tmp_path):
+        path = tmp_path / "vi.json"
+        vi = VectorIndex(path)
+        vi.upsert("stable", [0.1, 0.2], "stable")
+        vi.save()
+
+        broken = vi._binary_dir() / "generations" / "broken"
+        broken.mkdir(parents=True)
+        (broken / "ids.json").write_text("{}", encoding="utf-8")
+
+        loaded = VectorIndex(path)
+        assert loaded.load() is True
+        assert loaded.exists("stable")
 
 
 class TestVectorIndexSearch:

@@ -13,3 +13,8 @@ pydantic==2.10.5
 networkx==3.6.1         # graph
 httpx==0.28.1           # async
 beautifulsoup4==4.14.3  # weekly
+
+# 开发与质量工具
+ruff==0.15.4
+pip-audit==2.9.0
+pre-commit==4.5.1

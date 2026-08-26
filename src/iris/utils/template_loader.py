@@ -11,11 +11,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Optional
 
-# templates/ 目录：src/iris/utils/../../../.. / templates
-_TEMPLATES_DIR = Path(__file__).resolve().parent.parent.parent.parent / "templates"
+from iris.utils.paths import get_project_root
 
 
 def load_template(relative_path: str) -> Optional[str]:
@@ -25,7 +23,7 @@ def load_template(relative_path: str) -> Optional[str]:
         relative_path: 相对于 templates/ 的路径，如 "wiki/generate_generic.txt"
                        或 "prompt/stage1_instruction.md"
     """
-    tmpl_path = _TEMPLATES_DIR / relative_path
+    tmpl_path = get_project_root() / "templates" / relative_path
     if tmpl_path.exists():
         return tmpl_path.read_text(encoding="utf-8")
     return None

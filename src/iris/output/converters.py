@@ -12,8 +12,10 @@ def convert_report(markdown: str, output_path: Path, *, format: str = "md", titl
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     if format == "md":
+        from iris.utils.shared import atomic_write_text
+
         output_path = output_path.with_suffix(".md")
-        output_path.write_text(markdown, encoding="utf-8")
+        atomic_write_text(output_path, markdown)
         return output_path
 
     if format == "docx":
@@ -54,5 +56,10 @@ def _convert_to_docx(markdown: str, output_path: Path, *, title: str = "") -> Pa
             doc.add_paragraph(stripped)
         # 空行跳过
 
-    doc.save(str(output_path))
+    from iris.utils.shared import atomic_write_bytes
+    from io import BytesIO
+
+    buffer = BytesIO()
+    doc.save(buffer)
+    atomic_write_bytes(output_path, buffer.getvalue())
     return output_path

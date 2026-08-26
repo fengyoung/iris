@@ -81,7 +81,6 @@ class TestCallLlmErrorHandling:
     """_call_llm: LLM 失败时返回 fallback 而非 crash。"""
 
     def test_llm_failure_returns_fallback(self, config_bundle):
-        from iris.llm import LLMProviderError
         from iris.llm.service import GenerationResult
 
         pipeline = TranscribeMeetingPipeline(config_bundle)

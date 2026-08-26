@@ -10,6 +10,7 @@ from pathlib import Path
 from iris.config import load_config_bundle
 from iris.utils.logging import IrisLogger
 from iris.core.script_loader import run_delegated_script
+from iris.utils.paths import get_project_root
 
 from iris.app.cli.helpers import _show_banner, _emit_output
 from iris.app.cli.handlers import COMMAND_HANDLERS
@@ -34,6 +35,7 @@ COMMANDS = [
     "metrics-export",
     "reminders",
     "watch",
+    "workspace",
     # ── 委托命令 ──
     "trello", "extract-weekly-reports", "extract-travel-invoice",
     "sync-memory", "feishu-doc-convert", "chat-digest",
@@ -57,12 +59,14 @@ _DELEGATED_SCRIPTS = {
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Iris 命令行入口")
     parser.add_argument("command", choices=COMMANDS, help="执行的命令")
-    # 默认按代码位置推断项目根（src/iris/app/ 向上 4 级），
-    # 任意 cwd 运行 iris 均可用；多项目场景仍可显式 --project-root 覆盖（v3.27.0）
+    parser.add_argument("workspace_action", nargs="?", choices=["list", "current"], default="current",
+                        help="workspace 子命令（list/current）")
     parser.add_argument("--project-root",
-                        default=str(Path(__file__).resolve().parent.parent.parent.parent),
-                        help="Iris 项目根目录")
+                        default=str(get_project_root()),
+                        help="Iris 项目根目录（默认读取 IRIS_PROJECT_ROOT 或自动探测）")
     parser.add_argument("--workspace", default="", help="工作空间名称（覆盖 config/workspaces.json 中的路径配置）")
+    parser.add_argument("--list-workspaces", action="store_true",
+                        help="兼容选项：等价于 workspace list")
     parser.add_argument("--context", default="{}", help="route-model 使用的 JSON 上下文")
     parser.add_argument("--pretty", action="store_true", help="人类可读输出")
     # 数据源层
@@ -213,7 +217,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     if len(sys.argv) > 1 and sys.argv[1] in _DELEGATED_SCRIPTS:
-        project_root = Path(__file__).resolve().parent.parent.parent.parent
+        project_root = get_project_root()
         return run_delegated_script(_DELEGATED_SCRIPTS[sys.argv[1]], project_root)
 
     parser = build_parser()
@@ -263,7 +267,7 @@ def _handle_workspace_cmd(args) -> int:
     mgr = WorkspaceManager(Path(args.project_root))
     ws_name = getattr(args, "workspace", "") or mgr.config.default_workspace
 
-    if getattr(args, "list_workspaces", False):
+    if args.workspace_action == "list" or getattr(args, "list_workspaces", False):
         workspaces = mgr.list_workspaces()
         for ws in workspaces:
             print(f"  {ws.name:20s}  source={ws.source_root or '(默认)'}  wiki={ws.wiki_root or '(默认)'}")

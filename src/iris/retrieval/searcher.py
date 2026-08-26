@@ -181,12 +181,13 @@ class LocalRetriever:
         if chunk_index_path.exists():
             try:
                 stats_cache_path.parent.mkdir(parents=True, exist_ok=True)
-                stats_cache_path.write_text(json.dumps({
+                from iris.utils.shared import atomic_write_json
+                atomic_write_json(stats_cache_path, {
                     "index_mtime": chunk_index_path.stat().st_mtime,
                     "total_docs": self._total_docs,
                     "avg_doc_len": self._avg_doc_len,
                     "df": self._df,
-                }, ensure_ascii=False), encoding="utf-8")
+                })
             except OSError as exc:
                 logger.debug("BM25 缓存写入失败: %s", exc)
 
@@ -197,8 +198,8 @@ class LocalRetriever:
             db_path = self._config.root / "data" / "chunk_store.db"
             if not db_path.exists():
                 return False
-            store = ChunkStore(db_path)
-            chunks = store.load_all()
+            with ChunkStore(db_path) as store:
+                chunks = store.load_all()
             for chunk in chunks:
                 self._chunks.append(chunk)
                 self._by_source.setdefault(chunk.source_name, []).append(chunk)

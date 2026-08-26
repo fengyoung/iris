@@ -1,7 +1,7 @@
 """Pydantic v2 配置模型 — 类型安全的配置结构定义。
 
 从 iris2 迁移，适配 iris3 的 4 种 Wiki 页面类型 (domain/concept/project/person)
-和 llm.json v3.3 结构（策略开关 + 4 adv_model）。
+和 llm.json v3.5 结构（策略开关 + 多级 adv_model）。
 
 v3.11: BaseConfigModel 基类提供 __getitem__ / get() 向后兼容，
       使旧代码的 config.llm["models"] 风格访问在 Pydantic 模型上仍可工作。
@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, SecretStr, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 
 class BaseConfigModel(BaseModel):
@@ -22,6 +22,8 @@ class BaseConfigModel(BaseModel):
     允许旧代码以 config["key"] 和 config.get("key", default)
     访问 Pydantic 模型字段，作为属性访问的过渡桥接。
     """
+
+    model_config = ConfigDict(extra="allow")
 
     def __getitem__(self, key: str) -> Any:
         try:
@@ -82,8 +84,16 @@ class LoggingConfig(BaseConfigModel):
 
 class SafetyConfig(BaseConfigModel):
     """安全配置。"""
+    model_config = ConfigDict(extra="forbid")
+
+    protect_read_only_sources: bool = True
+    require_confirmation_for_destructive_actions: bool = True
     allowed_write_paths: List[str] = Field(default_factory=list, description="允许写入的路径白名单")
-    enforce_write_guard: bool = Field(default=True, description="启用写入守卫")
+    enforce_write_guard: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("enforce_write_guard", "deny_write_outside_allowed_paths"),
+        description="启用写入守卫",
+    )
 
 
 class AppConfig(BaseConfigModel):

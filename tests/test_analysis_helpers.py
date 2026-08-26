@@ -271,7 +271,8 @@ class TestLoadSaveBriefIndex:
         # Create a stale brief file (old timestamp)
         old_brief = briefs_dir / "old_hash.json"
         old_brief.write_text("{}", encoding="utf-8")
-        import os, time
+        import os
+        import time
         old_mtime = time.time() - 31 * 86400  # 31 days ago
         os.utime(str(old_brief), (old_mtime, old_mtime))
 

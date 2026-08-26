@@ -258,7 +258,7 @@ class ClaudeCodeAdapter(AgentAdapter):
         try:
             result = self._run_cli(["status"])
             return "error" not in str(result).lower()
-        except Exception as exc:
+        except Exception:
             logger.exception("Agent 健康检查失败")
             return False
 

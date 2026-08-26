@@ -15,7 +15,13 @@ from typing import Dict, Optional
 
 
 def _find_project_root() -> Path:
-    """通过向上查找 pyproject.toml 定位项目根目录。"""
+    """优先使用环境变量，再向上查找 pyproject.toml 定位项目根目录。"""
+    configured = os.environ.get("IRIS_PROJECT_ROOT", "").strip()
+    if configured:
+        root = Path(configured).expanduser().resolve()
+        if not (root / "pyproject.toml").is_file():
+            raise RuntimeError(f"IRIS_PROJECT_ROOT 不是有效 Iris 项目目录: {root}")
+        return root
     candidate = Path(__file__).resolve().parent
     for _ in range(6):  # 最多向上查找 6 级
         if (candidate / "pyproject.toml").exists():
@@ -90,7 +96,7 @@ def _load_archive_config(project_root: Optional[Path] = None) -> Dict[str, str]:
     if _ARCHIVE_CONFIG is not None:
         return _ARCHIVE_CONFIG
 
-    root = project_root or Path(__file__).resolve().parent.parent.parent.parent
+    root = project_root or get_project_root()
     path = root / _ARCHIVE_CONFIG_PATH
     if path.exists():
         with open(path, encoding="utf-8") as f:

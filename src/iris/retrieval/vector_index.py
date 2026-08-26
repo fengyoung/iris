@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -15,6 +17,8 @@ import numpy as np
 _VECTORS_NPY = "vectors.npy"
 _IDS_JSON = "ids.json"
 _META_JSON = "meta.json"
+_CURRENT_JSON = "current.json"
+_GENERATIONS_DIR = "generations"
 
 
 class VectorIndexModelMismatchError(RuntimeError):
@@ -34,12 +38,17 @@ class VectorIndex:
         self._valid_mask: np.ndarray | None = None
 
     def load(self) -> bool:
+        from iris.core.locks import FileLock
+
         bin_dir = self._binary_dir()
-        if bin_dir.exists() and (bin_dir / _VECTORS_NPY).exists():
-            ok = self._load_binary()
-            if ok:
-                self._invalidate_cache()
-            return ok
+        if bin_dir.exists():
+            with FileLock(bin_dir / "index"):
+                data_dir = self._active_binary_dir()
+                if data_dir is not None:
+                    ok = self._load_binary(data_dir)
+                    if ok:
+                        self._invalidate_cache()
+                    return ok
         if self._path.exists():
             ok = self._load_legacy_json()
             if ok:
@@ -50,11 +59,26 @@ class VectorIndex:
     def _binary_dir(self) -> Path:
         return self._path.parent / self._path.stem
 
-    def _load_binary(self) -> bool:
+    def _active_binary_dir(self) -> Optional[Path]:
+        """返回当前完整代际目录；兼容旧版直接三文件布局。"""
         bin_dir = self._binary_dir()
+        current_path = bin_dir / _CURRENT_JSON
+        if current_path.exists():
+            try:
+                generation = json.loads(current_path.read_text(encoding="utf-8"))["generation"]
+                candidate = bin_dir / _GENERATIONS_DIR / generation
+                if all((candidate / name).exists() for name in (_VECTORS_NPY, _IDS_JSON, _META_JSON)):
+                    return candidate
+            except (OSError, json.JSONDecodeError, KeyError, TypeError):
+                return None
+        if (bin_dir / _VECTORS_NPY).exists():
+            return bin_dir
+        return None
+
+    def _load_binary(self, data_dir: Path) -> bool:
         try:
-            vectors = np.load(str(bin_dir / _VECTORS_NPY))
-            ids_data = json.loads((bin_dir / _IDS_JSON).read_text(encoding="utf-8"))
+            vectors = np.load(str(data_dir / _VECTORS_NPY))
+            ids_data = json.loads((data_dir / _IDS_JSON).read_text(encoding="utf-8"))
             chunk_ids: List[str] = ids_data["chunk_ids"]
             texts: List[str] = ids_data.get("texts", [""] * len(chunk_ids))
             if len(texts) < len(chunk_ids):
@@ -63,7 +87,7 @@ class VectorIndex:
             for idx, cid in enumerate(chunk_ids):
                 vec = vectors[idx].tolist() if idx < len(vectors) else []
                 self._data[cid] = {"vector": vec, "text": texts[idx] if idx < len(texts) else ""}
-            meta_path = bin_dir / _META_JSON
+            meta_path = data_dir / _META_JSON
             if meta_path.exists():
                 try:
                     meta = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -93,12 +117,12 @@ class VectorIndex:
             self._save_binary()
 
     def _save_binary(self) -> None:
-        if not self._data:
-            return
+        from iris.utils.shared import atomic_write_json
+
         bin_dir = self._binary_dir()
         bin_dir.mkdir(parents=True, exist_ok=True)
         chunk_ids = list(self._data.keys())
-        dim = len(next(iter(self._data.values())).get("vector", []))
+        dim = len(next(iter(self._data.values())).get("vector", [])) if self._data else 0
         matrix = np.zeros((len(chunk_ids), dim), dtype=np.float32)
         texts: List[str] = []
         for idx, cid in enumerate(chunk_ids):
@@ -106,9 +130,27 @@ class VectorIndex:
             if len(vec) == dim:
                 matrix[idx] = np.array(vec, dtype=np.float32)
             texts.append(self._data[cid].get("text", ""))
-        np.save(str(bin_dir / _VECTORS_NPY), matrix)
-        (bin_dir / _IDS_JSON).write_text(json.dumps({"chunk_ids": chunk_ids, "texts": texts}, ensure_ascii=False), encoding="utf-8")
-        (bin_dir / _META_JSON).write_text(json.dumps({"dim": dim, "count": len(chunk_ids), "embedder_model": self._embedder_model, "updated_at": datetime.now(timezone.utc).isoformat()}, ensure_ascii=False, indent=2), encoding="utf-8")
+        generation = uuid.uuid4().hex
+        generation_dir = bin_dir / _GENERATIONS_DIR / generation
+        generation_dir.mkdir(parents=True, exist_ok=False)
+        try:
+            np.save(str(generation_dir / _VECTORS_NPY), matrix)
+            atomic_write_json(generation_dir / _IDS_JSON, {"chunk_ids": chunk_ids, "texts": texts})
+            atomic_write_json(generation_dir / _META_JSON, {
+                "dim": dim,
+                "count": len(chunk_ids),
+                "embedder_model": self._embedder_model,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            })
+            atomic_write_json(bin_dir / _CURRENT_JSON, {"generation": generation})
+        except Exception:
+            shutil.rmtree(generation_dir, ignore_errors=True)
+            raise
+
+        generations_dir = bin_dir / _GENERATIONS_DIR
+        for old_dir in generations_dir.iterdir():
+            if old_dir.is_dir() and old_dir.name != generation:
+                shutil.rmtree(old_dir, ignore_errors=True)
 
     def upsert(self, chunk_id: str, vector: List[float], text: str = "") -> None:
         self._data[chunk_id] = {"vector": vector, "text": text}

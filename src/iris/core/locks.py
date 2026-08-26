@@ -104,11 +104,8 @@ class FileLock:
                 logger.warning("释放文件锁异常: %s", exc)
             finally:
                 self._fd = None
-            # 清理锁文件（最佳努力）
-            try:
-                self._lock_path.unlink(missing_ok=True)
-            except OSError:
-                logger.debug("清理锁文件失败: %s", self._lock_path)
+            # 锁文件必须保留。释放后删除会产生 inode 竞态：等待者仍锁住旧
+            # inode，而后来者可创建并锁住新 inode，导致两个临界区并发执行。
 
 
 # ── 进程注册表 ─────────────────────────────────────────────────

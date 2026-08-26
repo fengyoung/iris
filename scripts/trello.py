@@ -102,7 +102,7 @@ def main() -> int:
             return 0
         if args.command == "lists":
             lists = service.get_lists()
-            _emit("lists", {"lists": [{"id": l.id, "name": l.name} for l in lists]}, pretty=pretty)
+            _emit("lists", {"lists": [{"id": item.id, "name": item.name} for item in lists]}, pretty=pretty)
             return 0
         if args.command == "list":
             cards = service.today_cards() if args.today else (service.weekly_cards() if args.weekly else service.list_cards(list_name=args.list_name, category=args.category))

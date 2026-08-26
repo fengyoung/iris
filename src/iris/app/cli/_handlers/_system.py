@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict
 
@@ -57,7 +58,7 @@ def handle_daily_start(args, bundle, logger) -> int:
 
         # 5. Wiki 自动发现 + 索引维护 + 增量更新
         _tr.report_phase("wiki_maintenance", "第5/8阶段：Wiki 维护", progress=5 / 8)
-        wiki_update_result, person_enrich_result = _daily_wiki_maintenance(
+        wiki_update_result, person_enrich_result, graph_result = _daily_wiki_maintenance(
             bundle, chunk_summaries,
         )
 
@@ -85,6 +86,7 @@ def handle_daily_start(args, bundle, logger) -> int:
                    "wiki_discover": _auto_discover_wiki_for_daily(bundle, chunk_summaries),
                    "wiki_update": wiki_update_result,
                    "person_enrich": person_enrich_result,
+                   "graph": graph_result,
                    "usage_summary": usage_summary,
                    "asr_audit": asr_audit_result,
                    "reminders": reminders_result}
@@ -196,9 +198,10 @@ def _daily_wiki_maintenance(bundle, chunk_summaries) -> tuple:
 
     wiki_update_result = {"status": "skipped", "reason": "无 chunk 数据"}
     person_enrich_result = {"status": "skipped", "reason": "无 wiki_root 配置"}
+    graph_result = {"status": "skipped", "reason": "无 wiki_root 配置"}
 
     if not bundle.wiki:
-        return wiki_update_result, person_enrich_result
+        return wiki_update_result, person_enrich_result, graph_result
 
     from iris.wiki.generator import WikiGenerator
     wiki_update_result = WikiGenerator(bundle).update_all_pages(top_k=4)
@@ -233,14 +236,17 @@ def _daily_wiki_maintenance(bundle, chunk_summaries) -> tuple:
             backlink_index = backlink_builder.build_from_wiki_pages(pages)
             graph.build_edges_from_backlinks(backlink_index)
         graph.save()
-    except Exception:
-        pass
+        density = graph.density_report()
+        graph_result = {"status": "ok", "nodes": density["nodes"], "edges": density["edges"]}
+    except Exception as exc:
+        logging.getLogger(__name__).warning("daily-start 知识图谱刷新失败: %s", exc, exc_info=True)
+        graph_result = {"status": "error", "reason": str(exc)}
 
     builder = WikiNavigationBuilder(bundle)
     builder.build(write=True)
     append_changelog(Path(bundle.wiki["wiki_root"]), "daily-start 自动维护")
 
-    return wiki_update_result, person_enrich_result
+    return wiki_update_result, person_enrich_result, graph_result
 
 
 def _daily_asr_audit(bundle) -> dict:

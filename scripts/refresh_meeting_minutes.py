@@ -217,7 +217,7 @@ class MeetingMinutesRefresher:
                 rel = p.relative_to(self._source_root)
                 print(f"     📦 将备份: {rel} → {p.name}.bak", file=sys.stderr)
         else:
-            print(f"     📂 将归档到 SOURCE（LLM 路由判定）", file=sys.stderr)
+            print("     📂 将归档到 SOURCE（LLM 路由判定）", file=sys.stderr)
 
     # ── 主循环 ────────────────────────────────────────────────────
     def run(self, *, dry_run: bool = False, resume: bool = True,
@@ -287,19 +287,18 @@ class MeetingMinutesRefresher:
 
         state = StateManager(STATE_FILE)
         summary = state.get_summary()
-        print(f"=== 校验报告 ===", file=sys.stderr)
+        print("=== 校验报告 ===", file=sys.stderr)
         print(f"处理: {summary['processed']}/{summary['total']} 成功"
               f"  {summary['failed']} 失败", file=sys.stderr)
 
         # 路由分布
         routes: Dict[str, int] = {}
-        orphans_in_source = []
         for item in state._items.values():
             if item.get("status") == "processed":
                 route = item.get("route", "未知")
                 routes[route] = routes.get(route, 0) + 1
 
-        print(f"\n路由分布:", file=sys.stderr)
+        print("\n路由分布:", file=sys.stderr)
         for r, c in sorted(routes.items(), key=lambda x: -x[1]):
             print(f"  {r}: {c}", file=sys.stderr)
 
@@ -314,7 +313,7 @@ class MeetingMinutesRefresher:
             for s in missing:
                 print(f"  - {s}", file=sys.stderr)
         else:
-            print(f"\n✅ 所有输出文件存在", file=sys.stderr)
+            print("\n✅ 所有输出文件存在", file=sys.stderr)
 
         # 备份完整性
         backed_up = sum(1 for item in state._items.values()

@@ -28,6 +28,9 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from iris.core.locks import FileLock
+from iris.utils.shared import atomic_write_json
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TTL = 3600
@@ -56,11 +59,15 @@ class LLMResponseCache:
 
     def __init__(
         self,
-        data_dir: Path,
+        data_dir: Optional[Path],
         ttl_seconds: int = _DEFAULT_TTL,
         max_entries: int = _DEFAULT_MAX_ENTRIES,
     ):
-        self._cache_dir = data_dir / "cache" / "llm_responses"
+        valid_data_dir = data_dir if isinstance(data_dir, (str, Path)) else None
+        self._cache_dir = (
+            Path(valid_data_dir) / "cache" / "llm_responses"
+            if valid_data_dir is not None else Path()
+        )
         self._ttl = ttl_seconds
         self._max_entries = max_entries
         self._hits = 0
@@ -70,15 +77,42 @@ class LLMResponseCache:
         # 最近访问的在末尾，最旧的在开头
         self._lru: OrderedDict[str, float] = OrderedDict()
         self._lock = threading.Lock()  # 并发安全（generate_async 多线程）
-        self._available = self._init_dir()
+        self._available = valid_data_dir is not None and self._init_dir()
 
     def _init_dir(self) -> bool:
         try:
             self._cache_dir.mkdir(parents=True, exist_ok=True)
+            with FileLock(self._cache_dir / ".cache"):
+                self._rebuild_lru_from_disk()
             return True
         except OSError as exc:
             logger.warning("LLMResponseCache 目录创建失败，缓存不可用: %s", exc)
             return False
+
+    def _rebuild_lru_from_disk(self) -> None:
+        """扫描磁盘缓存，清理损坏/过期项并重建跨进程 LRU。"""
+        now = time.time()
+        entries = []
+        for entry_path in self._cache_dir.glob("[0-9a-f][0-9a-f]/*.json"):
+            try:
+                data = json.loads(entry_path.read_text(encoding="utf-8"))
+                key = data["cache_key"]
+                cached_at = float(data["cached_at"])
+                if now - cached_at > self._ttl:
+                    entry_path.unlink(missing_ok=True)
+                    continue
+                entries.append((key, float(data.get("last_accessed_at", cached_at))))
+            except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+                entry_path.unlink(missing_ok=True)
+
+        entries.sort(key=lambda item: item[1])
+        if self._max_entries > 0 and len(entries) > self._max_entries:
+            for key, _ in entries[:-self._max_entries]:
+                self._entry_path(key).unlink(missing_ok=True)
+                self._evictions += 1
+            entries = entries[-self._max_entries:]
+        with self._lock:
+            self._lru = OrderedDict(entries)
 
     def _entry_path(self, cache_key: str) -> Path:
         """两级目录：{cache_dir}/{key[:2]}/{key}.json。"""
@@ -101,28 +135,27 @@ class LLMResponseCache:
 
         key = _make_cache_key(prompt, route_context, force_model, temperature)
         entry_path = self._entry_path(key)
-        if not entry_path.exists():
-            self._misses += 1
-            return None
-
         try:
-            data = json.loads(entry_path.read_text(encoding="utf-8"))
-            cached_at = data.get("cached_at", 0)
-            if time.time() - cached_at > self._ttl:
-                # TTL 过期，删除旧条目并从 LRU 移除
-                try:
+            with FileLock(self._cache_dir / ".cache"):
+                if not entry_path.exists():
+                    self._misses += 1
+                    return None
+                data = json.loads(entry_path.read_text(encoding="utf-8"))
+                cached_at = data.get("cached_at", 0)
+                if time.time() - cached_at > self._ttl:
                     entry_path.unlink()
-                except OSError:
-                    logger.debug("TTL 过期缓存删除失败: %s", entry_path)
-                with self._lock:
-                    self._lru.pop(key, None)
-                self._misses += 1
-                return None
+                    with self._lock:
+                        self._lru.pop(key, None)
+                    self._misses += 1
+                    return None
+
+                data["last_accessed_at"] = time.time()
+                atomic_write_json(entry_path, data)
 
             # 命中：移到 LRU 末尾（最近使用）
             with self._lock:
                 self._lru.pop(key, None)
-                self._lru[key] = cached_at
+                self._lru[key] = data["last_accessed_at"]
             self._hits += 1
             return data
         except (json.JSONDecodeError, OSError) as exc:
@@ -173,26 +206,21 @@ class LLMResponseCache:
         }
 
         try:
-            entry_path.parent.mkdir(parents=True, exist_ok=True)
-            entry_path.write_text(json.dumps(entry, ensure_ascii=False), encoding="utf-8")
-
-            # 更新 LRU（如果 key 已存在，移到最后；否则插入）
-            with self._lock:
-                self._lru.pop(key, None)
-                self._lru[key] = now
-
-                # 超过限制时驱逐最旧条目
-                if self._max_entries > 0 and len(self._lru) > self._max_entries:
-                    oldest_key, _ = self._lru.popitem(last=False)
-                else:
-                    oldest_key = None
-
-            if oldest_key:
-                try:
+            with FileLock(self._cache_dir / ".cache"):
+                entry_path.parent.mkdir(parents=True, exist_ok=True)
+                entry["last_accessed_at"] = now
+                atomic_write_json(entry_path, entry)
+                self._rebuild_lru_from_disk()
+                with self._lock:
+                    self._lru.pop(key, None)
+                    self._lru[key] = now
+                    if self._max_entries > 0 and len(self._lru) > self._max_entries:
+                        oldest_key, _ = self._lru.popitem(last=False)
+                    else:
+                        oldest_key = None
+                if oldest_key:
                     self._entry_path(oldest_key).unlink(missing_ok=True)
                     self._evictions += 1
-                except OSError:
-                    logger.debug("LRU 驱逐删除失败: %s", oldest_key)
         except OSError as exc:
             logger.debug("LLMResponseCache 写入失败: %s", exc)
 
@@ -213,7 +241,7 @@ class LLMResponseCache:
     def clear(self) -> int:
         """清空所有缓存条目，返回删除文件数。"""
         removed = 0
-        if not self._cache_dir.exists():
+        if not self._available or not self._cache_dir.exists():
             return 0
         for subdir in self._cache_dir.iterdir():
             if subdir.is_dir():

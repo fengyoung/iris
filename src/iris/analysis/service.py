@@ -468,7 +468,7 @@ class AnalysisReportService:
                     try:
                         r = future.result()
                         dir_file_map[r["direction_name"]] = r
-                    except Exception as e:
+                    except Exception:
                         d = futures[future]
                         d_name = d.get("name", f"方向{d.get('id','?')}")
                         logger.exception("  Stage 1 过滤失败 %s", d_name)
@@ -489,7 +489,7 @@ class AnalysisReportService:
                         try:
                             r = _filter_one(d)
                             dir_file_map[r["direction_name"]] = r
-                        except Exception as e:
+                        except Exception:
                             logger.exception("  Stage 1 补跑失败 %s", d_name)
                             dir_file_map[d_name] = {
                                 "direction_name": d_name,
@@ -583,7 +583,7 @@ class AnalysisReportService:
                             if f_data:
                                 hk = brief_hash_keys.get(label) or self._cache.content_hash(f_data["content"], 2000)
                                 self._cache.save_brief(label, hk, brief, brief_index)
-                    except Exception as e:
+                    except Exception:
                         logger.exception("  Stage 2 摘要失败 [%s]", label)
             except FuturesTimeoutError:
                 logger.error("Stage 2 摘要超时（%ds），已完成 %d/%d 份", _s2_timeout, len(briefs), len(to_summarize))
@@ -709,7 +709,7 @@ class AnalysisReportService:
                     try:
                         name, section = future.result()
                         sections[name] = section
-                    except Exception as e:
+                    except Exception:
                         d = futures[future]
                         d_name = d.get("name", "?")
                         logger.exception("  Stage 3 合成失败 %s", d_name)

@@ -13,6 +13,7 @@ from iris.core.write_guard import (
     WriteGuardError,
     resolve_allowed_paths,
     validate_write_path,
+    safe_write_bytes,
     safe_write_text,
 )
 
@@ -123,3 +124,18 @@ class TestSafeWriteText:
         result = safe_write_text(nested, "# Nested", config_bundle)
         assert result.exists()
         assert result.parent.exists()
+
+    def test_disabled_guard_allows_explicit_outside_path(self, config_bundle, tmp_path):
+        config_bundle.app.safety.enforce_write_guard = False
+        target = tmp_path.parent / f"{tmp_path.name}-outside" / "result.md"
+        try:
+            result = safe_write_text(target, "allowed", config_bundle)
+            assert result.read_text(encoding="utf-8") == "allowed"
+        finally:
+            target.unlink(missing_ok=True)
+            target.parent.rmdir()
+
+    def test_safe_write_bytes_is_atomic_writer(self, config_bundle, temp_project):
+        target = temp_project / "data" / "artifact.bin"
+        result = safe_write_bytes(target, b"\x00\x01", config_bundle)
+        assert result.read_bytes() == b"\x00\x01"

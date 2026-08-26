@@ -116,7 +116,7 @@ def _extract_why_and_how(body: str) -> str:
     if result_parts:
         return "；".join(result_parts)[:500]
     # 回退：取第一段实质内容
-    lines = [l.strip() for l in body.splitlines() if l.strip() and not l.strip().startswith("#")]
+    lines = [line.strip() for line in body.splitlines() if line.strip() and not line.strip().startswith("#")]
     return lines[0][:500] if lines else body.strip()[:500]
 
 
@@ -241,7 +241,7 @@ def _extract_note(fm: Dict[str, Any], body: str) -> str:
 
     # reference 类：取 description + 第一段
     desc = fm.get("description", "")
-    lines = [l.strip() for l in body.splitlines() if l.strip() and not l.strip().startswith("#")]
+    lines = [line.strip() for line in body.splitlines() if line.strip() and not line.strip().startswith("#")]
     first_line = lines[0] if lines else ""
     return f"{desc}：{first_line}"[:500] if desc else first_line[:500]
 
@@ -250,7 +250,7 @@ def _extract_persona(fm: Dict[str, Any], body: str) -> str:
     """提取 Iris 人设描述。"""
     desc = fm.get("description", "")
     # 从正文取关键要点
-    lines = [l.strip() for l in body.splitlines() if l.strip().startswith("- **")]
+    lines = [line.strip() for line in body.splitlines() if line.strip().startswith("- **")]
     if lines:
         return lines[0].lstrip("- ").replace("**", "")[:300]
     return desc[:300]

@@ -84,6 +84,5 @@ class TestExtractVectorsExtended:
 
     def test_data_not_a_list(self):
         """非列表 data → 抛出 AttributeError（已知行为，API 约定返回列表）。"""
-        import pytest
         with pytest.raises((AttributeError, TypeError)):
             _extract_vectors({"data": "not_a_list"})

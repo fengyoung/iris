@@ -1,5 +1,5 @@
 {
-  "version": "3.5",
+  "version": "3.6",
   "app": {
     "name": "Iris",
     "env": "local",
@@ -117,7 +117,7 @@
   "safety": {
     "protect_read_only_sources": true,
     "require_confirmation_for_destructive_actions": true,
-    "deny_write_outside_allowed_paths": true,
+    "enforce_write_guard": true,
     "allowed_write_paths": [
       "${IRIS_OUTPUT_DIR}",
       "./temp",

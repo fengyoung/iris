@@ -312,12 +312,12 @@ def handle_feed_collect(args, bundle, _logger) -> int:
         print(f"ℹ️  {result.empty_reason}")
         return 0
 
-    print(f"\n📊 信息汇聚完成")
+    print("\n📊 信息汇聚完成")
     print(f"  获取消息: {result.fetched_count} 条")
     print(f"  过滤后:   {result.filtered_count} 条")
     print(f"  检测话题: {len(result.topics)} 个")
     if no_extract_docs:
-        print(f"  提取文档: （已跳过）")
+        print("  提取文档: （已跳过）")
     else:
         print(f"  提取文档: {len(result.converted_docs)} 份")
     print(f"  生成简报: {len(result.brief_files)} 份")
@@ -326,7 +326,7 @@ def handle_feed_collect(args, bundle, _logger) -> int:
         print(f"  ✅ 自动入库: {len(result.auto_imported)} 个话题")
     if result.pending:
         print(f"  👁️  待确认: {len(result.pending)} 个话题")
-        print(f"     执行 iris feed-pending 查看详情")
+        print("     执行 iris feed-pending 查看详情")
 
     if dry_run:
         print("\n📋 预览话题:")

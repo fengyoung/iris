@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from iris.config.loader import ConfigBundle
@@ -47,7 +48,9 @@ class LLMService:
         self._config = config
         self._provider = EnvironmentConfiguredLLMProvider(config)
         from iris.llm.cache import LLMResponseCache
-        self._cache = LLMResponseCache(config.root / "data")
+        config_root = getattr(config, "root", None)
+        cache_root = Path(config_root) / "data" if isinstance(config_root, (str, Path)) else None
+        self._cache = LLMResponseCache(cache_root)
         # 来源标记：环境变量 IRIS_CALL_SOURCE 或默认 "cli"
         self._source = os.environ.get("IRIS_CALL_SOURCE", "cli")
 
@@ -215,10 +218,10 @@ class LLMService:
         extra_body: Optional[Dict[str, Any]] = None,
         use_cache: bool = False,
     ) -> GenerationResult:
-        """异步调用 LLM 生成文本（使用 httpx async 或 ThreadPoolExecutor fallback）。
+        """在线程池中适配同步 Provider，提供可等待的 LLM 文本生成。
 
-        Args 与 generate() 相同。需要 `pip install httpx` 获得最佳性能，
-        否则自动回退到同步调用（在线程池中运行）。
+        Args 与 generate() 相同。当前 Provider 协议为同步接口，因此该方法
+        不阻塞事件循环，但不承诺原生异步 HTTP。
         """
         import asyncio
 

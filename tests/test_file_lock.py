@@ -135,13 +135,12 @@ class TestFileLockDataIntegrity:
         final = json.loads(path.read_text(encoding="utf-8"))
         assert final["count"] == thread_count * iterations
 
-    def test_lock_file_cleaned_up(self, temp_project):
-        """释放后锁文件被清理。"""
+    def test_lock_file_persists_after_release(self, temp_project):
+        """释放后保留锁文件，避免跨进程 inode 竞态。"""
         path = temp_project / "test.json"
         with FileLock(path):
             pass
-        # 锁文件应在 release 中通过 unlink(missing_ok=True) 清理
-        assert not path.with_suffix(path.suffix + ".lock").exists()
+        assert path.with_suffix(path.suffix + ".lock").exists()
 
     def test_lock_for_directory_creation(self, temp_project):
         """锁目录自动创建。"""

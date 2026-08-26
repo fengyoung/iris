@@ -1,4 +1,4 @@
-# Iris 3.27.2 — 项目执行说明
+# Iris 3.28.0 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -9,9 +9,9 @@
 
 ### 当前规模
 
-~36,000 行 / 170 文件 / 27 模块 · CLI 66 命令 · 测试 2,929（148 文件，unit 1,872）· 覆盖率 62%+ · 10 个项目级 Skill · Wiki 222 页 · 知识图谱节点 220 / 关系边 1,858（wikilink 1,225 + LLM 633） · 数据源 822 文档 / 5,939 Chunk（text-embedding-v3 / 1,024 维）
+~43,000 行 / 176 个源码文件 / 27 模块 · CLI 67 命令 · 测试 2,945（150 文件，unit 1,580 / integration 245）· 覆盖率 65.82% · 10 个项目级 Skill · Wiki 222 页 · 知识图谱节点 220 / 关系边 1,858（wikilink 1,225 + LLM 633） · 数据源 822 文档 / 5,939 Chunk（text-embedding-v3 / 1,024 维）
 
-**近期新增能力**：任务面板（`taskpanel/`，Web 只读展示任务状态 + TaskReporter 埋点 + 探测兜底 + 常驻守护）· 实时会议助理（`assistant/`，逐段提炼要点/风险/决策点 + 实时提示关键提问 + 过程文档）· YAML frontmatter 标准化注入（`core/frontmatter.py`）· 批量 frontmatter 补全（`core/frontmatter_batch.py`，正则+LLM+wikilink+备份恢复）· wikilink 自动注入引擎（`wiki/wikilink_injector.py`，零 LLM 成本）· LLM 用量追踪（SQLite WAL + embedding 纳入）· LLM 响应缓存 + embedding 向量缓存（LRU + TTL）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（`memory_updater.py` + `session_miner.py`，双通道架构）· 多 Agent 并发安全（FileLock + SQLite WAL + Agent 隔离）· ASR 实时校正引擎（Aho-Corasick + LLM 编辑助手 + 反馈反向优化）· CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit · constraints.txt 可复现构建
+**近期新增能力**：工程可靠性治理（SQLite 生命周期、稳定 inode 文件锁、统一原子写、向量索引 generation 发布、跨进程 LLM 缓存治理）· 显式项目根 `IRIS_PROJECT_ROOT` · 任务面板（`taskpanel/`，Web 只读展示任务状态 + TaskReporter 埋点 + 探测兜底 + 常驻守护）· 实时会议助理（`assistant/`，逐段提炼要点/风险/决策点 + 实时提示关键提问 + 过程文档）· YAML frontmatter 标准化注入（`core/frontmatter.py`）· 批量 frontmatter 补全（`core/frontmatter_batch.py`，正则+LLM+wikilink+备份恢复）· wikilink 自动注入引擎（`wiki/wikilink_injector.py`，零 LLM 成本）· LLM 用量追踪（SQLite WAL + embedding 纳入）· LLM 响应缓存 + embedding 向量缓存（LRU + TTL）· LLM 熔断器（`_CircuitBreaker`，threshold=5 / reset 60s）· 记忆自动更新引擎（`memory_updater.py` + `session_miner.py`，双通道架构）· 多 Agent 并发安全（FileLock + SQLite WAL + Agent 隔离）· ASR 实时校正引擎（Aho-Corasick + LLM 编辑助手 + 反馈反向优化）· CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit · constraints.txt 可复现构建
 
 ### 关键路径
 
@@ -115,6 +115,7 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 | `IRIS_MEETING_TRANS_DIR` | 会议转写文件搜索目录 |
 | `LARK_APP_ID` / `LARK_APP_SECRET` | 飞书应用凭证 |
 | `IRIS_AGENT_ID` | 多 Agent 隔离标识（可选，默认 "default"） |
+| `IRIS_PROJECT_ROOT` | 从仓库外启动时显式指定 Iris 项目根目录 |
 
 ---
 
@@ -122,9 +123,9 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.27.2 | 软件发布版本 |
-| **协议版本** | `src/iris/__init__.py` | 3.20 | CLI 命令集 / agent-spec 格式 |
-| **数据版本** | `config/*.json` | 3.3/3.5 | 配置文件 Schema |
+| **产品版本** | `pyproject.toml` | 3.28.0 | 软件发布版本 |
+| **协议版本** | `src/iris/__init__.py` | 3.21 | CLI 命令集 / agent-spec 格式 |
+| **数据版本** | `config/*.json` | app 3.6（其余独立演进） | 配置文件 Schema |
 
 > 只有真正发生变化的层才递增版本号。
 
@@ -132,13 +133,15 @@ PDF 通过 PyMuPDF 提取文字 + 逐页渲染；DOCX 通过 python-docx 提取�
 
 ## 技术栈
 
-Python 3.9+ · OpenAI 兼容 LLM API（DeepSeek / 百炼 / Qwen）· Pydantic v2（配置校验）· lark-cli（飞书接口层）· PyMuPDF / python-docx（文档处理）· macOS Keychain（可选密钥存储）。
+Python 3.11+ · OpenAI 兼容 LLM API（DeepSeek / 百炼 / Qwen）· Pydantic v2（配置校验）· lark-cli（飞书接口层）· PyMuPDF / python-docx（文档处理）· macOS Keychain（可选密钥存储）。
 
 ---
 
 ## 开发约定
 
 - **长任务埋点规则（v3.27.0 起）**：新增长任务/常驻命令（运行时间分钟级以上）必须评估是否接入 `taskpanel.TaskReporter` 埋点——启动注册、关键阶段 `report_phase()`、结束写终态；不接埋点需在需求讨论时说明理由（如依赖探测兜底即可）。
+- **持久化规则（v3.28.0 起）**：共享状态的读-改-写必须在 `FileLock` 临界区内完成，`.lock` 文件释放后必须保留；单文件使用 `atomic_write_text/bytes/json`，多文件制品使用 generation 目录写全后再原子切换指针。
+- **资源生命周期规则（v3.28.0 起）**：SQLite 等持久资源必须显式 `close()` 或使用上下文管理器；调用方不得依赖垃圾回收释放文件描述符。
 
 ---
 
@@ -149,13 +152,13 @@ iris3/
 ├── src/iris/          # 27 模块（见下）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
-├── tests/             # 2,852 用例，139 文件
-│   ├── unit/          #   纯逻辑单元测试（1,498 用例，<10s）
-│   └── integration/   #   集成测试（240 用例）
+├── tests/             # 2,945 用例，150 文件
+│   ├── unit/          #   纯逻辑单元测试（1,580 用例）
+│   └── integration/   #   集成测试（245 用例）
 ├── config/            # *.json gitignored，*.example 版本控制
 ├── data/              # 运行时数据（全 gitignore）
 ├── .claude/skills/    # 项目级 Skill（10 个）
-├── .github/workflows/ # CI 流水线（Python 3.9-3.12）
+├── .github/workflows/ # CI 流水线（Python 3.11-3.13）
 ├── memory/            # Claude 工作记忆
 ├── Makefile           # 常用开发命令
 └── pyproject.toml · README · CLAUDE · CHANGELOG.md
@@ -173,7 +176,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.27.2 (2026-08-24)** — LLM 配置修复与新视觉模型默认（4 文件 / +1 测试）：① `find_model_by_name` Pydantic 兼容修复 — `isinstance(cfg, dict)` → `hasattr(cfg, "get")` + api_key SecretStr 显式解包（回归：v3.11 Pydantic 迁移后 force_model 对真实配置永远返回 None）；② adv_model 新默认 `deepseek-v4-flash-vision-exp`（实验性视觉模型，multimodal text+image，100 万上下文，priority 70 最高优先级），qwen3.8-max 降为第 2 优先级；③ iris-feishu-import SKILL.md 批量导入用法修正（`--url` 不可重复传参，改逗号分隔）；④ 顺带清零 2 文件 4 处 ruff 遗留告警。验证：LLM 相关 107 全过，ruff 零告警。协议版本 3.20（不变）。产品版本 3.27.1→**3.27.2**。
+**当前 v3.28.0 (2026-08-26)** — 全项目工程治理：① 可靠性 — SQLite 连接显式关闭；`FileLock` 保留稳定锁文件，消除 unlink 造成的 inode 双锁竞态；文本、二进制、JSON 统一原子写；② 索引与缓存 — 向量索引按完整 generation 发布并原子切换 `current`，LLM 缓存增加跨进程锁、重启 LRU/TTL 治理；③ 安全与配置 — 写入守卫规范字段改为 `enforce_write_guard` 并兼容旧字段，新增安全二进制写；④ CLI 与可观测性 — 修复 `workspace list|current`，daily-start 明确返回图谱维护状态；⑤ 工程工具 — CI/Makefile/pre-commit 统一覆盖 `src scripts tests`，Python 基线统一为 3.11-3.13，新增 `IRIS_PROJECT_ROOT`。验证：全量 2,945 通过，覆盖率 65.82%，ruff 零告警，精确锁定顶层依赖无已知漏洞。协议版本 3.20→**3.21**；app 配置 3.5→**3.6**；产品版本 3.27.2→**3.28.0**。
+
+**v3.27.2 (2026-08-24)** — LLM 配置修复与新视觉模型默认（4 文件 / +1 测试）：① `find_model_by_name` Pydantic 兼容修复 — `isinstance(cfg, dict)` → `hasattr(cfg, "get")` + api_key SecretStr 显式解包（回归：v3.11 Pydantic 迁移后 force_model 对真实配置永远返回 None）；② adv_model 新默认 `deepseek-v4-flash-vision-exp`（实验性视觉模型，multimodal text+image，100 万上下文，priority 70 最高优先级），qwen3.8-max 降为第 2 优先级；③ iris-feishu-import SKILL.md 批量导入用法修正（`--url` 不可重复传参，改逗号分隔）；④ 顺带清零 2 文件 4 处 ruff 遗留告警。验证：LLM 相关 107 全过，ruff 零告警。协议版本 3.20（不变）。产品版本 3.27.1→**3.27.2**。
 
 **v3.27.1 (2026-08-17)** — 双周报生成 w31 风格固化（3 文件 / +6 测试）：① 重写 `templates/prompt/biweekly_stage3_direction.md` — 总结段改为 w31 式**逐项目「目标→思考→决策→下一步」**（项目目标→思考主线/归因（事实简短带过）→决策→下一步，「我们」视角，含正/反示例）；关键进展**项目级聚合**（每 sub_area 1 个加粗条目 + ≤3 子项，严禁拆散、挑选最关键，无素材标「本期无重要进展」）；② `_biweekly_helpers.py` DEFAULT_STYLE_GUIDE 同步（默认生成即 w31 风格）；③ 防回归测试 `TestW31StyleFrozen` +6。背景：w33 首版总结宽泛空洞 + 关键进展过细；Stage 3 合成 240s 超时会静默丢弃末方向（素材未缺却输出「无实质进展」，w33 首版搜推方向即中招，重跑修复）。验证：biweekly 相关 133 全过，ruff 零告警。协议版本 3.20（不变）。产品版本 3.27.0→**3.27.1**。
 

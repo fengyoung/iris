@@ -1,8 +1,10 @@
-# Iris 3.27.2
+# Iris 3.28.0
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
+
+**v3.28.0** — [全项目工程治理](CHANGELOG.md)：修复 SQLite 连接泄漏与 FileLock inode 竞态；统一原子写入和安全配置契约；向量索引按完整代际发布；补齐 `workspace` CLI、daily-start 图谱状态、跨进程 LLM 缓存治理；统一 CI/Makefile/pre-commit 质量门禁。协议版本 **3.21**，app 配置版本 **3.6**。
 
 **v3.27.2** — [LLM 配置修复与新视觉模型默认](CHANGELOG.md)：`find_model_by_name` Pydantic 兼容修复（回归修复 v3.11 迁移后 force_model 对真实配置失效 + SecretStr 显式解包）；adv_model 新默认 `deepseek-v4-flash-vision-exp`（实验性视觉模型，priority 70 最高优先级，qwen3.8-max 降为第 2 优先级）；iris-feishu-import 批量导入用法修正（`--url` 不可重复传参，改逗号分隔）。验证：LLM 相关 107 全过，ruff 零告警。协议版本 3.20（不变）。产品版本 3.27.1→**3.27.2**。
 
@@ -78,6 +80,9 @@
 # 安装
 pip install -e .
 
+# Iris 是仓库型应用；从其他目录启动时可显式指定仓库根目录
+export IRIS_PROJECT_ROOT=/path/to/iris3
+
 # 配置
 cp .env.example .env
 cp config/app.json.example config/app.json
@@ -113,10 +118,12 @@ python scripts/run_cli.py daily-start
 | 工具 | `process`, `trello`, `extract-weekly-reports`, `extract-travel-invoice` | 富媒体处理（图片/PDF/DOCX/视频）/ 看板 / 周报提取 / 行程单报销 |
 | 用量 | `usage-stats [--by day/week/month/year] [--cost]` | LLM 调用/token 消耗统计（分模型 + 汇总，多粒度聚合，可选成本估算） |
 | 提醒 | `reminders` | 主动提醒：栏目断供 / 成员周报缺失 / 项目停滞（零 LLM 成本，daily-start 已集成） |
-| 系统 | `daily-start`, `check-config`, `status`, `diagnose` | 日常维护（含图谱增量刷新）/ 配置检查 |
+| 系统 | `daily-start`, `check-config`, `status`, `diagnose`, `workspace` | 日常维护（含图谱增量刷新）/ 配置检查 / 工作空间查看 |
 | ASR 校正 | `asr-corrector`, `asr-audit`, `asr-report` | vocotype 实时语音转写纠错润色（[使用指南](docs/asr-corrector-usage.md)） |
 | 会议助理 | `meeting-live-assistant` | 实时 AI 会议参谋：本地麦克风转写（FunASR）+ 逐段提炼要点/风险/决策/建议提问 + 话题追踪 + 说话人区分 + 洞察推送 + 热键 + 按话题过程文档（[使用指南](docs/meeting-live-assistant-usage.md) · [方案设计](docs/meeting-live-assistant-design.md)） |
 | 任务面板 | `task-panel` | Web 只读展示 iris 任务状态与进程：常驻守护 + 任务埋点 + 探测兜底（[使用指南](docs/task-panel-usage.md) · [方案设计](docs/task-panel-design.md)） |
+
+工程可靠性与运维约定见 [可靠性设计](docs/engineering-reliability-design.md) 和 [可靠性使用指南](docs/engineering-reliability-usage.md)。
 
 ## 知识库结构
 
@@ -138,20 +145,20 @@ SOURCE/                     LLM-WIKI/
 | 角色 | 默认模型 | 提供商 | 能力 | 降级链 |
 |------|---------|--------|------|--------|
 | `base_model` | deepseek-v4-flash | DeepSeek | 纯文本 | → deepseek-v4-pro |
-| `adv_model` | qwen3.7-plus | 百炼 | 文本 + 图片 | → qwen3.7-plus-0526 → qwen3.6-plus → qwen3.6-flash → qwen3.6-27b → qwen3.5-plus（6 级） |
+| `adv_model` | deepseek-v4-flash-vision-exp | DeepSeek | 文本 + 图片 | → qwen3.8-max → qwen3.7-flash-2026-07-15 → qwen3.7-flash → qwen3.7-plus-2026-05-26 |
 
 路由规则（8 条）：用户显式指定 → 多模态输入 → Prompt 生成 → 复杂分析 → Wiki 重建 → 问答 → 文本兜底。
 
 ## 技术栈
 
-- Python 3.9+
-- OpenAI 兼容 LLM API（DeepSeek / 百炼 Qwen 3.5/3.6/3.7 Plus 多模态）
+- Python 3.11+
+- OpenAI 兼容 LLM API（DeepSeek / 百炼 Qwen 多模态）
 - Pydantic v2（配置类型安全校验）
 - lark-cli（飞书接口，步骤 3）
 - macOS Keychain（可选密钥存储）
 - PyMuPDF / python-docx（PDF/DOCX 处理）
 - ffmpeg（视频抽帧/抽音轨，视频处理必需）+ openai-whisper（音轨转写，可选）
-- 2,713 个测试用例（138 个测试文件），覆盖率 62%+（仅统计 Iris 自身 LLM 调用）
+- 2,945 个测试用例（150 个测试文件），覆盖率 65.82%
 
 ## 开发环境
 
@@ -162,8 +169,8 @@ pip install -e ".[dev]"
 
 # 快速命令（Makefile）
 make test            # 运行全部测试
-make test-unit       # 纯逻辑单元测试（419 用例，0.5s）
-make test-integration # 集成测试（1,334 用例）
+make test-unit       # 运行 unit 标记测试
+make test-integration # 运行 integration 标记测试
 make test-cov        # 运行测试 + 覆盖率报告
 make lint            # Ruff 代码检查
 make lint-fix        # Ruff 自动修复
@@ -186,8 +193,8 @@ cp config/*.json.example config/  # 然后编辑各 .json 填入实际值
 
 ```
 iris3/
-├── src/iris/           # 21 模块（见下）
-│   ├── app/cli/        # CLI 入口 + 58 命令处理器（5 子模块）
+├── src/iris/           # 27 模块
+│   ├── app/cli/        # CLI 入口 + 67 个公开命令
 │   ├── analysis/       # 分析服务（报告/思维导图/双周报）
 │   ├── complex_input/  # 多模态三阶段（图片/PDF/DOCX/VIDEO）
 │   ├── config/         # 配置加载 + Pydantic 校验
@@ -197,7 +204,7 @@ iris3/
 │   ├── feishu/         # 飞书文档转换 + 聊天提炼
 │   ├── ingest/         # 文档扫描 + 切块
 │   ├── llm/            # Provider/路由/LLMService/用量统计
-│   ├── memory/         # 记忆系统（5 子模块）
+│   ├── memory/         # 记忆系统（6 子模块）
 │   ├── output/         # 格式化 + DOCX 输出
 │   ├── qa/             # 检索增强问答
 │   ├── retrieval/      # BM25 + 向量 + RRF 混合检索
@@ -207,11 +214,11 @@ iris3/
 │       └── asr/         #   ASR 提示词子系统（术语提取/热词/Prompt优化/版本管理）
 ├── scripts/            # CLI 入口 + 委托脚本
 ├── templates/          # Prompt / Wiki 模板
-├── tests/              # 2,154 用例（119 文件）
-│   ├── unit/           #   纯逻辑单元测试（419 用例）
-│   └── integration/    #   集成测试（1,334 用例）
+├── tests/              # 2,945 用例（150 文件）
+│   ├── unit/           #   纯逻辑单元测试（1,580 用例）
+│   └── integration/    #   集成测试（245 用例）
 ├── config/             # *.json gitignored，*.example 版本控制
-├── .github/workflows/  # CI 流水线（Python 3.9-3.12 矩阵）
+├── .github/workflows/  # CI 流水线（Python 3.11-3.13 矩阵）
 ├── Makefile            # 常用开发命令
 ├── Dockerfile          # 开发容器
 └── pyproject.toml      # 项目配置 + pytest/coverage/ruff 设置

@@ -133,6 +133,26 @@ class TestDiskFileCountAfterEviction:
         assert len(json_files) <= 5
         assert cache.stats()["entries"] == len(json_files)
 
+    def test_restart_rebuilds_lru_and_enforces_limit(self, tmp_path):
+        cache = LLMResponseCache(tmp_path, max_entries=3)
+        for i in range(3):
+            cache.put(f"q{i}", {}, None, _make_resp(text=str(i)))
+
+        restarted = LLMResponseCache(tmp_path, max_entries=2)
+        assert restarted.stats()["entries"] == 2
+        assert len(list((tmp_path / "cache" / "llm_responses").rglob("*.json"))) == 2
+
+    def test_restart_removes_expired_entries(self, tmp_path):
+        cache = LLMResponseCache(tmp_path, ttl_seconds=1)
+        cache.put("old", {}, None, _make_resp())
+        for path in (tmp_path / "cache" / "llm_responses").rglob("*.json"):
+            data = __import__("json").loads(path.read_text(encoding="utf-8"))
+            data["cached_at"] = time.time() - 10
+            path.write_text(__import__("json").dumps(data), encoding="utf-8")
+
+        restarted = LLMResponseCache(tmp_path, ttl_seconds=1)
+        assert restarted.stats()["entries"] == 0
+
 
 # ── LRU 命中提升 ──────────────────────────────────────────────
 

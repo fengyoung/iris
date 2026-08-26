@@ -658,7 +658,7 @@ sources:
         """asyncio 批量更新所有 Wiki 页面（并发 LLM 调用）。
 
         与 update_all_pages() 功能相同，但使用 asyncio 实现更高的并发度。
-        httpx 不可用时自动回退到 ThreadPoolExecutor。
+        单页更新使用同步 Provider，并在线程池中执行以避免阻塞事件循环。
 
         Args:
             top_k: 每次检索返回的 chunk 数
@@ -690,14 +690,17 @@ sources:
         if not items:
             return {"total": 0, "updated": 0, "unchanged": 0, "not_found": 0, "errors": 0, "details": []}
 
-        # 使用信号量控制并发
-        semaphore = asyncio.Semaphore(max_concurrency)
+        # 限制异常配置导致的线程膨胀，并复用项目共享线程池。
+        concurrency = max(1, min(max_concurrency, 32))
+        semaphore = asyncio.Semaphore(concurrency)
+        from iris.core.thread_pool import shared_pool
+        executor = shared_pool.get_executor(max_workers=concurrency)
 
         async def _update_one_async(title: str, path: Path, page_type: str, content: str) -> Dict[str, Any]:
             async with semaphore:
                 loop = asyncio.get_running_loop()
                 return await loop.run_in_executor(
-                    None,
+                    executor,
                     lambda: self._update_page_with_content(
                         title=title, page_type=page_type, path=path,
                         existing_content=content, top_k=top_k,
