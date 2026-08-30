@@ -1,7 +1,7 @@
 # Iris ASR 实时校正引擎 — 完整设计方案
 
 > 生成日期：2026-07-18 · 最后更新：2026-08-26
-> 关联项目：Iris 3.28.0 / VocoType (AltRight 热键 + vocotype ASR)
+> 关联项目：Iris 3.28.1 / VocoType (AltRight 热键 + vocotype ASR)
 > 状态：v3.24.3 全面优化（公共 push_context API + 结构化日志）。v3.24.2 真机修正 — full 模式一次写回 + 全场景逐字符 Delete（取消 Cmd+A）。v3.24.0 写回机制重构+LLM 相似度门槛+长度上限配置化。v3.23.3 双段流水线/短段门控。v3.22.5 热键门控修复。v3.19.12 上下文 A/B 对比。v3.19.10 ASR 引擎全面质量加固已完成
 
 ---

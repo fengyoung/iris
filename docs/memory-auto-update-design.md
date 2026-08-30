@@ -1,6 +1,6 @@
 # Iris 记忆系统自动更新方案
 
-> 当前验证版本：Iris 3.28.0 · 现行持久化遵循 `FileLock` 稳定锁文件与统一原子写约定，详见 [工程可靠性设计](engineering-reliability-design.md)。
+> 当前验证版本：Iris 3.28.1 · 现行持久化遵循 `FileLock` 稳定锁文件与统一原子写约定，详见 [工程可靠性设计](engineering-reliability-design.md)。
 > 目标：从手动/半自动更新演进为全自动化的记忆学习系统。
 > 创建时间：2026-07-22 · **状态：✅ 已全面实施（v3.19.14）**
 
