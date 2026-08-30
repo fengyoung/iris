@@ -132,6 +132,8 @@ TaskReporter 所有磁盘操作失败**静默**（logging.warning）——埋点
 
 **回调约定**：进度回调全部可选参数默认 None——零行为变化，不破坏现有调用方。
 
+**v3.28.1 修复**：meeting-live-assistant 埋点自 v3.27.0 接入以来实际不可见——`data_root` 误传 `_pid_dir.parent`（项目根），埋点写 `<root>/tasks/` 而面板 daemon 读 `<root>/data/tasks/`，错开一级（单测传 `pid_dir=tmp/"pids"` 恰好掩盖了错位）。已改传 `_pid_dir` 并补「`data_root` == pid 目录」的回归断言。教训：埋点接入需在真实默认路径下验证一次面板可见性。
+
 ---
 
 ## 7. 测试计划

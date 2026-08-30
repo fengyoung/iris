@@ -72,7 +72,7 @@ iris task-panel install        # 生成 ~/Library/LaunchAgents/com.iris.task-pan
 - `build-chunks` — 逐文档切块进度（含数据源名）
 - `build-wiki` — 逐页生成进度
 - `transcribe-meeting` — 5 阶段（解析/转写/Wiki 上下文/LLM 纪要/写盘）
-- `meeting-live-assistant` — 聆听/分析段数/会议总结
+- `meeting-live-assistant` — 聆听/分析段数/会议总结（v3.28.1 前因埋点目录错位在面板不可见，升级后正常显示）
 
 **探测兜底**（仅运行/未运行 + pid）：
 - `asr-corrector` — 未埋点，由 watchdog 只读探测显示
