@@ -205,6 +205,63 @@ class TestBuildVectorIndexModelGuard:
     def test_force_rebuild_persists_new_model(self, tmp_path):
         _, path = self._build_initial(tmp_path, model="model-a")
         build_vector_index("src", [_FakeChunk("c1")], _FakeEmbedder("model-b"), path, force_rebuild=True)
-        # 重新加载后模型记录应为新模型，后续同模型增量不再报错
-        idx = build_vector_index("src", [_FakeChunk("c2")], _FakeEmbedder("model-b"), path)
+        # 重新加载后模型记录应为新模型，后续同模型增量不再报错。
+        # v3.28.1 起 chunks 为全量语料语义：增量传 [c1, c2] 全量列表
+        # （只传 [c2] 会把 c1 当已删除文档清理，见 TestIncrementalStaleCleanup）。
+        idx = build_vector_index("src", [_FakeChunk("c1"), _FakeChunk("c2")], _FakeEmbedder("model-b"), path)
         assert idx.size() == 2
+
+
+class TestIncrementalStaleCleanup:
+    """v3.28.1 回归：增量更新按 document_hash 重嵌 + 差集清理死向量。
+
+    历史 bug：旧逻辑「exists 即跳过」——① 文档编辑后 chunk_id（路径::序号）不变，
+    旧向量永不更新；② 从不删除不在本次 chunks 中的 id，已删除文档的死向量
+    永久残留（v3.22.3「向量 > chunk」事故的复发通道）。
+    """
+
+    def test_stale_vectors_removed_on_incremental(self, tmp_path):
+        path = tmp_path / "vi.json"
+        emb = _FakeEmbedder("model-a")
+        build_vector_index("src", [_FakeChunk("a.md::chunk-0"), _FakeChunk("b.md::chunk-0")], emb, path)
+        # b.md 被删除：增量传入的全量列表不再包含它
+        idx = build_vector_index("src", [_FakeChunk("a.md::chunk-0")], emb, path)
+        assert idx.exists("a.md::chunk-0")
+        assert not idx.exists("b.md::chunk-0"), "已删除文档的死向量必须被清理（回归核心断言）"
+        # 落盘后重新加载同样不含死向量
+        reloaded = VectorIndex(path)
+        assert reloaded.load()
+        assert not reloaded.exists("b.md::chunk-0")
+
+    def test_edited_document_reembedded_by_hash(self, tmp_path):
+        path = tmp_path / "vi.json"
+        emb = _FakeEmbedder("model-a")
+        c_v1 = _FakeChunk("a.md::chunk-0", preview="旧内容")
+        c_v1.document_hash = "hash-v1"
+        build_vector_index("src", [c_v1], emb, path)
+        idx0 = VectorIndex(path)
+        idx0.load()
+        old_vec = idx0._data["a.md::chunk-0"]["vector"]
+
+        # 文档被编辑：chunk_id 不变但 document_hash 与内容变化
+        c_v2 = _FakeChunk("a.md::chunk-0", preview="新内容长度不同了")
+        c_v2.document_hash = "hash-v2"
+        build_vector_index("src", [c_v2], emb, path)
+        idx1 = VectorIndex(path)
+        idx1.load()
+        new_vec = idx1._data["a.md::chunk-0"]["vector"]
+        assert new_vec != old_vec, "hash 变化必须触发重嵌（回归核心断言）"
+        assert idx1.doc_hash("a.md::chunk-0") == "hash-v2"
+
+    def test_legacy_index_without_hash_not_reembedded(self, tmp_path):
+        """旧索引无 doc_hash（空串）时保持旧行为不重嵌，避免升级即全量重嵌。"""
+        path = tmp_path / "vi.json"
+        emb = _FakeEmbedder("model-a")
+        c_legacy = _FakeChunk("a.md::chunk-0")  # 无 document_hash 属性 → 空串
+        build_vector_index("src", [c_legacy], emb, path)
+
+        c_with_hash = _FakeChunk("a.md::chunk-0", preview="内容没变但现在带 hash")
+        c_with_hash.document_hash = "hash-v1"
+        idx = build_vector_index("src", [c_with_hash], emb, path)
+        # 索引中 hash 为空 → 不触发重嵌（向量保持不变），也不报错
+        assert idx.exists("a.md::chunk-0")

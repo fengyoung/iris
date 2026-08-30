@@ -30,12 +30,19 @@ class IrisLogger:
 
     def __init__(self, config: ConfigBundle):
         self._config = config
-        logging_cfg = config.app.get("logging", {}) if isinstance(config.app, dict) else {}
+        # v3.28.1：去掉 isinstance(config.app, dict) 守卫——v3.19 起 config.app 是
+        # Pydantic 模型（BaseConfigModel 自带 dict 风格 .get()），该守卫恒 False
+        # 曾导致 log_to_file 配置永不生效、文件日志整体失效。
+        app_cfg = config.app
+        logging_cfg = app_cfg.get("logging", {}) if hasattr(app_cfg, "get") else {}
         self._enabled = bool(logging_cfg.get("log_to_file", False))
         self._console_enabled = bool(logging_cfg.get("log_to_console", False))
         self._level = logging_cfg.get("level", "info").lower()
-        log_dir = str(config.app.get("paths", {}).get("log_dir", "./logs")) if isinstance(config.app, dict) else "./logs"
-        self._log_path = config.root / log_dir.replace("./", "") / "iris.jsonl"
+        paths_cfg = app_cfg.get("paths", {}) if hasattr(app_cfg, "get") else {}
+        log_dir = str(paths_cfg.get("log_dir", "./logs") if hasattr(paths_cfg, "get") else "./logs")
+        # 直接交给 pathlib 规范化：Path(root) / "./logs" 本身正确；
+        # 旧写法 replace("./", "") 会把 "../logs" 破坏成 ".logs"。
+        self._log_path = config.root / log_dir / "iris.jsonl"
         self._console_stream: Optional[TextIO] = sys.stderr if self._console_enabled else None
 
     @property

@@ -33,8 +33,14 @@ _EXISTING_WIKILINK_RE = re.compile(r'\[\[(?:[^\[\]]*?\|)?([^\[\]]*?)\]\]')
 _MD_LINK_RE = re.compile(r'\[([^\]]*)\]\([^\)]*\)')
 # 匹配图片 ![alt](url)
 _IMAGE_RE = re.compile(r'!\[[^\]]*\]\([^\)]*\)')
-# 匹配 URL（允许括号、中文等）
-_URL_RE = re.compile(r'https?://[^\s\[\]<>"]+')
+# 匹配 URL。允许汉字（URL 路径可含中文，如 /张三/profile），
+# 但排除 CJK 标点与全角符号（v3.28.1 修复）：URL 后紧跟「，。；）」等
+# 中文标点时（如「[文档](https://x.com)，本周……」）不得把后续正文吞进 URL 区，
+# 否则与 markdown 链接区部分重叠，合并还原后正文丢失。
+_URL_RE = re.compile(
+    r'https?://[^\s\[\]<>"'
+    r'　-〿＀-￯]+'
+)
 # 匹配 YAML frontmatter 块
 _FRONTMATTER_RE = re.compile(r'^---\s*\n.*?\n---\s*\n', re.DOTALL)
 
@@ -261,7 +267,11 @@ class WikilinkInjector:
 
         # 合并重叠区域，按位置排序
         regions.sort(key=lambda r: r[0])
-        return self._merge_regions(regions)
+        merged = self._merge_regions(regions)
+        # 双保险（v3.28.1）：合并区文本一律用原文切片重建。
+        # _merge_regions 在「部分重叠」时保留首区域文本会短于合并后的 span，
+        # 掩码/还原按不等长文本操作将丢失差值区间的正文。
+        return [(start, end, content[start:end]) for start, end, _text in merged]
 
     @staticmethod
     def _merge_regions(

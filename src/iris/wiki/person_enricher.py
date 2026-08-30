@@ -298,18 +298,19 @@ class PersonEnricher:
         fm_text = m.group(1)
         body = text[m.end():]
 
-        # 更新或插入 department
+        # 更新或插入 department / email。
+        # v3.28.1：新值为空时保留原行不动——页面缺 department 但已有手工 email 时，
+        # 飞书返回空 email 曾把已有值清空覆盖（email 是人工排歧过的关键字段）。
         lines = fm_text.splitlines()
         has_department = False
         has_email = False
         new_lines: List[str] = []
         for line in lines:
             if line.startswith("department:"):
-                new_lines.append(f"department: {department}")
+                new_lines.append(f"department: {department}" if department else line)
                 has_department = True
             elif line.startswith("email:"):
-                new_email = email or ""
-                new_lines.append(f"email: {new_email}")
+                new_lines.append(f"email: {email}" if email else line)
                 has_email = True
             else:
                 new_lines.append(line)
@@ -343,11 +344,11 @@ class PersonEnricher:
         new_fm = "\n".join(new_lines)
         new_content = f"---\n{new_fm}\n---\n{body}"
 
-        # 备份（使用 .bak.enrich 后缀，避免 .md 结尾被 Nav 计入）
+        # 备份（使用 .bak.enrich 后缀，避免 .md 结尾被 Nav 计入）。
+        # v3.28.1：已有备份时不再覆盖——旧逻辑二次 enrich 会用当前内容
+        # 覆盖首次备份，导致最原始的人工版本永久丢失。备份只保留最早版本。
         bak_path = path.with_name(f"{path.stem}.bak.enrich")
         if not bak_path.exists():
-            path.rename(bak_path)
-        else:
             import shutil
             shutil.copy2(str(path), str(bak_path))
 

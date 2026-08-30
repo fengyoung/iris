@@ -294,3 +294,56 @@ class TestExtractFilePaths:
         result = InputDetector().detect(query)
         assert result.is_complex is True
         assert str(png.resolve()) in result.file_paths
+
+
+# ── v3.28.1: IrisLogger Pydantic 配置兼容 ────────────────────
+
+class TestLoggerPydanticConfig:
+    """v3.28.1 回归：Pydantic 配置（非 dict）下 log_to_file 必须生效。
+
+    历史 bug：`isinstance(config.app, dict)` 守卫在 v3.19 Pydantic 迁移后
+    恒 False，logging_cfg 恒空 → 即使配置 log_to_file: true 文件日志也
+    永远关闭，结构化日志整体失效（测试全用 plain-dict FakeConfig 未暴露）。
+    """
+
+    def _make_pydantic_like_config(self, tmp_path):
+        """模拟 BaseConfigModel：非 dict 但带 dict 风格 .get()。"""
+
+        class FakeAppModel:
+            """非 dict、有 .get() —— 与 Pydantic BaseConfigModel 行为一致。"""
+
+            def __init__(self, data):
+                self._data = data
+
+            def get(self, key, default=None):
+                return self._data.get(key, default)
+
+        class FakeConfig:
+            app = FakeAppModel({
+                "logging": {"log_to_file": True, "log_to_console": False},
+                "paths": {"log_dir": "./logs"},
+            })
+            root = tmp_path
+
+        return FakeConfig()
+
+    def test_log_to_file_enabled_with_pydantic_config(self, tmp_path):
+        from iris.utils.logging import IrisLogger
+
+        logger = IrisLogger(self._make_pydantic_like_config(tmp_path))
+        assert logger._enabled is True, "Pydantic 配置下 log_to_file 必须生效（回归核心断言）"
+
+    def test_log_writes_file_with_pydantic_config(self, tmp_path):
+        from iris.utils.logging import IrisLogger
+
+        logger = IrisLogger(self._make_pydantic_like_config(tmp_path))
+        logger.log("test_event", {"key": "value"})
+        assert logger.log_path.exists(), "日志文件必须真实写入"
+        assert "test_event" in logger.log_path.read_text(encoding="utf-8")
+
+    def test_log_dir_relative_path_not_mangled(self, tmp_path):
+        """`./logs` 交由 pathlib 规范化，不再用 replace('./','') 破坏路径。"""
+        from iris.utils.logging import IrisLogger
+
+        logger = IrisLogger(self._make_pydantic_like_config(tmp_path))
+        assert logger.log_path == tmp_path / "logs" / "iris.jsonl"

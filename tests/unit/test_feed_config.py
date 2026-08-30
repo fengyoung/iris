@@ -336,3 +336,56 @@ class TestFeedConfigManager:
         pending = [{"topic_id": "t1", "title": "话题1"}]
         mgr.save_pending(tmp_path, pending)
         mock_atomic.assert_called_once_with(tmp_path / "feed_pending.json", pending)
+
+
+class TestAppendPending:
+    """v3.28.1 回归：append_pending 追加合并，不得覆盖历史未确认条目。
+
+    历史 bug：每次 feed-run 用 save_pending 整体覆盖 feed_pending.json，
+    上次运行尚未 confirm/ignore 的话题确认入口全部丢失。
+    """
+
+    def test_append_preserves_existing_items(self, tmp_path):
+        config_path = tmp_path / "feeds.json"
+        mgr = FeedConfigManager(config_path)
+        # 上次 run 留下的未确认条目
+        mgr.save_pending(tmp_path, [{"topic_id": "old-1", "title": "旧话题", "status": "pending"}])
+
+        added = mgr.append_pending(tmp_path, [{"topic_id": "new-1", "title": "新话题", "status": "pending"}])
+
+        assert added == 1
+        pending = mgr.load_pending(tmp_path)
+        ids = {p["topic_id"] for p in pending}
+        assert ids == {"old-1", "new-1"}, "历史未确认条目不得丢失（回归核心断言）"
+
+    def test_append_dedup_by_topic_id(self, tmp_path):
+        config_path = tmp_path / "feeds.json"
+        mgr = FeedConfigManager(config_path)
+        mgr.save_pending(tmp_path, [{"topic_id": "t1", "title": "话题1", "status": "pending"}])
+
+        added = mgr.append_pending(tmp_path, [
+            {"topic_id": "t1", "title": "话题1重复", "status": "pending"},
+            {"topic_id": "t2", "title": "话题2", "status": "pending"},
+        ])
+
+        assert added == 1  # t1 去重，仅 t2 新增
+        pending = mgr.load_pending(tmp_path)
+        assert len(pending) == 2
+        # 已有条目内容不被覆盖
+        assert pending[0]["title"] == "话题1"
+
+    def test_append_to_empty(self, tmp_path):
+        config_path = tmp_path / "feeds.json"
+        mgr = FeedConfigManager(config_path)
+        added = mgr.append_pending(tmp_path, [{"topic_id": "t1", "title": "话题1", "status": "pending"}])
+        assert added == 1
+        assert len(mgr.load_pending(tmp_path)) == 1
+
+    def test_append_corrupt_file_resets(self, tmp_path):
+        """损坏的 pending 文件不阻塞追加（重置后写入）。"""
+        config_path = tmp_path / "feeds.json"
+        (tmp_path / "feed_pending.json").write_text("{corrupt", encoding="utf-8")
+        mgr = FeedConfigManager(config_path)
+        added = mgr.append_pending(tmp_path, [{"topic_id": "t1", "title": "话题1", "status": "pending"}])
+        assert added == 1
+        assert len(mgr.load_pending(tmp_path)) == 1

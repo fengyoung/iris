@@ -1,6 +1,6 @@
 # Iris 多 Agent 并发支持方案
 
-> 当前验证版本：Iris 3.28.0 · v3.28.0 补强稳定 inode 锁、统一原子写、向量索引 generation 发布与跨进程 LLM 缓存治理。
+> 当前验证版本：Iris 3.28.1 · v3.28.0 补强稳定 inode 锁、统一原子写、向量索引 generation 发布与跨进程 LLM 缓存治理。
 > 目标：使 Iris 在多个 agent 进程同时运行时数据安全、状态一致。
 > 创建时间：2026-07-22 · **状态：✅ 已全面实施（v3.19.15）**
 
@@ -21,6 +21,8 @@
 3 轮审查修复 7 个问题，19 文件 / +215 -208 行，全量 1,858 测试通过。
 
 详细变更见 [CHANGELOG.md](../CHANGELOG.md#v31915-2026-07-22)。
+
+**后续演进**：v3.28.0 补强稳定 inode 锁（`.lock` 释放后保留）、统一原子写、向量索引 generation 发布与跨进程 LLM 缓存治理；v3.28.1 修复 feed 待确认队列的「锁内盲写」——`save_pending` 在锁内原子写整个列表但从不读旧数据合并，跨批次覆盖丢失历史条目，新增 `append_pending`（锁临界区内 load → topic_id 去重合并 → 原子写）。该模式已归纳进[工程可靠性设计](engineering-reliability-design.md)「队列追加语义」一节。已知遗留：memory 高层编排（lifecycle/updater/miner/manager）仍存在锁外 RMW 组合，收敛为 store 层 `locked_update()` 列入下批治理。
 
 ---
 

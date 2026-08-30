@@ -134,14 +134,17 @@ class MemoryLifecycle:
             if len(items) > 10:
                 changes[f"summarized_{key}"] = len(items)
 
-        notes = list(prefs.get("notes", [])[:DEFAULT_SUMMARY_MAX_ITEMS])
+        # 裁剪方向：列表按 append 时间序排列，末尾是最新写入，
+        # 必须保留末尾（与 long_term._trim_list 的 [-max_len:] 语义一致）。
+        # 历史 bug（v3.28.1 修复）：曾用 [:10] 保留最旧、每日删除最新记忆。
+        notes = list(prefs.get("notes", []))
         if len(notes) > 10:
-            prefs["notes"] = notes[:10]
+            prefs["notes"] = notes[-10:]
             changes["trimmed_notes"] = len(notes)
 
         styles = list(prefs.get("style_preferences", []))
         if len(styles) > 15:
-            prefs["style_preferences"] = styles[:15]
+            prefs["style_preferences"] = styles[-15:]
             changes["trimmed_style_preferences"] = len(styles)
 
         if changes:

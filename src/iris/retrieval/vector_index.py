@@ -83,10 +83,15 @@ class VectorIndex:
             texts: List[str] = ids_data.get("texts", [""] * len(chunk_ids))
             if len(texts) < len(chunk_ids):
                 texts.extend([""] * (len(chunk_ids) - len(texts)))
+            # doc_hashes：v3.28.1 新增，旧索引缺失时为空串（不触发重嵌，靠 force-rebuild 补齐）
+            doc_hashes: List[str] = ids_data.get("doc_hashes", [""] * len(chunk_ids))
+            if len(doc_hashes) < len(chunk_ids):
+                doc_hashes.extend([""] * (len(chunk_ids) - len(doc_hashes)))
             self._data = {}
             for idx, cid in enumerate(chunk_ids):
                 vec = vectors[idx].tolist() if idx < len(vectors) else []
-                self._data[cid] = {"vector": vec, "text": texts[idx] if idx < len(texts) else ""}
+                self._data[cid] = {"vector": vec, "text": texts[idx] if idx < len(texts) else "",
+                                   "doc_hash": doc_hashes[idx] if idx < len(doc_hashes) else ""}
             meta_path = data_dir / _META_JSON
             if meta_path.exists():
                 try:
@@ -125,17 +130,20 @@ class VectorIndex:
         dim = len(next(iter(self._data.values())).get("vector", [])) if self._data else 0
         matrix = np.zeros((len(chunk_ids), dim), dtype=np.float32)
         texts: List[str] = []
+        doc_hashes: List[str] = []
         for idx, cid in enumerate(chunk_ids):
             vec = self._data[cid].get("vector", [])
             if len(vec) == dim:
                 matrix[idx] = np.array(vec, dtype=np.float32)
             texts.append(self._data[cid].get("text", ""))
+            doc_hashes.append(self._data[cid].get("doc_hash", ""))
         generation = uuid.uuid4().hex
         generation_dir = bin_dir / _GENERATIONS_DIR / generation
         generation_dir.mkdir(parents=True, exist_ok=False)
         try:
             np.save(str(generation_dir / _VECTORS_NPY), matrix)
-            atomic_write_json(generation_dir / _IDS_JSON, {"chunk_ids": chunk_ids, "texts": texts})
+            atomic_write_json(generation_dir / _IDS_JSON,
+                              {"chunk_ids": chunk_ids, "texts": texts, "doc_hashes": doc_hashes})
             atomic_write_json(generation_dir / _META_JSON, {
                 "dim": dim,
                 "count": len(chunk_ids),
@@ -152,8 +160,9 @@ class VectorIndex:
             if old_dir.is_dir() and old_dir.name != generation:
                 shutil.rmtree(old_dir, ignore_errors=True)
 
-    def upsert(self, chunk_id: str, vector: List[float], text: str = "") -> None:
-        self._data[chunk_id] = {"vector": vector, "text": text}
+    def upsert(self, chunk_id: str, vector: List[float], text: str = "",
+               doc_hash: str = "") -> None:
+        self._data[chunk_id] = {"vector": vector, "text": text, "doc_hash": doc_hash}
         self._loaded = True
         self._invalidate_cache()
 
@@ -163,6 +172,15 @@ class VectorIndex:
 
     def exists(self, chunk_id: str) -> bool:
         return chunk_id in self._data
+
+    def doc_hash(self, chunk_id: str) -> str:
+        """返回该 chunk 入索引时的源文档 hash（旧索引/未知时为空串）。"""
+        entry = self._data.get(chunk_id)
+        return entry.get("doc_hash", "") if entry else ""
+
+    def all_chunk_ids(self) -> List[str]:
+        """返回索引中全部 chunk_id（供增量更新清理已删除文档的残留向量）。"""
+        return list(self._data.keys())
 
     def size(self) -> int:
         return len(self._data)
@@ -261,22 +279,45 @@ def build_vector_index(source_name: str, chunks: list, embedder, index_path: Pat
                 "请执行 build-vector-index --force-rebuild 完整重建。")
     if current_model:
         index.set_embedder_model(current_model)
-    to_embed: List[Tuple[str, str]] = []
+
+    # ── 增量判定（v3.28.1 重写）────────────────────────────────────
+    # 旧逻辑「exists 即跳过」有两个洞：
+    #   ① chunk_id = 路径::序号，不含内容 hash——文档编辑后 id 不变，旧向量永不更新；
+    #   ② 从不删除不在本次 chunks 中的 id——已删除/归档文档的死向量永久残留
+    #     （v3.22.3「向量 > chunk」事故的复发通道）。
+    # 现按 document_hash 判定重嵌，并按差集清理残留。
+    # 注意：调用方必须传入该数据源的**全量** chunk 列表（两个现有调用方均满足），
+    # 否则差集清理会误删。
+    current_ids = {chunk.chunk_id for chunk in chunks}
+    stale_ids = [cid for cid in index.all_chunk_ids() if cid not in current_ids]
+    for cid in stale_ids:
+        index.remove(cid)
+    if stale_ids:
+        logger.info("向量索引 %s 清理残留向量 %d 条（源文档已删除/归档）", source_name, len(stale_ids))
+
+    to_embed: List[Tuple[str, str, str]] = []
     for chunk in chunks:
         chunk_id = chunk.chunk_id
-        if not index.exists(chunk_id):
-            to_embed.append((chunk_id, chunk.content_preview))
+        doc_hash = getattr(chunk, "document_hash", "") or ""
+        if index.exists(chunk_id):
+            indexed_hash = index.doc_hash(chunk_id)
+            # 旧索引无 doc_hash（空串）时保持旧行为不重嵌，避免升级即全量重嵌；
+            # 有 hash 且不一致 → 文档已编辑，必须重嵌。
+            if not indexed_hash or indexed_hash == doc_hash:
+                continue
+        to_embed.append((chunk_id, chunk.content_preview, doc_hash))
     if not to_embed:
-        if force_rebuild:
-            index.save()  # 即使无新 chunk 也覆盖旧文件，确保强制重建生效
+        if force_rebuild or stale_ids:
+            index.save()  # 无新 chunk 也需落盘：强制重建覆盖旧文件 / 残留清理生效
         return index
     batch_size = 10
     for i in range(0, len(to_embed), batch_size):
         batch = to_embed[i:i + batch_size]
         ids = [item[0] for item in batch]
         texts = [item[1] for item in batch]
+        hashes = [item[2] for item in batch]
         vectors = embedder.embed(texts)
-        for chunk_id, vec, text in zip(ids, vectors, texts):
-            index.upsert(chunk_id, vec, text)
+        for chunk_id, vec, text, doc_hash in zip(ids, vectors, texts, hashes):
+            index.upsert(chunk_id, vec, text, doc_hash=doc_hash)
     index.save()
     return index
