@@ -530,3 +530,39 @@ class TestCumulativeCap:
         for _ in range(30):
             state._dedup_append(state.key_points, ["同一个要点"])
         assert len(state.key_points) == 1
+
+
+class TestTaskReporterDataRoot:
+    """v3.28.1 回归：TaskReporter 埋点 data_root 必须等于 pid 目录本身。
+
+    历史 bug：run() 误传 `data_root=self._pid_dir.parent`——默认 _pid_dir 为
+    <项目根>/data 时埋点写到 <项目根>/tasks/，而面板 daemon 读
+    <项目根>/data/tasks/，两者错开一级，会议任务在面板上永不可见
+    （单测传 pid_dir=tmp/"pids" 恰好掩盖了该错位）。
+    """
+
+    def test_data_root_equals_pid_dir(self, tmp_path):
+        assistant = _make_assistant(tmp_path)
+        captured = {}
+
+        class _CapturingReporter:
+            def __init__(self, name, command="", data_root=None, **kw):
+                captured["data_root"] = data_root
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def report_phase(self, *a, **kw):
+                pass
+
+        with patch("iris.core.locks.ProcessRegistry") as mock_registry, \
+             patch("iris.taskpanel.reporter.TaskReporter", _CapturingReporter), \
+             patch.object(assistant, "_audio_loop", side_effect=KeyboardInterrupt):
+            mock_registry.return_value = MagicMock()
+            assistant.run()
+
+        assert captured["data_root"] == assistant._pid_dir, \
+            "data_root 必须是 pid 目录本身（即 data 目录），不是它的父目录（回归核心断言）"

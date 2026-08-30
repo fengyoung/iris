@@ -92,3 +92,63 @@ class TestFrontmatterParsing:
         content = "---\n---\n正文"
         fm, body = parse_frontmatter(content)
         assert "正文" in body
+
+
+class TestUpdatePagePreservesManualFields:
+    """v3.28.1 回归：_update_page 新值为空时不得清空已有字段/覆盖首次备份。
+
+    历史 bug：① 页面缺 department 但已有手工 email 时，飞书返回空 email
+    会把已有值替换为空串（email 是人工排歧过的关键字段）；
+    ② 二次 enrich 用当前内容覆盖首次备份，最原始的人工版本永久丢失。
+    """
+
+    def _make_enricher(self):
+        enricher = object.__new__(PersonEnricher)
+        return enricher
+
+    def _make_page(self, tmp_path, fm_lines):
+        page = tmp_path / "人物-张三.md"
+        page.write_text("---\n" + "\n".join(fm_lines) + "\n---\n\n# 张三\n正文。\n",
+                        encoding="utf-8")
+        return page
+
+    def test_empty_email_keeps_existing(self, tmp_path):
+        enricher = self._make_enricher()
+        page = self._make_page(tmp_path, [
+            "title: 张三", "email: zhangsan@example.com",
+        ])
+
+        # 飞书只返回 department，email 为空
+        enricher._update_page(page, "张三", "数据智能部", "")
+
+        text = page.read_text(encoding="utf-8")
+        assert "email: zhangsan@example.com" in text, "已有 email 不得被清空（回归核心断言）"
+        assert "department: 数据智能部" in text
+
+    def test_empty_department_keeps_existing(self, tmp_path):
+        enricher = self._make_enricher()
+        page = self._make_page(tmp_path, [
+            "title: 张三", "department: 老部门", "email: old@example.com",
+        ])
+
+        enricher._update_page(page, "张三", "", "new@example.com")
+
+        text = page.read_text(encoding="utf-8")
+        assert "department: 老部门" in text
+        assert "email: new@example.com" in text
+
+    def test_backup_not_overwritten_on_second_run(self, tmp_path):
+        enricher = self._make_enricher()
+        page = self._make_page(tmp_path, ["title: 张三", "email: manual@example.com"])
+        original = page.read_text(encoding="utf-8")
+
+        enricher._update_page(page, "张三", "部门A", "a@example.com")
+        bak = tmp_path / "人物-张三.bak.enrich"
+        assert bak.exists()
+        assert bak.read_text(encoding="utf-8") == original, "首次备份 = 原始版本"
+
+        # 二次 enrich：备份不得被第一次 enrich 后的内容覆盖
+        enricher._update_page(page, "张三", "部门B", "b@example.com")
+        assert bak.read_text(encoding="utf-8") == original, \
+            "二次运行不得覆盖首次备份（回归核心断言）"
+        assert "department: 部门B" in page.read_text(encoding="utf-8")

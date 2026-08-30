@@ -229,10 +229,44 @@ class FeedConfigManager:
             return json.load(f)
 
     def save_pending(self, data_dir: Path, pending: List[Dict[str, Any]]) -> None:
-        """保存待确认队列（原子写入 + FileLock 保护）。"""
+        """保存待确认队列（原子写入 + FileLock 保护）。
+
+        注意：整体覆盖语义，仅供 feed-confirm/feed-ignore 等「已读旧队列再回写」
+        的调用方使用；新增待确认条目请用 append_pending（v3.28.1）。
+        """
         path = self.get_pending_queue_path(data_dir)
         data_dir.mkdir(parents=True, exist_ok=True)
         from iris.core.locks import FileLock
         with FileLock(path):
             from iris.utils.shared import atomic_write_json
             atomic_write_json(path, pending)
+
+    def append_pending(self, data_dir: Path, new_items: List[Dict[str, Any]]) -> int:
+        """追加待确认条目：锁临界区内读-合并-写，按 topic_id 去重。
+
+        v3.28.1 新增：修复每次 feed-run 整体覆盖 feed_pending.json、
+        丢失上次运行未确认条目的问题。返回实际新增条数。
+        """
+        path = self.get_pending_queue_path(data_dir)
+        data_dir.mkdir(parents=True, exist_ok=True)
+        from iris.core.locks import FileLock
+        from iris.utils.shared import atomic_write_json
+        with FileLock(path):
+            existing: List[Dict[str, Any]] = []
+            if path.exists():
+                try:
+                    existing = json.loads(path.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    existing = []
+            seen_ids = {str(item.get("topic_id", "")) for item in existing}
+            added = 0
+            for item in new_items:
+                tid = str(item.get("topic_id", ""))
+                if tid and tid in seen_ids:
+                    continue
+                existing.append(item)
+                seen_ids.add(tid)
+                added += 1
+            if added:
+                atomic_write_json(path, existing)
+            return added

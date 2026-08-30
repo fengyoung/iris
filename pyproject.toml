@@ -1,6 +1,6 @@
 [project]
 name = "iris"
-version = "3.28.0"
+version = "3.28.1"
 description = "工作知识助手 — 个人知识库与飞书团队知识库集成"
 requires-python = ">=3.11"
 license = {text = "MIT"}

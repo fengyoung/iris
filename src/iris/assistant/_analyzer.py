@@ -162,18 +162,24 @@ class SegmentAnalyzer:
         if remaining < 2.0:
             return []  # 时间不足，跳过
 
-        prompt = self._loader.render(
-            "meeting_live_suggest.md",
-            {
-                "key_points": "；".join(analysis.key_points) or "（无）",
-                "risks": "；".join(analysis.risks) or "（无）",
-                "questions": "；".join(analysis.questions) or "（无）",
-                "decisions": "；".join(analysis.decisions) or "（无）",
-                "meeting_summary": meeting_summary,
-                "retrieval_context": retrieval_context,
-            },
-        )
+        # v3.28.1：decisions 是 List[DecisionItem]（Pydantic 模型）不是 List[str]，
+        # 直接 join 抛 TypeError 且被上层静默吞——恰好在「存在决策点」这个
+        # 最需要建议提问的场景下让功能整体失效。prompt 渲染一并纳入 try。
         try:
+            from iris.assistant.models import CONF_ICON
+            decisions_text = "；".join(
+                f"{CONF_ICON.get(d.confidence, '')}{d.text}" for d in analysis.decisions)
+            prompt = self._loader.render(
+                "meeting_live_suggest.md",
+                {
+                    "key_points": "；".join(analysis.key_points) or "（无）",
+                    "risks": "；".join(analysis.risks) or "（无）",
+                    "questions": "；".join(analysis.questions) or "（无）",
+                    "decisions": decisions_text or "（无）",
+                    "meeting_summary": meeting_summary,
+                    "retrieval_context": retrieval_context,
+                },
+            )
             result = self._llm.generate(
                 prompt,
                 route_context={
