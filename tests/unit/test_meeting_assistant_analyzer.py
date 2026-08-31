@@ -160,3 +160,81 @@ class TestAnalyzeRouting:
         _analyzer(llm).analyze("段", "", "")
         kwargs = llm.calls[0]["kwargs"]
         assert kwargs["force_model"] is None
+
+
+class _SuggestLoader:
+    """渲染 meeting_live_suggest.md 的 Fake loader。"""
+
+    def __init__(self):
+        self.rendered_vars: dict | None = None
+
+    def render(self, name, variables):
+        assert name == "meeting_live_suggest.md"
+        self.rendered_vars = variables
+        return "SUGGEST_PROMPT"
+
+
+class TestSuggestQuestionsWithDecisions:
+    """v3.28.1 回归：decisions 是 List[DecisionItem]，不得对其直接 join。
+
+    历史 bug：`"；".join(analysis.decisions)` 对 Pydantic 模型列表抛 TypeError
+    且在上层被静默吞——恰好在「存在决策点」（事件驱动触发建议的条件）时
+    让建议提问功能整体失效；decisions 为空时 join 返回 "" 反而正常，测试难发现。
+    """
+
+    def _analysis_with_decisions(self):
+        from iris.assistant.models import DecisionItem
+        return SegmentAnalysis(
+            key_points=["要点A"],
+            decisions=[
+                DecisionItem(text="采用方案B", confidence="tentative"),
+                DecisionItem(text="下周上线", confidence="confirmed"),
+            ],
+        )
+
+    def test_decisions_rendered_not_typeerror(self):
+        """含决策点时必须正常生成（回归核心断言：不再 TypeError → []）。"""
+        import time
+        llm = _FakeLLM('["建议问一下上线风险？"]')
+        loader = _SuggestLoader()
+        analyzer = SegmentAnalyzer(llm, loader, model="")
+
+        result = analyzer.suggest_questions(
+            self._analysis_with_decisions(), "会议摘要", "检索上下文",
+            deadline=time.monotonic() + 30,
+        )
+
+        assert result == ["建议问一下上线风险？"]
+        assert loader.rendered_vars is not None, "prompt 必须真正渲染"
+        # 决策文本 + 置信度图标进入 prompt
+        assert "采用方案B" in loader.rendered_vars["decisions"]
+        assert "下周上线" in loader.rendered_vars["decisions"]
+        assert "✅" in loader.rendered_vars["decisions"]  # confirmed 图标
+        assert "❓" in loader.rendered_vars["decisions"]  # tentative 图标
+
+    def test_empty_decisions_placeholder(self):
+        import time
+        llm = _FakeLLM('[]')
+        loader = _SuggestLoader()
+        analyzer = SegmentAnalyzer(llm, loader, model="")
+
+        analyzer.suggest_questions(
+            SegmentAnalysis(key_points=["要点A"]), "摘要", "上下文",
+            deadline=time.monotonic() + 30,
+        )
+        assert loader.rendered_vars["decisions"] == "（无）"
+
+    def test_render_failure_degrades_to_empty(self):
+        """渲染异常（在 try 内）降级返回 []，不上抛。"""
+        import time
+
+        class _BoomLoader:
+            def render(self, name, variables):
+                raise RuntimeError("render boom")
+
+        analyzer = SegmentAnalyzer(_FakeLLM("[]"), _BoomLoader(), model="")
+        result = analyzer.suggest_questions(
+            self._analysis_with_decisions(), "摘要", "上下文",
+            deadline=time.monotonic() + 30,
+        )
+        assert result == []

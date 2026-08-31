@@ -1,6 +1,6 @@
 # Iris 工程可靠性使用指南
 
-> 适用版本：Iris 3.28.0+
+> 适用版本：Iris 3.28.1+
 
 ## 环境基线
 
@@ -20,6 +20,19 @@ iris workspace current
 `workspace current` 应返回该目录；`workspace list` 可查看已发现的工作空间。
 
 ## 配置迁移
+
+### 升级到 v3.28.1
+
+v3.28.1 修复了增量切块与向量索引增量的正确性缺陷（未变更 chunk 丢失、编辑文档旧向量、死向量残留），代码修复只防新增，存量数据需手动重建一次：
+
+```bash
+iris build-chunks --write-summary
+iris build-vector-index --force-rebuild
+```
+
+重建后新索引的 `ids.json` 带 `doc_hashes` 字段，后续增量按源文档 hash 精准判定重嵌。
+
+### 写入守卫
 
 `config/app.json` 的写入守卫推荐配置为：
 

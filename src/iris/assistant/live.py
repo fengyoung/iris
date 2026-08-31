@@ -289,10 +289,13 @@ class MeetingLiveAssistant:
             return 1
 
         # 任务埋点：register 成功即开始（面板实时显示会议进度；
-        # Ctrl+C 正常结束 → success，进程被杀 → probe 兜底 interrupted）
+        # Ctrl+C 正常结束 → success，进程被杀 → probe 兜底 interrupted）。
+        # v3.28.1：data_root 即 _pid_dir（默认 <项目根>/data，与 ProcessRegistry
+        # 的 data/<name>.pid 同级）——旧代码误传 .parent（项目根），埋点写到
+        # <项目根>/tasks/，面板 daemon 读 <项目根>/data/tasks/，任务永不可见。
         from iris.taskpanel.reporter import TaskReporter
         with TaskReporter("meeting-live-assistant", command="meeting-live-assistant",
-                          data_root=self._pid_dir.parent) as _tr:
+                          data_root=self._pid_dir) as _tr:
             self._task_reporter = _tr
 
             # Python 3.13 中默认 SIGINT 处理无法中断 time.sleep（主线程睡眠时不抛

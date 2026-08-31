@@ -98,6 +98,11 @@ def _load_archive_config(project_root: Optional[Path] = None) -> Dict[str, str]:
 
     root = project_root or get_project_root()
     path = root / _ARCHIVE_CONFIG_PATH
+    if not path.exists():
+        # v3.28.1：与 config/loader.py 惯例一致，缺失时回退 .example——
+        # 否则干净 checkout（config/*.json gitignored）归档模式全部退化 flat，
+        # 依赖归档路径的行为（含测试）与生产环境不一致。
+        path = root / (_ARCHIVE_CONFIG_PATH + ".example")
     if path.exists():
         with open(path, encoding="utf-8") as f:
             data = json.load(f)

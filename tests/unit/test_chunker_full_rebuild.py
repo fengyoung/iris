@@ -129,3 +129,31 @@ class TestFullRebuildDropsDeadChunks:
         assert ALIVE_A in paths          # 未变更 → 复用保留
         assert ALIVE_B not in paths      # deleted_paths → 清理
         assert result.build_stats["cleaned_documents"] == 1
+
+    def test_incremental_only_modified_no_deleted_keeps_unchanged(self, tmp_path):
+        """v3.28.1 回归：增量「只有修改、无删除」不得丢弃未变更文档的 chunk。
+
+        历史 bug：条件 `if incremental and (deleted_paths or reused_documents > 0)`
+        在增量 scan 只含变更文档（reused 恒 0）且无删除时为 False，
+        previous 中全部未变更文档的 chunk 被静默丢弃，summary 覆盖后即数据丢失。
+        """
+        chunker = _make_chunker(tmp_path)
+        old = [
+            _chunk(ALIVE_A, "h1", 1),   # 本次未变更（不在增量 scan 中）
+            _chunk(ALIVE_B, "h2", 1),   # 本次被修改
+        ]
+        _write_old_summary(chunker, old)
+
+        # 增量 scan 只含变更文档 B（hash 已变化），无删除
+        docs = [_make_doc(tmp_path, ALIVE_B, "h2-new")]
+        summary = _scan_summary(docs)
+
+        result = chunker._build_chunks_from_scan(summary, incremental=True)
+
+        paths = {c.relative_path for c in result.chunks}
+        assert ALIVE_A in paths, "未变更文档的旧 chunk 不得丢失（回归核心断言）"
+        assert ALIVE_B in paths
+        # B 必须是重建后的新 chunk（hash 已更新）
+        b_hashes = {c.document_hash for c in result.chunks if c.relative_path == ALIVE_B}
+        assert b_hashes == {"h2-new"}
+        assert result.build_stats["rebuilt_documents"] == 1

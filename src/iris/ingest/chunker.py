@@ -171,7 +171,9 @@ class MarkdownChunker:
         # 增量模式下保留未变更文件的旧 chunk。
         # 全量重建时 previous 中不在本次 scan 的路径 = 已删除文档的残留，
         # 绝不能追加（否则死 chunk 会随每次全量重建累积，v3.22.3 修复）。
-        if incremental and (deleted_paths or reused_documents > 0):
+        # 注意：增量模式必须无条件保留（v3.28.1 修复）——增量 scan 只含变更文档，
+        # 若按 deleted/reused 门控，「只有修改、无删除」的增量会丢弃全部未变更文档的 chunk。
+        if incremental:
             changed_paths = {doc.relative_path for doc in scan_summary.documents}
             for rp, cached_chunks in previous.items():
                 if rp not in changed_paths:

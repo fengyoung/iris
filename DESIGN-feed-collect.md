@@ -644,6 +644,8 @@ class Dispatcher:
 
 **待确认队列**：`data/feed_pending.json`
 
+> v3.28.1 起写入语义为**追加合并**（`append_pending`：FileLock 临界区内 load → 按 topic_id 去重 → 原子写）——此前每次 feed-run 整体覆盖该文件，上次运行尚未 confirm/ignore 的条目会丢失确认入口。整体覆盖的 `save_pending` 仅保留给 feed-confirm/feed-ignore 等「已读旧队列再回写」的调用方。
+
 ```json
 [
   {

@@ -4,7 +4,7 @@
 
 ## 版本
 
-**v3.28.1** — [LLM 思考文本污染修复](CHANGELOG.md)：`content` 为空时不再静默回退返回 `reasoning_content`（思考模型 max_tokens 耗尽时思考文本曾直接写入双周报产物），改为抛错走重试/降级链；Stage 4b 质量审查失败安全回退组装稿。协议版本 **3.21**，app 配置版本 **3.6**。
+**v3.28.1** — 两条修复线：① [LLM 思考文本污染修复](CHANGELOG.md) — `content` 为空时不再静默回退返回 `reasoning_content`（思考模型 max_tokens 耗尽时思考文本曾直接写入双周报产物），改为抛错走重试/降级链；Stage 4b 质量审查失败安全回退组装稿；② [深度审查批次 1 数据止损](CHANGELOG.md) — 6 路并行代码审查后修复 6 个 P0（记忆裁剪方向反转、增量切块丢 chunk、向量索引死向量/旧向量、wikilink 注入吞正文、feed pending 覆盖、人物页清空手工 email）+ 4 个 P1 功能坏死（文件日志、会话挖掘懒触发、建议提问、会议任务面板埋点）。回归测试 +19。**升级后需执行一次 `build-chunks --write-summary` + `build-vector-index --force-rebuild`。**协议版本 3.21（不变）。
 
 **v3.28.0** — [全项目工程治理](CHANGELOG.md)：修复 SQLite 连接泄漏与 FileLock inode 竞态；统一原子写入和安全配置契约；向量索引按完整代际发布；补齐 `workspace` CLI、daily-start 图谱状态、跨进程 LLM 缓存治理；统一 CI/Makefile/pre-commit 质量门禁。协议版本 **3.21**，app 配置版本 **3.6**。
 
@@ -160,7 +160,7 @@ SOURCE/                     LLM-WIKI/
 - macOS Keychain（可选密钥存储）
 - PyMuPDF / python-docx（PDF/DOCX 处理）
 - ffmpeg（视频抽帧/抽音轨，视频处理必需）+ openai-whisper（音轨转写，可选）
-- 2,945 个测试用例（150 个测试文件），覆盖率 65.82%
+- 2,970 个测试用例（150 个测试文件），覆盖率 65.82%
 
 ## 开发环境
 
@@ -216,7 +216,7 @@ iris3/
 │       └── asr/         #   ASR 提示词子系统（术语提取/热词/Prompt优化/版本管理）
 ├── scripts/            # CLI 入口 + 委托脚本
 ├── templates/          # Prompt / Wiki 模板
-├── tests/              # 2,945 用例（150 文件）
+├── tests/              # 2,970 用例（150 文件）
 │   ├── unit/           #   纯逻辑单元测试（1,580 用例）
 │   └── integration/    #   集成测试（245 用例）
 ├── config/             # *.json gitignored，*.example 版本控制

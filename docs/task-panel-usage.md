@@ -1,6 +1,6 @@
 # 任务面板 — 使用指南
 
-> 当前验证版本：Iris 3.28.0 · 功能基线：v3.27.0。Web 只读展示层：在浏览器中查看 iris 任务状态与进程。操作仍在 CC CLI——面板不做任何任务操作（无 kill/重试），只回答「什么在跑、跑到哪了、出过什么事」。
+> 当前验证版本：Iris 3.28.1 · 功能基线：v3.27.0。Web 只读展示层：在浏览器中查看 iris 任务状态与进程。操作仍在 CC CLI——面板不做任何任务操作（无 kill/重试），只回答「什么在跑、跑到哪了、出过什么事」。
 
 ## 快速开始
 
@@ -72,7 +72,7 @@ iris task-panel install        # 生成 ~/Library/LaunchAgents/com.iris.task-pan
 - `build-chunks` — 逐文档切块进度（含数据源名）
 - `build-wiki` — 逐页生成进度
 - `transcribe-meeting` — 5 阶段（解析/转写/Wiki 上下文/LLM 纪要/写盘）
-- `meeting-live-assistant` — 聆听/分析段数/会议总结
+- `meeting-live-assistant` — 聆听/分析段数/会议总结（v3.28.1 前因埋点目录错位在面板不可见，升级后正常显示）
 
 **探测兜底**（仅运行/未运行 + pid）：
 - `asr-corrector` — 未埋点，由 watchdog 只读探测显示

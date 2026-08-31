@@ -236,3 +236,26 @@ def test_summarize_no_changes_when_small(lifecycle):
 
     changes = lifecycle.summarize()
     assert changes == {}
+
+
+def test_summarize_keeps_newest_notes(lifecycle):
+    """v3.28.1 回归：裁剪必须保留末尾（最新写入），丢弃最旧。
+
+    历史 bug：曾用 notes[:10] 保留最旧——daily-start 每日固定删除
+    LLM 提取/会话挖掘新写入的记忆，留下最旧的 10 条。
+    """
+    prefs = {
+        "likes": [],
+        "dislikes": [],
+        "notes": [f"note{i}" for i in range(15)],  # note14 是最新写入
+        "style_preferences": [f"style{i}" for i in range(20)],  # style19 最新
+    }
+    lifecycle._profile.load.return_value = {"user_preferences": prefs}
+
+    changes = lifecycle.summarize()
+
+    assert changes["trimmed_notes"] == 15
+    assert prefs["notes"] == [f"note{i}" for i in range(5, 15)], \
+        "必须保留最新 10 条（末尾），与 long_term._trim_list 的 [-max:] 语义一致"
+    assert changes["trimmed_style_preferences"] == 20
+    assert prefs["style_preferences"] == [f"style{i}" for i in range(5, 20)]

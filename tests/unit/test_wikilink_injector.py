@@ -276,3 +276,38 @@ class TestWikilinkInjectorHelper:
         import re
         nested = re.findall(r'\[\[[^\]]*\[\[', result)
         assert len(nested) == 0, f"发现嵌套 wikilink: {nested}"
+
+
+class TestProtectedRegionTextIntegrity:
+    """v3.28.1 回归：保护区掩码/还原不得丢失正文。
+
+    历史 bug 双叠：① URL 正则排除集不含 CJK，markdown 链接后紧跟中文时
+    URL 匹配越过 `)` 吞到行尾；② _merge_regions 对「部分重叠」区域
+    只保留首区域文本，掩码按长 span、还原按短文本 → 差值区间正文丢失。
+    """
+
+    def test_md_link_followed_by_chinese_text_preserved(self, injector: WikilinkInjector):
+        """markdown 链接后紧跟中文正文（中文文档最常见写法）不得丢字。"""
+        content = "参考[方案文档](https://feishu.cn/docx/abc123)，本周张三推进了三项工作。"
+        result = injector.inject(content)
+        assert "本周" in result, "链接后的正文不得丢失（回归核心断言）"
+        assert "推进了三项工作" in result
+        assert "[方案文档](https://feishu.cn/docx/abc123)" in result, "链接本身保持原样"
+
+    def test_url_not_swallowing_cjk(self, injector: WikilinkInjector):
+        """裸 URL 后紧跟中文时，URL 保护区不得把中文吞进去。"""
+        content = "详见 https://example.com/page，李四会后跟进。"
+        result = injector.inject(content)
+        assert "李四会后跟进" in result.replace("[[04-人物/人物-李四|李四]]", "李四") \
+            .replace("[[04-人物/人物-李四]]", "李四") or "会后跟进" in result
+
+    def test_inject_roundtrip_no_content_loss(self, injector: WikilinkInjector):
+        """注入后除新增 wikilink 外，原有字符一个不少。"""
+        content = ("---\ntitle: 周报\n---\n\n"
+                   "[A 文档](https://x.com/a)，进展一：完成评审。\n"
+                   "详见 https://y.com/b，进展二：张三上线模型。\n")
+        result = injector.inject(content)
+        # 逐段验证原文关键内容仍在
+        for fragment in ["进展一：完成评审", "进展二：", "上线模型",
+                         "[A 文档](https://x.com/a)", "https://y.com/b"]:
+            assert fragment in result, f"正文片段丢失: {fragment}"

@@ -423,13 +423,16 @@ class MemoryUpdater:
         try:
             if not self._should_trigger_session_mine():
                 return
-            self._save_last_mine_time()  # 先记录时间，避免重复触发
 
-            # 后台线程执行 LLM 挖掘，不阻塞 Q&A
+            # 后台线程执行 LLM 挖掘，不阻塞 Q&A。
+            # v3.28.1 修复：① SharedThreadPool 没有 submit 方法，旧代码
+            # shared_pool.submit(...) 抛 AttributeError 被吞，懒触发通道从未生效；
+            # ② 时间戳必须在 submit 成功后才写入，否则提交失败也会 24h 内不重试。
             from iris.core.thread_pool import shared_pool
-            shared_pool.submit(self._run_session_mine)
+            shared_pool.get_executor().submit(self._run_session_mine)
+            self._save_last_mine_time()
         except Exception as exc:
-            logger.debug("会话挖掘触发失败（静默）: %s", exc)
+            logger.warning("会话挖掘触发失败: %s", exc)
 
     def _run_session_mine(self) -> None:
         """后台执行会话挖掘（由线程池调用）。"""

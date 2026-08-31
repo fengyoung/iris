@@ -84,9 +84,9 @@ class Dispatcher:
                     "status": "pending",
                 })
 
-        # 保存待确认队列
+        # 追加待确认队列（v3.28.1：改追加合并，不再整体覆盖丢失历史未确认条目）
         if pending_queue:
-            self._save_pending(pending_queue)
+            self._append_pending(pending_queue)
 
         # 发送通知
         if send_notifications and pending_queue:
@@ -110,8 +110,12 @@ class Dispatcher:
         return "confirm" if has_confirm else "auto_import"
 
     def _save_pending(self, pending: List[Dict[str, Any]]) -> None:
-        """保存待确认队列。"""
+        """保存待确认队列（整体覆盖，慎用——见 feed_config.save_pending）。"""
         self._config.save_pending(self._data_dir, pending)
+
+    def _append_pending(self, pending: List[Dict[str, Any]]) -> None:
+        """追加待确认队列（锁内合并 + topic_id 去重）。"""
+        self._config.append_pending(self._data_dir, pending)
 
     def _send_confirm_notification(self, item: Dict[str, Any]) -> None:
         """发送飞书确认通知。"""
