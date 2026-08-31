@@ -19,6 +19,7 @@
 **v3.28.1 修复（深度审查发现两处「静默失败」）**：
 - **Q&A 懒触发通道自实施以来从未执行**：`shared_pool.submit` 方法不存在（SharedThreadPool 只有 `get_executor()`），AttributeError 被 debug 级日志吞掉，且时间戳在提交前写入导致 24h 内不重试——会话挖掘实际只剩 daily-start 兜底通道。已改 `get_executor().submit` + 时间戳移到提交成功后，并补触发路径回归测试。
 - **每日维护固定删除最新记忆**：`lifecycle.summarize()` 裁剪用 `notes[:10]` 保留最旧（列表按 append 时间序，末尾才是最新），LLM 提取/会话挖掘晋升的新记忆一旦超过 10 条即被次日 daily-start 静默清除。已改 `[-10:]` 与 `long_term._trim_list` 语义对齐。
+- **LLM 深度通道输出不再被思考文本污染**（v3.28.1 合流线）：`_extract_chat_completions_text` 在 `content` 为空时不再静默回退返回 `reasoning_content`（思考过程），直接抛 `LLMProviderError`——记忆提取/会话挖掘在思考模型 max_tokens 耗尽场景下不再产出「思考当结论」的垃圾记忆，失败走重试/降级链。
 
 ---
 

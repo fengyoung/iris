@@ -61,6 +61,15 @@ generation 机制保证「发布完整性」，但不保证「内容正确性」
 - **按 hash 判定重嵌**：chunk_id（`路径::序号`）不含内容指纹，仅凭 `exists(chunk_id)` 跳过会让编辑过的文档永远使用旧向量。`ids.json` 新增 `doc_hashes` 字段记录每个 chunk 入索引时的 `document_hash`，hash 变化即重嵌；旧索引无该字段时不触发重嵌（避免升级即全量重嵌），由一次 `--force-rebuild` 补齐。
 - **差集清理死向量**：增量更新按「本次全量语料 chunk_id 集合」的差集删除残留向量（已删除/归档文档）。因此 `build_vector_index` 的 `chunks` 参数是**全量语料语义**——调用方必须传入该数据源的完整 chunk 列表，传子集会把缺失部分当已删除清理。
 
+### 2.5 LLM 响应文本提取正确性（v3.28.1）
+
+`_extract_chat_completions_text`（`llm/provider.py`）原在 `content` 为空时**静默回退返回 `reasoning_content`**（思考过程）——思考模型（deepseek-v4-flash）max_tokens 耗尽（finish_reason=length）时 content 为空而 reasoning 非空，思考文本被当最终输出返回。下游感知「成功」而把思考写入产物（实测 w35 双周报 Stage 4b 质量审查 13k 思考字符直接写入归档文件），比显式失败危害更大。
+
+v3.28.1 确立的可靠性约定：
+
+- **绝不静默返回思考文本**：`content` 为空直接抛 `LLMProviderError`，走上层重试/降级链——「失败」是安全态，「伪成功」是危险态，宁可让调用方降级也不产出「看起来成功」的垃圾文本。
+- **业务关键路径必须防御性降级**：消费方不得假定 `generate()` 永远成功；重要产物路径应有显式 fallback（如双周报 Stage 4b 质量审查失败回退 Stage 4a 组装稿并告警）。
+
 ## 3. 缓存一致性
 
 LLM 响应缓存以内容哈希寻址，但“同一 key 写入幂等”不足以保证 TTL 与 LRU 正确。v3.28.0 增加：
