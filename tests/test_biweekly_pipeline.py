@@ -355,3 +355,66 @@ class TestReportAuthorConfig:
         if not markdown.endswith(footer.strip()):
             markdown += footer
         assert markdown.count("revised by alice") == 1
+
+
+# ── Stage 4b 质量审查失败降级 ─────────────────────────────
+
+
+class TestStage4bReviewFallback:
+    """Stage 4b LLM 审查失败时必须安全回退 Stage 4a 组装稿，绝不写入失败产物。
+
+    回归背景：w35 双周报生成时 DeepSeek 思考模型 content 为空，provider 层
+    曾静默回退返回 reasoning_content 思考文本，审查输出被思考过程污染并写入
+    最终报告文件。v3.28.1 两层修复：provider 层不再回退思考文本（抛错），
+    Stage 4b 层捕获异常回退组装稿。
+    """
+
+    def _make_service(self, llm):
+        from iris.analysis.service import AnalysisReportService
+
+        class _FakePromptLoader:
+            def render(self, name, ctx):
+                return "审查 prompt"
+
+        svc = object.__new__(AnalysisReportService)
+        svc._prompt_loader = _FakePromptLoader()
+        svc._llm = llm
+        return svc
+
+    def test_llm_failure_returns_assembled(self):
+        from iris.analysis.service import AnalysisReportService
+        from iris.llm import LLMProviderError
+
+        class _FakeLLM:
+            def generate(self, **kwargs):
+                raise LLMProviderError("审查 LLM 调用失败")
+
+        svc = self._make_service(_FakeLLM())
+        assembled = (
+            "*时间周期：2026.08.16～2026.08.30*\n\n"
+            "## 方向一：进展\n\n内容…"
+        )
+        out = svc._stage4b_review(
+            "2026.08.16～2026.08.30", assembled,
+            [{"name": "方向一", "scope_summary": "x", "key_indicators": []}],
+        )
+        assert out == assembled
+
+    def test_llm_success_returns_reviewed_text(self):
+        from iris.analysis.service import AnalysisReportService
+
+        class _FakeLLM:
+            def generate(self, **kwargs):
+                from types import SimpleNamespace
+                return SimpleNamespace(
+                    text="*时间周期：2026.08.16～2026.08.30*\n\n## 方向一：修订版\n\n正文…"
+                )
+
+        svc = self._make_service(_FakeLLM())
+        assembled = "*时间周期：2026.08.16～2026.08.30*\n\n## 方向一：原稿\n\n正文…"
+        out = svc._stage4b_review(
+            "2026.08.16～2026.08.30", assembled,
+            [{"name": "方向一", "scope_summary": "x", "key_indicators": []}],
+        )
+        assert "修订版" in out
+        assert "原稿" not in out

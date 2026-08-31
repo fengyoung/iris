@@ -593,9 +593,11 @@ def _extract_chat_completions_text(payload: Dict[str, Any]) -> str:
         text = "\n".join(part for part in texts if part).strip()
         if text:
             return text
-    reasoning = message.get("reasoning_content", "")
-    if isinstance(reasoning, str) and reasoning.strip():
-        return reasoning.strip()
+    # 注意：content 为空时不得回退返回 reasoning_content（思考过程）。
+    # 思考模型（如 DeepSeek）在 max_tokens 耗尽等场景下 content 为空但
+    # reasoning_content 非空，把思考当输出返回会让下游把思考文本写入产物
+    # （实测 w35 双周报 Stage 4b 审查输出被污染）。此处抛错，让上层走
+    # 重试/降级链，而不是静默返回「看起来成功」的垃圾文本。
     finish_reason = choices[0].get("finish_reason", "")
     raise LLMProviderError(
         f"聊天补全响应中未找到可用文本输出 (finish_reason={finish_reason})"

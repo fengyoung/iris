@@ -863,10 +863,15 @@ class AnalysisReportService:
             "key_indicators_summary": indicators_summary,
         })
 
-        result = self._llm.generate(prompt=prompt, route_context={
-            "input_type": "text", "task_type": "analysis",
-            "complexity": "standard", "use_case": "biweekly_report_stage4",
-        })
+        try:
+            result = self._llm.generate(prompt=prompt, route_context={
+                "input_type": "text", "task_type": "analysis",
+                "complexity": "standard", "use_case": "biweekly_report_stage4",
+            })
+        except LLMProviderError:
+            # 审查失败时安全降级：返回 Stage 4a 组装稿，绝不写入失败产物
+            logger.warning("  Stage 4b LLM 调用失败，回退使用 Stage 4a 组装稿")
+            return assembled
 
         markdown = result.text.strip()
         if markdown.startswith("```"):

@@ -339,3 +339,66 @@ class TestFindModelByName:
             assert cfg["api_key"] == "sk-vision"  # SecretStr 已解包
             assert cfg["_model_id"] == "m2"
 
+
+
+# ── 响应文本提取（_extract_chat_completions_text）────────────────
+
+class TestExtractChatCompletionsText:
+    """响应文本提取：content 为空时绝不回退 reasoning_content（v3.28.1 修复）。
+
+    回归背景：DeepSeek 思考模型在 max_tokens 耗尽等场景下 content 为空但
+    reasoning_content 非空，旧实现静默回退返回思考过程，导致 w35 双周报
+    Stage 4b 审查输出被思考文本污染写入最终产物。
+    """
+
+    def test_normal_string_content(self):
+        from iris.llm.provider import _extract_chat_completions_text
+        payload = {"choices": [{"message": {"content": "  报告正文  "}}]}
+        assert _extract_chat_completions_text(payload) == "报告正文"
+
+    def test_empty_string_content_with_reasoning_raises(self):
+        """content 为空 + reasoning_content 非空 → 抛 LLMProviderError，而非返回思考。"""
+        from iris.llm.provider import _extract_chat_completions_text
+        payload = {
+            "choices": [{
+                "message": {"content": "", "reasoning_content": "思考过程"},
+                "finish_reason": "length",
+            }]
+        }
+        with pytest.raises(LLMProviderError, match="未找到可用文本输出"):
+            _extract_chat_completions_text(payload)
+
+    def test_missing_content_with_reasoning_raises(self):
+        """content 字段缺失 + reasoning_content 非空 → 同样抛错。"""
+        from iris.llm.provider import _extract_chat_completions_text
+        payload = {
+            "choices": [{
+                "message": {"reasoning_content": "思考过程"},
+                "finish_reason": "stop",
+            }]
+        }
+        with pytest.raises(LLMProviderError, match="未找到可用文本输出"):
+            _extract_chat_completions_text(payload)
+
+    def test_list_content_extracts_text_parts(self):
+        """多模态 content 列表正常提取文本片段。"""
+        from iris.llm.provider import _extract_chat_completions_text
+        payload = {
+            "choices": [{"message": {"content": [
+                {"type": "text", "text": "片段一"},
+                {"type": "text", "text": "片段二"},
+            ]}}]
+        }
+        assert _extract_chat_completions_text(payload) == "片段一\n片段二"
+
+    def test_empty_list_content_with_reasoning_raises(self):
+        """content 列表无文本 + reasoning_content 非空 → 抛错。"""
+        from iris.llm.provider import _extract_chat_completions_text
+        payload = {
+            "choices": [{"message": {
+                "content": [{"type": "text", "text": ""}],
+                "reasoning_content": "思考过程",
+            }}]
+        }
+        with pytest.raises(LLMProviderError, match="未找到可用文本输出"):
+            _extract_chat_completions_text(payload)

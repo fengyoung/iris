@@ -1,8 +1,10 @@
-# Iris 3.28.0
+# Iris 3.28.1
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
+
+**v3.28.1** — [LLM 思考文本污染修复](CHANGELOG.md)：`content` 为空时不再静默回退返回 `reasoning_content`（思考模型 max_tokens 耗尽时思考文本曾直接写入双周报产物），改为抛错走重试/降级链；Stage 4b 质量审查失败安全回退组装稿。协议版本 **3.21**，app 配置版本 **3.6**。
 
 **v3.28.0** — [全项目工程治理](CHANGELOG.md)：修复 SQLite 连接泄漏与 FileLock inode 竞态；统一原子写入和安全配置契约；向量索引按完整代际发布；补齐 `workspace` CLI、daily-start 图谱状态、跨进程 LLM 缓存治理；统一 CI/Makefile/pre-commit 质量门禁。协议版本 **3.21**，app 配置版本 **3.6**。
 

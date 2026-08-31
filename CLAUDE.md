@@ -1,4 +1,4 @@
-# Iris 3.28.0 — 项目执行说明
+# Iris 3.28.1 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -176,7 +176,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.28.0 (2026-08-26)** — 全项目工程治理：① 可靠性 — SQLite 连接显式关闭；`FileLock` 保留稳定锁文件，消除 unlink 造成的 inode 双锁竞态；文本、二进制、JSON 统一原子写；② 索引与缓存 — 向量索引按完整 generation 发布并原子切换 `current`，LLM 缓存增加跨进程锁、重启 LRU/TTL 治理；③ 安全与配置 — 写入守卫规范字段改为 `enforce_write_guard` 并兼容旧字段，新增安全二进制写；④ CLI 与可观测性 — 修复 `workspace list|current`，daily-start 明确返回图谱维护状态；⑤ 工程工具 — CI/Makefile/pre-commit 统一覆盖 `src scripts tests`，Python 基线统一为 3.11-3.13，新增 `IRIS_PROJECT_ROOT`。验证：全量 2,945 通过，覆盖率 65.82%，ruff 零告警，精确锁定顶层依赖无已知漏洞。协议版本 3.20→**3.21**；app 配置 3.5→**3.6**；产品版本 3.27.2→**3.28.0**。
+**当前 v3.28.1 (2026-08-30)** — LLM 思考文本污染修复（2 文件 / +7 测试）：① 根因 — `_extract_chat_completions_text` 在 `content` 为空时静默回退返回 `reasoning_content`，思考模型（deepseek-v4-flash）max_tokens 耗尽时把思考当最终输出；② 实测影响 — w35 双周报 Stage 4b 审查思考文本直接写入归档文件、Stage 1 过滤 JSON 解析失败全部归 low；③ 修复 — provider 层 content 为空直接抛 `LLMProviderError`（走重试/降级链）；Stage 4b 失败回退 Stage 4a 组装稿；④ 测试 +7（`TestExtractChatCompletionsText` 5 + `TestStage4bReviewFallback` 2）。验证：llm+analysis 相关 237 全过，全量 unit 通过（4 个 meeting_assistant 文件为既有 pydantic 收集错误与本次无关）。协议版本 3.21（不变）。产品版本 3.28.0→**3.28.1**。
+
+**v3.28.0 (2026-08-26)** — 全项目工程治理：① 可靠性 — SQLite 连接显式关闭；`FileLock` 保留稳定锁文件，消除 unlink 造成的 inode 双锁竞态；文本、二进制、JSON 统一原子写；② 索引与缓存 — 向量索引按完整 generation 发布并原子切换 `current`，LLM 缓存增加跨进程锁、重启 LRU/TTL 治理；③ 安全与配置 — 写入守卫规范字段改为 `enforce_write_guard` 并兼容旧字段，新增安全二进制写；④ CLI 与可观测性 — 修复 `workspace list|current`，daily-start 明确返回图谱维护状态；⑤ 工程工具 — CI/Makefile/pre-commit 统一覆盖 `src scripts tests`，Python 基线统一为 3.11-3.13，新增 `IRIS_PROJECT_ROOT`。验证：全量 2,945 通过，覆盖率 65.82%，ruff 零告警，精确锁定顶层依赖无已知漏洞。协议版本 3.20→**3.21**；app 配置 3.5→**3.6**；产品版本 3.27.2→**3.28.0**。
 
 **v3.27.2 (2026-08-24)** — LLM 配置修复与新视觉模型默认（4 文件 / +1 测试）：① `find_model_by_name` Pydantic 兼容修复 — `isinstance(cfg, dict)` → `hasattr(cfg, "get")` + api_key SecretStr 显式解包（回归：v3.11 Pydantic 迁移后 force_model 对真实配置永远返回 None）；② adv_model 新默认 `deepseek-v4-flash-vision-exp`（实验性视觉模型，multimodal text+image，100 万上下文，priority 70 最高优先级），qwen3.8-max 降为第 2 优先级；③ iris-feishu-import SKILL.md 批量导入用法修正（`--url` 不可重复传参，改逗号分隔）；④ 顺带清零 2 文件 4 处 ruff 遗留告警。验证：LLM 相关 107 全过，ruff 零告警。协议版本 3.20（不变）。产品版本 3.27.1→**3.27.2**。
 
