@@ -1,5 +1,5 @@
 {
-  "version": "3.6",
+  "version": "3.7",
   "app": {
     "name": "Iris",
     "env": "local",
@@ -54,7 +54,12 @@
     "author_name": "",
     "author_info": "你是一个技术团队负责人的写作助手。",
     "report_author": "",
-    "data_sources": ["成员周报", "会议纪要", "讨论思考", "方案报告"],
+    "data_sources": [
+      "成员周报",
+      "会议纪要",
+      "讨论思考",
+      "方案报告"
+    ],
     "lookback_days": 14,
     "dedup_window_days": 35,
     "dept_op_keyword": "",

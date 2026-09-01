@@ -1,4 +1,4 @@
-# Iris 3.28.3 — 项目执行说明
+# Iris 3.28.4 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -7,7 +7,7 @@
 
 ## 项目概览
 
-**当前规模**：~43,000 行 / 176 个源码文件 / 27 模块 · CLI 67 命令 · 测试 2,970（150 文件，unit 1,580 / integration 245）· 覆盖率 65.82% · 10 个项目级 Skill · Wiki 222 页 · 知识图谱节点 220 / 关系边 1,858（wikilink 1,225 + LLM 633）· 数据源 900+ 文档 / 6,771 Chunk（text-embedding-v3 / 1,024 维）
+**当前规模**：~43,000 行 / 176 个源码文件 / 27 模块 · CLI 67 命令 · 测试 1,851（unit 1,606 / integration 245）· 覆盖率 65.82% · 10 个项目级 Skill · Wiki 241 页 · 知识图谱节点 220 / 关系边 1,858（wikilink 1,225 + LLM 633）· 数据源 900+ 文档 / 6,771 Chunk（text-embedding-v3 / 1,024 维）
 
 **近期新增能力**：工程可靠性治理（SQLite 生命周期、稳定 inode 文件锁、统一原子写、向量索引 generation 发布、跨进程 LLM 缓存治理）· 任务面板 `taskpanel/`（Web 只读 + TaskReporter 埋点 + 探测兜底 + 常驻守护）· 实时会议助理 `assistant/`（逐段提炼要点/风险/决策点 + 实时提示提问 + 过程文档）· YAML frontmatter 标准化注入（`core/frontmatter.py`）+ 批量补全（`frontmatter_batch.py`，正则+LLM+备份恢复）· wikilink 自动注入引擎（零 LLM 成本）· LLM 用量追踪（SQLite WAL + embedding 纳入）· LLM 响应缓存 + embedding 向量缓存（LRU+TTL）· LLM 熔断器（threshold=5 / reset 60s）· 记忆自动更新引擎（双通道）· 多 Agent 并发安全（FileLock + SQLite WAL + Agent 隔离）· ASR 实时校正引擎（Aho-Corasick + LLM 编辑助手 + 反馈反向优化）· CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit · constraints.txt 可复现构建
 
@@ -92,9 +92,9 @@ PDF=PyMuPDF 提取文字 + 逐页渲染；DOCX=python-docx 段落+表格文字�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.28.3 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.28.4 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.21 | CLI 命令集 / agent-spec 格式 |
-| **数据版本** | `config/*.json` | app 3.6（其余独立演进） | 配置文件 Schema |
+| **数据版本** | `config/*.json` | app 3.7（其余独立演进） | 配置文件 Schema |
 
 > 只有真正发生变化的层才递增版本号。
 
@@ -121,7 +121,7 @@ iris3/
 ├── src/iris/          # 27 模块（见下）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
-├── tests/             # 2,970 用例（unit 1,580 / integration 245）
+├── tests/             # 1,851 用例（unit 1,606 / integration 245）
 ├── config/            # *.json gitignored，*.example 版本控制
 ├── data/              # 运行时数据（全 gitignore）
 ├── .claude/skills/    # 项目级 Skill（10 个）
@@ -142,9 +142,11 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.28.3 (2026-09-01)** — 开源前信息安全复审：全库二次脱敏（文档/测试/模板/Skill 中的真实姓名、业务指标与内部项目名泛化），git 历史作者邮箱迁移至 noreply，CI 权限最小化（`contents: read`），`.gitignore` 补 `.env.*`。协议 3.21（不变）；产品 3.28.2→**3.28.3**。
+**当前 v3.28.4 (2026-09-01)** — 提醒引擎项目停滞判定兜底（8 文件 / +242 -9，回归测试 +5）：① 三重兜底消除误报 — `project_stalled` 原先只信项目页 source_fingerprint（生成时证据快照可能陈旧），软硬一体/XRay/视频稽查/数据标注平台/售后归因/AI巡检等活跃项目被误报；修复 — 指纹 → SOURCE 同名文档（剥离链/英文 token/连词变体）→ **内容级匹配**（周报正文含项目活动但文件名仅含人名；前缀变体「数据标注平台」→「标注平台」；名单类文档仅提及不算活跃）；② `project_stall_ignore` 配置 — 已完结/已移交/维护期项目不再告警；③ 模板/生成器根因修复 — `[[Wiki-链接]]` 示例文字被 LLM 当真实链接复制进页面（存量 24 文件已清零），改为禁止输出示例占位符。验证：提醒 28 全过、全量 unit 1,606、ruff 零告警。协议 3.21（不变）；app 配置 3.6→**3.7**；产品 3.28.3→**3.28.4**。
 
-**v3.28.2 (2026-09-01)** — batch-transcribe 批量会议纪要修复（3 文件 / +111，回归测试 +2）：根因 — `handle_batch_transcribe` 调用 `TranscribeMeetingPipeline.run_batch(...)`，但 pipeline 类从未实现该方法，命令一执行即抛 `AttributeError`；修复 — 补全 `run_batch`（按扩展名分流：15 种音视频扩展名走 Whisper 转写、其余视为已有转写文本；逐文件调用 `run()`，单文件失败捕获入 `results.error` 不中断批量；返回 `{total, succeeded, failed, results}` 与 `_fmt_batch_transcribe` 展示结构匹配；批量层 TaskReporter 埋点），handler 补传 `--to-source`（此前批量模式丢失归档能力）。验证：transcribe 16 全过（+2）、formatter 68 全过、ruff 零告警、真实端到端批量路由归档跑通。协议 3.21（不变）；产品 3.28.1→**3.28.2**。
+**v3.28.3 (2026-09-01)** — 开源前信息安全复审：全库二次脱敏（文档/测试/模板/Skill 中的真实姓名、业务指标与内部项目名泛化），git 历史作者邮箱迁移至 noreply，CI 权限最小化（`contents: read`），`.gitignore` 补 `.env.*`。协议 3.21（不变）；产品 3.28.2→**3.28.3**。
+
+**v3.28.2 (2026-09-01)** — batch-transcribe 批量会议纪要修复（3 文件 / +111，回归测试 +2）：`TranscribeMeetingPipeline.run_batch` 从未实现，批量命令一执行即抛 `AttributeError`；补全实现（按扩展名分流音视频 Whisper 转写/已有转写文本、单文件失败不中断批量、批量层 TaskReporter 埋点）+ handler 补传 `--to-source`（此前批量模式丢失归档能力）。协议 3.21（不变）；产品 3.28.1→**3.28.2**。
 
 **v3.28.1 (2026-08-30)** — 两条修复线合并（14 代码+测试文件 / 回归测试 +26）：① **LLM 思考文本污染修复**（2 文件 / +7）— `_extract_chat_completions_text` 在 `content` 为空时静默回退返回 `reasoning_content`，思考模型（deepseek-v4-flash）max_tokens 耗尽时把思考当最终输出（实测某期双周报 Stage 4b 审查 13k 思考字符写入归档文件）；修复 — content 为空直接抛 `LLMProviderError`（走重试/降级链，绝不产出「伪成功」垃圾文本），Stage 4b 失败回退 Stage 4a 组装稿；② **深度审查批次 1 数据止损**（12 文件 / +19）— P0×6：记忆裁剪方向反转（`lifecycle.summarize()` `[-10:]` 保留最新）、chunker 增量丢 chunk（增量无条件保留）、向量索引增量只增不改不删（按 `document_hash` 重嵌 + 差集清理，ids.json 新增 doc_hashes）、wikilink 注入吞正文（URL 排除全角标点 + 合并区原文切片重建）、feed pending 队列覆盖（新增 `append_pending` 锁内合并 + topic_id 去重）、person_enricher 清空手工 email（空值保留原行 + 备份只写一次）；P1×4：文件日志从未生效（`isinstance(app, dict)` → `hasattr(x,"get")`）、会话挖掘懒触发从未执行（`shared_pool.submit` 不存在 → `get_executor().submit` + 时间戳后置）、建议提问 TypeError 被吞（CONF_ICON+text 渲染入 try）、会议助理埋点目录错位（`data_root` 改传 `_pid_dir`）；附带 `_load_archive_config` 缺配置回退 `.example`。**升级需执行一次 `build-chunks --write-summary` + `build-vector-index --force-rebuild` 清理存量死数据。**验证：全量 2,970 通过，ruff 零告警。协议 3.21（不变）；产品 3.28.0→**3.28.1**。
 
