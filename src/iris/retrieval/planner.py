@@ -112,8 +112,8 @@ class LLMQueryPlanner:
     _LOW_CONFIDENCE_INTENTS = {"general", "topic"}
     _MIN_ENTITIES_FOR_SKIP = 2
 
-    def __init__(self, llm_provider, prompt_loader):
-        self._llm = llm_provider
+    def __init__(self, llm_service, prompt_loader):
+        self._llm = llm_service
         self._prompts = prompt_loader
 
     def enhance(self, rule_plan: QueryPlan, *, _deadline: Optional[float] = None) -> QueryPlan:
@@ -141,7 +141,6 @@ class LLMQueryPlanner:
 
     def _call_llm_enhance(self, plan: QueryPlan, *, _deadline: Optional[float] = None) -> Optional[QueryPlan]:
         """调用 LLM 做语义增强，成功返回新 QueryPlan，失败返回 None。"""
-        from iris.llm import LLMRequest
 
         prompt = (
             f"分析以下查询，提取关键信息并以 JSON 返回：\n"
@@ -152,11 +151,12 @@ class LLMQueryPlanner:
             f'"entities":["实体1","实体2"],"keywords":["关键词1"]}}'
         )
 
-        request = LLMRequest(
-            prompt=prompt,
+        response = self._llm.generate(
+            prompt,
             route_context={"input_type": "text", "task_type": "query_enhancement", "use_case": "retrieval"},
+            temperature=0.0,
+            _deadline=_deadline,
         )
-        response = self._llm.generate(request, temperature=0.0, _deadline=_deadline)
         if not response or not response.text:
             return None
 

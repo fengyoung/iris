@@ -28,7 +28,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from iris.config import load_config_bundle
-from iris.llm import EnvironmentConfiguredLLMProvider, LLMProviderError, LLMRequest
+from iris.llm import LLMProviderError, LLMService
 
 
 # ── Prompt ─────────────────────────────────────────────────────
@@ -283,7 +283,7 @@ def resolve_inputs(paths: List[str]):
 
 def _process_text_input(
     text_input: PdfTextInput,
-    provider: EnvironmentConfiguredLLMProvider,
+    llm: LLMService,
 ) -> List[TripEntry]:
     """处理文字型 PDF：直接将文字送给 base_model 解析，返回行程条目。"""
     print(f"  [文字] {text_input.name}  ({len(text_input.text)} 字符)", file=sys.stderr)
@@ -292,13 +292,14 @@ def _process_text_input(
     backoff = [5, 15, 30]
     for attempt, wait in enumerate(backoff, 1):
         try:
-            response = provider.generate(
-                LLMRequest(prompt=prompt, route_context={
+            response = llm.generate(
+                prompt,
+                route_context={
                     "input_type": "text",
                     "task_type": "analysis",
                     "complexity": "standard",
                     "use_case": "analysis",
-                }),
+                },
             )
             entries = _parse_stage1_output(response.text, source_file=text_input.name)
             return entries
@@ -314,7 +315,7 @@ def _process_text_input(
 
 def _process_single_page(
     page_img: PageImage,
-    provider: EnvironmentConfiguredLLMProvider,
+    llm: LLMService,
 ) -> List[TripEntry]:
     """处理单张图片：调用多模态 API（含指数退避重试），返回行程条目。"""
     print(f"  [图片] {page_img.name}  ({page_img.size_kb:.0f} KB)", file=sys.stderr)
@@ -326,7 +327,7 @@ def _process_single_page(
     backoff = [5, 15, 30]  # 指数退避：5s → 15s → 30s
     for attempt, wait in enumerate(backoff, 1):
         try:
-            text = provider.generate_multimodal(
+            text = llm.generate_multimodal(
                 content_parts,
                 route_context={
                     "input_type": "multimodal",
@@ -348,7 +349,7 @@ def _process_single_page(
 
 
 def stage1_extract_entries(
-    provider: EnvironmentConfiguredLLMProvider,
+    llm: LLMService,
     text_inputs: List[PdfTextInput],
     page_images: List[PageImage],
 ) -> List[TripEntry]:
@@ -357,7 +358,7 @@ def stage1_extract_entries(
 
     # 文字型 PDF：串行处理（通常只有少数几个文件）
     for text_input in text_inputs:
-        entries = _process_text_input(text_input, provider)
+        entries = _process_text_input(text_input, llm)
         print(f"  ✓ {text_input.name} → {len(entries)} 条行程", file=sys.stderr)
         all_entries.extend(entries)
 
@@ -366,7 +367,7 @@ def stage1_extract_entries(
         max_workers = min(2, len(page_images))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             fut_map = {
-                executor.submit(_process_single_page, img, provider): img
+                executor.submit(_process_single_page, img, llm): img
                 for img in page_images
             }
             for fut in as_completed(fut_map):
@@ -406,7 +407,7 @@ def _parse_stage1_output(text: str, source_file: str = "") -> List[TripEntry]:
 
 
 def stage2_consolidate(
-    provider: EnvironmentConfiguredLLMProvider,
+    llm: LLMService,
     entries: List[TripEntry],
 ) -> str:
     """调用 base_model 合并、排序、区分差旅并计算报销。"""
@@ -423,13 +424,14 @@ def stage2_consolidate(
     backoff = [2, 4, 8]
     for attempt, wait in enumerate(backoff, 1):
         try:
-            response = provider.generate(
-                LLMRequest(prompt=prompt, route_context={
+            response = llm.generate(
+                prompt,
+                route_context={
                     "input_type": "text",
                     "task_type": "analysis",
                     "complexity": "standard",
                     "use_case": "analysis",
-                }),
+                },
             )
             return response.text.strip()
         except LLMProviderError as exc:
@@ -451,7 +453,7 @@ def main():
 
     # 加载配置
     config = load_config_bundle(PROJECT_ROOT)
-    provider = EnvironmentConfiguredLLMProvider(config)
+    llm = LLMService(config)
 
     # 解析输入文件（文字型 PDF 直接提取文字，扫描件/图片转内存图像）
     print("=" * 50, file=sys.stderr)
@@ -468,7 +470,7 @@ def main():
 
     # Stage 1: 提取行程条目
     print("\n[Stage 1] 提取行程条目...", file=sys.stderr)
-    entries = stage1_extract_entries(provider, text_inputs, page_images)
+    entries = stage1_extract_entries(llm, text_inputs, page_images)
     if not entries:
         print("[错误] 未提取到任何行程条目", file=sys.stderr)
         sys.exit(1)
@@ -482,7 +484,7 @@ def main():
     # Stage 2: base_model 整合
     print("\n[Stage 2] base_model 整合分析...", file=sys.stderr)
     try:
-        result = stage2_consolidate(provider, entries)
+        result = stage2_consolidate(llm, entries)
     except RuntimeError as exc:
         print(f"\n[错误] {exc}", file=sys.stderr)
         sys.exit(1)

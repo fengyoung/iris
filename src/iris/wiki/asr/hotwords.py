@@ -13,7 +13,7 @@ import time
 from typing import List, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from iris.llm.provider import EnvironmentConfiguredLLMProvider
+    from iris.llm import LLMService
 
 from ..context_loader import WikiPageInfo
 from ._types import AsrTerm
@@ -200,14 +200,14 @@ class LLMHotwordExtractor:
 
     def extract(
         self,
-        provider: "EnvironmentConfiguredLLMProvider",
+        llm: "LLMService",
         max_hotwords: int = 490,
         domain_context: str = "",
     ) -> List[str]:
         """分批次调用 LLM 提取热词，去重合并。
 
         Args:
-            provider: Iris LLM Provider
+            llm: Iris LLMService
             max_hotwords: 最多返回的热词数
 
         Returns:
@@ -215,8 +215,6 @@ class LLMHotwordExtractor:
         """
         if not self._pages:
             return []
-
-        from iris.llm import LLMRequest
 
         batches = _build_page_batches(self._pages)
         tracker = ProgressTracker(total=len(batches), label="热词提取")
@@ -235,14 +233,12 @@ class LLMHotwordExtractor:
             last_exc = None
             for attempt in range(2):  # 最多一次重试
                 try:
-                    response = provider.generate(
-                        LLMRequest(
-                            prompt=prompt,
-                            route_context={
-                                "task_type": "asr_hotword",
-                                "input_type": "text",
-                            },
-                        ),
+                    response = llm.generate(
+                        prompt,
+                        route_context={
+                            "task_type": "asr_hotword",
+                            "input_type": "text",
+                        },
                         temperature=0.3,
                         max_tokens=8192,
                         _deadline=time.monotonic() + _BATCH_DEADLINE_SEC,

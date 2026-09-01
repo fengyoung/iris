@@ -1,4 +1,4 @@
-# Iris 3.28.4 — 项目执行说明
+# Iris 3.28.5 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -92,7 +92,7 @@ PDF=PyMuPDF 提取文字 + 逐页渲染；DOCX=python-docx 段落+表格文字�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.28.4 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.28.5 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.21 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | app 3.7（其余独立演进） | 配置文件 Schema |
 
@@ -142,7 +142,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.28.4 (2026-09-01)** — 提醒引擎项目停滞判定兜底（8 文件 / +242 -9，回归测试 +5）：① 三重兜底消除误报 — `project_stalled` 原先只信项目页 source_fingerprint（生成时证据快照可能陈旧），软硬一体/XRay/视频稽查/数据标注平台/售后归因/AI巡检等活跃项目被误报；修复 — 指纹 → SOURCE 同名文档（剥离链/英文 token/连词变体）→ **内容级匹配**（周报正文含项目活动但文件名仅含人名；前缀变体「数据标注平台」→「标注平台」；名单类文档仅提及不算活跃）；② `project_stall_ignore` 配置 — 已完结/已移交/维护期项目不再告警；③ 模板/生成器根因修复 — `[[Wiki-链接]]` 示例文字被 LLM 当真实链接复制进页面（存量 24 文件已清零），改为禁止输出示例占位符。验证：提醒 28 全过、全量 unit 1,606、ruff 零告警。协议 3.21（不变）；app 配置 3.6→**3.7**；产品 3.28.3→**3.28.4**。
+**当前 v3.28.5 (2026-09-01)** — LLM 调用统一到 LLMService 单一口径（7 文件 / +56 -69）：消除「已建 LLMService 却又 `get_provider()` 取回底层 provider 绕过响应缓存」的残留路径。① scripts — `extract_travel_invoice.py` / `extract_weekly_reports.py` 改 `LLMService`；② ASR — `hotwords.extract` / `extractor.generate_misreadings` 接口改 `llm: LLMService`；③ 检索 — `LLMQueryPlanner` 参数名 `llm_provider` 实为 provider（命名误导）+ `enhanced.py` 直接传 `LLMService`；④ 命令 — `build-asr-prompt` 改传 `llm_service`。统一适配 `provider.generate(LLMRequest(...))` → `llm.generate(prompt, route_context=...)`。保留（非绕过）：`corrector` 的 `_provider` fallback（测试注入/降级）、`route-model` 的 `ModelRouter`（查询路由）、`get_provider()` 诊断用途、`force_model`。验证：全量 unit 1,910 通过、ruff 零告警。协议 3.21（不变）；app 配置 3.7（不变）；产品 3.28.4→**3.28.5**。
+
+**v3.28.4 (2026-09-01)** — 提醒引擎项目停滞判定兜底（8 文件 / +242 -9，回归测试 +5）：① 三重兜底消除误报 — `project_stalled` 原先只信项目页 source_fingerprint（生成时证据快照可能陈旧），软硬一体/XRay/视频稽查/数据标注平台/售后归因/AI巡检等活跃项目被误报；修复 — 指纹 → SOURCE 同名文档（剥离链/英文 token/连词变体）→ **内容级匹配**（周报正文含项目活动但文件名仅含人名；前缀变体「数据标注平台」→「标注平台」；名单类文档仅提及不算活跃）；② `project_stall_ignore` 配置 — 已完结/已移交/维护期项目不再告警；③ 模板/生成器根因修复 — `[[Wiki-链接]]` 示例文字被 LLM 当真实链接复制进页面（存量 24 文件已清零），改为禁止输出示例占位符。验证：提醒 28 全过、全量 unit 1,606、ruff 零告警。协议 3.21（不变）；app 配置 3.6→**3.7**；产品 3.28.3→**3.28.4**。
 
 **v3.28.3 (2026-09-01)** — 开源前信息安全复审：全库二次脱敏（文档/测试/模板/Skill 中的真实姓名、业务指标与内部项目名泛化），git 历史作者邮箱迁移至 noreply，CI 权限最小化（`contents: read`），`.gitignore` 补 `.env.*`。协议 3.21（不变）；产品 3.28.2→**3.28.3**。
 

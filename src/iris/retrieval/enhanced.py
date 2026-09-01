@@ -125,7 +125,7 @@ class EnhancedRetriever:
         self._vector_indexes: Dict[str, VectorIndex] = {}
         if self._embedder:
             self._vector_indexes = _load_vector_indexes(config)
-        self._llm_planner = LLMQueryPlanner(self._llm.get_provider(), self._prompt_loader)
+        self._llm_planner = LLMQueryPlanner(self._llm, self._prompt_loader)
         self._cache: OrderedDict = OrderedDict()
         self._cache_lock = threading.Lock()
 

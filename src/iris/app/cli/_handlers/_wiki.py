@@ -216,7 +216,6 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
     today = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     data_dir = bundle.root / "data"
     llm_service = LLMService(bundle)
-    provider = llm_service.get_provider()
 
     # 从配置构建领域背景描述（无配置时使用通用占位）
     from iris.wiki._constants import build_domain_context
@@ -231,7 +230,7 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
         _t1 = time.monotonic()
         hotword_extractor = LLMHotwordExtractor(pages)
         max_hotwords = getattr(args, "max_hotwords", 490) or 490
-        hotwords = hotword_extractor.extract(provider, max_hotwords=max_hotwords,
+        hotwords = hotword_extractor.extract(llm_service, max_hotwords=max_hotwords,
                                              domain_context=domain_context)
         print(f"[asr]   ... Phase 1 完成 ({time.monotonic() - _t1:.1f}s): "
               f"{len(hotwords)} 热词", file=sys.stderr)
@@ -257,7 +256,7 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
             print(f"[asr] Phase 2/3: LLM 误识别生成（{len(terms)} 术语）...",
                   file=sys.stderr)
             _t2 = time.monotonic()
-            terms = extractor.generate_misreadings(terms, provider,
+            terms = extractor.generate_misreadings(terms, llm_service,
                                                    domain_context=domain_context)
             total_mappings = sum(len(t.mis_asr) for t in terms)
             print(f"[asr]   ... Phase 2 完成 ({time.monotonic() - _t2:.1f}s): "

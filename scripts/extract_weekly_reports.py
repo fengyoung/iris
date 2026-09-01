@@ -940,14 +940,14 @@ class FeishuDocFetcher:
 
 
 class AIReportProcessor:
-    """使用 Iris 的 LLM Provider 对周报内容进行结构化提取。
+    """使用 Iris 的 LLMService 对周报内容进行结构化提取。
 
     替代 _weekly-reports-from-email/ai_processor.py，
-    不再直接调 requests，而是走 Iris 的 EnvironmentConfiguredLLMProvider。
+    不再直接调 requests，而是走 Iris 的 LLMService。
     """
 
-    def __init__(self, provider: Any, prompt_template: str):
-        self._provider = provider
+    def __init__(self, llm: Any, prompt_template: str):
+        self._llm = llm
         self._template = prompt_template
 
     def _build_prompt(
@@ -971,8 +971,7 @@ class AIReportProcessor:
         )
 
     def _call_llm(self, prompt: str, use_advanced: bool = False) -> Optional[str]:
-        """通过 Iris LLM Provider 调用模型。"""
-        from iris.llm import LLMRequest
+        """通过 Iris LLMService 调用模型。"""
 
         route_context = {
             "input_type": "image" if use_advanced else "text",
@@ -981,13 +980,8 @@ class AIReportProcessor:
             "use_case": "weekly_report_extraction",
         }
 
-        request = LLMRequest(
-            prompt=prompt,
-            route_context=route_context,
-        )
-
         try:
-            response = self._provider.generate(request)
+            response = self._llm.generate(prompt, route_context=route_context)
             return response.text.strip() if response.text else None
         except Exception as e:
             print(f"      LLM 调用失败: {e}")
@@ -1301,7 +1295,7 @@ class WeeklyReportMarkdownGenerator:
 def cmd_run(args: argparse.Namespace) -> None:
     """执行完整周报提取流水线：扫描 → 过滤 → 提取 → AI → 生成。"""
     from iris.config.loader import load_config_bundle
-    from iris.llm import EnvironmentConfiguredLLMProvider
+    from iris.llm import LLMService
 
     print("=" * 60)
     print("  Iris 周报邮件提取")
@@ -1324,9 +1318,9 @@ def cmd_run(args: argparse.Namespace) -> None:
     if not args.skip_ai:
         try:
             bundle = load_config_bundle(PROJECT_ROOT)
-            provider = EnvironmentConfiguredLLMProvider(bundle)
+            llm = LLMService(bundle)
             prompt_template = PROMPT_TEMPLATE_PATH.read_text(encoding="utf-8")
-            ai_processor = AIReportProcessor(provider, prompt_template)
+            ai_processor = AIReportProcessor(llm, prompt_template)
             print("🤖 LLM Provider 已就绪")
         except Exception as e:
             print(f"⚠️ LLM Provider 初始化失败: {e}")

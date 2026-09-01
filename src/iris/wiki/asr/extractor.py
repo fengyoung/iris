@@ -12,7 +12,7 @@ paraformer ASR 的常见误识别映射，最终渲染为 vocotype 可用的校�
 
     extractor = TermExtractor(pages)
     terms = extractor.extract_terms()          # 阶段 1：规则提取（纯本地）
-    terms = extractor.generate_misreadings(terms, provider)  # 阶段 2：LLM 批量生成
+    terms = extractor.generate_misreadings(terms, llm)  # 阶段 2：LLM 批量生成
 
     prompt = render_asr_prompt(terms, version, output_format="standard")
 """
@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 _BATCH_DEADLINE_SEC = 90.0
 
 if TYPE_CHECKING:
-    from iris.llm.provider import EnvironmentConfiguredLLMProvider
+    from iris.llm import LLMService
 
 
 # ── 向后兼容别名 ──────────────────────────────────────────
@@ -286,7 +286,7 @@ class TermExtractor:
     def generate_misreadings(
         self,
         terms: List[AsrTerm],
-        provider: "EnvironmentConfiguredLLMProvider",
+        llm: "LLMService",
         domain_context: str = "",
     ) -> List[AsrTerm]:
         """调用 base_model 批量生成所有术语的 ASR 误识别。
@@ -296,15 +296,13 @@ class TermExtractor:
 
         Args:
             terms: extract_terms() 的结果
-            provider: Iris LLM Provider
+            llm: Iris LLMService
 
         Returns:
             填充了 mis_asr 的同一个 terms 列表
         """
         if not terms:
             return terms
-
-        from iris.llm import LLMRequest
 
         # 分批：每批独立回填自身 AsrTerm 的 mis_asr，批间无共享状态 → 可并发
         batches = [
@@ -322,14 +320,12 @@ class TermExtractor:
             last_exc = None
             for attempt in range(2):  # 最多一次重试
                 try:
-                    response = provider.generate(
-                        LLMRequest(
-                            prompt=prompt,
-                            route_context={
-                                "task_type": "asr_misreading",
-                                "input_type": "text",
-                            },
-                        ),
+                    response = llm.generate(
+                        prompt,
+                        route_context={
+                            "task_type": "asr_misreading",
+                            "input_type": "text",
+                        },
                         temperature=0.3,
                         max_tokens=8192,
                         _deadline=time.monotonic() + _BATCH_DEADLINE_SEC,

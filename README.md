@@ -1,8 +1,10 @@
-# Iris 3.28.4
+# Iris 3.28.5
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
+
+**v3.28.5** — [LLM 调用统一到 LLMService](CHANGELOG.md)：消除「已建 LLMService 又 `get_provider()` 绕过响应缓存」的残留路径（scripts 两脚本、ASR hotwords/extractor、检索 planner/enhanced、build-asr-prompt 共 7 文件），`provider.generate(LLMRequest(...))` 统一适配为 `llm.generate(prompt, route_context=...)`；保留 corrector `_provider` 测试降级、route-model 查询路由、get_provider() 诊断等非绕过路径。协议版本 3.21（不变）。
 
 **v3.28.4** — [提醒引擎项目停滞判定兜底 + 模板占位符根因修复](CHANGELOG.md)：项目停滞信号三重兜底（指纹 → SOURCE 同名文档 → 周报正文内容级匹配），消除软硬一体/XRay/视频稽查/数据标注平台/售后归因/AI巡检等活跃项目误报；`project_stall_ignore` 配置支持已完结/已移交项目静默；修复模板中 `[[Wiki-链接]]` 示例文字被 LLM 复制进页面（根因+存量清零）。app 配置版本 **3.7**，协议版本 3.21（不变）。
 
