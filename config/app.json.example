@@ -48,7 +48,7 @@
     "name": "",
     "department": "",
     "domains": [],
-    "_note": "name: 公司/组织名称；department: 部门名称；domains: 业务领域列表（用于 LLM Prompt 中的领域背景描述，开源时留空即可）。示例：name='Acme Corp', department='技术研发部', domains=['AI质检','推荐算法','大模型应用']。"
+    "_note": "name: 公司/组织名称；department: 部门名称；domains: 业务领域列表（用于 LLM Prompt 中的领域背景描述，开源时留空即可）。示例：name='Acme Corp', department='技术研发部', domains=['智能检测','推荐算法','大模型应用']。"
   },
   "biweekly_report": {
     "author_name": "",

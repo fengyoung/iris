@@ -28,7 +28,7 @@ class KR:
 class Objective:
     """单个目标。"""
     obj_id: str         # "O1"
-    title: str          # "智能质检技术升级…"
+    title: str          # "检测技术升级…"
     content: str = ""   # 完整内容（含方向描述等）
     krs: Dict[str, KR] = field(default_factory=dict)
 
@@ -51,7 +51,7 @@ class OKRDocument:
         """将标签列表解析为 {标签: 实际描述} 映射。
 
         Example:
-            ["O1"] → {"O1": "智能质检技术升级…"}
+            ["O1"] → {"O1": "检测技术升级…"}
             ["O1-KR1"] → {"O1-KR1": "【质量】自动质检模型优化…"}
             ["O1"] → 包含该 Objective 下所有 KR 描述
         """

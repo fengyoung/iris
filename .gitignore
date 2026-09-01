@@ -10,6 +10,8 @@ venv/
 
 # Environment
 .env
+.env.*
+!.env.example
 
 # Config (user-specific, contains real paths/keys)
 config/*.json

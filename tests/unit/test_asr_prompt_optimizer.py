@@ -100,11 +100,11 @@ class TestRenderV2:
 
     def test_hotwords_section_appears(self):
         """v3.24: hotwords 参数真正使用——渲染「高频词（优先识别）」段。"""
-        result = LLMPromptOptimizer._render_v2(["图验技术", "质检平台", "AI巡检"], [])
+        result = LLMPromptOptimizer._render_v2(["图像验证技术", "质检平台", "智能巡查"], [])
         assert "高频词" in result
-        assert "图验技术" in result
+        assert "图像验证技术" in result
         assert "质检平台" in result
-        assert "AI巡检" in result
+        assert "智能巡查" in result
 
     def test_hotwords_empty_placeholder(self):
         result = LLMPromptOptimizer._render_v2([], [])

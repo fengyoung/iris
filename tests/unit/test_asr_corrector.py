@@ -459,7 +459,7 @@ class TestPidAlive:
         pid_file.write_text(str(os.getpid()))
         # v3.24: 含 ps 命令行校验（防 PID 复用误判），mock 通过
         with patch("subprocess.run", return_value=SimpleNamespace(
-                stdout="python /Users/fengyoung/MyProjects/iris3/src/iris/app/main.py")):
+                stdout="python /Users/dev/myproject/src/iris/app/main.py")):
             assert self._mod()._pid_alive(pid_file) is True
 
     def test_pid_reused_by_unrelated_process(self, tmp_path):

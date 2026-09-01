@@ -1,8 +1,10 @@
-# Iris 3.28.2
+# Iris 3.28.3
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
+
+**v3.28.3** — [开源前信息安全复审](CHANGELOG.md)：变更日志/文档/测试/模板全库二次脱敏（真实姓名、业务指标、内部项目名泛化）；git 历史作者邮箱迁移 noreply；CI 最小权限 + `.gitignore` 纵深防御。协议版本 3.21（不变）。
 
 **v3.28.2** — [batch-transcribe 批量会议纪要修复](CHANGELOG.md)：`TranscribeMeetingPipeline.run_batch` 缺失导致命令一执行即抛 AttributeError（handler 调用时方法从未实现）——补全实现（按扩展名分流音频 Whisper 转写/已有转写文本、单文件失败不中断批量、批量层 TaskReporter 埋点），handler 补传 `--to-source`，回归测试 +2，并真实端到端验证批量路由归档。协议版本 3.21（不变）。
 
@@ -12,7 +14,7 @@
 
 **v3.27.2** — [LLM 配置修复与新视觉模型默认](CHANGELOG.md)：`find_model_by_name` Pydantic 兼容修复（回归修复 v3.11 迁移后 force_model 对真实配置失效 + SecretStr 显式解包）；adv_model 新默认 `deepseek-v4-flash-vision-exp`（实验性视觉模型，priority 70 最高优先级，qwen3.8-max 降为第 2 优先级）；iris-feishu-import 批量导入用法修正（`--url` 不可重复传参，改逗号分隔）。验证：LLM 相关 107 全过，ruff 零告警。协议版本 3.20（不变）。产品版本 3.27.1→**3.27.2**。
 
-**v3.27.1** — [双周报生成 w31 风格固化](CHANGELOG.md)：重写 Stage 3 合成模板 — 总结段改 w31 式逐项目「目标→思考→决策→下一步」（「我们」视角，含正/反示例）；关键进展项目级聚合（每 sub_area 1 个加粗条目 + ≤3 子项，挑选最关键进展）；DEFAULT_STYLE_GUIDE 同步（默认生成即 w31 风格）+ 防回归测试 +6。背景：w33 首版总结宽泛空洞、关键进展过细；Stage 3 合成 240s 超时静默丢弃末方向（素材未缺却输出「无实质进展」）。验证：biweekly 相关 133 全过，ruff 零告警。协议版本 3.20（不变）。产品版本 3.27.0→**3.27.1**。
+**v3.27.1** — [双周报生成写作风格固化](CHANGELOG.md)：重写 Stage 3 合成模板 — 总结段改逐项目「目标→思考→决策→下一步」（「我们」视角，含正/反示例）；关键进展项目级聚合（每 sub_area 1 个加粗条目 + ≤3 子项，挑选最关键进展）；DEFAULT_STYLE_GUIDE 同步（默认生成即该风格）+ 防回归测试 +6。背景：某期首版总结宽泛空洞、关键进展过细；Stage 3 合成 240s 超时静默丢弃末方向（素材未缺却输出「无实质进展」）。验证：biweekly 相关 133 全过，ruff 零告警。协议版本 3.20（不变）。产品版本 3.27.0→**3.27.1**。
 
 **v3.27.0** — [任务面板 `iris task-panel`](CHANGELOG.md)：Web 只读展示层查看 iris 任务状态与进程（操作仍在 CC CLI）。常驻守护（start/stop/status/install，launchd 崩溃自动拉起）+ 零新依赖（stdlib ThreadingHTTPServer + 单 HTML + 原生 JS 轮询 + 深色主题）+ 混合数据源（TaskReporter 埋点上下文管理器 + ps 探测兜底 + stale 判定，存储 `data/tasks/` 原子写 + flock 历史）+ 首批埋点接入 5 命令（daily-start 8 阶段 / build-chunks / build-wiki / transcribe-meeting / meeting-live-assistant）。端口默认 8765，`--port` > `IRIS_TASK_PANEL_PORT`。测试 taskpanel 专项 69 全过。协议版本 3.19→**3.20**。产品版本 3.26.3→**3.27.0**。
 
@@ -36,7 +38,7 @@
 
 **v3.22.5** — ASR 校正引擎热键门控修复：① CGEventTap 启动失败（辅助功能权限缺失）时热键门控「卡死为全跳过」— `run_forever` 失败后置空监听器，降级为内容特征判定（`_is_asr_text` + 富文本检查兜底），不再误拦真实 ASR 输出；② 监听窗口与热键按住时长挂钩（`max(3s, min(按住时长, 120s))`）— vocotype 松开热键后才转写，1 分钟长语音的剪贴板结果不再因超时被跳过。测试 +13（合计 2,646 用例）。协议版本 3.15（不变）。
 
-**v3.22.4** — 周报提取主题日期不一致自动标注：`extract_weekly_reports.py` 新增 `_subject_date_mismatch_note`（检测主题 `YYYYMMDD` 日期 ≠ 邮件发送日期，覆盖复制标题忘改日期场景，如李嘉晨 08-07 主题仍写 20260731），不一致时邮件信息栏自动加 ⚠️ 标注；一致或无日期不加注。测试 +4（合计 2,633 用例）。协议版本 3.15（不变）。
+**v3.22.4** — 周报提取主题日期不一致自动标注：`extract_weekly_reports.py` 新增 `_subject_date_mismatch_note`（检测主题 `YYYYMMDD` 日期 ≠ 邮件发送日期，覆盖复制标题忘改日期场景，如团队成员 08-07 主题仍写 20260731），不一致时邮件信息栏自动加 ⚠️ 标注；一致或无日期不加注。测试 +4（合计 2,633 用例）。协议版本 3.15（不变）。
 
 **v3.22.3** — 知识库全面体检修复：检索索引死数据清除（`chunker.py` 全量重建误追加已删除文档旧 chunk，实测 4,636 死 chunk 占 45.1%，重建后 chunk 10,290→5,939 / 向量 10,321→5,939 / 覆盖率 201.7%→100%）+ 知识图谱 LLM 边清零修复（`graph.py` 增量刷新丢边，从 relations 缓存恢复 591 条，验证 591→633 不再丢）+ deep-eval CLI 参数补齐（`--page-filter`/`--sample-rate`）+ 回归测试 +4。协议版本 3.15（不变）。
 
@@ -293,7 +295,7 @@ iris3/
 | **v3.11.13** | 2026-07-10 | 开源脱敏清理：源码/测试/模板内部信息移除，`_SUB_AREA_KEYWORDS` 用户自定义，`.gitignore` 补全，397 测试 |
 | **v3.11.12** | 2026-07-09 | extract-travel-invoice PDF 文字直接提取 + 转置表格输出；wiki-lint --fix 噪音链接正则修复（避免误删 frontmatter），397 测试 |
 | **v3.11.11** | 2026-07-09 | extract-travel-invoice 代码审查 8 项修复，397 测试 |
-| **v3.11.10** | 2026-07-09 | extract-weekly-reports 扫描漏人修复：folder list → 跨全文件夹 search + 白名单预筛 + 撤回/重复去重，命中 3→10 人，384→397 测试 |
+| **v3.11.10** | 2026-07-09 | extract-weekly-reports 扫描漏人修复：folder list → 跨全文件夹 search + 白名单预筛 + 撤回/重复去重，命中人数大幅提升，384→397 测试 |
 | **v3.11.9** | 2026-07-08 | 安全加固（开源准备）+ 工程质量 6 项 + 测试补全，315→384 测试 |
 | **v3.11.8** | 2026-07-08 | build-asr-prompt 性能与质量优化：Phase 1/2 并发化 + Phase 3 校正策略强化，315 测试 |
 | **v3.11.7** | 2026-07-07 | analysis/service.py 职责拆分：数据层/缓存层独立模块 + 38 测试用例，315 测试 |

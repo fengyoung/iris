@@ -364,11 +364,11 @@ class TestTopicDetector:
         detector, _ = self._make_detector(brief_dir=tmp_path)
         base = datetime(2026, 7, 28, 10, 0, 0, tzinfo=timezone.utc)
         msgs = [
-            _make_msg("关于智能巡检的讨论", send_time=base),
+            _make_msg("关于智能巡查的讨论", send_time=base),
             _make_msg("我们可以在现有系统上增加巡检功能", send_time=base + timedelta(minutes=1)),
         ]
         result = detector.detect({"c1": msgs})
-        assert "智能巡检" in result[0].title
+        assert "智能巡查" in result[0].title
 
     def test_simple_detect_participants(self, tmp_path):
         """简单检测应提取参与者列表。"""

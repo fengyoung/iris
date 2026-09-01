@@ -347,7 +347,7 @@ class TestExtractChatCompletionsText:
     """响应文本提取：content 为空时绝不回退 reasoning_content（v3.28.1 修复）。
 
     回归背景：DeepSeek 思考模型在 max_tokens 耗尽等场景下 content 为空但
-    reasoning_content 非空，旧实现静默回退返回思考过程，导致 w35 双周报
+    reasoning_content 非空，旧实现静默回退返回思考过程，导致某期双周报
     Stage 4b 审查输出被思考文本污染写入最终产物。
     """
 

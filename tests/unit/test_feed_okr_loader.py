@@ -23,9 +23,9 @@ class TestKR:
 
     def test_create_basic(self):
         """创建基本 KR 实例。"""
-        kr = KR(kr_id="O1-KR1", title="【质量】影像3.0主观项检测", short_title="【质量】")
+        kr = KR(kr_id="O1-KR1", title="【质量】图像验证主观项检测", short_title="【质量】")
         assert kr.kr_id == "O1-KR1"
-        assert kr.title == "【质量】影像3.0主观项检测"
+        assert kr.title == "【质量】图像验证主观项检测"
         assert kr.owner == ""
 
     def test_create_with_owner(self):
@@ -44,9 +44,9 @@ class TestObjective:
 
     def test_create_basic(self):
         """创建基本 Objective 实例。"""
-        obj = Objective(obj_id="O1", title="智能质检技术升级")
+        obj = Objective(obj_id="O1", title="检测技术升级")
         assert obj.obj_id == "O1"
-        assert obj.title == "智能质检技术升级"
+        assert obj.title == "检测技术升级"
         assert obj.krs == {}
 
     def test_create_with_krs(self):
@@ -65,10 +65,10 @@ class TestOKRDocument:
     """OKRDocument 查询方法测试。"""
 
     def _make_doc(self):
-        kr1 = KR(kr_id="O1-KR1", title="【质量】影像3.0主观项检测", short_title="【质量】")
-        kr2 = KR(kr_id="O1-KR2", title="【智能巡检】完成准召达标", short_title="【智能巡检】")
+        kr1 = KR(kr_id="O1-KR1", title="【质量】图像验证主观项检测", short_title="【质量】")
+        kr2 = KR(kr_id="O1-KR2", title="【智能巡查】完成准确率达标", short_title="【智能巡查】")
         kr3 = KR(kr_id="O2-KR1", title="推荐体验优化", short_title="推荐体验优化")
-        obj1 = Objective(obj_id="O1", title="智能质检技术升级", krs={"O1-KR1": kr1, "O1-KR2": kr2})
+        obj1 = Objective(obj_id="O1", title="检测技术升级", krs={"O1-KR1": kr1, "O1-KR2": kr2})
         obj2 = Objective(obj_id="O2", title="推荐体验保障", krs={"O2-KR1": kr3})
         doc = OKRDocument(objectives={"O1": obj1, "O2": obj2}, source_file="2026-Q3-OKR.md")
         return doc
@@ -79,7 +79,7 @@ class TestOKRDocument:
         kr = doc.get_kr("O1-KR1")
         assert kr is not None
         assert kr.kr_id == "O1-KR1"
-        assert "影像" in kr.title
+        assert "图像" in kr.title
 
     def test_get_kr_not_found(self):
         """不存在的标签应返回 None。"""
@@ -95,20 +95,20 @@ class TestOKRDocument:
         """resolve_tags 对 KR 标签应返回 KR 标题。"""
         doc = self._make_doc()
         result = doc.resolve_tags(["O1-KR1"])
-        assert result == {"O1-KR1": "【质量】影像3.0主观项检测"}
+        assert result == {"O1-KR1": "【质量】图像验证主观项检测"}
 
     def test_resolve_tags_objective(self):
         """resolve_tags 对 Objective 标签应返回 O 标题。"""
         doc = self._make_doc()
         result = doc.resolve_tags(["O1"])
-        assert result == {"O1": "智能质检技术升级"}
+        assert result == {"O1": "检测技术升级"}
 
     def test_resolve_tags_multiple(self):
         """resolve_tags 支持多个标签同时解析。"""
         doc = self._make_doc()
         result = doc.resolve_tags(["O1-KR1", "O2"])
         assert len(result) == 2
-        assert "影像" in result["O1-KR1"]
+        assert "图像" in result["O1-KR1"]
         assert "推荐" in result["O2"]
 
     def test_resolve_tags_unknown(self):
@@ -129,8 +129,8 @@ class TestOKRDocument:
         doc = self._make_doc()
         ctx = doc.to_prompt_context()
         assert "O1" in ctx
-        assert "智能质检技术升级" in ctx
-        assert "智能巡检" in ctx
+        assert "检测技术升级" in ctx
+        assert "智能巡查" in ctx
 
     def test_to_prompt_context_empty(self):
         """空文档应返回默认占位文本。"""
@@ -209,15 +209,15 @@ class TestParseOKRFile:
 
     def test_parse_normal(self, tmp_path):
         """标准格式的 OKR 文件应正确解析。"""
-        content = """## O1：智能质检技术升级
+        content = """## O1：检测技术升级
 
-### KR1：拍照质检准确率提升
+### KR1：图像质检准确率提升
 
 **KR Owner：** 张三
 
 这是 KR 的完整描述内容
 
-### KR2：智能巡检准召达标
+### KR2：智能巡查准确率达标
 
 ## O2：推荐体验优化
 
@@ -231,9 +231,9 @@ class TestParseOKRFile:
         assert len(doc.objectives) == 2
         assert "O1" in doc.objectives
         assert "O2" in doc.objectives
-        assert doc.objectives["O1"].title == "智能质检技术升级"
+        assert doc.objectives["O1"].title == "检测技术升级"
         assert len(doc.objectives["O1"].krs) == 2
-        assert doc.objectives["O1"].krs["O1-KR1"].title == "拍照质检准确率提升"
+        assert doc.objectives["O1"].krs["O1-KR1"].title == "图像质检准确率提升"
         assert doc.objectives["O1"].krs["O1-KR1"].owner == "张三"
         assert doc.objectives["O2"].krs["O2-KR1"].owner == "李四"
 
@@ -265,14 +265,14 @@ type: okr
         """含【】括号的 KR 标题应正确提取 short_title。"""
         content = """## O1：目标
 
-### KR1：【质量】影像3.0主观项检测，支撑手机全入仓战略
+### KR1：【质量】图像验证主观项检测，支撑商品全量入仓战略
 """
         filepath = tmp_path / "OKR.md"
         filepath.write_text(content, encoding="utf-8")
         doc = _parse_okr_file(filepath)
         kr = doc.objectives["O1"].krs["O1-KR1"]
         assert kr.short_title == "【质量】"
-        assert "手机" in kr.title
+        assert "商品" in kr.title
 
     def test_parse_kr_before_obj(self, tmp_path):
         """KR 出现在 Objective 之前应被忽略（日志警告）。"""

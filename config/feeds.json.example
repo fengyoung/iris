@@ -7,7 +7,7 @@
       "name": "示例群聊",
       "type": "group",
       "mode": "auto_import",
-      "okr_tags": ["智能巡检"]
+      "okr_tags": ["智能巡查"]
     }
   ],
   "topic_config": {
