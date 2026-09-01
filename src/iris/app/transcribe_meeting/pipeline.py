@@ -16,6 +16,10 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = "你是一个专业的会议纪要提取专家，擅长从语音转写文本中提取结构化会议纪要。你会仔细校正 ASR 误识别，准确提取信息。注意：直接输出会议纪要正文，不要输出任何前缀说明、开场白或打招呼内容。"
 
+# 音视频扩展名（Whisper 经 ffmpeg 解码），其余视为已有转写文本
+_AUDIO_VIDEO_EXTS = {".m4a", ".mp3", ".wav", ".aac", ".flac", ".ogg", ".wma",
+                     ".amr", ".m4b", ".opus", ".webm", ".mov", ".mp4", ".mkv", ".avi"}
+
 
 class TranscribeMeetingPipeline:
     def __init__(self, bundle: ConfigBundle) -> None:
@@ -152,6 +156,52 @@ class TranscribeMeetingPipeline:
                 result["route"] = route_result.get("route", "")
                 result["route_reason"] = route_result.get("reason", "")
         return result
+
+    def run_batch(self, file_paths: List[str], *, output_dir: Optional[str] = None,
+                  whisper_model: str = "base", force_retranscribe: bool = False,
+                  to_source: bool = False) -> Dict[str, Any]:
+        """批量处理多个录音或转写文本文件，逐文件生成纪要。
+
+        按扩展名区分：音视频扩展名走 Whisper 转写，其余视为已有转写文本。
+        单个文件失败不中断批量，汇总到 results 列表供上层展示。
+
+        返回 {"total", "succeeded", "failed", "results"}，其中每条 results
+        为 {"file", "status": "ok"|"error"}，成功时并入 run() 的完整结果。
+        """
+        results: List[Dict[str, Any]] = []
+        succeeded = 0
+        total = len(file_paths)
+        from iris.taskpanel.reporter import TaskReporter
+        with TaskReporter("batch-transcribe", command="batch-transcribe") as _tr:
+            for idx, fp in enumerate(file_paths, 1):
+                entry = {"file": fp, "status": "error"}
+                print(f"[批量 {idx}/{total}] 处理 {Path(fp).name} ...", file=sys.stderr)
+                try:
+                    path = Path(fp)
+                    output_path = None
+                    if output_dir:
+                        output_path = str(Path(output_dir) / f"{path.stem}.md")
+                    if path.suffix.lower() in _AUDIO_VIDEO_EXTS:
+                        single = self.run(str(path), output_path=output_path,
+                                          whisper_model=whisper_model,
+                                          force_retranscribe=force_retranscribe,
+                                          to_source=to_source)
+                    else:
+                        single = self.run(transcript_path=str(path), output_path=output_path,
+                                          whisper_model=whisper_model,
+                                          force_retranscribe=force_retranscribe,
+                                          to_source=to_source)
+                    entry["status"] = "ok"
+                    entry.update(single)
+                    succeeded += 1
+                except Exception as exc:
+                    entry["error"] = str(exc)
+                    logger.error("批量处理失败 %s: %s", fp, exc)
+                results.append(entry)
+                _tr.report_phase(f"file_{idx}", f"{'✅' if entry['status'] == 'ok' else '❌'} {Path(fp).name}",
+                                 progress=idx / total if total else 1.0)
+        return {"total": total, "succeeded": succeeded,
+                "failed": total - succeeded, "results": results}
 
     # ── 日期与时长计算 ──────────────────────────────────────────
 

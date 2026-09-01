@@ -1,8 +1,10 @@
-# Iris 3.28.1
+# Iris 3.28.2
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
+
+**v3.28.2** — [batch-transcribe 批量会议纪要修复](CHANGELOG.md)：`TranscribeMeetingPipeline.run_batch` 缺失导致命令一执行即抛 AttributeError（handler 调用时方法从未实现）——补全实现（按扩展名分流音频 Whisper 转写/已有转写文本、单文件失败不中断批量、批量层 TaskReporter 埋点），handler 补传 `--to-source`，回归测试 +2，并真实端到端验证批量路由归档。协议版本 3.21（不变）。
 
 **v3.28.1** — 两条修复线：① [LLM 思考文本污染修复](CHANGELOG.md) — `content` 为空时不再静默回退返回 `reasoning_content`（思考模型 max_tokens 耗尽时思考文本曾直接写入双周报产物），改为抛错走重试/降级链；Stage 4b 质量审查失败安全回退组装稿；② [深度审查批次 1 数据止损](CHANGELOG.md) — 6 路并行代码审查后修复 6 个 P0（记忆裁剪方向反转、增量切块丢 chunk、向量索引死向量/旧向量、wikilink 注入吞正文、feed pending 覆盖、人物页清空手工 email）+ 4 个 P1 功能坏死（文件日志、会话挖掘懒触发、建议提问、会议任务面板埋点）。回归测试 +19。**升级后需执行一次 `build-chunks --write-summary` + `build-vector-index --force-rebuild`。**协议版本 3.21（不变）。
 

@@ -185,7 +185,10 @@ def handle_batch_transcribe(args, bundle, logger) -> int:
         print("未匹配到任何文件", file=sys.stderr)
         return 1
     pipeline = TranscribeMeetingPipeline(bundle)
-    result = pipeline.run_batch(file_paths, output_dir=args.output_dir or None, whisper_model=args.whisper_model, force_retranscribe=args.force)
+    result = pipeline.run_batch(file_paths, output_dir=args.output_dir or None,
+                                whisper_model=args.whisper_model,
+                                force_retranscribe=args.force,
+                                to_source=getattr(args, "to_source", False))
     _emit_output(args.command, result, pretty=args.pretty)
     return 0 if result["failed"] == 0 else 1
 

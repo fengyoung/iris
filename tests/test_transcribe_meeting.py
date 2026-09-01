@@ -100,3 +100,60 @@ class TestCallLlmErrorHandling:
         assert "LLM 生成失败" in result or "LLM 不可用" in result
         assert "测试转写文本" in result
 
+
+class TestRunBatch:
+    """run_batch: 批量处理音频/转写文本文件，单文件失败不中断。"""
+
+    def test_mixed_files_success_and_failure(self, config_bundle, tmp_path):
+        pipeline = TranscribeMeetingPipeline(config_bundle)
+
+        ok_txt = tmp_path / "20260831-周会-测试.txt"
+        ok_txt.write_text("测试转写内容", encoding="utf-8")
+        missing_audio = tmp_path / "不存在的录音.m4a"
+
+        def fake_run(audio_path="", **kwargs):
+            if audio_path:
+                raise FileNotFoundError(audio_path)
+            return {"output_file": str(tmp_path / "out.md"), "word_count": 6,
+                    "wiki_pages_loaded": 0, "source_type": "text",
+                    "transcript_file": str(ok_txt), "audio_file": "",
+                    "model": "test-model"}
+
+        pipeline.run = fake_run
+        result = pipeline.run_batch([str(ok_txt), str(missing_audio)])
+
+        assert result["total"] == 2
+        assert result["succeeded"] == 1
+        assert result["failed"] == 1
+        assert result["results"][0]["status"] == "ok"
+        assert result["results"][0]["file"] == str(ok_txt)
+        assert result["results"][1]["status"] == "error"
+        assert "不存在" in result["results"][1]["error"]
+
+    def test_audio_vs_text_routing_and_options(self, config_bundle, tmp_path):
+        pipeline = TranscribeMeetingPipeline(config_bundle)
+
+        audio = tmp_path / "20260831-周会-录音.m4a"
+        audio.write_bytes(b"fake")
+        txt = tmp_path / "20260831-项目周会-转写.txt"
+        txt.write_text("转写文本", encoding="utf-8")
+
+        seen = []
+
+        def fake_run(audio_path="", **kwargs):
+            seen.append((audio_path, kwargs.get("transcript_path"),
+                         kwargs.get("output_path"), kwargs.get("to_source")))
+            return {"output_file": "x.md", "word_count": 1, "wiki_pages_loaded": 0,
+                    "source_type": "text" if not audio_path else "audio",
+                    "transcript_file": str(txt) if not audio_path else "",
+                    "audio_file": audio_path, "model": "m"}
+
+        pipeline.run = fake_run
+        pipeline.run_batch([str(audio), str(txt)], output_dir=str(tmp_path / "out"),
+                           to_source=True)
+
+        assert seen[0][0] == str(audio)  # m4a → audio_path 分支
+        assert seen[0][3] is True        # to_source 透传
+        assert seen[1][1] == str(txt)    # txt → transcript_path 分支
+        assert seen[1][2] == str(tmp_path / "out" / "20260831-项目周会-转写.md")
+

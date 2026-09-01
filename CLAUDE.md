@@ -1,4 +1,4 @@
-# Iris 3.28.1 — 项目执行说明
+# Iris 3.28.2 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -92,7 +92,7 @@ PDF=PyMuPDF 提取文字 + 逐页渲染；DOCX=python-docx 段落+表格文字�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.28.1 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.28.2 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.21 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | app 3.6（其余独立演进） | 配置文件 Schema |
 
@@ -142,12 +142,12 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.28.1 (2026-08-30)** — 两条修复线合并（14 代码+测试文件 / 回归测试 +26）：① **LLM 思考文本污染修复**（2 文件 / +7）— `_extract_chat_completions_text` 在 `content` 为空时静默回退返回 `reasoning_content`，思考模型（deepseek-v4-flash）max_tokens 耗尽时把思考当最终输出（实测 w35 双周报 Stage 4b 审查 13k 思考字符写入归档文件）；修复 — content 为空直接抛 `LLMProviderError`（走重试/降级链，绝不产出「伪成功」垃圾文本），Stage 4b 失败回退 Stage 4a 组装稿；② **深度审查批次 1 数据止损**（12 文件 / +19）— P0×6：记忆裁剪方向反转（`lifecycle.summarize()` `[-10:]` 保留最新）、chunker 增量丢 chunk（增量无条件保留）、向量索引增量只增不改不删（按 `document_hash` 重嵌 + 差集清理，ids.json 新增 doc_hashes）、wikilink 注入吞正文（URL 排除全角标点 + 合并区原文切片重建）、feed pending 队列覆盖（新增 `append_pending` 锁内合并 + topic_id 去重）、person_enricher 清空手工 email（空值保留原行 + 备份只写一次）；P1×4：文件日志从未生效（`isinstance(app, dict)` → `hasattr(x,"get")`）、会话挖掘懒触发从未执行（`shared_pool.submit` 不存在 → `get_executor().submit` + 时间戳后置）、建议提问 TypeError 被吞（CONF_ICON+text 渲染入 try）、会议助理埋点目录错位（`data_root` 改传 `_pid_dir`）；附带 `_load_archive_config` 缺配置回退 `.example`。**升级需执行一次 `build-chunks --write-summary` + `build-vector-index --force-rebuild` 清理存量死数据。**验证：全量 2,970 通过，ruff 零告警。协议 3.21（不变）；产品 3.28.0→**3.28.1**。
+**当前 v3.28.2 (2026-09-01)** — batch-transcribe 批量会议纪要修复（3 文件 / +111，回归测试 +2）：根因 — `handle_batch_transcribe` 调用 `TranscribeMeetingPipeline.run_batch(...)`，但 pipeline 类从未实现该方法，命令一执行即抛 `AttributeError`；修复 — 补全 `run_batch`（按扩展名分流：15 种音视频扩展名走 Whisper 转写、其余视为已有转写文本；逐文件调用 `run()`，单文件失败捕获入 `results.error` 不中断批量；返回 `{total, succeeded, failed, results}` 与 `_fmt_batch_transcribe` 展示结构匹配；批量层 TaskReporter 埋点），handler 补传 `--to-source`（此前批量模式丢失归档能力）。验证：transcribe 16 全过（+2）、formatter 68 全过、ruff 零告警、真实端到端批量路由归档跑通。协议 3.21（不变）；产品 3.28.1→**3.28.2**。
 
-**v3.28.0 (2026-08-26)** — 全项目工程治理：SQLite 显式关闭 + `FileLock` 稳定锁文件（消除 inode 双锁竞态）+ 统一原子写；向量索引按 generation 发布并原子切换 `current` + LLM 缓存跨进程锁/LRU/TTL 治理；写入守卫规范字段 `enforce_write_guard`（兼容旧字段）+ 安全二进制写；修复 `workspace list|current`、daily-start 返回图谱维护状态；CI/Makefile/pre-commit 统一覆盖 `src scripts tests`，Python 基线 3.11-3.13，新增 `IRIS_PROJECT_ROOT`。验证 2,945 全过，覆盖率 65.82%。协议 3.20→**3.21**；app 配置 3.5→**3.6**；产品 3.27.2→**3.28.0**。
+**v3.28.1 (2026-08-30)** — 两条修复线合并（14 代码+测试文件 / 回归测试 +26）：① **LLM 思考文本污染修复**（2 文件 / +7）— `_extract_chat_completions_text` 在 `content` 为空时静默回退返回 `reasoning_content`，思考模型（deepseek-v4-flash）max_tokens 耗尽时把思考当最终输出（实测 w35 双周报 Stage 4b 审查 13k 思考字符写入归档文件）；修复 — content 为空直接抛 `LLMProviderError`（走重试/降级链，绝不产出「伪成功」垃圾文本），Stage 4b 失败回退 Stage 4a 组装稿；② **深度审查批次 1 数据止损**（12 文件 / +19）— P0×6：记忆裁剪方向反转（`lifecycle.summarize()` `[-10:]` 保留最新）、chunker 增量丢 chunk（增量无条件保留）、向量索引增量只增不改不删（按 `document_hash` 重嵌 + 差集清理，ids.json 新增 doc_hashes）、wikilink 注入吞正文（URL 排除全角标点 + 合并区原文切片重建）、feed pending 队列覆盖（新增 `append_pending` 锁内合并 + topic_id 去重）、person_enricher 清空手工 email（空值保留原行 + 备份只写一次）；P1×4：文件日志从未生效（`isinstance(app, dict)` → `hasattr(x,"get")`）、会话挖掘懒触发从未执行（`shared_pool.submit` 不存在 → `get_executor().submit` + 时间戳后置）、建议提问 TypeError 被吞（CONF_ICON+text 渲染入 try）、会议助理埋点目录错位（`data_root` 改传 `_pid_dir`）；附带 `_load_archive_config` 缺配置回退 `.example`。**升级需执行一次 `build-chunks --write-summary` + `build-vector-index --force-rebuild` 清理存量死数据。**验证：全量 2,970 通过，ruff 零告警。协议 3.21（不变）；产品 3.28.0→**3.28.1**。
 
-**v3.27.2 → v3.19.24 主题索引**（完整条目见 [CHANGELOG.md](CHANGELOG.md)）：
+**v3.28.0 → v3.19.24 主题索引**（完整条目见 [CHANGELOG.md](CHANGELOG.md)）：
 
-v3.27.2 LLM 配置修复+新视觉模型默认 · v3.27.1 双周报 w31 风格固化 · v3.27.0 任务面板 task-panel · v3.26.3 面板稳定化+并发加固 · v3.26.2 面板双主题 · v3.26.1 会议助理全量优化 · v3.26.0 AI 会议参谋 · v3.24.x 会议助理×asr-corrector 优化系列 · v3.23.x 实时会议助理落地系列 · v3.22.5 热键门控 · v3.22.4 周报日期标注 · v3.22.3 知识库体检修复 · v3.22.2 wikilink 残留清理 · v3.22.1 噪音过滤+图谱重建 · v3.22.0 开源信息脱敏 · v3.21.1 SOURCE 归档适配 · v3.21.0 SOURCE 元数据工程 · v3.20.x feed 文档提取/覆盖率提升 · v3.19.24-26 质量加固/feed 质量/检索时效性
+v3.28.0 工程可靠性治理（SQLite 生命周期/稳定 inode 锁/统一原子写/向量索引 generation 发布/LLM 缓存治理/IRIS_PROJECT_ROOT）· v3.27.2 LLM 配置修复+新视觉模型默认 · v3.27.1 双周报 w31 风格固化 · v3.27.0 任务面板 task-panel · v3.26.3 面板稳定化+并发加固 · v3.26.2 面板双主题 · v3.26.1 会议助理全量优化 · v3.26.0 AI 会议参谋 · v3.24.x 会议助理×asr-corrector 优化系列 · v3.23.x 实时会议助理落地系列 · v3.22.5 热键门控 · v3.22.4 周报日期标注 · v3.22.3 知识库体检修复 · v3.22.2 wikilink 残留清理 · v3.22.1 噪音过滤+图谱重建 · v3.22.0 开源信息脱敏 · v3.21.1 SOURCE 归档适配 · v3.21.0 SOURCE 元数据工程 · v3.20.x feed 文档提取/覆盖率提升 · v3.19.24-26 质量加固/feed 质量/检索时效性
 
 > 更早版本摘要（v3.12.x ~ v3.19.10）见 [CHANGELOG.md](CHANGELOG.md)。
