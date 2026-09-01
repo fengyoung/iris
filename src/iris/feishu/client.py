@@ -358,6 +358,45 @@ class FeishuClient:
         ], timeout=120)
         return str(save)
 
+    def download_message_image(
+        self,
+        msg_id: str,
+        image_key: str,
+        save_path: str,
+        *,
+        overwrite: bool = False,
+    ) -> str:
+        """下载 IM 消息中的图片资源（区别于文档图 download_image）。
+
+        注意：lark-cli im +messages-resources-download 的 --output 只接受
+        当前目录下的相对路径（拒绝绝对路径与 .. 穿越），调用方需传相对路径。
+
+        Args:
+            msg_id: 消息 ID（om_xxx）
+            image_key: 图片资源 key（img_v3_xxx）
+            save_path: 本地相对保存路径
+            overwrite: 是否覆盖已有文件
+
+        Returns:
+            实际保存路径
+        """
+        save = Path(save_path)
+        if save.exists() and not overwrite:
+            return str(save)
+
+        save.parent.mkdir(parents=True, exist_ok=True)
+        args = [
+            "im", "+messages-resources-download",
+            "--message-id", msg_id,
+            "--file-key", image_key,
+            "--type", "image",
+            "--output", str(save),
+        ]
+        if overwrite:
+            args.append("--overwrite")
+        self._run(args, timeout=120)
+        return str(save)
+
     # ── IM 操作 ────────────────────────────────────────────
 
     def search_group_by_name(self, name: str) -> Optional[str]:

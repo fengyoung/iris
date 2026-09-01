@@ -98,7 +98,7 @@ class BaseLLMProvider:
 class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
     """根据 llm.json 决定是否可调用真实 LLM。"""
 
-    OPENAI_COMPATIBLE_PROVIDERS = {"openai", "deepseek", "openai_compatible", "qwen", "bailian", "custom-algo-platform"}
+    OPENAI_COMPATIBLE_PROVIDERS = {"openai", "deepseek", "openai_compatible", "qwen", "bailian", "custom-algo-platform", "zz_tokenhub"}
 
     def __init__(self, config: ConfigBundle):
         self._config = config

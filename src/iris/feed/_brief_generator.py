@@ -283,10 +283,11 @@ class BriefGenerator:
             for m in sorted_msgs:
                 if len(all_quotes) >= 8:
                     break
-                preview = m.content[:80]
-                if preview not in seen_texts and len(m.content.strip()) > 5:
+                prompt_content = m.content_for_prompt()
+                preview = prompt_content[:80]
+                if preview not in seen_texts and len(prompt_content.strip()) > 5:
                     all_quotes.append(Quote(
-                        text=m.content,
+                        text=prompt_content,
                         speaker=m.sender_name,
                         time=m.send_time.strftime("%m-%d %H:%M"),
                     ))

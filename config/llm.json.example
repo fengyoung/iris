@@ -1,5 +1,5 @@
 {
-  "version": "3.5",
+  "version": "3.6",
   "default_strategy": {
     "default_model_role": "base_model",
     "fallback_model_role": "adv_model",
@@ -10,12 +10,12 @@
   "models": {
     "base_model": {
       "enabled": true,
-      "default_model_id": "deepseek-v4-flash",
+      "default_model_id": "deepseek-v4-flash-zz",
       "models": {
-        "deepseek-v4-flash": {
-          "provider": "Deepseek",
+        "deepseek-v4-flash-zz": {
+          "channel": "zz_tokenhub",
           "model": "deepseek-v4-flash",
-          "display_name": "DeepSeek V4 Flash",
+          "display_name": "DeepSeek V4 Flash (zz_tokenhub)",
           "multimodal": false,
           "max_context_tokens": 1000000,
           "max_tokens": 8192,
@@ -34,46 +34,68 @@
             "summary",
             "analysis_basic"
           ],
-          "notes": "默认纯文本主力模型",
-          "api_base_url": "https://api.deepseek.com/v1",
-          "api_key": "${YOUR_API_KEY}"
+          "notes": "默认纯文本主力模型(zz_tokenhub 中转)"
         },
-        "deepseek-v4-pro": {
-          "provider": "Deepseek",
-          "model": "deepseek-v4-pro",
-          "display_name": "DeepSeek V4 Pro",
+        "deepseek-v4-flash": {
+          "channel": "deepseek",
+          "model": "deepseek-v4-flash",
+          "display_name": "DeepSeek V4 Flash (官方)",
           "multimodal": false,
           "max_context_tokens": 1000000,
-          "max_tokens": 16384,
+          "max_tokens": 8192,
           "temperature": 0.2,
           "top_p": 1.0,
-          "timeout_seconds": 120,
+          "timeout_seconds": 60,
           "max_retries": 2,
           "priority": 5,
           "cost_level": "low",
-          "reasoning_level": "advanced",
+          "reasoning_level": "standard",
           "supported_inputs": [
             "text"
           ],
           "use_cases": [
             "qa",
             "summary",
-            "analysis_complex",
-            "wiki_generate",
-            "conflict_resolution"
+            "analysis_basic"
           ],
-          "notes": "增强推理，用于复杂文本任务，base_model 降级链 fallback",
-          "api_base_url": "https://api.deepseek.com/v1",
-          "api_key": "${YOUR_API_KEY}"
+          "notes": "官方直连,base_model 降级链 fallback"
         }
       }
     },
     "adv_model": {
       "enabled": true,
-      "default_model_id": "deepseek-v4-flash-vision-exp",
+      "default_model_id": "qwen3.8-max-zz",
       "models": {
+        "qwen3.8-max-zz": {
+          "channel": "zz_tokenhub",
+          "model": "qwen3.8-max",
+          "display_name": "Qwen 3.8 Max (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 200000,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 300,
+          "max_retries": 3,
+          "priority": 70,
+          "cost_level": "high",
+          "reasoning_level": "advanced",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "wiki_extract_multimodal",
+            "wiki_rebuild",
+            "analysis_complex",
+            "image_understanding",
+            "conflict_resolution"
+          ],
+          "notes": "旗舰模型,adv_model 新默认(zz_tokenhub 中转)"
+        },
         "deepseek-v4-flash-vision-exp": {
-          "provider": "Deepseek",
+          "channel": "deepseek",
           "model": "deepseek-v4-flash-vision-exp",
           "display_name": "DeepSeek V4 Flash Vision (Exp)",
           "multimodal": true,
@@ -83,7 +105,7 @@
           "top_p": 1.0,
           "timeout_seconds": 120,
           "max_retries": 2,
-          "priority": 70,
+          "priority": 60,
           "cost_level": "low",
           "reasoning_level": "standard",
           "supported_inputs": [
@@ -98,127 +120,7 @@
             "image_understanding",
             "conflict_resolution"
           ],
-          "notes": "实验性视觉模型，最高优先级，adv_model 新默认",
-          "api_base_url": "https://api.deepseek.com/v1",
-          "api_key": "${YOUR_API_KEY}"
-        },
-        "qwen3.8-max": {
-          "provider": "Bailian",
-          "model": "qwen3.8-max",
-          "display_name": "Qwen 3.8 Max",
-          "multimodal": true,
-          "max_context_tokens": 200000,
-          "max_tokens": 8192,
-          "temperature": 0.2,
-          "top_p": 1.0,
-          "timeout_seconds": 300,
-          "max_retries": 3,
-          "priority": 60,
-          "cost_level": "high",
-          "reasoning_level": "advanced",
-          "supported_inputs": [
-            "text",
-            "image"
-          ],
-          "use_cases": [
-            "qa",
-            "wiki_extract_multimodal",
-            "wiki_rebuild",
-            "analysis_complex",
-            "image_understanding",
-            "conflict_resolution"
-          ],
-          "notes": "旗舰模型，第 2 优先级（deepseek-v4-flash-vision-exp 之后），多模态",
-          "api_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-          "api_key": "${YOUR_API_KEY}"
-        },
-        "qwen3.7-flash-2026-07-15": {
-          "provider": "Bailian",
-          "model": "qwen3.7-flash-2026-07-15",
-          "display_name": "Qwen 3.7 Flash (2026-07-15 快照)",
-          "multimodal": true,
-          "max_context_tokens": 1000000,
-          "max_tokens": 8192,
-          "temperature": 0.2,
-          "top_p": 1.0,
-          "timeout_seconds": 300,
-          "max_retries": 3,
-          "priority": 50,
-          "cost_level": "medium",
-          "reasoning_level": "standard",
-          "supported_inputs": [
-            "text",
-            "image"
-          ],
-          "use_cases": [
-            "qa",
-            "summary",
-            "analysis_basic",
-            "image_understanding",
-            "wiki_extract_multimodal"
-          ],
-          "notes": "Flash 快照版，第 2 级，轻量多模态",
-          "api_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-          "api_key": "${YOUR_API_KEY}"
-        },
-        "qwen3.7-flash": {
-          "provider": "Bailian",
-          "model": "qwen3.7-flash",
-          "display_name": "Qwen 3.7 Flash",
-          "multimodal": true,
-          "max_context_tokens": 1000000,
-          "max_tokens": 8192,
-          "temperature": 0.2,
-          "top_p": 1.0,
-          "timeout_seconds": 300,
-          "max_retries": 3,
-          "priority": 40,
-          "cost_level": "medium",
-          "reasoning_level": "standard",
-          "supported_inputs": [
-            "text",
-            "image"
-          ],
-          "use_cases": [
-            "qa",
-            "summary",
-            "analysis_basic",
-            "image_understanding",
-            "wiki_extract_multimodal"
-          ],
-          "notes": "第 3 级，轻量多模态",
-          "api_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-          "api_key": "${YOUR_API_KEY}"
-        },
-        "qwen3.7-plus-2026-05-26": {
-          "provider": "Bailian",
-          "model": "qwen3.7-plus-2026-05-26",
-          "display_name": "Qwen 3.7 Plus (2026-05-26 快照)",
-          "multimodal": true,
-          "max_context_tokens": 200000,
-          "max_tokens": 8192,
-          "temperature": 0.2,
-          "top_p": 1.0,
-          "timeout_seconds": 300,
-          "max_retries": 3,
-          "priority": 30,
-          "cost_level": "high",
-          "reasoning_level": "advanced",
-          "supported_inputs": [
-            "text",
-            "image"
-          ],
-          "use_cases": [
-            "qa",
-            "wiki_extract_multimodal",
-            "wiki_rebuild",
-            "analysis_complex",
-            "image_understanding",
-            "conflict_resolution"
-          ],
-          "notes": "第 4 级 fallback（唯一保留的 Plus 版，其余 Plus 因额度耗尽移除）",
-          "api_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-          "api_key": "${YOUR_API_KEY}"
+          "notes": "实验性视觉模型,adv_model 降级链 fallback(官方直连)"
         }
       }
     }
@@ -319,8 +221,8 @@
   "embedding": {
     "enabled": true,
     "model": "text-embedding-v3",
-    "api_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    "api_key": "${YOUR_API_KEY}",
+    "api_base_url": "${IRIS_BAILIAN_BASE_URL}",
+    "api_key": "${IRIS_BAILIAN_API_KEY}",
     "timeout_seconds": 30,
     "max_retries": 2
   }

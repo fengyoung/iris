@@ -1,3 +1,14 @@
+## v3.29.0 (2026-09-01)
+
+**飞书消息图片理解沉淀**（9 文件 / +测试 17）：让 feed-collect 与 chat-digest 两条消息管道真正「看」图片，而非把图片消息当 `[图片]` 占位或 `[Image: img_v3_xxx]` 原始 token 噪音文本——为图片消息补中文内容描述并注入下游 LLM。
+- **可复用组件** `MessageImageAnalyzer`（`src/iris/feishu/image_analyzer.py`）：下载 → 多模态 LLM（`LLMService.generate_multimodal`）→ 内容描述；按 `image_key` 跨运行、跨管道共享缓存（`data/image_analysis/`），受 `enabled` 开关 + `max_per_run` 单次上限控制；兼容 RawMessage 与飞书原始 dict 两种形态。
+- **FeishuClient 新增** `download_message_image()`（`im +messages-resources-download`）——区别于文档图 `download_image()`（`docs +media-download` 只认文档图，对消息图返回 404）。
+- **feed 管道**：Step 2b 插桩（过滤后、检测前）为 image 消息补描述；`RawMessage` 加 `image_description` 字段 + `content_for_prompt()` 三级回退（描述 > `[图片]` > 原文）；`_topic_detector` 两处序列化与 `_brief_generator` 引述改用 `content_for_prompt()`。
+- **chat-digest**：`digest()` 拉取后、格式化前分析图片，`image_descriptions[message_id]` 注入 `_format_conversation`（仅作用于进 prompt 的窗口）。
+- **配置**：`image_understanding: {enabled, max_per_run}`（feed 落 `feeds.json#topic_config`，chat-digest 落 `feishu_ingest.json#chat_digest`），默认 `{enabled: true, max_per_run: 10}`，`.example` 同步。
+- 已知边界：只处理 `msg_type == "image"` 的独立图片消息，post（富文本）内嵌图片不单独分析；单张分析失败降级 `[图片]` 占位不中断。
+- 端到端验证：对「图验先遣队」群 `feed-collect`（5 张播报图精确识别为直检率看板、描述入缓存）+ `chat-digest` 均跑通；全量 3,004 通过（原 2,987 + 17），ruff 零告警。协议版本 3.21（不变）；产品版本 3.28.5→**3.29.0**。
+
 ## v3.28.5 (2026-09-01)
 
 **LLM 调用统一到 LLMService 单一口径**（7 文件 / +56 -69）：消除「已创建 LLMService 却又 `get_provider()` 取回底层 provider 绕过响应缓存」的残留路径——这些调用虽走统一路由，但丢失响应缓存层。① scripts 层 — `extract_travel_invoice.py` / `extract_weekly_reports.py`（历史从外部项目合并、接入时仅替换为 `EnvironmentConfiguredLLMProvider`）改 `LLMService`；② ASR 层 — `wiki/asr/hotwords.py` 的 `extract()` 与 `wiki/asr/extractor.py` 的 `generate_misreadings()` 接口由 `provider: EnvironmentConfiguredLLMProvider` 改为 `llm: LLMService`；③ 检索层 — `retrieval/planner.py` 的 `LLMQueryPlanner` 参数名 `llm_provider` 实为 provider（命名误导），`retrieval/enhanced.py` 去掉 `get_provider()` 直接传 `LLMService`；④ 命令层 — `app/cli/_handlers/_wiki.py` 的 `build-asr-prompt` 改传 `llm_service`。统一点：`provider.generate(LLMRequest(...))` 全部适配为 `llm.generate(prompt, route_context=...)`，`temperature`/`max_tokens`/`_deadline` 原样保留。保留（非绕过，已逐一核实）：`asr/corrector.py` 的 `_provider` fallback（`set_provider` 测试注入 + `correct_text_static` 静态函数）、`route-model` 命令的 `ModelRouter`（仅查询路由决策）、各处 `get_provider()` 诊断用途（查模型配置/切模型/凭证检查/设独立熔断器）、`force_model` 显式指定模型。验证：全量 unit 1,910 通过（python3.13）、ruff 零告警。协议版本 3.21（不变）；app 配置版本 3.7（不变）；产品版本 3.28.4→**3.28.5**。

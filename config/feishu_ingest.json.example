@@ -12,6 +12,10 @@
     "dedup_index": "data/dedup/chat_digest_index.json",
     "default_output": "to_source",
     "default_range_days": 3,
-    "targets": []
+    "targets": [],
+    "image_understanding": {
+      "enabled": true,
+      "max_per_run": 10
+    }
   }
 }

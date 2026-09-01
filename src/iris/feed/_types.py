@@ -24,6 +24,18 @@ class RawMessage:
     send_time: datetime
     has_doc_link: bool = False
     doc_links: List[str] = field(default_factory=list)
+    image_description: str = ""  # 图片消息的内容描述（图片理解注入，避免 [Image: xxx] 噪音）
+
+    def content_for_prompt(self) -> str:
+        """LLM/模板渲染用文本：图片消息优先输出内容描述而非原始 token。
+
+        三级回退：有描述 → "（图片：…）"；无描述的图片 → "[图片]"；其他消息 → 原文。
+        """
+        if self.image_description:
+            return f"（图片：{self.image_description}）"
+        if self.msg_type == "image":
+            return "[图片]"
+        return self.content
 
 
 @dataclass

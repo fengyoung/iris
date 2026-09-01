@@ -15,7 +15,11 @@
     "min_msg_length": 10,
     "topic_min_messages": 2,
     "max_topics_per_run": 30,
-    "time_window_minutes": 30
+    "time_window_minutes": 30,
+    "image_understanding": {
+      "enabled": true,
+      "max_per_run": 10
+    }
   },
   "okr_mapping": {
     "enabled": true,

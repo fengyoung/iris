@@ -28,6 +28,8 @@ from iris.feed._okr_loader import OKRLoader, extract_dept_keyword
 from iris.feed._topic_detector import TopicDetector
 from iris.feed._types import PipelineResult
 from iris.feed.feed_config import FeedConfig, FeedConfigManager, load_feed_config
+from iris.feishu.client import FeishuClient
+from iris.feishu.image_analyzer import MessageImageAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +141,28 @@ class FeedPipeline:
         logger.info("Step 2: 过滤后剩余 %d 条", filtered_count)
         if filtered_count == 0:
             return PipelineResult.empty("所有消息被过滤，无有效内容")
+
+        # ── Step 2b: 图片理解（下载 → 多模态分析 → 补描述）──
+        # 为消息压缩补上图片内容描述，LLM 话题检测/总结时能引用图片信息，
+        # 而非把 [Image: img_v3_xxx] 原始 token 当噪音文本。
+        img_cfg = config.topic_config.get("image_understanding", {}) or {}
+        img_enabled = img_cfg.get("enabled", True)
+        img_max = img_cfg.get("max_per_run", 10)
+        if img_enabled:
+            analyzer = MessageImageAnalyzer(
+                FeishuClient(as_user=True), self._llm,
+                cache_dir=self._data_dir / "image_analysis",
+                enabled=True, max_per_run=img_max,
+            )
+            img_msgs = [m for msgs in filtered.values() for m in msgs if m.msg_type == "image"]
+            img_msgs.sort(key=lambda m: m.send_time)
+            analyzed = 0
+            for m in img_msgs:
+                desc = analyzer.describe_raw_message(m)
+                if desc:
+                    m.image_description = desc
+                    analyzed += 1
+            logger.info("Step 2b: 图片理解 %d/%d", analyzed, len(img_msgs))
 
         # ── Step 3: 话题检测 ──
         okr_context = self._okr_loader.load()

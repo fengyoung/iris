@@ -188,6 +188,37 @@ class TestRunMethod:
                 client._run(["wiki", "list"], timeout=10, retries=1)
 
 
+class TestDownloadMessageImage:
+    """消息图片下载（im +messages-resources-download）。"""
+
+    def test_downloads_with_rel_output(self):
+        client = FeishuClient()
+        with patch.object(client, "_run", return_value={"ok": True}) as mock_run:
+            client.download_message_image("om_123", "img_v3_x", "sub/img.png")
+            args = mock_run.call_args[0][0]
+            assert args[:2] == ["im", "+messages-resources-download"]
+            assert "--message-id" in args and "om_123" in args
+            assert "--file-key" in args and "img_v3_x" in args
+            assert "--type" in args and "image" in args
+            assert "--output" in args and "sub/img.png" in args
+            assert "--overwrite" not in args
+
+    def test_overwrite_appends_flag(self):
+        client = FeishuClient()
+        with patch.object(client, "_run", return_value={"ok": True}) as mock_run:
+            client.download_message_image("om_x", "img_v3_y", "b.png", overwrite=True)
+            args = mock_run.call_args[0][0]
+            assert "--overwrite" in args
+
+    def test_existing_file_skips_run(self, tmp_path):
+        client = FeishuClient()
+        f = tmp_path / "exists.png"
+        f.write_bytes(b"x")
+        with patch.object(client, "_run") as mock_run:
+            client.download_message_image("om_x", "img_v3_z", str(f))
+            mock_run.assert_not_called()
+
+
 class TestWikiNodeMeta:
     """WikiNodeMeta 数据类。"""
 

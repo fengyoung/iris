@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 
 class BaseConfigModel(BaseModel):
@@ -168,8 +168,15 @@ class DataSourceConfig(BaseConfigModel):
 
 
 class ModelItem(BaseConfigModel):
-    """单个模型配置。"""
-    provider: str
+    """单个模型配置。
+
+    v3.6: 接入信息(provider/api_base_url/api_key)不再内联必填,
+    改为通过 channel 字段引用通道,由 loader.resolve_channels() 从
+    环境变量 IRIS_<CHANNEL>_BASE_URL / _API_KEY / _PROVIDER 展开注入。
+    保留内联字段用于模型级覆盖(内联值优先于通道默认)。
+    """
+    channel: str = ""
+    provider: str = ""
     model: str
     display_name: str = ""
     multimodal: bool = False
@@ -184,15 +191,14 @@ class ModelItem(BaseConfigModel):
     supported_inputs: List[Literal["text", "image"]] = Field(default_factory=lambda: ["text"])
     use_cases: List[str] = Field(default_factory=list)
     notes: str = ""
-    api_base_url: str
-    api_key: SecretStr
+    api_base_url: str = ""
+    api_key: SecretStr = Field(default_factory=lambda: SecretStr(""))
 
-    @field_validator("api_base_url")
-    @classmethod
-    def non_empty_url(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("api_base_url 不能为空")
-        return v
+    @model_validator(mode="after")
+    def check_channel_or_base_url(self) -> "ModelItem":
+        if not self.channel.strip() and not self.api_base_url.strip():
+            raise ValueError("api_base_url 不能为空(channel 为空时须提供内联 api_base_url)")
+        return self
 
 
 class RoleModels(BaseConfigModel):

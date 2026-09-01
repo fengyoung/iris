@@ -36,6 +36,47 @@ class TestChatDigestClassify:
         assert result == "04-讨论思考"
 
 
+class TestFormatConversation:
+    """_format_conversation: 图片描述注入。"""
+
+    def _msg(self, msg_type, mid, content="", ts=1788260333, sender="张三"):
+        return {
+            "msg_type": msg_type, "message_id": mid, "content": content,
+            "create_time": str(ts), "sender": {"name": sender},
+        }
+
+    def _fmt(self, messages, image_descriptions=None):
+        from iris.feishu.chat_digest import ChatDigester
+        return ChatDigester._format_conversation(messages, "cx", image_descriptions)
+
+    def test_image_with_description(self):
+        out = self._fmt(
+            [self._msg("image", "om_1", "这是图片")],
+            image_descriptions={"om_1": "一张数据看板，总直检率45.7%"},
+        )
+        assert "（图片：一张数据看板，总直检率45.7%）" in out
+        assert "om_1" not in out
+
+    def test_image_without_description(self):
+        out = self._fmt([self._msg("image", "om_1", "这是图片")])
+        assert "[图片]" in out
+
+    def test_file_and_text_unchanged(self):
+        msgs = [
+            self._msg("file", "om_1"),
+            self._msg("text", "om_2", "讨论内容"),
+        ]
+        out = self._fmt(msgs)
+        assert "[文件]" in out
+        assert "讨论内容" in out
+
+    def test_image_no_desc_stays_placeholder(self):
+        out = self._fmt(
+            [self._msg("image", "om_1")], image_descriptions={"om_2": "别的"}
+        )
+        assert "[图片]" in out
+
+
 class TestBuildMarkdownTodoTable:
     """_build_markdown: 待办表格含 | 的边界情况。"""
 

@@ -310,7 +310,7 @@ class TopicDetector:
             input_lines.append(f"### 消息组 {idx} (来源: {chat_name}, {len(msgs)} 条)")
             for m in msgs[:20]:
                 input_lines.append(
-                    f"[{m.send_time.strftime('%m-%d %H:%M')}] {m.sender_name}: {m.content}"
+                    f"[{m.send_time.strftime('%m-%d %H:%M')}] {m.sender_name}: {m.content_for_prompt()}"
                 )
             input_lines.append("")
         input_text = "\n".join(input_lines)
@@ -425,7 +425,7 @@ class TopicDetector:
             msg_lines = []
             for m in sorted_msgs:
                 msg_lines.append(
-                    f"[{m.send_time.strftime('%m-%d %H:%M')}] {m.sender_name}: {m.content}"
+                    f"[{m.send_time.strftime('%m-%d %H:%M')}] {m.sender_name}: {m.content_for_prompt()}"
                 )
             full_text = "\n".join(msg_lines)
 

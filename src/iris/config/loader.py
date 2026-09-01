@@ -136,6 +136,94 @@ def resolve_env_vars(
     return data
 
 
+def _lookup_env(name: str, env: Dict[str, str]) -> tuple[Optional[str], str]:
+    """按优先级查找环境变量:OS 环境变量 > .env 文件 > macOS Keychain。
+
+    与 resolve_env_vars 的查找优先级一致,额外返回来源用于诊断日志。
+
+    Returns:
+        (值, 来源) — 来源为 "os" / ".env" / "keychain" / ""(未找到)
+    """
+    val = os.environ.get(name)
+    if val is not None:
+        return val, "os"
+    val = env.get(name)
+    if val is not None:
+        return val, ".env"
+    try:
+        from iris.config.secrets import get_secret
+        val = get_secret(name)
+        if val is not None:
+            return val, "keychain"
+    except (ImportError, OSError) as exc:
+        logger.debug("Keychain 查找 %s 失败: %s", name, exc)
+    return None, ""
+
+
+def _resolve_channel_attrs(channel: str, env: Dict[str, str]) -> Dict[str, str]:
+    """解析单个通道的三要素,并打印来源日志。
+
+    通道属性变量名约定(通道名 deepseek → 前缀 DEEPSEEK):
+      - base_url: IRIS_DEEPSEEK_BASE_URL
+      - api_key : IRIS_DEEPSEEK_API_KEY
+      - provider: IRIS_DEEPSEEK_PROVIDER(可选,默认 = 通道名)
+    """
+    prefix = channel.upper().replace("-", "_")
+
+    base_url, base_src = _lookup_env(f"IRIS_{prefix}_BASE_URL", env)
+    api_key, key_src = _lookup_env(f"IRIS_{prefix}_API_KEY", env)
+    provider, prov_src = _lookup_env(f"IRIS_{prefix}_PROVIDER", env)
+
+    base_url = base_url or ""
+    api_key = api_key or ""
+    provider = provider or channel
+
+    logger.info(
+        "[config] 通道 '%s': base_url@%s / api_key@%s / provider@%s",
+        channel,
+        base_src or "未设置",
+        key_src or "未设置",
+        prov_src or f"默认({channel})",
+    )
+    if not base_url:
+        logger.warning(
+            "[config] 通道 '%s' 的 IRIS_%s_BASE_URL 未设置,该通道模型将无法调用",
+            channel, prefix,
+        )
+
+    return {"provider": provider, "api_base_url": base_url, "api_key": api_key}
+
+
+def resolve_channels(llm_dict: Dict[str, Any], env: Dict[str, str]) -> None:
+    """将 LLM 模型的 channel 字段展开为 provider/api_base_url/api_key。
+
+    每个通道只解析一次(缓存),模型级内联值优先(setdefault 不覆盖),
+    支持个别模型用不同接入信息特例。
+    """
+    models = llm_dict.get("models", {})
+    if not isinstance(models, dict):
+        return
+
+    channel_cache: Dict[str, Dict[str, str]] = {}
+    for role_container in models.values():
+        if not isinstance(role_container, dict):
+            continue
+        role_models = role_container.get("models", {})
+        if not isinstance(role_models, dict):
+            continue
+        for model_cfg in role_models.values():
+            if not isinstance(model_cfg, dict):
+                continue
+            channel = model_cfg.get("channel", "")
+            if not channel:
+                continue
+            if channel not in channel_cache:
+                channel_cache[channel] = _resolve_channel_attrs(channel, env)
+            attrs = channel_cache[channel]
+            for key, value in attrs.items():
+                model_cfg.setdefault(key, value)
+
+
 def resolve_path_vars(data: Any, project_root: Path) -> Any:
     """递归替换字符串中的 ${IRIS_XXX_DIR} 路径占位符。
 
@@ -222,6 +310,9 @@ def load_config_bundle(
     # 环境变量解析
     for name in loaded:
         loaded[name] = resolve_env_vars(loaded[name], env)
+
+    # LLM 通道展开:模型的 channel → provider/api_base_url/api_key
+    resolve_channels(loaded.get("llm", {}), env)
 
     # 项目路径占位符解析
     for name in loaded:

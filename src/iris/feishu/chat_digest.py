@@ -17,6 +17,7 @@ from iris.feishu._shared import (
     sanitize_title, extract_date, now_iso,
 )
 from iris.llm import LLMService, LLMProviderError
+from iris.feishu.image_analyzer import MessageImageAnalyzer
 from iris.core.write_guard import safe_write_text
 
 logger = logging.getLogger(__name__)
@@ -118,8 +119,28 @@ class ChatDigester:
         # 5. 补全发送者
         raw_messages = self._client.batch_enrich_messages(raw_messages)
 
+        # 5b. 图片理解（下载 → 多模态分析 → 补描述）
+        fng = getattr(self._bundle, "feishu_ingest", None)
+        chat_digest_cfg = fng.get("chat_digest", {}) if fng else {}
+        img_cfg = chat_digest_cfg.get("image_understanding", {}) or {}
+        img_enabled = img_cfg.get("enabled", True)
+        img_max = img_cfg.get("max_per_run", 10)
+        image_descriptions: Dict[str, str] = {}
+        if img_enabled:
+            analyzer = MessageImageAnalyzer(
+                self._client, self._llm,
+                cache_dir=Path(self._bundle.root) / "data" / "image_analysis",
+                enabled=True, max_per_run=img_max,
+            )
+            for msg in raw_messages[:MAX_MESSAGES_IN_PROMPT]:
+                if msg.get("msg_type") == "image":
+                    desc = analyzer.describe_dict_message(msg)
+                    if desc:
+                        image_descriptions[msg.get("message_id", "")] = desc
+
         # 6. 格式化（按消息条数截断）
-        conversation = self._format_conversation(raw_messages, identifier)
+        conversation = self._format_conversation(
+            raw_messages, identifier, image_descriptions=image_descriptions)
 
         # 7. AI 提炼
         try:
@@ -247,7 +268,10 @@ class ChatDigester:
         return dt
 
     @staticmethod
-    def _format_conversation(messages: List[Dict[str, Any]], _identifier: str) -> str:
+    def _format_conversation(
+        messages: List[Dict[str, Any]], _identifier: str,
+        image_descriptions: Optional[Dict[str, str]] = None,
+    ) -> str:
         """格式化消息流，最多注入 MAX_MESSAGES_IN_PROMPT 条。"""
         lines = []
         for msg in messages[:MAX_MESSAGES_IN_PROMPT]:
@@ -281,7 +305,8 @@ class ChatDigester:
 
             prefix = f"{sender_name} ({time_str})" if sender_name else f"({time_str})"
             if msg_type == "image":
-                lines.append(f"{prefix}: [图片]")
+                desc = (image_descriptions or {}).get(msg.get("message_id", ""))
+                lines.append(f"{prefix}: （图片：{desc}）" if desc else f"{prefix}: [图片]")
             elif msg_type == "file":
                 lines.append(f"{prefix}: [文件]")
             else:

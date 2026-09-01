@@ -67,6 +67,7 @@ class FeedConfig:
             "time_window_minutes": 30,
             "extract_docs": True,
             "doc_extract_max": 10,
+            "image_understanding": {"enabled": True, "max_per_run": 10},
         }
         self.okr_mapping = okr_mapping or {
             "enabled": True,
@@ -144,6 +145,7 @@ def write_example_config(config_path: Path) -> None:
             "time_window_minutes": 30,
             "extract_docs": True,
             "doc_extract_max": 10,
+            "image_understanding": {"enabled": True, "max_per_run": 10},
         },
         "okr_mapping": {
             "enabled": True,
