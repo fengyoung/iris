@@ -150,7 +150,7 @@ python3 scripts/run_cli.py --call-source skill build-biweekly-report --to-source
 |------|------|
 | 标准生成 | `python3 scripts/run_cli.py --call-source skill build-biweekly-report --to-source` |
 | 预览检查 | `python3 scripts/run_cli.py --call-source skill build-biweekly-report --dry-run` |
-| 指定风格 | `python3 scripts/run_cli.py --call-source skill build-biweekly-report --to-source --style-from 20260621-双周报-w25-冯扬.md`（风格文件在 `06-我的周报/YYYY/` 子目录中，系统自动递归查找）|
+| 指定风格 | `python3 scripts/run_cli.py --call-source skill build-biweekly-report --to-source --style-from 20260621-双周报-w25-本人.md`（风格文件在 `06-我的周报/YYYY/` 子目录中，系统自动递归查找）|
 | 手动输出 | `python3 scripts/run_cli.py --call-source skill build-biweekly-report --output-file output/双周报.md` |
 
 ## 常见场景

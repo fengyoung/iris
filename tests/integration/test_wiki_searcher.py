@@ -25,8 +25,8 @@ class TestTokenize:
         assert "test" in tokens
 
     def test_chinese_text(self):
-        tokens = tokenize("智能质检进展")
-        assert "智能质检进展" in tokens
+        tokens = tokenize("智能检测进展")
+        assert "智能检测进展" in tokens
 
     def test_mixed_text(self):
         tokens = tokenize("Alpha项目进展")
@@ -113,9 +113,9 @@ type: concept
 
 class TestScorePage:
     def test_title_match_high_score(self):
-        score, terms = _score_page("智能质检", ["质检", "智能化"], "智能质检", "关于智能质检", "智能质检是核心")
+        score, terms = _score_page("智能检测", ["检测", "智能化"], "智能检测", "关于智能检测", "智能检测是核心")
         assert score >= 10
-        assert "质检" in terms or "智能化" in terms
+        assert "检测" in terms or "智能化" in terms
 
     def test_no_match_zero(self):
         score, terms = _score_page("完全无关", ["完全", "无关"], "测试", "测试页面", "内容")
@@ -133,7 +133,7 @@ class TestLoadIndexSummaries:
         assert result == {}
 
     def test_parse_index(self):
-        content = "# LLM-WIKI 索引\n\n## 领域\n\n- [智能质检](path/to/file.md) — 智能质检概述。\n"
+        content = "# LLM-WIKI 索引\n\n## 领域\n\n- [智能检测](path/to/file.md) — 智能检测概述。\n"
         p = tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False)
         p.write(content)
         p.close()

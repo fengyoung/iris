@@ -63,7 +63,7 @@ generation 机制保证「发布完整性」，但不保证「内容正确性」
 
 ### 2.5 LLM 响应文本提取正确性（v3.28.1）
 
-`_extract_chat_completions_text`（`llm/provider.py`）原在 `content` 为空时**静默回退返回 `reasoning_content`**（思考过程）——思考模型（deepseek-v4-flash）max_tokens 耗尽（finish_reason=length）时 content 为空而 reasoning 非空，思考文本被当最终输出返回。下游感知「成功」而把思考写入产物（实测 w35 双周报 Stage 4b 质量审查 13k 思考字符直接写入归档文件），比显式失败危害更大。
+`_extract_chat_completions_text`（`llm/provider.py`）原在 `content` 为空时**静默回退返回 `reasoning_content`**（思考过程）——思考模型（deepseek-v4-flash）max_tokens 耗尽（finish_reason=length）时 content 为空而 reasoning 非空，思考文本被当最终输出返回。下游感知「成功」而把思考写入产物（实测某期双周报 Stage 4b 质量审查 13k 思考字符直接写入归档文件），比显式失败危害更大。
 
 v3.28.1 确立的可靠性约定：
 

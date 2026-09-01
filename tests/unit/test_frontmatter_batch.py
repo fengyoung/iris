@@ -78,7 +78,7 @@ class TestExtractPeriod:
     """我的周报周期提取。"""
 
     def test_chinese_colon(self):
-        content = "*时间周期：2026.04.13～2026.04.26*\n\n## 智能质检技术"
+        content = "*时间周期：2026.04.13～2026.04.26*\n\n## 智能检测技术"
         assert FrontmatterBatchProcessor._extract_period(content) == "2026.04.13～2026.04.26"
 
     def test_english_colon(self):

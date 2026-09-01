@@ -160,13 +160,13 @@ class TestFormatReplaceDict:
         """规范化后重合也跳过（去空格/大小写）。"""
         path = str(tmp_path / "replace.json")
         terms = [
-            _make_term("AI质检", "concept", mis_asr=["ai质检"]),
-            _make_term("ai 质检", "concept", mis_asr=["ai质捡"]),
+            _make_term("AI检测", "concept", mis_asr=["ai检测"]),
+            _make_term("ai 检测", "concept", mis_asr=["ai检捡"]),
         ]
         result = format_replace_dict(terms, path)
         data = json.loads(Path(result).read_text(encoding="utf-8"))
-        assert "ai质检" not in data["replace_map"]  # 规范化后 == "AI质检"
-        assert data["replace_map"]["ai质捡"] == "ai 质检"
+        assert "ai检测" not in data["replace_map"]  # 规范化后 == "AI检测"
+        assert data["replace_map"]["ai检捡"] == "ai 检测"
 
     def test_creates_parent_dir(self, tmp_path):
         path = str(tmp_path / "sub" / "replace.json")

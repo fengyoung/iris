@@ -82,13 +82,17 @@ class TestLoadOpDocument:
         src = tmp_path / "SOURCE"
         op_dir = src / "01-目标管理"
         op_dir.mkdir(parents=True)
-        # 团队 OKR（应被排除）
-        (op_dir / "20260701-数据部门-测试研发-张三-OKR.md").write_text(
+        # 团队 OKR（按 team_okr_patterns 排除，文件名命中「-团队名-人名-OKR」）
+        (op_dir / "20260701-数据部门-测试团队-张三-OKR.md").write_text(
             "团队OKR内容", encoding="utf-8")
         # 部门级 OP（应被选中）
         (op_dir / "20260701-数据部门-OP规划.md").write_text(
             "部门OP内容", encoding="utf-8")
-        bundle = _make_bundle(tmp_path, source_dir=src)
+        bundle = _make_bundle(
+            tmp_path, source_dir=src,
+            biweekly_cfg={"dept_op_keyword": "数据部门",
+                          "team_okr_patterns": ["测试团队"]},
+        )
         c = BiweeklyCollector(bundle)
         result = c.load_op_document()
         assert result == "部门OP内容"
@@ -226,8 +230,8 @@ class TestBuildCitationLabel:
         assert label == "项目讨论-项目Alpha检测-0702"
 
     def test_discussion(self):
-        label = BiweeklyCollector._build_citation_label("20260701-内部讨论-智能质检.md", "讨论思考")
-        assert label == "内部讨论-智能质检-0701"
+        label = BiweeklyCollector._build_citation_label("20260701-内部讨论-智能检测.md", "讨论思考")
+        assert label == "内部讨论-智能检测-0701"
 
     def test_fallback_dir(self):
         label = BiweeklyCollector._build_citation_label("20260701-未知文件.md", "其他目录")

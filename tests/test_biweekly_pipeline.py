@@ -363,7 +363,7 @@ class TestReportAuthorConfig:
 class TestStage4bReviewFallback:
     """Stage 4b LLM 审查失败时必须安全回退 Stage 4a 组装稿，绝不写入失败产物。
 
-    回归背景：w35 双周报生成时 DeepSeek 思考模型 content 为空，provider 层
+    回归背景：某期双周报生成时 DeepSeek 思考模型 content 为空，provider 层
     曾静默回退返回 reasoning_content 思考文本，审查输出被思考过程污染并写入
     最终报告文件。v3.28.1 两层修复：provider 层不再回退思考文本（抛错），
     Stage 4b 层捕获异常回退组装稿。

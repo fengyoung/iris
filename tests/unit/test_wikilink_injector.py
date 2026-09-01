@@ -27,12 +27,12 @@ def wiki_root(tmp_path: Path) -> Path:
     """创建一个包含 4 种类型页面的临时 Wiki 根目录。"""
     root = tmp_path / "LLM-WIKI"
     root.mkdir()
-    _make_wiki_page(root, "01-领域", "领域-AI质检.md", "AI质检")
+    _make_wiki_page(root, "01-领域", "领域-智能检测.md", "智能检测")
     _make_wiki_page(root, "02-概念", "概念-Iris.md", "Iris")
     _make_wiki_page(root, "03-项目",
-                    "项目-X光手机拆修检测项目.md", "X光手机拆修检测项目")
+                    "项目-硬件拆修检测项目.md", "硬件拆修检测项目")
     _make_wiki_page(root, "03-项目",
-                    "项目-影像3.0 AI外观定级项目.md", "影像3.0 AI外观定级项目")
+                    "项目-图像验证 AI外观评估项目.md", "图像验证 AI外观评估项目")
     _make_wiki_page(root, "04-人物", "人物-张三.md", "张三")
     _make_wiki_page(root, "04-人物", "人物-李四.md", "李四")
     _make_wiki_page(root, "04-人物", "人物-李光明.md", "李光明")
@@ -56,7 +56,7 @@ class TestWikilinkInjectorIndex:
         # 验证 frontmatter title 被索引
         assert "张三" in titles
         assert titles["张三"] == "04-人物/人物-张三"
-        assert "X光手机拆修检测项目" in titles
+        assert "硬件拆修检测项目" in titles
 
     def test_index_relative_path_format(self, wiki_root: Path):
         """索引使用 type_dir/filename 格式的路径。"""
@@ -70,8 +70,8 @@ class TestWikilinkInjectorIndex:
         """文件名去掉类型前缀后也可作为标题。"""
         injector = WikilinkInjector(wiki_root)
         titles = injector.get_title_index()
-        # 文件名 "项目-X光手机拆修检测项目" → 标题 "X光手机拆修检测项目"
-        assert "X光手机拆修检测项目" in titles
+        # 文件名 "项目-硬件拆修检测项目" → 标题 "硬件拆修检测项目"
+        assert "硬件拆修检测项目" in titles
         # 文件名 "人物-张三" → 标题 "张三"
         assert "张三" in titles
 
@@ -114,9 +114,9 @@ class TestWikilinkInjectorInject:
 
     def test_inject_project_name(self, injector: WikilinkInjector):
         """正文中的项目名被替换为 wikilink。"""
-        content = "X光手机拆修检测项目本周上线了新模型。"
+        content = "硬件拆修检测项目本周上线了新模型。"
         result = injector.inject(content)
-        assert "X光手机拆修检测项目" not in result or \
+        assert "硬件拆修检测项目" not in result or \
             "[[" in result
 
     def test_only_first_occurrence(self, injector: WikilinkInjector):
@@ -172,12 +172,12 @@ class TestWikilinkInjectorInject:
 
     def test_longest_match_first(self, injector: WikilinkInjector):
         """长标题优先匹配，避免短标题的误匹配。"""
-        # "X光手机拆修检测项目" 比 "X光" 长
+        # "硬件拆修检测项目" 比 "硬件" 长
         # 确保长标题完整匹配
-        content = "X光手机拆修检测项目有新进展。"
+        content = "硬件拆修检测项目有新进展。"
         result = injector.inject(content)
         # 整个长标题应被匹配（作为单个 wikilink）
-        target = injector.get_title_index().get("X光手机拆修检测项目", "")
+        target = injector.get_title_index().get("硬件拆修检测项目", "")
         if target:
             assert f"[[{target}]]" in result
 
@@ -221,10 +221,10 @@ class TestWikilinkInjectorHelper:
     def test_extract_title_from_filename(self):
         """_extract_title_from_filename 正确去掉类型前缀。"""
         f = WikilinkInjector._extract_title_from_filename
-        assert f("项目-X光检测项目") == "X光检测项目"
+        assert f("项目-硬件检测项目") == "硬件检测项目"
         assert f("人物-张三") == "张三"
         assert f("概念-Iris") == "Iris"
-        assert f("领域-AI质检") == "AI质检"
+        assert f("领域-智能检测") == "智能检测"
         # 无前缀时保持原样
         assert f("普通文件名") == "普通文件名"
 
@@ -246,16 +246,16 @@ class TestWikilinkInjectorHelper:
     def test_find_safe_skips_wikilink_markers(self):
         """_find_safe 跳过 \x01...\x02 标记区域，不匹配内部文本。"""
         # 模拟已注入 wikilink 的内容：\x01target-path\x02 followed by text
-        text_with_wl = "\x0103-项目/项目-X光手机拆修检测\x02 正文"
-        # 搜索 "X光" — 它在 wikilink target 路径内部，应被跳过
-        idx = WikilinkInjector._find_safe(text_with_wl, "X光")
+        text_with_wl = "\x0103-项目/项目-硬件拆修检测\x02 正文"
+        # 搜索 "硬件" — 它在 wikilink target 路径内部，应被跳过
+        idx = WikilinkInjector._find_safe(text_with_wl, "硬件")
         assert idx == -1  # 在标记区域内，不应匹配
 
     def test_find_safe_finds_outside_markers(self):
         """_find_safe 在标记区域外的文本中正常匹配。"""
-        text = "\x0103-项目/项目-X光手机拆修检测\x02 正文中提到了 X光。"
-        idx = WikilinkInjector._find_safe(text, "X光")
-        # 第二个 X光 在正文中（标记区域外），应被找到
+        text = "\x0103-项目/项目-硬件拆修检测\x02 正文中提到了 硬件。"
+        idx = WikilinkInjector._find_safe(text, "硬件")
+        # 第二个 硬件 在正文中（标记区域外），应被找到
         assert idx > 10  # 在较后的位置
 
     def test_nested_wikilink_prevention(self, wiki_root: Path):

@@ -329,7 +329,7 @@ class TestS3CheckSubareaOrder:
 
 
 class TestW31StyleFrozen:
-    """防回归：Stage 3 模板与默认风格指南必须保持 w31 风格
+    """防回归：Stage 3 模板与默认风格指南必须保持固化风格
     （总结段「思考→决策」+ 关键进展项目级聚合 ≤3 子项）。"""
 
     @staticmethod

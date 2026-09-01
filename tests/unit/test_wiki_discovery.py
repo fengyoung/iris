@@ -106,10 +106,10 @@ class TestNoiseCandidateFilter:
         assert is_noise_candidate(title), f"应判定为噪音: {title}"
 
     @pytest.mark.parametrize("title", [
-        "XRay拆修检测项目",
-        "拍照3.0主观项检测",
+        "硬件拆修检测项目",
+        "硬件检测主观项检测",
         "视频稽查与在线审核",
-        "二奢拍图验真",
+        "商品图片验真",
         "标注平台优化",
     ])
     def test_real_titles_kept(self, title):
@@ -125,7 +125,7 @@ class TestNoiseCandidateFilter:
                               score=1007, evidence_count=1007,
                               sample_paths=[], rationale="", has_wiki=False,
                               wiki_stale=False, wiki_path="")
-        real = CandidateItem(title="XRay拆修检测项目", page_type="project", query="",
+        real = CandidateItem(title="硬件拆修检测项目", page_type="project", query="",
                              score=834, evidence_count=212,
                              sample_paths=[], rationale="", has_wiki=False,
                              wiki_stale=False, wiki_path="")
@@ -135,4 +135,4 @@ class TestNoiseCandidateFilter:
         # 验证过滤函数本身对候选列表的过滤行为
         from iris.wiki.discovery import is_noise_candidate
         kept = [c for c in [noise, real] if not is_noise_candidate(c.title)]
-        assert [c.title for c in kept] == ["XRay拆修检测项目"]
+        assert [c.title for c in kept] == ["硬件拆修检测项目"]

@@ -119,11 +119,11 @@ class TestUpdatePagePreservesManualFields:
         ])
 
         # 飞书只返回 department，email 为空
-        enricher._update_page(page, "张三", "数据智能部", "")
+        enricher._update_page(page, "张三", "数据部门", "")
 
         text = page.read_text(encoding="utf-8")
         assert "email: zhangsan@example.com" in text, "已有 email 不得被清空（回归核心断言）"
-        assert "department: 数据智能部" in text
+        assert "department: 数据部门" in text
 
     def test_empty_department_keeps_existing(self, tmp_path):
         enricher = self._make_enricher()

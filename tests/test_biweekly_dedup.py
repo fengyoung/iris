@@ -144,7 +144,7 @@ class TestExtractKeyBullets:
 FAKE_DIRECTION = {
     "id": 1,
     "name": "质检流程智能化",
-    "strategic_quote": "构建功能检测、质量检测、真伪检测的质检能力",
+    "strategic_quote": "构建功能检测、质量检测、商品评估的检测能力",
     "scope_summary": "覆盖项目Alpha、项目Beta、项目Gamma",
     "key_indicators": ["检出率", "通过率"],
     "sub_areas": [],

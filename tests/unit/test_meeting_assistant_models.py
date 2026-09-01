@@ -193,15 +193,15 @@ class TestConflictDetection:
     def test_refinement_not_conflict(self):
         """讨论细化/进展不判冲突（缺陷 3 回归）。"""
         s = MeetingState()
-        s.check_conflict(["售后归拢到校需求提出"])
-        conflicts = s.check_conflict(["售后归拢方案可能不满足需求"])
+        s.check_conflict(["质检流程优化需求提出"])
+        conflicts = s.check_conflict(["质检流程方案可能不满足需求"])
         assert conflicts == []
 
     def test_constraint_not_conflict(self):
         """约束性否定（"不能有差异"）不判冲突。"""
         s = MeetingState()
-        s.check_conflict(["重质量检率统一指标"])
-        conflicts = s.check_conflict(["重质量检率不能有地区差异"])
+        s.check_conflict(["重点质量指标统一指标"])
+        conflicts = s.check_conflict(["重点质量指标不能有地区差异"])
         assert conflicts == []
 
     def test_double_negation_not_conflict(self):
@@ -214,16 +214,16 @@ class TestConflictDetection:
     def test_overturn_detected(self):
         """明确推翻（"不可行" vs 肯定结论）判定为冲突。"""
         s = MeetingState()
-        s.check_conflict(["重质量检率统一指标"])
-        conflicts = s.check_conflict(["重质量检率统一不可行"])
+        s.check_conflict(["重点质量指标统一指标"])
+        conflicts = s.check_conflict(["重点质量指标统一不可行"])
         assert len(conflicts) == 1
         assert "统一不可行" in conflicts[0]
 
     def test_explicit_objection_detected(self):
         """明确反对（"反对"）判定为冲突。"""
         s = MeetingState()
-        s.check_conflict(["售后归拢到校需求提出"])
-        conflicts = s.check_conflict(["反对售后归拢到校方案"])
+        s.check_conflict(["质检流程优化需求提出"])
+        conflicts = s.check_conflict(["反对质检流程优化方案"])
         assert len(conflicts) == 1
 
 

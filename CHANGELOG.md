@@ -1,10 +1,14 @@
+## v3.28.3 (2026-09-01)
+
+开源前信息安全复审 — 全库二次脱敏（40+ 文件）：① 变更日志与文档中残留的真实姓名、业务指标、内部项目名与团队规模数字全部泛化（含历史条目）；② 测试与模板中的真实业务示例（OKR 目标树、会议内容、项目代号）替换为通用示例；③ 工程加固 — git 历史作者邮箱迁移至 noreply 形式、CI 最小权限（`contents: read`）、`.gitignore` 补 `.env.*` 纵深防御。协议版本 3.21（不变）。产品版本 3.28.2→**3.28.3**。
+
 ## v3.28.2 (2026-09-01)
 
 **batch-transcribe 批量会议纪要修复**（3 文件 / +111，回归测试 +2）：① 根因 — `handle_batch_transcribe`（`app/cli/_handlers/_content.py`）调用 `TranscribeMeetingPipeline.run_batch(...)`，但 pipeline 类从未实现该方法，命令一执行即抛 `AttributeError`；② 修复 — 补全 `run_batch`（`app/transcribe_meeting/pipeline.py`）：按扩展名分流（15 种音视频扩展名走 Whisper 转写，其余视为已有转写文本）、逐文件调用 `run()`、单文件失败捕获入 `results.error` 不中断批量、返回 `{total, succeeded, failed, results}` 与 formatter `_fmt_batch_transcribe` 展示结构匹配、批量层 `TaskReporter` 埋点（每文件 `report_phase` 进度）；handler 补传 `to_source=getattr(args, "to_source", False)`（此前批量模式丢失 `--to-source`，单文件模式本就有此能力）；③ 测试 +2（`TestRunBatch`：混合文件成功/失败容错、音频/文本分流 + `output_dir`/`to_source` 透传）。验证：`tests/test_transcribe_meeting.py` 16 全过（原 14 + 新 2）、formatter 相关 68 全过、ruff 零告警、真实端到端 `batch-transcribe --dir <目录> --to-source` 跑通（路由归档正常，测试产物已清理）。协议版本 3.21（不变）。产品版本 3.28.1→**3.28.2**。
 
 ## v3.28.1 (2026-08-30)
 
-**LLM 思考文本污染修复**（2 文件 / +7 测试）：① 根因 — `_extract_chat_completions_text`（`llm/provider.py`）在 `content` 为空时静默回退返回 `reasoning_content`（思考过程），思考模型（deepseek-v4-flash）max_tokens 耗尽（finish_reason=length）时把思考当最终输出；② 实测影响 — w35 双周报生成中 Stage 4b 质量审查 LLM 思考 13k 字符直接写入归档文件（报告正文全部被思考过程取代），Stage 1 过滤拿到思考文本 JSON 解析失败全部归入 low；③ 修复 — provider 层 content 为空直接抛 `LLMProviderError`（绝不回退思考文本，让上层走重试/降级链）；Stage 4b 防御性降级（`analysis/service.py`）— LLM 调用失败时回退返回 Stage 4a 组装稿并告警，绝不写入失败产物；④ 测试 +7（`TestExtractChatCompletionsText` 5 用例：正常文本/list 提取/空 content+reasoning 抛错/缺失 content+reasoning 抛错/空 list+reasoning 抛错；`TestStage4bReviewFallback` 2 用例：失败回退组装稿/成功返回修订稿）。验证：llm+analysis 相关 237 全过，全量 unit 通过（本地 4 个 meeting_assistant 文件为既有 pydantic 收集错误，与本次无关），ruff 零告警。协议版本 3.21（不变）。产品版本 3.28.0→**3.28.1**。
+**LLM 思考文本污染修复**（2 文件 / +7 测试）：① 根因 — `_extract_chat_completions_text`（`llm/provider.py`）在 `content` 为空时静默回退返回 `reasoning_content`（思考过程），思考模型（deepseek-v4-flash）max_tokens 耗尽（finish_reason=length）时把思考当最终输出；② 实测影响 — 某期双周报生成中 Stage 4b 质量审查 LLM 思考 13k 字符直接写入归档文件（报告正文全部被思考过程取代），Stage 1 过滤拿到思考文本 JSON 解析失败全部归入 low；③ 修复 — provider 层 content 为空直接抛 `LLMProviderError`（绝不回退思考文本，让上层走重试/降级链）；Stage 4b 防御性降级（`analysis/service.py`）— LLM 调用失败时回退返回 Stage 4a 组装稿并告警，绝不写入失败产物；④ 测试 +7（`TestExtractChatCompletionsText` 5 用例：正常文本/list 提取/空 content+reasoning 抛错/缺失 content+reasoning 抛错/空 list+reasoning 抛错；`TestStage4bReviewFallback` 2 用例：失败回退组装稿/成功返回修订稿）。验证：llm+analysis 相关 237 全过，全量 unit 通过（本地 4 个 meeting_assistant 文件为既有 pydantic 收集错误，与本次无关），ruff 零告警。协议版本 3.21（不变）。产品版本 3.28.0→**3.28.1**。
 
 **深度审查批次 1 数据止损** — 全项目深度代码审查（6 路并行覆盖 27 模块）后的批次 1 数据止损修复（12 文件 / 回归测试 +19）：
 
@@ -24,7 +28,7 @@ LLM 配置修复与新视觉模型默认（4 文件 / +85 -11 + 测试 +1）：�
 
 ## v3.27.1 (2026-08-17)
 
-双周报生成 w31 风格固化（3 文件 / +1 测试类）：① 重写 `templates/prompt/biweekly_stage3_direction.md` — 总结段由「4 段式机械结构」改为 w31 式**逐项目「目标→思考→决策→下一步」**（项目目标 → 思考主线/归因（事实简短带过）→ 决策 → 下一步，以「我们」视角行文，含正/反示例）；关键进展改为**项目级聚合**（每 sub_area 1 个加粗聚合条目 + ≤3 子项，严禁拆散并列，挑选最关键进展，无素材标注「本期无重要进展」）；② `_biweekly_helpers.py` DEFAULT_STYLE_GUIDE 同步更新（默认生成不带 --style-from 也保持 w31 风格）；③ 防回归测试 +6（`TestW31StyleFrozen`：模板关键规则 + 默认风格指南断言）。背景：w33 首版总结宽泛空洞、关键进展过细（同项目拆多条），且 Stage 3 合成 240s 超时会静默丢弃末方向（素材未缺却输出「无实质进展」）。验证：biweekly 相关 133 全过，ruff 零告警。协议版本 3.20（不变）。产品版本 3.27.0→**3.27.1**。
+双周报生成写作风格固化（3 文件 / +1 测试类）：① 重写 `templates/prompt/biweekly_stage3_direction.md` — 总结段由「4 段式机械结构」改为**逐项目「目标→思考→决策→下一步」**（项目目标 → 思考主线/归因（事实简短带过）→ 决策 → 下一步，以「我们」视角行文，含正/反示例）；关键进展改为**项目级聚合**（每 sub_area 1 个加粗聚合条目 + ≤3 子项，严禁拆散并列，挑选最关键进展，无素材标注「本期无重要进展」）；② `_biweekly_helpers.py` DEFAULT_STYLE_GUIDE 同步更新（默认生成不带 --style-from 也保持该风格）；③ 防回归测试 +6（`TestW31StyleFrozen`：模板关键规则 + 默认风格指南断言）。背景：某期首版总结宽泛空洞、关键进展过细（同项目拆多条），且 Stage 3 合成 240s 超时会静默丢弃末方向（素材未缺却输出「无实质进展」）。验证：biweekly 相关 133 全过，ruff 零告警。协议版本 3.20（不变）。产品版本 3.27.0→**3.27.1**。
 
 ## v3.27.0 (2026-08-16)
 
@@ -548,13 +552,13 @@ ASR 校正引擎热键门控修复：长语音不再被跳过（2 文件 / +215 
 
 ### 1. 背景
 
-提取 W32 成员周报时发现：李嘉晨 08-07 发送的周报邮件主题仍写「20260731」（复制上周标题未改日期），归档后「邮件信息」栏主题日期与实际发送日期矛盾，易误读为错误周期。
+提取某周成员周报时发现：团队成员 08-07 发送的周报邮件主题仍写「20260731」（复制上周标题未改日期），归档后「邮件信息」栏主题日期与实际发送日期矛盾，易误读为错误周期。
 
 ### 2. 改动（`scripts/extract_weekly_reports.py`）
 
 - 新增 `WeeklyReportMarkdownGenerator._subject_date_mismatch_note()` 静态方法：从主题中提取 `YYYYMMDD` / `YYYY-MM-DD` 日期（正则，兼容时区），与邮件实际发送日期比较，不一致时生成标注文本。
 - `generate_content` 邮件信息栏集成：不一致时追加 `- **⚠️ 主题日期与发送日期不一致**: 主题标注 X，实际发送 Y（可能是复制标题未改日期）`；一致或无日期时不加注（零噪音）。
-- 已生成的 `20260807-周报-w32-李嘉晨.md` 同步加注（数据文件，不入库）。
+- 已生成的对应归档文件同步加注（数据文件，不入库）。
 
 ### 3. 测试
 
@@ -668,11 +672,11 @@ Wiki 发现噪音过滤 + 知识图谱全量重建边去重修复（3 文件 / +
 
 ### 2. 全库泛化（文档与模板）
 
-- **真实人名 → 通用占位**：冯扬/卞凯/李嘉晨等 11 人姓名替换为「本人/团队成员/负责人」等通用表述。
-- **企业邮箱 → `example.com`**：`zhuanzhuan.com` 域名全库替换。
-- **真实 OKR/项目名/业务指标 → 通用词**：图验技术/拍照3.0/XRay/台球杆/直检率等替换为「图像验证技术/硬件检测/直检率指标」等（`templates/prompt/biweekly_*.md` / `misreadings.md` / `generate_person.txt`）。
+- **真实人名 → 通用占位**：多名团队成员姓名替换为「本人/团队成员/负责人」等通用表述。
+- **企业邮箱 → `example.com`**：企业域名全库替换。
+- **真实 OKR/项目名/业务指标 → 通用词**：内部项目名与业务指标替换为「图像验证技术/硬件检测/质量指标」等（`templates/prompt/biweekly_*.md` / `misreadings.md` / `generate_person.txt`）。
 - **Skill 文档重写**：iris-okr-check KR 检索词表、iris-feed dry-run 示例、iris-wiki 示例整体替换。
-- **DESIGN-feed-collect.md / CHANGELOG.md 二次脱敏**：历史条目中残留的飞书 ID/群名/成员数/内部项目名（zz-algo-plat 等）清理。
+- **DESIGN-feed-collect.md / CHANGELOG.md 二次脱敏**：历史条目中残留的飞书 ID/群名/成员数/内部项目名清理。
 
 ### 3. 测试断言同步（61 文件）
 
@@ -680,7 +684,7 @@ Wiki 发现噪音过滤 + 知识图谱全量重建边去重修复（3 文件 / +
 
 ### 4. 合并冲突解决（1 处）
 
-- `.claude/skills/iris-okr-check/SKILL.md`：合并保留 main 侧「01-目标管理 按年归档 `YYYY/` 子目录」路径修复 + alpha 侧「冯扬→本人姓名」泛化，两侧意图均保留。
+- `.claude/skills/iris-okr-check/SKILL.md`：合并保留 main 侧「01-目标管理 按年归档 `YYYY/` 子目录」路径修复 + alpha 侧「本人姓名」泛化，两侧意图均保留。
 
 ### 版本升级
 
@@ -1672,7 +1676,7 @@ ASR 引擎全面质量加固 — P0 字符串截断 + P1 正确性 + P2 健壮�
 
 ### P1 改进（内容质量提升，6 项）
 
-- **Stage 3 约束重构**：`max_items` 硬约束 → 子方向全覆盖 + 每子方向 ≤3 条 + 每条 ~50 字精简。解决 3 子方向抢 4 条配额导致真伪检测被合并的问题
+- **Stage 3 约束重构**：`max_items` 硬约束 → 子方向全覆盖 + 每子方向 ≤3 条 + 每条 ~50 字精简。解决 3 子方向抢 4 条配额导致部分子方向被合并的问题
 - **Stage 3 brief 优先级排序**：按 Stage 1 分发（high/medium/low）+ owner 匹配计算优先级，确保高质量 brief 优先进入 LLM 上下文
 - **Stage 4b 审查维度扩展**：新增子方向覆盖完整性检查（维度 4），条目数量规则改为每子方向 ≤3 条，审查项 10→11 重新编号
 - **Stage 2 方向上下文增强**：注入子方向名称/责任人/目标信息 + `relevant_directions` 合并 Stage 1 分发，避免跨方向内容遗漏
@@ -1916,7 +1920,7 @@ ASR 实时校正引擎 — 从离线配置编译器升级为 vocotype 实时校�
 
 ### 人物丰富优化
 
-- **预先过滤已丰富页面**：新增 `_needs_enrichment()` 方法，在调用飞书通讯录 API 前先检查 frontmatter，跳过已含 department/email 的页面（436 人中绝大多数可跳过），从根本上减少 API 调用量
+- **预先过滤已丰富页面**：新增 `_needs_enrichment()` 方法，在调用飞书通讯录 API 前先检查 frontmatter，跳过已含 department/email 的页面（绝大多数人员可跳过），从根本上减少 API 调用量
 - **自适应批间延迟**：成功时逐步恢复至 3s，失败（检测到频率限制）时翻倍至上限 30s，避免退避后再次触发的振荡
 - **批次大小调低**：`_BATCH_SIZE` 20 → 10，单批 API 负载减半
 
@@ -2210,7 +2214,7 @@ SOURCE 结构优化：新增「工作简报」栏目 + bug 修复。
 ### 新功能
 
 - **SOURCE 新增 09-工作简报/**：用于存放从聊天记录、多会议总结、邮件等多渠道聚合生成的项目进展简报和工作简报。规范命名 `{YYYYMMDD}-简报-{topic}（from{source_type}）.md`。
-- **简报归档**：已迁移两份简报至新栏目（W28 会议纪要聚合 + 某流程优化方案推动进展）。
+- **简报归档**：已迁移两份简报至新栏目（会议纪要聚合 + 某流程优化方案推动进展）。
 
 ### Bug 修复
 
@@ -2818,14 +2822,14 @@ SOURCE 结构优化：新增「工作简报」栏目 + bug 修复。
 
 ### extract-weekly-reports 扫描漏人修复 + 测试补全（384 → 397 测试）
 
-**问题**：白名单 12 人本周实际 10 人提交周报，`extract-weekly-reports` CLI 仅扫到 3 人，静默漏掉 7 人（团队成员B、团队成员X、团队成员A、团队成员G、团队成员D、团队成员H、团队成员I）。根因 `LarkMailScanner.scan_triage` 走「folder + time_range」list 路径，这些成员的周报带 `IMPORTANT` 标签、散落在 priority/自定义文件夹并落在 list 首屏 50 封之外，list 路径捞不到；search 路径（`--query`，跨全文件夹）可一次命中。
+**问题**：白名单成员本周多数提交周报，`extract-weekly-reports` CLI 仅扫到少数几人，静默漏掉多数（团队成员B、团队成员X、团队成员A、团队成员G、团队成员D、团队成员H、团队成员I）。根因 `LarkMailScanner.scan_triage` 走「folder + time_range」list 路径，这些成员的周报带 `IMPORTANT` 标签、散落在 priority/自定义文件夹并落在 list 首屏 50 封之外，list 路径捞不到；search 路径（`--query`，跨全文件夹）可一次命中。
 
 **修复（`scripts/extract_weekly_reports.py` + `config/weekly_report.json`）：**
 - `scan_triage` 新增 `query` 参数：非空时走跨全文件夹 search 路径（追加 `--query`，filter 仅带 `time_range` 不带 folder）；为空保持旧 folder-list 行为（向后兼容）
 - `scan_mailbox` 新增 search 模式：按 `subject_keywords` 逐关键词搜索、按 `message_id` 合并去重；在逐封拉取完整正文前新增 `_prefilter_summaries`（按白名单 email 子串 + 主题关键词预筛 summary），message GET 由 ~50 次降至 ~12 次
 - `EmailFilter`：新增 `is_recall_notice` 排除「发件人已撤回邮件」通知；`filter_emails` 同一发件人按日期保留最新一封（团队成员C本周重复 3 封 → 1 封干净版）
 - 配置层：`config/weekly_report.json` 新增 `scan.mode`（默认 `search`，保留 `folder` 兜底），schema 版本 3.2 → 3.3；同步 `.example`
-- 实测：dry-run 命中 3 → 10 人，10 位白名单提交成员 w27 周报全部落地 `SOURCE/07-成员周报`
+- 实测：dry-run 命中人数大幅提升，白名单提交成员当周周报全部落地 `SOURCE/07-成员周报`
 
 **测试补全（+13 用例，384 → 397）：**
 - `test_weekly_report_extract.py`（新建，13 用例）：scan_triage search/folder 路径命令组装（`--query` 有无、filter 是否带 folder）/ `scan_mode` 解析（默认 search、非法值兜底）/ `_prefilter_summaries` 白名单+关键词预筛与空白名单透传 / `EmailFilter` 撤回通知排除 + 同人保留最新 + 非白名单/无关键词剔除
@@ -3014,7 +3018,7 @@ SOURCE 结构优化：新增「工作简报」栏目 + bug 修复。
 - `TranscribeMeetingPipeline` 新增 `model` 参数，可指定纪要生成模型
 - `scripts/refresh_meeting_minutes.py` — 独立翻新脚本，支持 dry-run/resume/verify
 - 使用 deepseek-v4-pro 重新提取全部 111 份历史转录文件纪要
-- 人物歧义处理：6 人手动排歧，飞书信息统一修正
+- 人物歧义处理：多名人员手动排歧，飞书信息统一修正
 
 ---
 

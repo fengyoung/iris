@@ -26,7 +26,7 @@ class TestProbeRunning:
     def test_alive_pid(self, tmp_path):
         (tmp_path / "asr-corrector.pid").write_text(str(os.getpid()))
         with patch("subprocess.run", return_value=SimpleNamespace(
-                stdout="python /Users/fengyoung/MyProjects/iris3/src/iris/app/main.py")):
+                stdout="python /Users/dev/myproject/src/iris/app/main.py")):
             assert _probe_running("asr-corrector", tmp_path) is True
         assert (tmp_path / "asr-corrector.pid").exists()
 
@@ -183,7 +183,7 @@ class TestPipelineParallel:
         (pid_dir / "asr-corrector.pid").write_text(str(os.getpid()))
         assistant = _make_assistant(tmp_path)
         with patch("subprocess.run", return_value=SimpleNamespace(
-                stdout="python /Users/fengyoung/MyProjects/iris3/src/iris/app/main.py")), \
+                stdout="python /Users/dev/myproject/src/iris/app/main.py")), \
              patch.object(assistant, "_audio_loop", side_effect=KeyboardInterrupt):
             assert assistant.run() == 0  # 不再返回 1，正常执行
 

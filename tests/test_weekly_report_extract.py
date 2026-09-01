@@ -193,7 +193,7 @@ def test_subject_date_mismatch_note_detects():
     from datetime import datetime
     gen = _make_generator()
     send_date = datetime(2026, 8, 7)
-    note = gen._subject_date_mismatch_note("【周报】李嘉晨 - 20260731", send_date)
+    note = gen._subject_date_mismatch_note("【周报】团队成员 - 20260731", send_date)
     assert note is not None
     assert "2026-07-31" in note
     assert "2026-08-07" in note
@@ -204,22 +204,22 @@ def test_subject_date_mismatch_note_consistent_returns_none():
     gen = _make_generator()
     send_date = datetime(2026, 8, 7)
     # 主题日期与发送日期一致 → 无标注
-    assert gen._subject_date_mismatch_note("【周报】李嘉晨 - 20260807", send_date) is None
+    assert gen._subject_date_mismatch_note("【周报】团队成员 - 20260807", send_date) is None
     # 主题无日期 → 无标注
-    assert gen._subject_date_mismatch_note("【周报】李嘉晨", send_date) is None
+    assert gen._subject_date_mismatch_note("【周报】团队成员", send_date) is None
     # 空主题 → 无标注
     assert gen._subject_date_mismatch_note("", send_date) is None
     # 日期带时区 → 正常比较
     tz_send = datetime(2026, 8, 7, tzinfo=datetime.now().astimezone().tzinfo)
-    assert gen._subject_date_mismatch_note("【周报】李嘉晨 - 20260807", tz_send) is None
+    assert gen._subject_date_mismatch_note("【周报】团队成员 - 20260807", tz_send) is None
 
 
 def test_generate_content_annotates_mismatch():
     gen = _make_generator()
     email_data = {
-        "sender_name": "李嘉晨",
-        "from": {"mail_address": "lijiachen01@example.com", "name": "李嘉晨"},
-        "subject": "【周报】李嘉晨 - 20260731",
+        "sender_name": "团队成员",
+        "from": {"mail_address": "zhangsan01@example.com", "name": "团队成员"},
+        "subject": "【周报】团队成员 - 20260731",
         "date": "2026-08-07T10:00:00",
         "ai_content": "本周工作内容",
         "ai_processed": True,
