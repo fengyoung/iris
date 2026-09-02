@@ -1,8 +1,10 @@
-# Iris 3.29.0
+# Iris 3.29.1
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
+
+**v3.29.1** — [Wiki 增量更新指纹预检补全](CHANGELOG.md)：修复 daily-start 卡死——`update_all_pages()` 此前对全部 241 页每页无差别调 LLM 判断是否需更新（并发 6 路），压垮中转导致超时/无 content；现补全 v3.28.4 的 `is_wiki_stale()` 指纹预检（discovery/metrics 已用但该路径漏用）：加载 `chunk_hash_index`，源文档未变页面零 LLM 跳过（241 页全跳过约 5 秒），从「无差别全量重扫」退化为「按源文档指纹的精准增量」。协议版本 3.21（不变）。
 
 **v3.29.0** — [飞书消息图片理解沉淀](CHANGELOG.md)：新增 `MessageImageAnalyzer`（`feishu/image_analyzer.py`），让 feed-collect 与 chat-digest 两条消息管道真正「看」图——图片消息下载后经多模态 LLM 生成中文描述并注入下游，而非把 `[Image: img_v3_xxx]` 当噪音文本或 `[图片]` 占位。`FeishuClient.download_message_image()`（`im +messages-resources-download`）补齐消息图下载；配置 `image_understanding:{enabled,max_per_run}` 控制成本 + 按 `image_key` 跨管道缓存。已知边界：只处理 `msg_type=="image"` 独立图，post 内嵌图不单独分析，单张失败降级占位。
 

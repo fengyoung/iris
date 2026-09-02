@@ -20,7 +20,7 @@ from .searcher import WikiSearcher
 from ._constants import (
     get_display_name, get_dir_map, get_prefix_map, get_display_name_map,
 )
-from .discovery_utils import inject_source_fingerprint
+from .discovery_utils import inject_source_fingerprint, is_wiki_stale
 from ._wiki_io import slugify_title as _slugify_title
 
 logger = logging.getLogger(__name__)
@@ -618,8 +618,25 @@ sources:
         if not items:
             return {"total": 0, "updated": 0, "unchanged": 0, "not_found": 0, "errors": 0, "details": []}
 
+        # 指纹预检索引：源文档未变化的页面零 LLM 跳过（省 LLM 成本，避免全量调用）。
+        # 与 discovery/metrics 的 is_wiki_stale 判定保持一致（v3.28.4 设计意图）。
+        try:
+            from iris.ingest.chunker import MarkdownChunker
+            hash_index = MarkdownChunker.load_hash_index(self._config)
+        except Exception:
+            hash_index = None
+
         def _update_one(args: Tuple) -> Dict[str, Any]:
             title, path, page_type, content = args
+            # 指纹预检：source_fingerprint 全部源文档 hash 未变 → 页面新鲜，
+            # 跳过 LLM 增量更新（判定失败时兜底照常走 LLM 更新）。
+            if hash_index:
+                try:
+                    if not is_wiki_stale(path, hash_index=hash_index):
+                        return {"status": "no_changes", "title": title, "path": str(path),
+                                "reason": "源文档未变化（指纹新鲜），跳过 LLM 更新"}
+                except Exception:
+                    pass  # 判定异常 → 照常走 LLM 更新，保证不因预检漏更
             return self._update_page_with_content(
                 title=title, page_type=page_type, path=path,
                 existing_content=content, top_k=top_k,

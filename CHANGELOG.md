@@ -1,3 +1,10 @@
+## v3.29.1 (2026-09-02)
+
+**Wiki 增量更新指纹预检补全**（`src/iris/wiki/generator.py`，+18 行）：修复 daily-start 卡死——`update_all_pages()` 对全部 241 页每页无差别调 LLM（并发 6 路）判断是否需更新，241 次长 prompt 调用压垮 zz_tokenhub 中转（请求超时 + `finish_reason=stop/length` 无 content——思考模型 max_tokens 被 reasoning_content 耗尽），进程阻塞在网络上 15 分钟无页面落盘。根因：v3.28.4 已实现 `is_wiki_stale()` 指纹预检（frontmatter `source_fingerprint` 中任一源文档 hash 变化才判过时，源文档全未变 → 页面新鲜 → 零 LLM 跳过，discovery/metrics 均已接入），但 `update_all_pages()` 路径漏用，导致每次 daily-start 全量遍历 241 页触发 LLM。
+- **修复**：`update_all_pages()` 加载 `chunk_hash_index`（`MarkdownChunker.load_hash_index`），每页先 `is_wiki_stale(path, hash_index=...)` 判定——源文档未变页面直接返回 `no_changes`（reason="源文档未变化（指纹新鲜），跳过 LLM 更新"），仅过时页面走 `_update_page_with_content` 增量更新；指纹判定异常时兜底照常走 LLM 更新（不因预检漏更）。
+- **效果**：daily-start Wiki 更新从 241 次 LLM 调用降至 ~0 次（源文档无变化场景，241 页全跳过约 5 秒）；从「无差别全量重扫」退化为「按源文档指纹的精准增量」，省 LLM 成本且根治中转超时卡死。
+- 验证：`wiki_generator` 相关 unit 85 + integration 5 通过（python3.13）、ruff 零告警、真实 daily-start 完整跑通（exit 0：chunks 6820 / vector 6820 / graph 241 节点 2115 边 / 人物 176 无歧义无未找到）。协议版本 3.21（不变）；app 配置版本 3.7（不变）；产品版本 3.29.0→**3.29.1**。
+
 ## v3.29.0 (2026-09-01)
 
 **飞书消息图片理解沉淀**（9 文件 / +测试 17）：让 feed-collect 与 chat-digest 两条消息管道真正「看」图片，而非把图片消息当 `[图片]` 占位或 `[Image: img_v3_xxx]` 原始 token 噪音文本——为图片消息补中文内容描述并注入下游 LLM。

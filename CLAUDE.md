@@ -1,4 +1,4 @@
-# Iris 3.29.0 — 项目执行说明
+# Iris 3.29.1 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -92,7 +92,7 @@ PDF=PyMuPDF 提取文字 + 逐页渲染；DOCX=python-docx 段落+表格文字�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.29.0 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.29.1 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.21 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | app 3.7（其余独立演进） | 配置文件 Schema |
 
@@ -142,7 +142,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.29.0 (2026-09-01)** — 飞书消息图片理解沉淀(9 文件 / +测试 17):`MessageImageAnalyzer`(`feishu/image_analyzer.py`)下载→多模态 LLM→描述,按 image_key 跨管道共享缓存(data/image_analysis/)+ enabled/max_per_run 控制;`FeishuClient.download_message_image()`(`im +messages-resources-download`,区别于文档图 `docs +media-download`);feed 管道 Step2b 插桩 + `RawMessage.content_for_prompt()` 三级回退(描述>[图片]>原文);chat-digest 注入 `image_descriptions`;配置 `image_understanding:{enabled,max_per_run}`(feed 落 feeds.json#topic_config / chat-digest 落 feishu_ingest.json#chat_digest,默认 true/10)。已知边界:只处理 msg_type==image 独立图,post 内嵌图不单独分析;单张失败降级[图片]占位。端到端:图验先遣队 feed-collect(5 张播报图识别为直检率看板)+ chat-digest 跑通。验证:全量 3,004 通过、ruff 零告警。协议 3.21(不变);产品 3.28.5→**3.29.0**。
+**当前 v3.29.1 (2026-09-02)** — Wiki 增量更新指纹预检补全(`src/iris/wiki/generator.py`):修复 daily-start 卡死——`update_all_pages()` 对全部 241 页每页无差别调 LLM(并发 6 路)判断是否需更新,241 次长 prompt 调用压垮 zz_tokenhub 中转(超时 + finish_reason=stop/length 无 content),进程阻塞在网络上 15 分钟无页面落盘。根因:v3.28.4 已实现 `is_wiki_stale()` 指纹预检(source_fingerprint 源文档 hash 全未变→页面新鲜→零 LLM 跳过,discovery/metrics 均已用),但 `update_all_pages` 漏用此路径。修复:加载 chunk_hash_index,每页先 `is_wiki_stale(path, hash_index)` 判定,源文档未变直接返回 no_changes(跳过 LLM),仅过时页面走增量更新;判定异常兜底照常走 LLM(不因预检漏更)。效果:daily-start Wiki 更新从 241 次 LLM 调用降至 ~0 次(源文档无变化场景),全跳过 ~5s。验证:wiki_generator 相关 unit 85 + integration 5 通过、ruff 零告警、真实 daily-start 跑通(exit 0:chunks 6820/vector 6820/graph 241 节点 2115 边/人物 176 无歧义)。协议 3.21(不变);产品 3.29.0→**3.29.1**。
+
+**v3.29.0 (2026-09-01)** — 飞书消息图片理解沉淀(9 文件 / +测试 17):`MessageImageAnalyzer`(`feishu/image_analyzer.py`)下载→多模态 LLM→描述,按 image_key 跨管道共享缓存(data/image_analysis/)+ enabled/max_per_run 控制;`FeishuClient.download_message_image()`(`im +messages-resources-download`,区别于文档图 `docs +media-download`);feed 管道 Step2b 插桩 + `RawMessage.content_for_prompt()` 三级回退(描述>[图片]>原文);chat-digest 注入 `image_descriptions`;配置 `image_understanding:{enabled,max_per_run}`(feed 落 feeds.json#topic_config / chat-digest 落 feishu_ingest.json#chat_digest,默认 true/10)。已知边界:只处理 msg_type==image 独立图,post 内嵌图不单独分析;单张失败降级[图片]占位。端到端:图验先遣队 feed-collect(5 张播报图识别为直检率看板)+ chat-digest 跑通。验证:全量 3,004 通过、ruff 零告警。协议 3.21(不变);产品 3.28.5→**3.29.0**。
 
 **v3.28.5 (2026-09-01)** — LLM 调用统一到 LLMService 单一口径（7 文件 / +56 -69）：消除「已建 LLMService 却又 `get_provider()` 取回底层 provider 绕过响应缓存」的残留路径。① scripts — `extract_travel_invoice.py` / `extract_weekly_reports.py` 改 `LLMService`；② ASR — `hotwords.extract` / `extractor.generate_misreadings` 接口改 `llm: LLMService`；③ 检索 — `LLMQueryPlanner` 参数名 `llm_provider` 实为 provider（命名误导）+ `enhanced.py` 直接传 `LLMService`；④ 命令 — `build-asr-prompt` 改传 `llm_service`。统一适配 `provider.generate(LLMRequest(...))` → `llm.generate(prompt, route_context=...)`。保留（非绕过）：`corrector` 的 `_provider` fallback（测试注入/降级）、`route-model` 的 `ModelRouter`（查询路由）、`get_provider()` 诊断用途、`force_model`。验证：全量 unit 1,910 通过、ruff 零告警。协议 3.21（不变）；app 配置 3.7（不变）；产品 3.28.4→**3.28.5**。
 
