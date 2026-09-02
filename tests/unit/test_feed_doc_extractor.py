@@ -3,7 +3,7 @@
 import pytest
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch, MagicMock
 
 from iris.feed._doc_extractor import (
     DocExtractor,
@@ -11,7 +11,7 @@ from iris.feed._doc_extractor import (
     _collect_topic_urls,
     _FEISHU_DOC_URL_PATTERN,
 )
-from iris.feed._types import RawMessage, DetectedTopic, SourceRef, ConvertedDoc
+from iris.feed._types import RawMessage, DetectedTopic, SourceRef
 
 
 def _make_msg(msg_id, chat_id, sender, content, chat_type="group", msg_type="text",

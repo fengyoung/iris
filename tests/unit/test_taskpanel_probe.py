@@ -6,7 +6,6 @@ import os
 import subprocess
 import sys
 
-import pytest
 
 from iris.taskpanel.probe import (
     is_pid_alive,

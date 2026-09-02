@@ -3,14 +3,10 @@
 from __future__ import annotations
 
 import json
-import tempfile
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 
-import pytest
 
 from iris.utils.metrics import MetricsExporter, _week_key
-from iris.config.workspace import WorkspaceDef, WorkspaceConfig, WorkspaceManager
+from iris.config.workspace import WorkspaceConfig, WorkspaceManager
 from iris.ingest.watcher import SourceWatcher, FileEvent
 
 

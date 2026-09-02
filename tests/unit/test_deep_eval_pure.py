@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from iris.evaluation.deep_eval import (
     parse_references,

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import pytest
-from pathlib import Path
 
 from iris.analysis._biweekly_cache import BiweeklyCache
 

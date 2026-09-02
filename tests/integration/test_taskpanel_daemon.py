@@ -18,7 +18,7 @@ import pytest
 
 from iris.taskpanel.daemon import _resolve_port
 from iris.taskpanel.reporter import TaskReporter
-from iris.taskpanel.store import history_path, pid_file, read_history
+from iris.taskpanel.store import pid_file, read_history
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 

@@ -6,7 +6,6 @@ mode=confirm 的会话 → 暂存到待确认队列 + 推送飞书通知
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from datetime import datetime
@@ -15,7 +14,7 @@ from typing import Any, Dict, List, Optional
 
 from iris.feed._feishu_bridge import FeishuBridge, IRIS_BOT_USER_ID
 from iris.feed._types import DetectedTopic
-from iris.feed.feed_config import FeedConfigManager, WatchChat
+from iris.feed.feed_config import FeedConfigManager
 
 logger = logging.getLogger(__name__)
 

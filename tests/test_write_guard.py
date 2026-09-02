@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import json
-import tempfile
 from pathlib import Path
 
 import pytest
 
-from iris.config.loader import ConfigBundle
 from iris.core.write_guard import (
     WriteGuardError,
     resolve_allowed_paths,

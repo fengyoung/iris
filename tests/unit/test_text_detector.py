@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
 
 from iris.wiki.asr._text_detector import (
-    _MIN_ASR_LENGTH,
     _MAX_ASR_LENGTH,
     _MIN_CHINESE_RATIO,
     _count_chinese,

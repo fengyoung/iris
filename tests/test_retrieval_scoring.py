@@ -1,7 +1,5 @@
 """C5 BM25 全文计算 + M6 QA token 预算 专项测试。"""
 
-import pytest
-from unittest.mock import MagicMock, patch
 
 from iris.retrieval.searcher import _score_chunk
 from iris.utils.tokenization import tokenize, estimate_tokens
@@ -15,7 +13,6 @@ class TestBm25FullContent:
     def testtokenize_on_content_vs_preview(self):
         """_compute_corpus_stats 使用 content 字段。"""
         # 模拟 LocalRetriever._compute_corpus_stats
-        from collections import defaultdict
 
         class FakeChunk:
             def __init__(self, content, content_preview):

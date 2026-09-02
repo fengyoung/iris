@@ -302,7 +302,7 @@ class TestProjectStalled:
         old = "05-会议纪要/202605/20260512-项目周会-上门百晓生.md"  # 78 天前
         _write(source_root / old)
         # 人员盘点文档仅列出项目名（非活动证据）
-        roster = "02-部门管理/2026/20260721-人员盘点02-中间过程-fengyoung.md"
+        roster = "02-部门管理/2026/20260721-人员盘点02-中间过程-member01.md"
         _write(source_root / roster, "百晓生项目成员：张三、李四。")
         self._make_wiki_page(wiki_root, "项目-上门百晓生项目", [old])
         result = ReminderEngine(config).collect(now=_NOW)

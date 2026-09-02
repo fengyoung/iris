@@ -5,13 +5,10 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
-from pathlib import Path
 
-import pytest
 
-from iris.analysis.service import (
+from iris.analysis._biweekly_helpers import (
     _extract_direction_section,
     _extract_key_bullets,
     _extract_previous_direction_sections,

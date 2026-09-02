@@ -15,8 +15,7 @@ from iris.feishu.client import FeishuClient, FeishuClientError
 
 logger = logging.getLogger(__name__)
 from iris.feishu._shared import (
-    resolve_pic_dir, resolve_source_sub_dir, resolve_source_root,
-    resolve_dedup_path, load_dedup_index, save_dedup_index,
+    resolve_pic_dir, resolve_source_sub_dir, resolve_dedup_path, load_dedup_index, save_dedup_index,
     upsert_dedup_item, sanitize_title, extract_date, now_iso,
 )
 from iris.core.write_guard import safe_write_text

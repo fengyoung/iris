@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 
-from ._constants import PAGE_TYPE_PRIORITY
 
 # 标题前缀 → 页面类型映射（用于 infer_page_type）
 HEADING_PREFIXES: list[tuple[str, str]] = [

@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import time
-from concurrent.futures import ThreadPoolExecutor, wait
 
-import pytest
 
 from iris.core.thread_pool import SharedThreadPool, shared_pool
 

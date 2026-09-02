@@ -6,7 +6,6 @@ from iris.wiki.asr.hotwords import (
     _is_valid_hotword,
     _clean_text_term,
     _build_hotwords_prompt,
-    _build_page_batches,
     _parse_hotwords_response,
 )
 from iris.wiki.context_loader import WikiPageInfo

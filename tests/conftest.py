@@ -10,7 +10,6 @@ from typing import Any, Dict
 import pytest
 
 from iris.config.loader import ConfigBundle, load_config_bundle
-from iris.config.secrets import KeychainError
 
 
 # 顶层目录中实际为纯单元测试的文件（无 mock / I/O 依赖，应为 unit）

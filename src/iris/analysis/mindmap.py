@@ -5,7 +5,6 @@ from __future__ import annotations
 import io
 import json
 import re
-import uuid
 import zipfile
 from dataclasses import dataclass, field
 from typing import Any, Dict, List

@@ -12,7 +12,6 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
-from iris.feed._types import DetectedTopic
 
 logger = logging.getLogger(__name__)
 

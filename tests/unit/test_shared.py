@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 
 from iris.utils.shared import atomic_write_json, now_iso
 

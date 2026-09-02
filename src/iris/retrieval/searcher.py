@@ -5,17 +5,15 @@ from __future__ import annotations
 import json
 import logging
 import math
-import re
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
-from pathlib import Path
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Tuple
 
 from iris.config.loader import ConfigBundle
 from iris.ingest.chunker import ChunkRecord
 from iris.retrieval.planner import QueryPlan
 
-from iris.utils.tokenization import TOKEN_RE, tokenize  # noqa: F811 — 统一分词
+from iris.utils.tokenization import tokenize  # noqa: F811 — 统一分词
 
 logger = logging.getLogger(__name__)
 

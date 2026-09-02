@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from unittest.mock import patch, MagicMock
 
 from iris.feed._feishu_bridge import (

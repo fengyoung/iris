@@ -14,7 +14,6 @@ from iris.memory.lifecycle import (
     MemoryLifecycle,
     _now_iso,
     _parse_iso,
-    DEFAULT_CORRECTION_AGE_DAYS,
 )
 
 

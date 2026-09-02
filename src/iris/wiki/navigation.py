@@ -13,9 +13,9 @@ from iris.config.loader import ConfigBundle
 
 logger = logging.getLogger(__name__)
 
-from .searcher import WikiSearcher, _read_wiki_page, _infer_title_from_filename, FRONTMATTER_RE
+from .searcher import FRONTMATTER_RE
 from ._constants import (
-    get_wiki_dir, get_display_name, get_all_types, get_type_config_map,
+    get_display_name, get_type_config_map,
     LINT_STALE_DAYS,
 )
 
@@ -465,7 +465,6 @@ def lint_wiki(wiki_root: Path, data_root: Optional[Path] = None) -> Dict[str, An
 def fix_wiki(wiki_root: Path) -> Dict[str, Any]:
     """自动修复 Wiki 常见问题。"""
     import re as _re
-    from datetime import datetime as _dt
 
     if not wiki_root.exists():
         return {"error": "Wiki 根目录不存在", "actions": 0}
@@ -550,7 +549,6 @@ def _parse_updated_from_content(content: str) -> str:
 def _compute_content_quality(page_titles: dict, wiki_root: Path) -> Dict[str, Any]:
     """计算 Wiki 内容质量：信息密度 + 重复检测。"""
     import re
-    from collections import Counter
 
     pages = []
     for title, path in page_titles.items():

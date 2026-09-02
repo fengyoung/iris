@@ -9,9 +9,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from iris.config.loader import ConfigBundle
-from iris.utils.tokenization import TOKEN_RE, tokenize  # noqa: F811
+from iris.utils.tokenization import tokenize  # noqa: F811
 from ._constants import (
-    get_wiki_dir, get_wiki_prefix,
     get_dir_map, get_prefix_to_type_map,
 )
 

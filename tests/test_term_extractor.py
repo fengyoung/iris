@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
-import pytest
 
 from iris.wiki.context_loader import WikiPageInfo
 from iris.wiki.asr import (

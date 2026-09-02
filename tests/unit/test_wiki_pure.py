@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from iris.wiki.generator import _slugify_title, WikiGenerator
 from iris.wiki.discovery_utils import (

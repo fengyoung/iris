@@ -6,7 +6,6 @@ import pytest
 from iris.retrieval.embedder import (
     TextEmbedder,
     _extract_vectors,
-    EmbedderError,
 )
 
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from iris.analysis._biweekly_helpers import (
     DEFAULT_REPORT_SECTIONS,

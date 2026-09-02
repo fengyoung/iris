@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import pytest
 
 from iris.wiki.context_loader import WikiPageInfo
 from iris.wiki.asr.hotwords import (

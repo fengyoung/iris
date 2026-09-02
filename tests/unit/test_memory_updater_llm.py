@@ -4,16 +4,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 
 # ── 测试：LLM 响应解析 ──────────────────────────────────────
 
 class TestParseLLMResponse:
     def test_parse_valid_json(self):
-        from iris.qa.memory_updater import MemoryUpdater
         updater = _dummy_updater()
         payload = {
             "new_likes": ["简短回答"],
@@ -30,7 +28,6 @@ class TestParseLLMResponse:
         assert result["confidence"] == 0.85
 
     def test_parse_with_code_block(self):
-        from iris.qa.memory_updater import MemoryUpdater
         updater = _dummy_updater()
         payload = '{"new_likes": ["短回答"], "new_dislikes": [], "new_styles": [], "new_corrections": [], "new_notes": [], "confidence": 0.7}'
         text = f"```json\n{payload}\n```"
@@ -39,19 +36,16 @@ class TestParseLLMResponse:
         assert result["new_likes"] == ["短回答"]
 
     def test_parse_invalid_json(self):
-        from iris.qa.memory_updater import MemoryUpdater
         updater = _dummy_updater()
         result = updater._parse_llm_response("不是 JSON")
         assert result is None
 
     def test_parse_empty(self):
-        from iris.qa.memory_updater import MemoryUpdater
         updater = _dummy_updater()
         result = updater._parse_llm_response("")
         assert result is None
 
     def test_parse_fallback_json_extraction(self):
-        from iris.qa.memory_updater import MemoryUpdater
         updater = _dummy_updater()
         text = """一些前言文字...
 {
@@ -72,22 +66,18 @@ class TestParseLLMResponse:
 
 class TestShouldDeepAnalyze:
     def test_no_answer_skips(self):
-        from iris.qa.memory_updater import MemoryUpdater
         updater = _dummy_updater()
         assert updater._should_deep_analyze("这是一个很长的有意义的问题需要分析", None) is False
 
     def test_short_question_skips(self):
-        from iris.qa.memory_updater import MemoryUpdater
         updater = _dummy_updater()
         assert updater._should_deep_analyze("短问题", "有回答") is False
 
     def test_explicit_memory_skips(self):
-        from iris.qa.memory_updater import MemoryUpdater
         updater = _dummy_updater()
         assert updater._should_deep_analyze("记住，我喜欢的分析风格是简洁的", "已回答") is False
 
     def test_normal_question_triggers(self):
-        from iris.qa.memory_updater import MemoryUpdater
         updater = _dummy_updater()
         assert updater._should_deep_analyze("帮我分析一下这个季度 智能巡查的数据趋势", "详细回答...") is True
 
@@ -96,25 +86,21 @@ class TestShouldDeepAnalyze:
 
 class TestRegexChannel:
     def test_explicit_remember(self):
-        from iris.qa.memory_updater import MemoryUpdater
         updater = _dummy_updater()
         updates = updater._apply_regex_channel("记住，我喜欢简短的回答风格")
         assert len(updates) >= 0  # 依赖 profile 写入，但应无异常
 
     def test_explicit_correct(self):
-        from iris.qa.memory_updater import MemoryUpdater
         updater = _dummy_updater()
         updates = updater._apply_regex_channel("纠正：NLP 是指自然语言处理")
         assert len(updates) >= 0
 
     def test_implicit_correction(self):
-        from iris.qa.memory_updater import MemoryUpdater
         updater = _dummy_updater()
         updates = updater._apply_regex_channel("Q3 的目标应该是 85% 而不是 80%")
         assert len(updates) >= 0
 
     def test_normal_question_no_regex_match(self):
-        from iris.qa.memory_updater import MemoryUpdater
         updater = _dummy_updater()
         updates = updater._apply_regex_channel("今天的天气怎么样")
         assert updates == []
@@ -124,7 +110,6 @@ class TestRegexChannel:
 
 class TestApplyExtracted:
     def test_apply_likes(self, tmp_path):
-        from iris.qa.memory_updater import MemoryUpdater
         updater = _dummy_updater_with_paths(tmp_path)
         extracted = {
             "new_likes": ["结构化输出", "数据可视化"],
@@ -144,7 +129,6 @@ class TestApplyExtracted:
         assert "数据可视化" in likes
 
     def test_apply_dislikes(self, tmp_path):
-        from iris.qa.memory_updater import MemoryUpdater
         updater = _dummy_updater_with_paths(tmp_path)
         extracted = {
             "new_likes": [],
@@ -161,7 +145,6 @@ class TestApplyExtracted:
         assert "过度技术化的解释" in dislikes
 
     def test_apply_correction(self, tmp_path):
-        from iris.qa.memory_updater import MemoryUpdater
         updater = _dummy_updater_with_paths(tmp_path)
         extracted = {
             "new_likes": [],
@@ -177,7 +160,6 @@ class TestApplyExtracted:
         assert "PV" in corrections["items"]
 
     def test_low_confidence_discarded(self, tmp_path):
-        from iris.qa.memory_updater import MemoryUpdater
         updater = _dummy_updater_with_paths(tmp_path)
         extracted = {
             "new_likes": ["不确定的偏好"],
@@ -194,7 +176,6 @@ class TestApplyExtracted:
         assert len(updates) >= 1  # _apply_extracted 不管置信度
 
     def test_duplicate_likes_not_added(self, tmp_path):
-        from iris.qa.memory_updater import MemoryUpdater
         updater = _dummy_updater_with_paths(tmp_path)
         # 先写入一次
         extracted1 = {

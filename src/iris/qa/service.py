@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from typing import Any, Dict, List
+from typing import Any, List
 
 from iris.config.loader import ConfigBundle
 from iris.config.models import ConfigBundleV2  # noqa: F401 — 渐进迁移到 Pydantic 类型安全

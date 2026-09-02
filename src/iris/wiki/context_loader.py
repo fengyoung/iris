@@ -11,9 +11,9 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional
 
 from ._constants import get_wiki_dir, get_display_name, get_all_types
 from .searcher import _read_wiki_page, _infer_title_from_filename

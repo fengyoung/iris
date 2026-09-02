@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 
 def convert_report(markdown: str, output_path: Path, *, format: str = "md", title: str = "") -> Path:
@@ -27,7 +26,7 @@ def convert_report(markdown: str, output_path: Path, *, format: str = "md", titl
 def _convert_to_docx(markdown: str, output_path: Path, *, title: str = "") -> Path:
     try:
         from docx import Document
-        from docx.shared import Pt, Inches
+        from docx.shared import Pt
     except ImportError:
         raise RuntimeError("python-docx 未安装，请运行 pip install python-docx")
 

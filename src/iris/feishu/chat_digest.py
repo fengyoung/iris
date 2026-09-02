@@ -14,7 +14,7 @@ from iris.feishu.client import FeishuClient, FeishuClientError
 from iris.feishu._shared import (
     resolve_source_sub_dir, resolve_dedup_path,
     load_dedup_index, save_dedup_index, upsert_dedup_item,
-    sanitize_title, extract_date, now_iso,
+    sanitize_title, now_iso,
 )
 from iris.llm import LLMService, LLMProviderError
 from iris.feishu.image_analyzer import MessageImageAnalyzer

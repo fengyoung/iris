@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from iris.app.banner import BANNER
-from iris.config import load_config_bundle
 from iris.llm import LLMService
 from iris.output.formatter import format_payload
 from iris.utils.logging import IrisLogger

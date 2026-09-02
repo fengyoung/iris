@@ -76,12 +76,18 @@ show_missing = true
 fail_under = 55
 
 [tool.ruff.lint]
-ignore = ["BLE001", "E402", "F401"]
+# BLE001: 宽泛捕获是有意的容错策略（见下方 per-file 说明）
+# E402: 有意延迟导入以避免循环依赖
+ignore = ["BLE001", "E402"]
 
 [tool.ruff.lint.per-file-ignores]
 # BLE001: Do not catch blind exception — 项目架构大量依赖外部服务
 # (LLM API / 飞书 API / 文件 I/O)，宽泛捕获是有意的容错策略。
 "src/iris/**/*.py" = ["BLE001"]
+# F401: 包 __init__.py 中的导入是对外 re-export，属公开 API。
+"src/iris/**/__init__.py" = ["F401"]
+# F401: handlers.py 是 _handlers/ 子模块的向后兼容 facade（re-export 全部 handler）。
+"src/iris/app/cli/handlers.py" = ["F401"]
 # E402: 有意延迟导入以避免循环依赖（wiki 内部模块 / feishu / llm provider）
 "src/iris/app/cli/_handlers/_wiki.py" = ["E402"]
 "src/iris/feishu/doc_convert.py" = ["E402"]

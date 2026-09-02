@@ -10,6 +10,7 @@ from iris.analysis._helpers import (
     render_evidence_blocks,
     render_structured_evidence,
 )
+from iris.analysis import _biweekly_helpers as bh
 from iris.analysis import service as svc
 
 
@@ -104,23 +105,23 @@ class TestParseReviewJson:
 class TestExtractKeyBullets:
     def test_extracts_bullet_lines_only(self):
         section = "普通行\n- 第一条\n* 第二条\n非 bullet\n- 第三条"
-        bullets = svc._extract_key_bullets(section)
+        bullets = bh._extract_key_bullets(section)
         # 保留 bullet 前缀，仅去除来源注记
         assert bullets == ["- 第一条", "* 第二条", "- 第三条"]
 
     def test_respects_max_per_report(self):
         section = "\n".join(f"- 条目{i}" for i in range(10))
-        bullets = svc._extract_key_bullets(section, max_per_report=3)
+        bullets = bh._extract_key_bullets(section, max_per_report=3)
         assert len(bullets) == 3
 
     def test_strips_source_annotation(self):
         section = "- 完成了功能A（来源：报告.md）"
-        bullets = svc._extract_key_bullets(section)
+        bullets = bh._extract_key_bullets(section)
         assert bullets == ["- 完成了功能A"]
 
     def test_truncates_long_bullet_to_120_chars(self):
         section = "- " + "字" * 200
-        bullets = svc._extract_key_bullets(section)
+        bullets = bh._extract_key_bullets(section)
         # clean 后截断到 120 字（含 "- " 前缀）
         assert len(bullets[0]) == 120
 
@@ -137,27 +138,27 @@ class TestExtractDirectionSection:
             "## 方向二：数据质检\n"
             "- 进展C\n"
         )
-        section = svc._extract_direction_section(report, "方向一：项目Alpha")
+        section = bh._extract_direction_section(report, "方向一：项目Alpha")
         assert "进展A" in section and "进展B" in section
         assert "进展C" not in section
 
     def test_returns_empty_when_no_match(self):
         report = "## 方向一：X\n- a\n"
-        assert svc._extract_direction_section(report, "方向九：不存在") == ""
+        assert bh._extract_direction_section(report, "方向九：不存在") == ""
 
 
 # ── service._build_multi_report_dedup_text ──────────────────────
 
 class TestBuildMultiReportDedup:
     def test_empty_reports_returns_empty(self):
-        assert svc._build_multi_report_dedup_text([], [{"name": "方向一：X"}]) == {}
+        assert bh._build_multi_report_dedup_text([], [{"name": "方向一：X"}]) == {}
 
     def test_collects_bullets_per_direction(self):
         reports = [
             {"content": "## 方向一：X\n- 已做A\n", "week": 28, "date_str": "2026-07-01"},
         ]
         directions = [{"name": "方向一：X"}]
-        result = svc._build_multi_report_dedup_text(reports, directions)
+        result = bh._build_multi_report_dedup_text(reports, directions)
         assert "方向一：X" in result
         assert "已做A" in result["方向一：X"]
         assert "w28" in result["方向一：X"]
@@ -168,12 +169,12 @@ class TestBuildMultiReportDedup:
 class TestCollectDirectionConcepts:
     def test_strips_bracket_prefix(self):
         direction = {"sub_areas": [{"name": "1.1 【功能】搜索召回"}]}
-        concepts = svc._collect_direction_concepts(direction)
+        concepts = bh._collect_direction_concepts(direction)
         assert concepts == ["搜索召回"]
 
     def test_skips_empty_names(self):
         direction = {"sub_areas": [{"name": ""}, {"name": "纯名称"}]}
-        assert svc._collect_direction_concepts(direction) == ["纯名称"]
+        assert bh._collect_direction_concepts(direction) == ["纯名称"]
 
 
 # ── service._build_local_report / _resolve_section_content ──────
@@ -199,7 +200,7 @@ class TestBuildLocalReport:
 
 class TestLoadReportSections:
     def test_returns_default_when_no_custom(self):
-        assert svc._load_report_sections({}) == svc.DEFAULT_REPORT_SECTIONS
+        assert svc._load_report_sections({}) == bh.DEFAULT_REPORT_SECTIONS
 
     def test_uses_custom_sections(self):
         cfg = {"report": {"sections": [{"title": "自定义", "group": "overview"}]}}
@@ -208,7 +209,7 @@ class TestLoadReportSections:
 
     def test_falls_back_when_custom_invalid(self):
         cfg = {"report": {"sections": [{"title": "", "group": ""}]}}
-        assert svc._load_report_sections(cfg) == svc.DEFAULT_REPORT_SECTIONS
+        assert svc._load_report_sections(cfg) == bh.DEFAULT_REPORT_SECTIONS
 
 
 # ── AnalysisReportService 静态方法 ──────────────────────────

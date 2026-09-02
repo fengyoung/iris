@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import pytest
-from pathlib import Path
 
 
 class TestChatDigestClassify:
     """_classify: 根据内容决定归档路径。"""
 
     def _digester(self, config_bundle, tmp_path):
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
         with patch("iris.feishu.chat_digest.FeishuClient"):
             from iris.feishu.chat_digest import ChatDigester
             d = ChatDigester.__new__(ChatDigester)

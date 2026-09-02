@@ -1,8 +1,6 @@
 """C1 API Key 脱敏 + M1 策略开关 专项测试。"""
 
-import pytest
 from pathlib import Path
-from unittest.mock import patch
 
 from iris.llm.model_manager import ModelManager
 
@@ -158,7 +156,7 @@ class TestStrategySwitches:
 
     def test_downgrade_disabled_skips_fallback_chain(self, tmp_path):
         """allow_auto_downgrade=false 时降级链不含 fallback 角色。"""
-        from iris.llm.router import ModelRouter, RoutingDecision
+        from iris.llm.router import ModelRouter
         from iris.llm.model_manager import ModelManager
 
         cfg = self._make_config(allow_downgrade=False)

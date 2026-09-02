@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from iris.config.loader import ConfigBundle

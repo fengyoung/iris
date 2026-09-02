@@ -24,12 +24,7 @@ from ._helpers import render_evidence_blocks, render_structured_evidence
 from ._biweekly_collector import BiweeklyCollector
 from ._biweekly_cache import BiweeklyCache
 from ._biweekly_helpers import (
-    _collect_direction_concepts,
     _build_boundaries_text,
-    _extract_previous_direction_sections,
-    _build_multi_report_dedup_text,
-    _extract_key_bullets,
-    _extract_direction_section,
     _s3_build_direction_index,
     _s3_index_briefs_by_direction,
     _s3_build_concept_boundaries,
@@ -43,12 +38,8 @@ from ._biweekly_helpers import (
     _build_local_fallback,
     _try_parse_json,
     _parse_review_json,
-    DEFAULT_REPORT_SECTIONS,
     _load_report_sections,
     _build_local_report,
-    _resolve_section_content,
-    _pick_group_line,
-    _render_group_lines,
     DEFAULT_STYLE_GUIDE,
     assemble_biweekly_sections,
 )

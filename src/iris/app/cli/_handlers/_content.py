@@ -174,7 +174,6 @@ def handle_batch_transcribe(args, bundle, logger) -> int:
     from iris.app.transcribe_meeting import TranscribeMeetingPipeline
     # --dir 支持：自动扫描目录下所有 .txt 文件
     if not args.files and getattr(args, "dir", ""):
-        import glob as _g
         dir_path = Path(getattr(args, "dir", ""))
         if dir_path.exists() and dir_path.is_dir():
             args.files = ",".join(str(p) for p in sorted(dir_path.glob("*.txt")))

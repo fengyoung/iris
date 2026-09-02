@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
 
 from iris.analysis._biweekly_types import FileBrief, FileEntry
 from iris.utils.metrics import MetricsExporter, _week_key

@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import json
-import os
-from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 
 # ── 测试数据 ──────────────────────────────────────────────────
@@ -39,19 +36,16 @@ def _sample_session_data():
 
 class TestHasEnoughData:
     def test_enough_topics(self):
-        from iris.memory.session_miner import SessionPatternMiner
         miner = _dummy_miner()
         data = {"recent_topics": ["A", "B", "C"], "recent_questions": []}
         assert miner._has_enough_data(data) is True
 
     def test_enough_questions(self):
-        from iris.memory.session_miner import SessionPatternMiner
         miner = _dummy_miner()
         data = {"recent_topics": [], "recent_questions": ["Q"] * 5}
         assert miner._has_enough_data(data) is True
 
     def test_insufficient_data(self):
-        from iris.memory.session_miner import SessionPatternMiner
         miner = _dummy_miner()
         data = {"recent_topics": ["A"], "recent_questions": ["Q1", "Q2"]}
         assert miner._has_enough_data(data) is False
@@ -61,7 +55,6 @@ class TestHasEnoughData:
 
 class TestBuildMinePrompt:
     def test_contains_key_sections(self):
-        from iris.memory.session_miner import SessionPatternMiner
         miner = _dummy_miner()
         prompt = miner._build_mine_prompt(_sample_session_data())
         assert "近期问题" in prompt
@@ -75,7 +68,6 @@ class TestBuildMinePrompt:
 
 class TestParseMineResponse:
     def test_parse_valid_json(self):
-        from iris.memory.session_miner import SessionPatternMiner
         miner = _dummy_miner()
         payload = {
             "recurring_themes": [
@@ -96,7 +88,6 @@ class TestParseMineResponse:
         assert discoveries[2]["type"] == "new_fact"
 
     def test_parse_with_code_block(self):
-        from iris.memory.session_miner import SessionPatternMiner
         miner = _dummy_miner()
         payload = '{"recurring_themes": [], "preference_patterns": [], "new_facts": [], "confidence": 0.0}'
         text = f"```json\n{payload}\n```"
@@ -104,7 +95,6 @@ class TestParseMineResponse:
         assert len(discoveries) == 0
 
     def test_parse_invalid_json_returns_empty(self):
-        from iris.memory.session_miner import SessionPatternMiner
         miner = _dummy_miner()
         discoveries = miner._parse_mine_response("not json at all")
         assert discoveries == []
@@ -114,7 +104,6 @@ class TestParseMineResponse:
 
 class TestPromote:
     def test_promote_recurring_theme_to_notes(self, tmp_path):
-        from iris.memory.session_miner import SessionPatternMiner
         miner = _dummy_miner_with_paths(tmp_path)
         discovery = {
             "type": "recurring_theme",
@@ -131,7 +120,6 @@ class TestPromote:
         assert any("建议创建 Wiki" in n for n in prefs.get("notes", []))
 
     def test_promote_preference_to_styles(self, tmp_path):
-        from iris.memory.session_miner import SessionPatternMiner
         miner = _dummy_miner_with_paths(tmp_path)
         discovery = {
             "type": "preference_pattern",
@@ -146,7 +134,6 @@ class TestPromote:
         assert any("先数据后分析" in s for s in styles)
 
     def test_promote_new_fact_to_notes(self, tmp_path):
-        from iris.memory.session_miner import SessionPatternMiner
         miner = _dummy_miner_with_paths(tmp_path)
         discovery = {
             "type": "new_fact",
@@ -161,7 +148,6 @@ class TestPromote:
         assert any("用户负责数据部门" in n for n in notes)
 
     def test_duplicate_theme_not_promoted(self, tmp_path):
-        from iris.memory.session_miner import SessionPatternMiner
         miner = _dummy_miner_with_paths(tmp_path)
         discovery = {
             "type": "recurring_theme",

@@ -1,10 +1,9 @@
 """feed 包单元测试 — 话题检测（规则分割 + 两阶段 LLM + 历史加载）。"""
 
 import json
-import pytest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch, MagicMock, mock_open, ANY
+from unittest.mock import MagicMock
 
 from iris.feed._topic_detector import (
     _segment_by_time,
