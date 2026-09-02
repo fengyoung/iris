@@ -267,6 +267,28 @@ class TestProjectStalled:
         kws = ReminderEngine._project_keywords("项目-数据标注平台")
         assert "标注平台" in kws
 
+    def test_project_keywords_decimal_dot_variants(self):
+        """数字点号变体：slug 去点（拍照30）还原版本号写法（拍照3.0）。
+
+        含版本号的项目（拍照3.0、PIC-3.0）文档名保留点号，slug 丢失点号
+        导致匹配落空、活跃项目被误判停滞——插点变体还原真实写法。
+        """
+        kws = ReminderEngine._project_keywords("项目-拍照30AI外观定级项目")
+        assert "拍照3.0AI外观定级" in kws  # 30 → 3.0
+        assert "3.0AI" in kws
+        # 长数字（年份 2026）不被误插点
+        kws_year = ReminderEngine._project_keywords("项目-数据智能部2026调薪规则与推荐方案")
+        assert not any("2.0.2.6" in kw or "20.26" in kw for kw in kws_year)
+
+    def test_project_keywords_from_title_words(self):
+        """title 词段关键词：slug 丢失词边界，title 保留原始写法（拍照3.0 AI外观定级）。"""
+        kws = ReminderEngine._project_keywords_from_title("拍照3.0 AI外观定级项目")
+        assert "拍照3.0" in kws          # 版本号词段（保留点号）
+        assert "AI外观定级" in kws       # 子方向词段
+        assert "外观定级" in kws
+        # 无 title 时不报错
+        assert ReminderEngine._project_keywords_from_title(None) == []
+
     def test_content_match_activity_in_weekly_report(self, tmp_path):
         """指纹陈旧但周报正文包含项目活动 → 不误报停滞。"""
         wiki_root = tmp_path / "WIKI"

@@ -1,3 +1,12 @@
+## v3.29.2 (2026-09-02)
+
+**提醒引擎项目停滞误判修复**（`src/iris/analysis/reminders.py` / 回归测试 +2）：拍照3.0 等含版本号项目被误判停滞（138 天）——项目页 slug 文件名**去点号**（拍照3.0 → 拍照30）且**丢失词边界**（拍照3.0 AI外观定级 → 拍照30AI外观定级），`_project_keywords` 从 slug 产出的关键词（拍照30AI外观定级 / 30AI）永远匹配不到带点/分段命名的文档（拍照3.0主观项检测 / AI外观定级业务应用反馈），v3.28.4 的三重兜底（指纹→SOURCE 同名→内容级）全部失效。
+- **修复① 数字点号变体**：`_insert_decimal_dot()` 对关键词中「恰好 2 位数字组」生成插点变体（30 → 3.0，环视排除 2026/202607 等长数字，不误伤年份/日期）；`_project_keywords` 收集后补一轮点号变体。
+- **修复② title 词段补充（关键）**：slug 信息熵不足无法还原词边界，`_check_project_stall` 读取 frontmatter title（保留原始写法「拍照3.0 AI外观定级项目」），`_source_dir_freshest` 通过 `_project_keywords_from_title()` 按空格/标点切分词段后逐段复用剥离链——产出 `拍照3.0`（版本号词段）、`AI外观定级`、`外观定级`（子方向词段）等关键词，命中 08-13 会议纪要 / 08-04 简报等近期活动文档。
+- **修复③ `project_stall_ignore` 补 4 个完结项目**：数据智能部2026调薪方案 / 数据智能部调薪规则与推荐方案 / 质检研发调薪规则与方案 / 质检研发团队最终调薪方案（08-06 定稿完结，不再重复告警）。
+- 效果：daily-start 停滞信号 6 → 1（拍照30AI外观定级项目误判消除，调薪 4 项目入 ignore）。
+- 验证：reminders 测试 28 + 2 = 30 全过（新增点号变体 + title 词段回归）、ruff 零告警、真实 ReminderEngine 验证（停滞信号 6→1，剩余仅「拍照30清洁方案快照页」方向正确）。协议版本 3.21（不变）；app 配置版本 3.7（不变）；产品版本 3.29.1→**3.29.2**。
+
 ## v3.29.1 (2026-09-02)
 
 **Wiki 增量更新指纹预检补全**（`src/iris/wiki/generator.py`，+18 行）：修复 daily-start 卡死——`update_all_pages()` 对全部 241 页每页无差别调 LLM（并发 6 路）判断是否需更新，241 次长 prompt 调用压垮 zz_tokenhub 中转（请求超时 + `finish_reason=stop/length` 无 content——思考模型 max_tokens 被 reasoning_content 耗尽），进程阻塞在网络上 15 分钟无页面落盘。根因：v3.28.4 已实现 `is_wiki_stale()` 指纹预检（frontmatter `source_fingerprint` 中任一源文档 hash 变化才判过时，源文档全未变 → 页面新鲜 → 零 LLM 跳过，discovery/metrics 均已接入），但 `update_all_pages()` 路径漏用，导致每次 daily-start 全量遍历 241 页触发 LLM。

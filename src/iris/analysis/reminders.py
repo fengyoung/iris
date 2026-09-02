@@ -50,6 +50,9 @@ _NON_ACTIVITY_HINTS = ("人员盘点", "组织架构", "通讯录")
 _PROJECT_KEYWORD_MIN_LEN = 3
 # 中英/数字切分 token 的最小长度（英文 token 更易误匹配，要求 ≥4）
 _SPLIT_TOKEN_MIN_LEN = 4
+# 数字点号变体：匹配「恰好 2 位的数字组」（30/10/40…），还原版本号写法 3.0。
+# 用环视排除长数字（2026 年份、202607 日期），避免把年份当版本号插点。
+_DOT_CANDIDATE_RE = re.compile(r"(?<!\d)\d{2}(?!\d)")
 
 _DEFAULTS: Dict[str, Any] = {
     # 栏目断供：默认阈值 + 高频栏目单独收紧
@@ -202,7 +205,11 @@ class ReminderEngine:
                 continue  # 引用源全部缺失，属于断链问题，交给 wiki-lint
             # 兜底：指纹可能陈旧（生成时的证据快照），按项目名在 SOURCE 目录
             # 扫描同名文档，取真实最新日期——指纹滞后时避免误报「项目停滞」。
-            dir_freshest = self._source_dir_freshest(source_root, page.stem)
+            # title 补充：slug 文件名丢失点号/空格（拍照3.0 → 拍照30），
+            # frontmatter title 保留原始写法（含「3.0」「AI」词边界），
+            # 是匹配带点文档（拍照3.0主观项检测等）的关键词来源。
+            title = self._page_title(page)
+            dir_freshest = self._source_dir_freshest(source_root, page.stem, title=title)
             if dir_freshest is not None and dir_freshest > freshest:
                 freshest = dir_freshest
             days = (now.date() - freshest.date()).days
@@ -217,7 +224,8 @@ class ReminderEngine:
         signals.sort(key=lambda s: -int(s["days"]))
         return signals[:limit]
 
-    def _source_dir_freshest(self, source_root: Path, page_stem: str) -> Optional[datetime]:
+    def _source_dir_freshest(self, source_root: Path, page_stem: str,
+                             title: Optional[str] = None) -> Optional[datetime]:
         """SOURCE 目录中按项目名匹配文档的最新日期（指纹兜底）。
 
         项目活动常散落在周报/会议纪要等文档中（文件名仅含人名/日期），
@@ -228,6 +236,8 @@ class ReminderEngine:
         取匹配文档的最新日期；关键词过短或无匹配时返回 None（沿用指纹判定）。
         """
         keywords = self._project_keywords(page_stem)
+        if title:
+            keywords.extend(self._project_keywords_from_title(title))
         if not keywords:
             return None
         freshest: Optional[datetime] = None
@@ -310,6 +320,14 @@ class ReminderEngine:
             seen.add(kw)
             if len(kw) >= _PROJECT_KEYWORD_MIN_LEN:
                 result.append(kw)
+        # 数字点号变体：项目页 slug 去点（拍照3.0 → 拍照30），但文档名/正文
+        # 真实写法仍带点号（拍照3.0）。还原插点变体使关键词能匹配带点文档——
+        # 否则含版本号的项目（拍照3.0、PIC-3.0 等）文件名/内容匹配全落空，
+        # 活跃项目被误判停滞（138 天误报即因此）。
+        for kw in list(result):
+            dv = cls._insert_decimal_dot(kw)
+            if dv and dv != kw and len(dv) >= _PROJECT_KEYWORD_MIN_LEN:
+                result.append(dv)
         return result
 
     @classmethod
@@ -325,6 +343,51 @@ class ReminderEngine:
             if piece and len(piece) >= _SPLIT_TOKEN_MIN_LEN and re.search(r"[A-Za-z]", piece):
                 tokens.append(piece)
         return tokens
+
+    @classmethod
+    def _insert_decimal_dot(cls, text: str) -> str:
+        """将词中第一个「恰好 2 位数字组」还原为版本号写法（30 → 3.0）。
+
+        项目名 slug 会去掉点号（拍照3.0 → 拍照30），此处为匹配带点文档
+        生成插点变体。仅处理恰好 2 位数字（环视排除 2026/202607 等长数字），
+        无匹配时返回原文本（调用方据此去重）。
+        """
+        m = _DOT_CANDIDATE_RE.search(text)
+        if not m:
+            return text
+        d = m.group(0)
+        return text[: m.start()] + d[0] + "." + d[1] + text[m.end():]
+
+    @classmethod
+    def _project_keywords_from_title(cls, title: str) -> List[str]:
+        """从项目页 frontmatter title 补充关键词（slug 文件名丢失点号/空格）。
+
+        slug「拍照30AI外观定级项目」无法还原「拍照3.0 AI外观定级项目」的
+        词边界；title 保留原始写法。按空格/标点切分词段后逐段复用剥离链，
+        产出「拍照3.0」「AI外观定级」「外观定级」等可匹配带点/词段文档的
+        关键词。title 缺失或解析失败返回空列表。
+        """
+        result: List[str] = []
+        for seg in re.split(r"[ /_\-·、,，&/|（）()]+", title or ""):
+            seg = seg.strip()
+            if not seg:
+                continue
+            for kw in cls._project_keywords(f"项目-{seg}"):
+                if kw not in result:
+                    result.append(kw)
+        return result
+
+    @classmethod
+    def _page_title(cls, path: Path) -> Optional[str]:
+        """读取 Wiki 页 frontmatter 的 title 字段（解析失败返回 None）。"""
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+        m = re.search(r"^title:\s*(.+)$", content, re.MULTILINE)
+        if not m:
+            return None
+        return m.group(1).strip().strip('"').strip("'")
 
     # ── 工具方法 ─────────────────────────────────────────────
 
