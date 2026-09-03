@@ -94,8 +94,12 @@ class MergeBuffer:
         return [self._take()] if self._texts else []
 
     def _speaker_changed(self, gap: float) -> bool:
-        """间隙过大 → 说话人边界：强信号直接判定；弱信号 + 已有累积 → 保守刷新。"""
-        if gap <= _SPEAKER_GAP:
+        """间隙过大 → 说话人边界：强信号直接判定；弱信号 + 已有累积 → 保守刷新。
+
+        缓冲为空时无"前一句"可比（gap=inf），不构成边界——否则首句 push 会
+        产出一个空 Flush（live 侧被噪音门控吞掉，但语义错误且白跑一次）。
+        """
+        if not self._texts or gap <= _SPEAKER_GAP:
             return False
         return gap > _SPEAKER_GAP_STRONG or len(self._texts) >= 2
 
