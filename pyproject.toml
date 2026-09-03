@@ -1,6 +1,6 @@
 [project]
 name = "iris"
-version = "3.29.1"
+version = "3.30.0"
 description = "工作知识助手 — 个人知识库与飞书团队知识库集成"
 requires-python = ">=3.11"
 license = {text = "MIT"}
@@ -74,7 +74,7 @@ exclude_lines = [
     "raise NotImplementedError",
 ]
 show_missing = true
-fail_under = 55
+fail_under = 65
 
 [tool.ruff.lint]
 # 默认规则集（E/F）之外启用 C901 圈复杂度门禁（阈值见 [tool.ruff.lint.mccabe]）。

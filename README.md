@@ -1,8 +1,10 @@
-# Iris 3.29.1
+# Iris 3.30.0
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
+
+**v3.30.0** — [三阶段质量优化](CHANGELOG.md)：① 开源冲刺——F401 门禁 + 395 处未使用导入清理、测试数据残留泛化；② 代码质量——`corrector.py` 1,542→873 / `live.py` 1,044→871 模块拆分（旧导入路径兼容），ruff C901 `max-complexity=20` 门禁并重构全部 11 个超限函数（最高 53），库层 print→logger；③ 长期改进——`IrisError` 统一异常基类（19 个异常挂接、原标准库父类保留）、mypy 非阻断基线 193 errors（`make typecheck`）、新拆模块与 `sync_memory` 专项单测 +257。附带修复循环导入 `config.loader ↔ core/__init__` 与 `MergeBuffer` 首句空 Flush。覆盖率 65.82%→68%（`fail_under` 55→65），全量 3,261 用例通过。协议版本 3.21（不变）。
 
 **v3.29.1** — [Wiki 增量更新指纹预检补全](CHANGELOG.md)：修复 daily-start 卡死——`update_all_pages()` 此前对全部 241 页每页无差别调 LLM 判断是否需更新（并发 6 路），压垮中转导致超时/无 content；现补全 v3.28.4 的 `is_wiki_stale()` 指纹预检（discovery/metrics 已用但该路径漏用）：加载 `chunk_hash_index`，源文档未变页面零 LLM 跳过（241 页全跳过约 5 秒），从「无差别全量重扫」退化为「按源文档指纹的精准增量」。协议版本 3.21（不变）。
 
