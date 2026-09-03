@@ -75,7 +75,9 @@ def handle_daily_start(args, bundle, logger) -> int:
         reminders_result = _daily_reminders(bundle)
 
         payload = {"memory_sync": {"scanned": sync_result.get("scanned", 0), "skipped": sync_result.get("skipped", 0),
-                                    "corrections_added": sync_result.get("corrections_added", 0)},
+                                    "corrections_added": sync_result.get("corrections_added", 0),
+                                    "cc_files_created": sync_result.get("cc_files_created", 0),
+                                    "cc_skipped_covered": sync_result.get("cc_files_skipped_covered", 0)},
                    "memory_maintenance": maintenance_report,
                    "session_mine": session_mine_result,
                    "scan": scan_info,

@@ -154,8 +154,12 @@ class TestClassify:
     def test_user_type_is_profile(self):
         assert sm._classify({"type": "user"}, "") == "profile"
 
-    def test_reference_type_is_profile_notes(self):
-        assert sm._classify({"type": "reference"}, "") == "profile_notes"
+    def test_reference_type_without_flag_not_synced(self):
+        """reference 不再隐式降级为备注；需显式 sync_to_iris: true 才同步。"""
+        assert sm._classify({"type": "reference"}, "") is None
+
+    def test_reference_type_with_flag_syncs_to_notes(self):
+        assert sm._classify({"sync_to_iris": True, "iris_target": "profile_notes", "type": "reference"}, "") == "profile_notes"
 
     def test_feedback_with_correction_keyword(self):
         assert sm._classify({"type": "feedback"}, "这里需要纠正一个说法。") == "corrections"
@@ -167,8 +171,13 @@ class TestClassify:
     def test_feedback_with_dislike_sentence(self):
         assert sm._classify({"type": "feedback"}, "我不喜欢冗长。") == "profile_dislikes"
 
-    def test_feedback_default_is_profile_notes(self):
-        assert sm._classify({"type": "feedback"}, "普通说明文字。") == "profile_notes"
+    def test_feedback_without_marker_not_synced(self):
+        """无纠正/偏好句式的 feedback 不再自动进 notes（防噪音）。"""
+        assert sm._classify({"type": "feedback"}, "普通说明文字。") is None
+
+    def test_origin_iris_file_never_syncs_back(self):
+        """反向物化文件（origin: iris）禁止回灌，防止同步环路。"""
+        assert sm._classify({"origin": "iris", "type": "feedback"}, "我喜欢简洁。") is None
 
     def test_unknown_type_not_synced(self):
         assert sm._classify({"type": ""}, "") is None
@@ -558,7 +567,8 @@ class TestRunSync:
             "- **知识助理**：服务数据智能部\n\n我喜欢结构化输出。\n"
         ))
         _write_md(sys_dir, "ref.md", (
-            "---\nname: ref\ndescription: 参考规则\ntype: reference\n---\n# 标题\n第一行内容\n"
+            "---\nname: ref\ndescription: 参考规则\ntype: reference\n"
+            "sync_to_iris: true\niris_target: profile_notes\n---\n# 标题\n第一行内容\n"
         ))
 
         stats = sm.run_sync(sys_dir, iris_dir)
@@ -584,6 +594,156 @@ class TestRunSync:
         assert stats["profile_likes_added"] == 2
         profile = json.loads((lt / "profile.json").read_text(encoding="utf-8"))
         assert profile["user_preferences"]["likes"] == ["先给结论", "简洁直接的回答"]
+
+
+# ── 反向同步（Iris → CC） ─────────────────────────────────
+
+NATIVE_CORRECTION = {"文件归档命名规范": {
+    "preferred": "数据源文件命名统一为 YYYYMMDD-名称.md，每周同步一次。",
+    "update_count": 1,
+    "updated_at": "2026-09-01T00:00:00",
+    "last_source": "Iris Q&A",
+}}
+
+
+def _seed_native_correction(iris_dir: Path) -> None:
+    lt = iris_dir / "long_term"
+    lt.mkdir(parents=True, exist_ok=True)
+    (lt / "corrections.json").write_text(
+        json.dumps({"items": dict(NATIVE_CORRECTION), "updated_at": None}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+class TestSlugify:
+    def test_english_phrase_kebab(self):
+        assert sm._slugify("document signature rule") == "document-signature-rule"
+
+    def test_mixed_cjk_and_latin(self):
+        assert sm._slugify("飞书 IM 消息签名规则") == "飞书-im-消息签名规则"
+
+    def test_cjk_kept(self):
+        assert sm._slugify("人物歧义-刘宇") == "人物歧义-刘宇"
+
+    def test_all_punct_falls_back(self):
+        assert sm._slugify("！！！") == "memory-note"
+
+
+class TestReverseSync:
+    def test_uncovered_native_correction_materializes(self, tmp_path):
+        cc_dir = tmp_path / "cc"
+        cc_dir.mkdir()
+        _write_md(cc_dir, "some-project.md", SKIP_MD)
+        iris_dir = tmp_path / "iris"
+        _seed_native_correction(iris_dir)
+
+        stats = sm.run_sync(cc_dir, iris_dir, reverse=True)
+
+        assert stats["cc_files_created"] == 1
+        assert stats["cc_files_skipped_covered"] == 0
+        assert stats["mem_index_updated"] is True
+        assert stats["synced"] is True
+
+        path = cc_dir / "文件归档命名规范.md"
+        assert path.exists()
+        text = path.read_text(encoding="utf-8")
+        assert "origin: iris" in text
+        assert "sync_to_iris: true" in text
+        idx = (cc_dir / "MEMORY.md").read_text(encoding="utf-8")
+        assert "文件归档命名规范](文件归档命名规范.md)" in idx
+
+    def test_second_run_is_idempotent(self, tmp_path):
+        cc_dir = tmp_path / "cc"
+        cc_dir.mkdir()
+        _write_md(cc_dir, "some-project.md", SKIP_MD)
+        iris_dir = tmp_path / "iris"
+        _seed_native_correction(iris_dir)
+        sm.run_sync(cc_dir, iris_dir, reverse=True)
+
+        stats = sm.run_sync(cc_dir, iris_dir, reverse=True)
+
+        assert stats["cc_files_created"] == 0
+        assert stats["cc_files_skipped_covered"] == 1
+        assert stats["synced"] is False
+        # 索引行不重复
+        idx = (cc_dir / "MEMORY.md").read_text(encoding="utf-8")
+        assert idx.count("文件归档命名规范](文件归档命名规范.md)") == 1
+
+    def test_dry_run_reverse_writes_nothing(self, tmp_path):
+        cc_dir = tmp_path / "cc"
+        cc_dir.mkdir()
+        _write_md(cc_dir, "some-project.md", SKIP_MD)
+        iris_dir = tmp_path / "iris"
+        _seed_native_correction(iris_dir)
+
+        stats = sm.run_sync(cc_dir, iris_dir, reverse=True, dry_run=True)
+
+        assert stats["cc_files_created"] == 1
+        assert not (cc_dir / "文件归档命名规范.md").exists()
+        assert not (cc_dir / "MEMORY.md").exists()
+
+    def test_reverse_off_by_default_no_cc_writes(self, tmp_path):
+        cc_dir = tmp_path / "cc"
+        cc_dir.mkdir()
+        _write_md(cc_dir, "some-project.md", SKIP_MD)
+        iris_dir = tmp_path / "iris"
+        _seed_native_correction(iris_dir)
+
+        stats = sm.run_sync(cc_dir, iris_dir)  # reverse=False（默认，向后兼容）
+
+        assert "cc_files_created" not in stats
+        assert not (cc_dir / "文件归档命名规范.md").exists()
+        assert stats["synced"] is False
+
+    def test_covered_by_existing_cc_skipped(self, tmp_path):
+        """已被 CC 文件覆盖的纠正（中文概念 + 前向新增的英文 slug）不重复物化。"""
+        cc_dir = tmp_path / "cc"
+        cc_dir.mkdir()
+        _write_md(cc_dir, "document-signature-rule.md", CORRECTION_MD)
+        iris_dir = tmp_path / "iris"
+        lt = iris_dir / "long_term"
+        lt.mkdir(parents=True, exist_ok=True)
+        (lt / "corrections.json").write_text(json.dumps({
+            "items": {
+                "文档签名规则": {
+                    "preferred": "所有文档末尾统一签名。",
+                    "update_count": 2,
+                    "updated_at": "2026-09-01T00:00:00",
+                    "last_source": "manual",
+                },
+            },
+            "updated_at": None,
+        }, ensure_ascii=False), encoding="utf-8")
+
+        stats = sm.run_sync(cc_dir, iris_dir, reverse=True)
+
+        assert stats["cc_files_created"] == 0
+        # 中文概念「文档签名规则」按描述子串覆盖跳过（前向合并时仍写回同一中文 key，不新增英文 key）
+        assert stats["cc_files_skipped_covered"] == 1
+        assert not (cc_dir / "文档签名规则.md").exists()  # 未被反向创建
+
+    def test_mapping_table_style_coverage_recognized(self, tmp_path):
+        """知识点以映射表形态散落正文时仍判定为已覆盖（如 ASR 小溪→小汐）。"""
+        cc_dir = tmp_path / "cc"
+        cc_dir.mkdir()
+        _write_md(cc_dir, "asr-notes.md", (
+            "---\nname: asr-notes\ndescription: ASR 人名误识别备忘\n---\n"
+            "# 误识别表\n\n| 误识别 | 正确 |\n|--------|------|\n"
+            "| 小溪 | 小汐 |\n"
+        ))
+        iris_dir = tmp_path / "iris"
+        lt = iris_dir / "long_term"
+        lt.mkdir(parents=True, exist_ok=True)
+        (lt / "corrections.json").write_text(json.dumps({
+            "items": {"ASR校正-小溪→小汐": {"preferred": "小溪应写为小汐。", "update_count": 1}},
+            "updated_at": None,
+        }, ensure_ascii=False), encoding="utf-8")
+
+        stats = sm.run_sync(cc_dir, iris_dir, reverse=True)
+
+        assert stats["cc_files_created"] == 0
+        assert stats["cc_files_skipped_covered"] == 1
+        assert not (cc_dir / "asr校正-小溪→小汐.md").exists()
 
 
 # ── 输出格式 ────────────────────────────────────────────────

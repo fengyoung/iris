@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""sync-memory — 将 Claude Code 系统记忆同步到 Iris 长期记忆。
+"""sync-memory — Claude Code 系统记忆 ↔ Iris 长期记忆 双向同步。
 
-读取 .claude/projects/<slug>/memory/ 下的 Markdown 文件，
+前向（CC→Iris）：读取 .claude/projects/<slug>/memory/ 下的 Markdown 文件，
 根据元数据标记或兜底规则分类，转换为 Iris 的 profile.json 和
 corrections.json 格式，增量写入。
+反向（Iris→CC）：把 Iris 运行期自主学习、CC 尚无覆盖的纠正物化为 CC
+记忆文件并登记 MEMORY.md 索引（幂等）。默认两向都执行。
 
 用法：
     python scripts/run_cli.py sync-memory --pretty
     python scripts/run_cli.py sync-memory --pretty --dry-run
-    python scripts/sync_memory.py --project-root . --pretty --dry-run
+    python scripts/sync_memory.py --project-root . --pretty --forward-only
 """
 
 from __future__ import annotations
@@ -62,6 +64,7 @@ def _parse_frontmatter(text: str) -> Dict[str, Any]:
     result["type"] = _extract_yaml_str(fm_text, "type")
     result["sync_to_iris"] = _extract_yaml_bool(fm_text, "sync_to_iris")
     result["iris_target"] = _extract_yaml_str(fm_text, "iris_target")
+    result["origin"] = _extract_yaml_str(fm_text, "origin")
 
     # 处理嵌套 metadata: 块（缩进子字段）
     meta_match = re.search(r"^metadata:\s*$(.+?)(?:^\S|\Z)", fm_text, re.MULTILINE | re.DOTALL)
@@ -73,6 +76,8 @@ def _parse_frontmatter(text: str) -> Dict[str, Any]:
             result["sync_to_iris"] = _extract_yaml_bool(meta_text, "sync_to_iris")
         if not result["iris_target"]:
             result["iris_target"] = _extract_yaml_str(meta_text, "iris_target")
+        if not result["origin"]:
+            result["origin"] = _extract_yaml_str(meta_text, "origin")
 
     return result
 
@@ -122,6 +127,10 @@ def _extract_why_and_how(body: str) -> str:
 
 def _classify(fm: Dict[str, Any], body: str) -> Optional[str]:
     """返回 Iris 目标类型，或 None 表示不同步。"""
+    # 0. 反向物化的文件（origin: iris）内容已存在于 Iris，禁止回灌
+    if fm.get("origin") == "iris":
+        return None
+
     # 1. 显式标记优先级最高
     sync_flag = fm.get("sync_to_iris")
     if sync_flag is False:
@@ -132,14 +141,16 @@ def _classify(fm: Dict[str, Any], body: str) -> Optional[str]:
             return target
         # 有标记但无 target，回退到规则
 
-    # 2. 兜底规则
+    # 2. 兜底规则：除用户画像与明显纠正/偏好句式外，一律要求显式 sync_to_iris
+    #    （v3.31+ 收紧：不再把 reference / 无标记 feedback 隐式降级为备注，避免噪音灌入）
     mem_type = fm.get("type", "")
     if mem_type == "project":
         return None
     if mem_type == "user":
         return "profile"
     if mem_type == "reference":
-        return "profile_notes"
+        # reference 默认不同步；仅在显式 sync_to_iris: true 且带 iris_target 时放行
+        return "profile_notes" if sync_flag is True else None
     if mem_type == "feedback":
         # 判断是否为纠正类
         if re.search(r"纠正|不是.*而是|应该是|应为|指的是|纠正规则", body):
@@ -148,7 +159,7 @@ def _classify(fm: Dict[str, Any], body: str) -> Optional[str]:
             return "profile_likes"
         if _DISLIKE_RE.search(body):
             return "profile_dislikes"
-        return "profile_notes"
+        return None  # 无明确规则句式的 feedback 不再自动进 notes
     return None
 
 
@@ -411,13 +422,144 @@ def _sync_one(state: _SyncState, sf: Path) -> None:
         _sync_profile(state, fm, body, sf.name)
 
 
+def _slugify(text: str) -> str:
+    """生成文件名 slug：保留中英文与数字，其余连字符合并成单个 '-' 并去首尾。"""
+    slug = re.sub(r"[^\w一-鿿]+", "-", text.strip()).strip("-").lower()
+    return slug or "memory-note"
+
+
+def _norm(text: str) -> str:
+    """归一化：去掉空白/连接符并小写，用于子串比较（中文不受影响）。"""
+    return re.sub(r"[\s_\-]+", "", text).lower()
+
+
+def _cn_bigrams(text: str) -> set:
+    """取中文连续二元组集合（过滤非 CJK），用于覆盖共现判定。"""
+    cjk = "".join(ch for ch in text if "一" <= ch <= "鿿")
+    return {cjk[i:i + 2] for i in range(len(cjk) - 1)}
+
+
+def _cc_file_has_coverage(cc_dir: Path, concept: str) -> bool:
+    """判断 CC 记忆目录是否已有文件覆盖该纠正概念（防止重复物化）。
+
+    五级匹配：文件名/frontmatter name slug、description 子串、正文子串、
+    中文字符重叠率（复用 _concept_overlap，如「人物歧义-刘宇」↔
+    「13 人…同名歧义已排除」）、CJK 二元组同文件共现（覆盖知识点以
+    「映射表 / 清单 / 混合规则」形态散落在正文、而非整句出现的情况）。
+    """
+    concept_norm = _norm(concept)
+    if not concept_norm:
+        return False
+    concept_bigrams = _cn_bigrams(concept)
+    # 要求同文件命中 ≥ max(2, 40%) 个概念二元组：排除「校正/正小/溪小」这类
+    # 跨边界噪音，留下「小溪/小汐」这类真实语义单元即可判定已覆盖。
+    bigram_need = max(2, -(-len(concept_bigrams) * 4 // 10)) if len(concept_bigrams) >= 2 else 0
+    for path in cc_dir.glob("*.md"):
+        if path.name == "MEMORY.md":
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        fm = _parse_frontmatter(text)
+        body = _extract_body(text)
+        name = fm.get("name", "")
+        desc = fm.get("description", "")
+        if _norm(path.stem) == concept_norm or name and _norm(name) == concept_norm:
+            return True
+        if any(h and concept_norm in _norm(h) for h in (desc, body)):
+            return True
+        if desc and _concept_overlap(concept, desc):
+            return True
+        if bigram_need:
+            search_text = _norm(f"{body}\n{desc}")
+            matched = sum(1 for bg in concept_bigrams if bg in search_text)
+            if matched >= bigram_need:
+                return True
+    return False
+
+
+def _write_cc_reverse_file(cc_dir: Path, concept: str, preferred: str) -> Path:
+    """把一条 Iris 原生纠正物化为 CC 记忆 markdown，返回写入路径。"""
+    slug = _slugify(concept)
+    path = cc_dir / f"{slug}.md"
+    suffix = 2
+    while path.exists():
+        path = cc_dir / f"{slug}-{suffix}.md"
+        suffix += 1
+    content = (
+        "---\n"
+        f"name: {path.stem}\n"
+        f"description: {concept}\n"
+        "metadata: \n"
+        "  node_type: memory\n"
+        "  type: feedback\n"
+        "  sync_to_iris: true\n"
+        "  iris_target: corrections\n"
+        "  origin: iris\n"
+        "---\n"
+        "\n"
+        f"# {concept}\n\n{preferred.strip() or concept}\n\n"
+        "> 本条目由 Iris 运行期自主学习（会话纠正 / enrich 确认等）并经 sync-memory 反向物化；"
+        "再次同步会据此重建，勿直接编辑。\n"
+    )
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def _append_to_mem_index(cc_dir: Path, path: Path, title: str) -> bool:
+    """把新记忆登记进 MEMORY.md 索引；已存在该行则跳过。返回是否写入。"""
+    index_path = cc_dir / "MEMORY.md"
+    line = f"- [{title}]({path.name}) — {title}\n"
+    if index_path.exists():
+        text = index_path.read_text(encoding="utf-8", errors="ignore")
+        if line in text:
+            return False
+    else:
+        text = ""
+    if text and not text.endswith("\n"):
+        text += "\n"
+    index_path.write_text(text + line, encoding="utf-8")
+    return True
+
+
+def _reverse_iris_to_cc(
+    items: Dict[str, Any], cc_dir: Path, *, dry_run: bool,
+) -> Dict[str, Any]:
+    """把 Iris 纠正中 CC 尚未覆盖的项物化为 CC 记忆文件 + MEMORY.md 索引。"""
+    stats = {"cc_files_created": 0, "cc_files_skipped_covered": 0, "mem_index_updated": False}
+    if not items:
+        return stats
+    cc_dir.mkdir(parents=True, exist_ok=True)
+    for concept, item in sorted(items.items()):
+        concept = str(concept).strip()
+        preferred = str(item.get("preferred", ""))
+        if not concept:
+            continue
+        if _cc_file_has_coverage(cc_dir, concept):
+            stats["cc_files_skipped_covered"] += 1
+            continue
+        stats["cc_files_created"] += 1
+        if dry_run:
+            continue
+        try:
+            path = _write_cc_reverse_file(cc_dir, concept, preferred)
+            if _append_to_mem_index(cc_dir, path, concept):
+                stats["mem_index_updated"] = True
+        except OSError:
+            stats["cc_files_created"] -= 1
+    return stats
+
+
 def run_sync(
     system_memory_dir: Path,
     iris_memory_dir: Path,
     *,
     dry_run: bool = False,
+    reverse: bool = False,
 ) -> Dict[str, Any]:
-    """执行一次同步，返回变更摘要。"""
+    """执行一次同步，返回变更摘要。
+
+    reverse=True 时除前向（CC→Iris）外追加反向（Iris→CC）：把 Iris 运行期
+    自主学习、CC 尚无覆盖的纠正物化为 CC 记忆文件。两向均幂等。
+    """
     if not system_memory_dir.exists():
         return {"error": f"系统记忆目录不存在: {system_memory_dir}"}
 
@@ -438,13 +580,24 @@ def run_sync(
     # 扫描系统记忆文件
     system_files = sorted(system_memory_dir.glob("*.md"))
     if not system_files:
+        # 前向无源；反向开启时仍可用 Iris 既有纠正引导出 CC 记忆（如引导新环境）
+        if reverse:
+            stats = _reverse_iris_to_cc(iris_corrections.get("items", {}), system_memory_dir, dry_run=dry_run)
+            stats.update({"scanned": 0, "skipped": 0, "details": [], "synced": stats["cc_files_created"] > 0})
+            stats["dry_run"] = dry_run
+            return stats
         return {"synced": False, "reason": "系统记忆目录为空"}
 
     state = _SyncState(iris_profile, iris_corrections, scanned=len(system_files))
     for sf in system_files:
         _sync_one(state, sf)
 
-    # 回写
+    # 反向基于前向合并后的纠正集合（含本轮新增），确保物化的是最终真相
+    reverse_stats: Dict[str, Any] = {}
+    if reverse:
+        reverse_stats = _reverse_iris_to_cc(state.correction_items, system_memory_dir, dry_run=dry_run)
+
+    # 回写 Iris 记忆（含反向物化之后执行，保证 corrections.json 落的是最终态）
     if state.has_changes:
         state.finalize()
         if not dry_run:
@@ -453,7 +606,8 @@ def run_sync(
                 path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     stats = state.stats
-    stats["synced"] = state.has_changes
+    stats.update(reverse_stats)
+    stats["synced"] = state.has_changes or reverse_stats.get("cc_files_created", 0) > 0
     stats["dry_run"] = dry_run
     return stats
 
@@ -470,10 +624,14 @@ def _load_json(path: Path, default: Dict[str, Any]) -> Dict[str, Any]:
 # ── CLI 入口 ──────────────────────────────────────────────
 
 def _build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="同步 Claude Code 系统记忆到 Iris 长期记忆")
+    p = argparse.ArgumentParser(description="Claude Code 系统记忆 ↔ Iris 长期记忆 双向同步")
     p.add_argument("--project-root", default=".", help="Iris 项目根目录")
     p.add_argument("--pretty", action="store_true", help="人类可读输出")
     p.add_argument("--dry-run", action="store_true", help="仅预览，不写入")
+    p.add_argument("--reverse", dest="reverse", action="store_true", default=True,
+                   help="同时执行反向 Iris→CC（默认开启）")
+    p.add_argument("--forward-only", dest="reverse", action="store_false",
+                   help="只做前向 CC→Iris，关闭反向")
     return p
 
 
@@ -500,6 +658,12 @@ def _format_pretty(stats: Dict[str, Any]) -> str:
         lines.append(f"  纠正规则：+{stats['corrections_added']} 条")
     if stats.get("corrections_updated"):
         lines.append(f"  纠正规则：Δ{stats['corrections_updated']} 条")
+    if stats.get("cc_files_created"):
+        lines.append(f"  反向(CC 记忆)：+{stats['cc_files_created']} 个文件")
+    if stats.get("cc_files_skipped_covered"):
+        lines.append(f"  反向(已覆盖跳过)：{stats['cc_files_skipped_covered']} 条")
+    if stats.get("mem_index_updated"):
+        lines.append("  MEMORY.md 索引：已更新")
     if stats.get("dry_run"):
         lines.append("  (dry-run 模式，未实际写入)")
     if stats.get("details"):
@@ -520,7 +684,7 @@ def main() -> int:
     # Iris 记忆目录：memory/long_term/
     iris_mem_dir = project_root / "memory"
 
-    result = run_sync(sys_mem_dir, iris_mem_dir, dry_run=args.dry_run)
+    result = run_sync(sys_mem_dir, iris_mem_dir, dry_run=args.dry_run, reverse=args.reverse)
 
     if args.pretty:
         print(_format_pretty(result))

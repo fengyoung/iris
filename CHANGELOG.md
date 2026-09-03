@@ -1,3 +1,12 @@
+## v3.31.0 (2026-09-03)
+
+**sync-memory 双向化 — CC 记忆 ↔ Iris 长期记忆持久互通 + 前向备注噪音治理**（4 文件 / +344；回归 `test_sync_memory.py` 至 90 项，全量 pytest 3,286 通过）。此前记忆同步仅 CC→Iris 单向（daily-start 阶段 1 自动执行），且前向会把 `reference` / 无标记 `feedback` 类 CC 记忆隐式降级为 Iris「备注」——dry-run 实测每次灌入 5 条低价值/重复噪音。全量审计（分支记忆逐字节 diff、前向 dry-run、反向逐条覆盖探测）确认：iris3 家族分支记忆与主库一致、Iris 27 条纠正全部已有 CC 对应——两边「记住同一套信息」在实质层面已成立，缺的是**防止未来漂移的反向机制**。
+
+- **前向收紧**（`_classify`）：`reference` 与无纠正/偏好句式的 `feedback` 不再隐式落为 `profile_notes`，一律要求显式 `sync_to_iris`（配 `iris_target`）才放行——备注噪音归零；反向物化文件带 `origin: iris` 标记，前向直接跳过，杜绝同步环路。
+- **新增反向通道**（`_reverse_iris_to_cc` / `_cc_file_has_coverage` / `_write_cc_reverse_file` / `_append_to_mem_index`）：Iris 运行期自主学习（会话纠正 / enrich 确认 / 生命周期合并）产生、而 CC 尚无覆盖的纠正 → 物化为 CC 记忆文件并登记 MEMORY.md 索引；幂等，文件一旦生成即被覆盖判定识别、不再重复。覆盖判定五级：文件名 / frontmatter `name` slug → 描述子串 → 正文子串 → 中文字符重叠率（复用 `_concept_overlap`）→ **CJK 二元组同文件共现**（识别「映射表 / 清单 / 混合规则」等知识点散落形态，避免把已在 `asr-corrections.md` 表内的小溪→小汐、人物歧义排除清单内的李俊波等重复物化）。实测 27 条纠正全部识别为已覆盖 → 反向当前 0 新增（正确且可验证）。
+- **接线**：daily-start 第 1 阶段经 `helpers._run_sync_memory` 自动双向（`run_sync(..., reverse=True)`）；CLI `sync-memory` 增 `--forward-only` 可只做前向；daily-start 报告补 `cc_files_created` / `cc_skipped_covered`。
+- 验证：ruff 零告警；`test_sync_memory.py` 现 90 项（新增收紧语义断言、反向套件、映射表覆盖回归）；全量 pytest 3,274→**3,286** 通过（unit 2,197 / integration 1,089），100s；真实数据双向 sync **幂等零写入**（48 文件扫描 / 前向备注 0 / 反向已覆盖跳过 27 / profile·corrections·MEMORY.md 前后一致）。协议版本 3.21（不变，命令集未变）；app 配置版本 3.7（不变）；产品版本 3.30.1→**3.31.0**。
+
 ## v3.30.1 (2026-09-03)
 
 **主线合并 0902-alpha → main — v3.30.0 质量线并入主干，补齐并行修复**（merge commit；源码自动合并零冲突，仅 pyproject / CHANGELOG / CLAUDE / README 四处版本文档冲突）：两条分叉线此前各自发布——main 线 v3.29.2（提醒引擎项目停滞误判修复）+ v3.29.3（deep-eval 准确性校验修复），0902-alpha 线（自 v3.29.1 分出，未含 main 两补丁）v3.30.0（三阶段质量优化：F401/C901 门禁、`IrisError` 统一异常体系、mypy 非阻断基线、corrector/live 模块拆分、专项单测 +257）。本次将 v3.30.0 全部质量改动并入 main 主干，统一主干版本 = v3.30.0 + v3.29.2 + v3.29.3。验证：合并后全量 pytest 3,274 通过（unit 2,185 / integration 1,089）、ruff 零告警。协议版本 3.21（不变）；app 配置版本 3.7（不变）；产品版本 3.30.0→**3.30.1**。

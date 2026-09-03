@@ -179,7 +179,7 @@ def _run_sync_memory(bundle) -> Dict[str, Any]:
         mod = load_script_module("sync_memory.py", project_root)
         sys_mem_dir = mod._system_memory_dir(project_root)
         iris_mem_dir = project_root / "memory"
-        return mod.run_sync(sys_mem_dir, iris_mem_dir, dry_run=False)
+        return mod.run_sync(sys_mem_dir, iris_mem_dir, dry_run=False, reverse=True)
     except (ImportError, AttributeError) as exc:
         return {"synced": False, "error": f"加载 sync_memory 失败: {exc}"}
 
