@@ -24,9 +24,14 @@ from iris.utils.paths import get_project_root
 from ._analyzer import SegmentAnalyzer, _ANALYSIS_DEADLINE_SEC
 from ._asr import ASREngine
 from ._audio import AudioCapture
+from ._audio_capture import MergeBuffer, hotwords_from_lines, is_noise, rms_of
+from ._batch_processor import (
+    apply_analysis, batch_hints, batch_label, dedup_hits, rms_level,
+    segment_line, should_suggest, speaker_id_of,
+)
 from ._corrector import CorrectorAdapter
 from ._doc_writer import DocWriter
-from ._insight import InsightEvent, InsightFeed
+from ._insight import InsightFeed
 from ._logging import setup_session_logger, teardown_session_logger
 from ._panel import PanelDisplay, PanelRenderer
 from ._retriever import RetrieverAdapter
@@ -111,19 +116,12 @@ def _load_assistant_data(asr_cfg: AsrConfig) -> tuple[dict, str]:
             try:
                 lines = [ln.strip() for ln in path.read_text(encoding="utf-8").splitlines()
                          if ln.strip()]
-                hotwords = " ".join(lines)
                 # v3.26.1: 热词总长校验
                 _MAX_HOTWORDS_CHARS = 10000
-                if len(hotwords) > _MAX_HOTWORDS_CHARS:
-                    _logger.warning("热词过长（%d 字符），截断到 %d 字符", len(hotwords), _MAX_HOTWORDS_CHARS)
-                    truncated: list[str] = []
-                    current = 0
-                    for line in lines:
-                        if current + len(line) + 1 > _MAX_HOTWORDS_CHARS:
-                            break
-                        truncated.append(line)
-                        current += len(line) + 1
-                    hotwords = " ".join(truncated)
+                raw_len = sum(len(ln) + 1 for ln in lines) - 1
+                if raw_len > _MAX_HOTWORDS_CHARS:
+                    _logger.warning("热词过长（%d 字符），截断到 %d 字符", raw_len, _MAX_HOTWORDS_CHARS)
+                hotwords = hotwords_from_lines(lines, _MAX_HOTWORDS_CHARS)
             except Exception as e:
                 _logger.warning("热词文件加载失败: %s", e)
         else:
@@ -368,10 +366,9 @@ class MeetingLiveAssistant:
     # ── 线程逻辑 ────────────────────────────────────────────
 
     def _audio_loop(self) -> None:
-        """音频采集线程：sounddevice 回调 → ASREngine.feed() → merge buffer → submit 段。
+        """音频采集线程：sounddevice 回调 → ASREngine.feed() → MergeBuffer → submit 段。
 
-        v3.25.2 merge buffer：说话人自然停顿（思考、看数据）期间 VAD 可能切段，
-        将间隔 ≤ _MERGE_WINDOW 的连续短句合并为一个段再提交，减少碎片化。
+        合并/说话人边界策略见 `_audio_capture.MergeBuffer`。
         """
         if self._asr_engine is None:
             _logger.error("ASR 引擎未初始化（mode=%s），无法启动音频采集", self._asr_cfg.mode)
@@ -381,24 +378,14 @@ class MeetingLiveAssistant:
         _silent_ticks = 0
         _heartbeat_at = time.monotonic()
         _peak_rms = 0.0
-        # merge buffer：将 VAD 连续短间隔输出合并后再提交
-        _merge_texts: list[str] = []
-        _merge_time = 0.0
-        _MERGE_WINDOW = 3.0       # 3 秒内连续语音合并
-        _MERGE_MAX_CHARS = 500    # 合并总长上限（防内存膨胀）
-        # v3.25.5 说话人间隙门控：VAD 间隙超过阈值时不合并（优先保证不跨人）
-        _SPEAKER_GAP = 0.8        # > 0.8s 可能是说话人切换
-        _SPEAKER_GAP_STRONG = 2.0  # > 2.0s 几乎一定是切换
+        buf = MergeBuffer()
         try:
             while not self._session.stop.is_set():
                 chunk = mic.read()
                 if chunk is None:
                     _silent_ticks += 1
-                    # 静音期间检查 merge buffer 是否过期需刷新
-                    # v3.25.5: 静音 >3s 是最强的说话人切换信号 → 标记
-                    if _merge_texts and (time.monotonic() - _merge_time) > _MERGE_WINDOW:
-                        self._flush_merge(_merge_texts, speaker_change_signal=True)
-                        _merge_texts = []
+                    for flush in buf.on_silence(time.monotonic()):
+                        self._flush_merge(flush.texts, speaker_change_signal=flush.speaker_change_signal)
                     if _silent_ticks == 250:
                         _logger.warning(
                             "⚠ 5 秒未收到音频！请检查系统麦克风权限："
@@ -408,72 +395,28 @@ class MeetingLiveAssistant:
                     continue
                 _silent_ticks = 0
                 # 追踪峰值（供心跳日志）
-                import numpy as np
-                rms = float(np.sqrt(np.mean(chunk.astype(np.float64) ** 2)))
+                rms = rms_of(chunk)
                 self._last_rms = rms
                 self._last_threshold = self._asr_engine.effective_threshold
-                if rms > _peak_rms:
-                    _peak_rms = rms
+                _peak_rms = max(_peak_rms, rms)
                 # 每 10 秒输出一次心跳（让用户知道系统在监听）
                 now = time.monotonic()
                 if now - _heartbeat_at > 10:
                     bar = "█" * int(_peak_rms * 500)
-                    thr = self._asr_engine.effective_threshold
-                    nf = self._asr_engine.noise_floor
                     _logger.debug("🔊 峰值 %.4f %s（噪声 %.4f 阈值 %.4f）",
-                                  _peak_rms, bar, nf, thr)
+                                  _peak_rms, bar, self._asr_engine.noise_floor,
+                                  self._asr_engine.effective_threshold)
                     _peak_rms = 0.0
                     _heartbeat_at = now
                 text = self._asr_engine.feed(chunk)
-                if text:
-                    # ── 噪音门控：拦截 ASR 幻觉/键盘噪音/碎片 ──
-                    if self._is_noise(text):
-                        continue
-                    now = time.monotonic()
-                    # ── v3.25.5 说话人边界：间隙过大时不合并 ──
-                    gap = now - _merge_time if _merge_texts else float("inf")
-                    speaker_change = False
-                    if _merge_texts and gap > _SPEAKER_GAP:
-                        if gap > _SPEAKER_GAP_STRONG:
-                            speaker_change = True
-                        elif len(_merge_texts) >= 2:
-                            # 弱信号 + 已有累积 → 保守刷新（宁多一段不合并错人）
-                            speaker_change = True
-                    if speaker_change:
-                        self._flush_merge(_merge_texts, speaker_change_signal=True)
-                        _merge_texts = []
-                        gap = float("inf")
-
-                    # ── 内容感知合并 ──
-                    cur_len = len(text)
-                    prev_total = sum(len(t) for t in _merge_texts) if _merge_texts else 0
-                    should_merge = False
-                    if _merge_texts and gap <= _MERGE_WINDOW:
-                        should_merge = True  # 正常窗口内
-                    elif _merge_texts and gap <= 6.0:
-                        # 放宽窗口：短段（<8字）或前段也短（<15字）继续等
-                        if cur_len < 8 or prev_total < 15:
-                            should_merge = True
-
-                    if should_merge:
-                        combined_len = prev_total + cur_len
-                        if combined_len <= _MERGE_MAX_CHARS:
-                            _merge_texts.append(text)
-                            _merge_time = now
-                            continue
-                        self._flush_merge(_merge_texts)
-                        _merge_texts = []
-                    else:
-                        if _merge_texts:
-                            self._flush_merge(_merge_texts)
-                            _merge_texts = []
-                    # 启动新合并窗口
-                    _merge_texts = [text]
-                    _merge_time = now
+                # 噪音门控：拦截 ASR 幻觉/键盘噪音/碎片
+                if text and not self._is_noise(text):
+                    for flush in buf.push(text, time.monotonic()):
+                        self._flush_merge(flush.texts, speaker_change_signal=flush.speaker_change_signal)
         finally:
             # 退出前刷新 merge buffer 中剩余内容
-            if _merge_texts:
-                self._flush_merge(_merge_texts)
+            for flush in buf.drain():
+                self._flush_merge(flush.texts)
             mic.stop()
 
     def _flush_merge(self, texts: list[str], speaker_change_signal: bool = False) -> None:
@@ -507,34 +450,8 @@ class MeetingLiveAssistant:
 
     @staticmethod
     def _is_noise(text: str) -> bool:
-        """ASR 后置噪音检测：拦截幻觉/键盘噪音/英文碎片，不进入管线。
-
-        以下模式视为噪音：
-        1. 单字符连续重复 ≥6 次（"不不不不不不…"、"据据据据…"）
-        2. 无有效内容（纯标点/空白）
-        3. 极短文本（≤1 字符）
-        4. 零中文字符且总长 <15（"yeah"、"OK"、"ststeteding"）
-        """
-        import re
-        if not text or not text.strip():
-            return True
-        # 单字符重复（ASR 幻觉：电流噪音/键盘撞击被当成语音）
-        if re.search(r"(.)\1{5,}", text):
-            return True
-        # 长度 ≤1 的非应答词
-        stripped = text.strip()
-        if len(stripped) <= 1:
-            return True
-        # 纯英文/拼音碎片：零中文字符且不长（"yeah", "OK", "ststeteding"）
-        cjk = len(re.findall(r"[一-鿿]", stripped))
-        if cjk == 0 and len(stripped) < 15:
-            return True
-        # v3.26.1: 混合文本噪音判定——少量中文+大量英文（疑似代码/日志误识别）
-        if cjk <= 2 and len(stripped) > 30:
-            cjk_ratio = cjk / len(stripped)
-            if cjk_ratio < 0.1:
-                return True
-        return False
+        """ASR 后置噪音检测（见 `_audio_capture.is_noise`）。"""
+        return is_noise(text)
 
     # ── 键盘交互（v3.25.3）────────────────────────────────
 
@@ -705,6 +622,36 @@ class MeetingLiveAssistant:
         首个可分析段承载分析结果，其余段标记 ANALYSIS_MERGED。
         """
         # ── Phase 1: fast 兜底 + 短段跳过 ──
+        skipped, analyzable = self._split_batch(batch)
+        if not analyzable:
+            self._finish_skipped_batch(batch, skipped)
+            return
+
+        # ── Phase 2: 各段收集 deep 校正 + 检索 ──
+        first = analyzable[0]
+        self._phase_start = time.monotonic()  # v3.26.3: 追踪分析实际耗时
+        combined_text, retrieval_ctx = self._assemble_batch_input(analyzable)
+
+        # ── Phase 3: 合并文本 → 一次 LLM 分析 ──
+        self._analyze_batch(first, analyzable, combined_text, retrieval_ctx)
+
+        # ── v3.25.3 话题追踪 + 洞察推送 ──
+        if first.analysis:
+            apply_analysis(self._session.state, self._feed, first.analysis, analyzable,
+                           agenda=self._cfg.agenda)
+
+        # ── Phase 4: 建议提问（固定间隔 + 事件驱动，v3.26.1）──
+        self._maybe_suggest(first, retrieval_ctx)
+
+        # ── Phase 5: 按 seq 升序落账（保证 segments 列表严格时间有序）──
+        self._record_batch(skipped, analyzable, first)
+
+        # ── Phase 6: 面板 + 文档 ──
+        self._render_batch(batch, first, len(analyzable), len(skipped))
+        self._maybe_mini_summary()
+
+    def _split_batch(self, batch: list[VoiceSegment]) -> tuple[list[VoiceSegment], list[VoiceSegment]]:
+        """fast 兜底 + 短段/fast_only 跳过 → (skipped, analyzable)。"""
         skipped: list[VoiceSegment] = []
         analyzable: list[VoiceSegment] = []
         for seg in batch:
@@ -716,76 +663,41 @@ class MeetingLiveAssistant:
                 skipped.append(seg)
             else:
                 analyzable.append(seg)
+        return skipped, analyzable
 
-        if not analyzable:
-            # 全批次跳过
-            for s in skipped:
-                self._session.record(s)
-            last = batch[-1]
-            self._panel.render(PanelDisplay(
-                status=f"已处理段 {last.seq}（跳过分析）",
-                seg=last, state=self._session.state,
-                topic=self._session.state.current_topic),
-                feed=self._feed)
-            self._writer.maybe_rewrite(self._session.state)
-            return
+    def _finish_skipped_batch(self, batch: list[VoiceSegment], skipped: list[VoiceSegment]) -> None:
+        """全批次跳过：直接落账 + 面板 + 文档。"""
+        for s in skipped:
+            self._session.record(s)
+        last = batch[-1]
+        self._panel.render(PanelDisplay(
+            status=f"已处理段 {last.seq}（跳过分析）",
+            seg=last, state=self._session.state,
+            topic=self._session.state.current_topic),
+            feed=self._feed)
+        self._writer.maybe_rewrite(self._session.state)
 
-        # ── Phase 2: 各段收集 deep 校正 + 检索 ──
-        first = analyzable[0]
-        self._phase_start = time.monotonic()  # v3.26.3: 追踪分析实际耗时
-        n = len(analyzable)
-
-        batch_texts: list[str] = []
-        all_hits: list = []
+    def _assemble_batch_input(self, analyzable: list[VoiceSegment]) -> tuple[str, str]:
+        """收集 deep 校正 + 检索，组装 LLM 分析输入 → (combined_text, retrieval_ctx)。"""
         # 批量收集 deep/检索：一次性 wait 全部 futures（避免逐段 wait 放大
         # LLM 超时——批处理 5 段最坏从 50s 降到 10s）
         results = self._collect_batch_deep_retrieval(analyzable)
-        # v3.25.5: VAD 说话人切换信号 → 注入 batch_texts 供 LLM 参考
-        # v3.26.1: 批内多 speaker_change_signal → 强化提示帮助 LLM 区分微话题
-        # v3.26.1: 手动话题边界标记（m 键）
-        if self._force_topic_boundary:
-            batch_texts.append("[用户标记：此处为话题边界，请将 topic_change 设为 true]")
-            self._force_topic_boundary = False
-        speaker_change_count = sum(1 for s in analyzable if getattr(s, "speaker_change_signal", False))
-        if speaker_change_count > 0:
-            if speaker_change_count >= 2:
-                batch_texts.append(
-                    "[注意：批内检测到多次说话人切换，以下段落可能涉及不同微话题，"
-                    "请分别为各说话人段标注 topic 和 speaker 信息]"
-                )
-            else:
-                batch_texts.append("[VAD 检测到可能的说话人切换，请确认 speaker.is_turn_change]")
-        # v3.26.1: 连续 forced_cut 段 → 标注可能是同一发言的延续
-        forced_count = sum(1 for s in analyzable if getattr(s, "forced_cut", False))
-        if forced_count >= 2:
-            batch_texts.append("[注意：以下多段为 ASR 强制切段（非自然停顿），可能属于同一人的连续发言]")
+        batch_texts = batch_hints(analyzable, force_topic_boundary=self._force_topic_boundary)
+        self._force_topic_boundary = False
+        all_hits: list = []
         for seg, (deep, hits) in zip(analyzable, results):
             if deep != seg.corrected_text:
-                _logger.info("🤖 LLM 校正 段%d: %s → %s",
-                           seg.seq, seg.corrected_text, deep)
+                _logger.info("🤖 LLM 校正 段%d: %s → %s", seg.seq, seg.corrected_text, deep)
                 seg.corrected_text = deep
-                sp = getattr(seg, "speaker", None)
-                sp_id = sp.speaker_id if sp else ""
-                self._corrector.push_context(deep, speaker_id=sp_id)
-            # v3.25.5 batch_texts 加 speaker 标签
-            # v3.26.1: 连续 forced_cut 段标注连续性提示
-            sp = getattr(seg, "speaker", None)
-            sp_label = f"（{sp.speaker_id}）" if (sp and sp.speaker_id) else ""
-            batch_texts.append(f"段{seg.seq}{sp_label}：{seg.corrected_text}")
+                self._corrector.push_context(deep, speaker_id=speaker_id_of(seg))
+            batch_texts.append(segment_line(seg))
             all_hits.extend(hits)
+        unique_hits = dedup_hits(all_hits)
+        return "\n".join(batch_texts), RetrieverAdapter.format_context(unique_hits[:10])
 
-        # 检索去重
-        seen = set()
-        unique_hits = []
-        for h in all_hits:
-            key = (h.title, (h.content_preview or "")[:50])
-            if key not in seen:
-                seen.add(key)
-                unique_hits.append(h)
-
-        # ── Phase 3: 合并文本 → 一次 LLM 分析 ──
-        combined_text = "\n".join(batch_texts)
-        retrieval_ctx = RetrieverAdapter.format_context(unique_hits[:10])
+    def _analyze_batch(self, first: VoiceSegment, analyzable: list[VoiceSegment],
+                       combined_text: str, retrieval_ctx: str) -> None:
+        """一次 LLM 分析，结果挂在首个可分析段；异常 → ANALYSIS_FAILED。"""
         first.analysis_started_at = time.monotonic()
         # v3.26.1: 更新面板显示分析进度
         # v3.26.3: analysis_elapsed 传递实际耗时（不再恒为 0）
@@ -815,114 +727,35 @@ class MeetingLiveAssistant:
             first.analysis = None
             first.analysis_status = VoiceSegment.ANALYSIS_FAILED
 
-        # ── v3.25.3 话题追踪 + 洞察推送 ──
-        if first.analysis:
-            analysis = first.analysis
-            state = self._session.state
-            # 话题变化 → 推送（以实际状态变化为准，兼容 topic_change 缺失）
-            if analysis.topic:
-                prev_topic = state.current_topic
-                state.update_topic(
-                    analysis.topic, analysis.topic_change,
-                    analysis.topic_summary, first.seq)
-                if prev_topic and prev_topic != state.current_topic:
-                    self._feed.push_topic_change(analysis.topic)
-            # 决策 → 推送
-            for d in analysis.decisions:
-                if d.confidence == "confirmed":
-                    self._feed.push_decision(d.text, "confirmed")
-            # 风险 → 推送（只推前 2 条）
-            for r in analysis.risks[:2]:
-                self._feed.push_risk(r)
-            # 冲突 → 推送
-            if analysis.key_points:
-                conflicts = state.check_conflict(analysis.key_points)
-                for c in conflicts:
-                    self._feed.push_conflict(c)
-                    _logger.warning("⚠ 语义冲突: %s", c)
-            # 待办 → 累计 + 推送
-            if analysis.todos:
-                for t in analysis.todos:
-                    if t.text and t.text not in state.todos:
-                        state._dedup_append(state.todos, [t.text])
-                for t in analysis.todos[:2]:
-                    assignee = f"（{t.assignee}）" if t.assignee else ""
-                    self._feed.push(InsightEvent(
-                        event_type="todo", text=f"{t.text}{assignee}"))
-            # ── v3.25.5 说话人追踪 ──
-            if analysis.speaker and analysis.speaker.speaker_id:
-                sp = analysis.speaker
-                # 新说话人登记
-                if sp.speaker_id not in [s.get("id") for s in state.speakers]:
-                    state.speakers.append({
-                        "id": sp.speaker_id, "role": sp.role_hint,
-                        "first_seen": first.seq, "segments": 1,
-                    })
-                else:
-                    for s in state.speakers:
-                        if s["id"] == sp.speaker_id:
-                            s["segments"] = s.get("segments", 0) + len(analyzable)
-                # 更新段的 speaker（后验传递，仅 VoiceSegment）
-                for seg in analyzable:
-                    if hasattr(seg, "speaker"):
-                        seg.speaker = sp
-                # 说话人切换 → 推送洞察
-                if sp.is_turn_change:
-                    role = f"（{sp.role_hint}）" if sp.role_hint else ""
-                    self._feed.push(InsightEvent(
-                        event_type="speaker_turn",
-                        text=f"{sp.speaker_id}{role} 发言"))
-
-            # 跑偏检测：有议程但当前话题偏离
-            if self._cfg.agenda and analysis.topic:
-                agenda_keywords = self._cfg.agenda.replace("；", ";").split(";")
-                topic_lower = analysis.topic.lower()
-                on_agenda = any(
-                    kw.strip().lower() in topic_lower or topic_lower in kw.strip().lower()
-                    for kw in agenda_keywords if kw.strip()
-                )
-                if not on_agenda and len(state.topics) >= 1:
-                    _logger.info("⚠ 跑偏提醒: 当前话题「%s」不在预设议程中", analysis.topic)
-
-        # ── Phase 4: 建议提问（固定间隔 + 事件驱动，v3.26.1）──
-        should_suggest = False
-        if first.analysis:
-            # 条件 1：固定间隔采样（保留原有逻辑）
-            if (first.seq - 1) % self._cfg.suggest_every == 0:
-                should_suggest = True
-            else:
-                # v3.26.1: 事件驱动条件（tentative 决策 / 新问题）统一节流——
-                # 距上次实际生成建议 ≥ suggest_every 段才触发，防止高频 LLM 调用
-                since_last = first.seq - self._last_suggest_seq
-                if since_last >= self._cfg.suggest_every:
-                    # 条件 2：检测到 tentative 决策 → 追问确认
-                    if any(d.confidence == "tentative" for d in first.analysis.decisions):
-                        should_suggest = True
-                    # 条件 3：有新的未解决问题
-                    elif first.analysis.questions:
-                        should_suggest = True
-        if should_suggest and first.analysis:
-            try:
-                deadline = (getattr(first, 'analysis_started_at', time.monotonic())
-                            + _ANALYSIS_DEADLINE_SEC)
-                sharp = self._analyzer.suggest_questions(
-                    first.analysis,
-                    self._session.summary_for_prompt(),
-                    retrieval_ctx,
-                    deadline=deadline,
-                )
-                if sharp:
-                    first.analysis.suggested_questions = sharp
-                    self._last_suggest_seq = first.seq
-            except Exception:
-                pass
-        elif first.analysis:
+    def _maybe_suggest(self, first: VoiceSegment, retrieval_ctx: str) -> None:
+        """建议提问：满足节流条件时调 LLM；否则清空。"""
+        if first.analysis is None:
+            return
+        if not should_suggest(first.analysis, first.seq, self._last_suggest_seq, self._cfg.suggest_every):
             first.analysis.suggested_questions = []
+            return
+        try:
+            deadline = (getattr(first, 'analysis_started_at', time.monotonic())
+                        + _ANALYSIS_DEADLINE_SEC)
+            sharp = self._analyzer.suggest_questions(
+                first.analysis,
+                self._session.summary_for_prompt(),
+                retrieval_ctx,
+                deadline=deadline,
+            )
+            if sharp:
+                first.analysis.suggested_questions = sharp
+                self._last_suggest_seq = first.seq
+        except Exception:
+            pass
 
-        # ── Phase 5: 按 seq 升序落账（保证 segments 列表严格时间有序）──
-        # v3.26.3: 修复多段批次中 first (seq最小) 被最后 record 导致的乱序
-        all_segs: list[VoiceSegment] = skipped + analyzable
-        all_segs.sort(key=lambda s: s.seq)
+    def _record_batch(self, skipped: list[VoiceSegment], analyzable: list[VoiceSegment],
+                      first: VoiceSegment) -> None:
+        """按 seq 升序落账；非首段标记 ANALYSIS_MERGED。
+
+        v3.26.3: 修复多段批次中 first (seq最小) 被最后 record 导致的乱序。
+        """
+        all_segs: list[VoiceSegment] = sorted(skipped + analyzable, key=lambda s: s.seq)
         for s in all_segs:
             if s in analyzable and s is not first:
                 s.analysis_status = VoiceSegment.ANALYSIS_MERGED
@@ -931,31 +764,24 @@ class MeetingLiveAssistant:
             except Exception as e:
                 _logger.error("段 %d 落账异常: %s", s.seq, e)
 
-        # ── Phase 6: 面板 + 文档 ──
-        if len(batch) == 1:
-            label = f"已处理段 {first.seq}"
-        else:
-            skipped_n = len(skipped)
-            analyze_note = f"{n} 段合并分析" if skipped_n == 0 else (
-                f"{n} 段合并分析 + {skipped_n} 段跳过")
-            label = f"已处理段 {batch[0].seq}-{batch[-1].seq}（{analyze_note}）"
+    def _render_batch(self, batch: list[VoiceSegment], first: VoiceSegment,
+                      n_analyzed: int, n_skipped: int) -> None:
+        """面板 + 文档 + 任务埋点。"""
         # v3.26.1: 收集系统告警 + 音频电平
         alerts = []
         if self._writer.is_failing:
             alerts.append("文档写入失败（磁盘空间不足？）")
-        if (hasattr(self, '_asr_engine') and self._asr_engine is not None
-                and getattr(self._asr_engine, '_consecutive_failures', 0) > 0):
-            alerts.append(f"ASR 异常 ({self._asr_engine._consecutive_failures} 次)")
-        # 音频电平（归一化到 0-1）
-        thr = self._last_threshold or 0.005
-        rms_level = min(1.0, self._last_rms / thr) if self._last_rms > 0 else 0.0
+        engine = getattr(self, '_asr_engine', None)
+        failures = getattr(engine, '_consecutive_failures', 0) if engine is not None else 0
+        if failures > 0:
+            alerts.append(f"ASR 异常 ({failures} 次)")
         self._panel.render(PanelDisplay(
-            status=label, seg=first,
+            status=batch_label(batch, n_analyzed, n_skipped), seg=first,
             analysis_unavailable=first.analysis is None,
             state=self._session.state,
             topic=self._session.state.current_topic,
             alerts=alerts if alerts else None,
-            rms_level=rms_level),
+            rms_level=rms_level(self._last_rms, self._last_threshold)),
             feed=self._feed)
         self._writer.maybe_rewrite(self._session.state)
         # 任务埋点：每批处理后上报累计段数（常驻任务无总量，progress 留空）
@@ -963,21 +789,22 @@ class MeetingLiveAssistant:
         if _tr is not None:
             _tr.report_phase("analyze", f"已处理 {len(self._session.state.segments)} 段")
 
-        # v3.26.1: 每 15 分钟或每 30 段触发增量迷你总结
+    def _maybe_mini_summary(self) -> None:
+        """v3.26.1: 每 15 分钟且 ≥10 段触发增量迷你总结。"""
         _MINI_SUMMARY_INTERVAL = 900.0  # 15 分钟
         _MINI_SUMMARY_MIN_SEGMENTS = 10
-        if (time.monotonic() - self._last_mini_summary_at > _MINI_SUMMARY_INTERVAL
+        if not (time.monotonic() - self._last_mini_summary_at > _MINI_SUMMARY_INTERVAL
                 and len(self._session.state.segments) >= _MINI_SUMMARY_MIN_SEGMENTS):
-            try:
-                mini = self._analyzer.mini_summarize(self._session.state)
-                if mini:
-                    # 带时间戳存储，渲染进文档时用户可看到生成时刻
-                    self._session.state.mini_summaries.append(
-                        f"[{datetime.now():%H:%M}] {mini}")
-                    _logger.info("📝 阶段性总结: %s", mini)
-                self._last_mini_summary_at = time.monotonic()
-            except Exception:
-                pass
+            return
+        try:
+            mini = self._analyzer.mini_summarize(self._session.state)
+            if mini:
+                # 带时间戳存储，渲染进文档时用户可看到生成时刻
+                self._session.state.mini_summaries.append(f"[{datetime.now():%H:%M}] {mini}")
+                _logger.info("📝 阶段性总结: %s", mini)
+            self._last_mini_summary_at = time.monotonic()
+        except Exception:
+            pass
 
     def _collect_batch_deep_retrieval(self, segments: list[VoiceSegment]) -> list:
         """批量收集 deep/检索：一次性 wait 全部 futures（v3.25.4 性能修复）。

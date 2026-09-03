@@ -256,6 +256,161 @@ def _extract_persona(fm: Dict[str, Any], body: str) -> str:
 
 # ── 核心同步逻辑 ──────────────────────────────────────────
 
+class _SyncState:
+    """一次同步过程中的可变状态：Iris 记忆快照 + 统计。"""
+
+    def __init__(self, iris_profile: Dict[str, Any], iris_corrections: Dict[str, Any], scanned: int):
+        self.profile = iris_profile
+        self.corrections = iris_corrections
+        prefs = iris_profile.setdefault("user_preferences", {})
+        self.likes: set = set(prefs.setdefault("likes", []))
+        self.dislikes: set = set(prefs.setdefault("dislikes", []))
+        self.notes: List[str] = prefs.setdefault("notes", [])
+        self.correction_items: Dict[str, Any] = iris_corrections.setdefault("items", {})
+        self.persona_updated = False
+        self.stats: Dict[str, Any] = {
+            "scanned": scanned,
+            "profile_likes_added": 0,
+            "profile_dislikes_added": 0,
+            "profile_notes_added": 0,
+            "corrections_added": 0,
+            "corrections_updated": 0,
+            "skipped": 0,
+            "details": [],
+        }
+
+    # ---- 增量写入（自动去重 + 计数） ----
+
+    def add_likes(self, items: List[str], *, detail: bool = True) -> None:
+        for item in items:
+            if item not in self.likes:
+                self.likes.add(item)
+                self.stats["profile_likes_added"] += 1
+                if detail:
+                    self.stats["details"].append(f"新增偏好(喜欢): {item}")
+
+    def add_dislikes(self, items: List[str], *, detail: bool = True) -> None:
+        for item in items:
+            if item not in self.dislikes:
+                self.dislikes.add(item)
+                self.stats["profile_dislikes_added"] += 1
+                if detail:
+                    self.stats["details"].append(f"新增偏好(避免): {item}")
+
+    def add_note(self, note: str) -> None:
+        if note and note not in self.notes:
+            self.notes.append(note)
+            self.stats["profile_notes_added"] += 1
+            self.stats["details"].append(f"新增备注: {note[:80]}")
+
+    def set_persona(self, persona: str) -> None:
+        if persona and self.profile.get("iris_persona", {}).get("description") != persona:
+            self.profile.setdefault("iris_persona", {})["description"] = persona
+            self.persona_updated = True
+            self.stats["details"].append("更新 Iris 人设")
+
+    @property
+    def has_changes(self) -> bool:
+        s = self.stats
+        return bool(
+            s["profile_likes_added"] or s["profile_dislikes_added"] or s["profile_notes_added"]
+            or s["corrections_added"] or s["corrections_updated"] or self.persona_updated
+        )
+
+    def finalize(self) -> None:
+        """把 set/list 快照写回 profile dict 并打时间戳。"""
+        prefs = self.profile["user_preferences"]
+        prefs["likes"] = sorted(self.likes)
+        prefs["dislikes"] = sorted(self.dislikes)
+        prefs["notes"] = self.notes
+        now = datetime.now().isoformat(timespec="seconds")
+        self.profile["updated_at"] = now
+        self.corrections["updated_at"] = now
+
+
+def _find_existing_correction(
+    items: Dict[str, Any], fm: Dict[str, Any], concept: str,
+) -> tuple[Dict[str, Any], str, bool]:
+    """查找已有纠正条目 → (existing, concept, dedup_matched)。
+
+    三级匹配：
+    1. 概念名精确命中
+    2. 已有条目的 last_source 引用同一 CC 文件（防英文 slug 与中文概念名重复；
+       Iris 自建条目 last_source 可能是 "合并自: ..., file_slug, ..."，故用子串匹配，
+       同时匹配 kebab-case 与空格形式）
+    3. CC 文件 description 与已有中文概念名模糊重叠（如 "document signature rule" → "文档签名规则"）
+    """
+    existing = items.get(concept, {})
+    if existing:
+        return existing, concept, False
+
+    file_slug = fm.get("name", "")
+    if file_slug:
+        spaced = file_slug.replace("-", " ")
+        for key, val in items.items():
+            src = val.get("last_source", "")
+            if file_slug in src or spaced in src:
+                return val, key, True
+
+    file_desc = fm.get("description", "")
+    if file_desc:
+        for key, val in items.items():
+            if _concept_overlap(file_desc, key):
+                return val, key, True
+
+    return {}, concept, False
+
+
+def _sync_correction(state: _SyncState, fm: Dict[str, Any], body: str) -> None:
+    concept, entry = _extract_correction_entry(fm, body)
+    existing, concept, dedup_matched = _find_existing_correction(state.correction_items, fm, concept)
+
+    if existing.get("preferred") == entry["preferred"]:
+        return  # 未变化
+    # 去重匹配到的中文条目通常更完整（经多次合并），新的英文版
+    # preferred 较短时跳过，避免用不完整内容覆盖
+    if dedup_matched and len(existing.get("preferred", "")) > len(entry.get("preferred", "")):
+        return
+
+    entry["update_count"] = existing.get("update_count", 0) + 1
+    state.correction_items[concept] = entry
+    if existing:
+        state.stats["corrections_updated"] += 1
+        state.stats["details"].append(f"更新纠正: {concept}")
+    else:
+        state.stats["corrections_added"] += 1
+        state.stats["details"].append(f"新增纠正: {concept}")
+
+
+def _sync_profile(state: _SyncState, fm: Dict[str, Any], body: str, filename: str) -> None:
+    """用户人设文件：提取 Iris 人设 + likes/dislikes（不记 details）。"""
+    if "iris" in filename.lower() or "身份" in filename:
+        state.set_persona(_extract_persona(fm, body))
+    state.add_likes(_extract_likes(fm, body), detail=False)
+    state.add_dislikes(_extract_dislikes(fm, body), detail=False)
+
+
+def _sync_one(state: _SyncState, sf: Path) -> None:
+    """按分类把单个系统记忆文件合入状态。"""
+    text = sf.read_text(encoding="utf-8", errors="ignore")
+    fm = _parse_frontmatter(text)
+    body = _extract_body(text)
+    target = _classify(fm, body)
+
+    if target is None:
+        state.stats["skipped"] += 1
+    elif target == "corrections":
+        _sync_correction(state, fm, body)
+    elif target == "profile_likes":
+        state.add_likes(_extract_likes(fm, body))
+    elif target == "profile_dislikes":
+        state.add_dislikes(_extract_dislikes(fm, body))
+    elif target == "profile_notes":
+        state.add_note(_extract_note(fm, body))
+    elif target == "profile":
+        _sync_profile(state, fm, body, sf.name)
+
+
 def run_sync(
     system_memory_dir: Path,
     iris_memory_dir: Path,
@@ -285,157 +440,20 @@ def run_sync(
     if not system_files:
         return {"synced": False, "reason": "系统记忆目录为空"}
 
-    stats: Dict[str, Any] = {
-        "scanned": len(system_files),
-        "profile_likes_added": 0,
-        "profile_dislikes_added": 0,
-        "profile_notes_added": 0,
-        "corrections_added": 0,
-        "corrections_updated": 0,
-        "skipped": 0,
-        "details": [],
-    }
-
-    likes_set = set(iris_profile.setdefault("user_preferences", {}).setdefault("likes", []))
-    dislikes_set = set(iris_profile.setdefault("user_preferences", {}).setdefault("dislikes", []))
-    notes_list: List[str] = iris_profile.setdefault("user_preferences", {}).setdefault("notes", [])
-    corrections_items: Dict[str, Any] = iris_corrections.setdefault("items", {})
-
-    persona_updated = False
-
+    state = _SyncState(iris_profile, iris_corrections, scanned=len(system_files))
     for sf in system_files:
-        text = sf.read_text(encoding="utf-8", errors="ignore")
-        fm = _parse_frontmatter(text)
-        body = _extract_body(text)
-        target = _classify(fm, body)
-
-        if target is None:
-            stats["skipped"] += 1
-            continue
-
-        filename = sf.name
-
-        if target == "corrections":
-            concept, entry = _extract_correction_entry(fm, body)
-            existing = corrections_items.get(concept, {})
-            dedup_matched = False  # 是否通过去重匹配到已有条目
-
-            # 去重：检查是否有其他条目已引用同一 CC 文件（防止英文 slug
-            # 与中文概念名重复，如 "deep discussion rule" vs "深入讨论流程"）。
-            # Iris 自身创建的条目 last_source 可能是 "合并自: ..., file_slug, ..."，
-            # 因此用子串匹配而非精确匹配。
-            if not existing:
-                file_slug = fm.get("name", "")
-                if file_slug:
-                    for exist_key, exist_val in corrections_items.items():
-                        exist_source = exist_val.get("last_source", "")
-                        # 同时匹配 kebab-case（deep-discussion-rule）和空格形式（deep discussion rule）
-                        if file_slug in exist_source or file_slug.replace("-", " ") in exist_source:
-                            # 已有条目覆盖同一 CC 文件，更新该条目而非新建
-                            existing = exist_val
-                            concept = exist_key
-                            dedup_matched = True
-                            break
-
-            # 内容去重：如果新条目 concept 是纯英文，用 CC 文件的 description
-            # 与已有中文概念名做模糊匹配，防止同一条规则中英文各存一份。
-            # 如 "document signature rule" → "文档签名规则"
-            if not existing:
-                file_desc = fm.get("description", "")
-                if file_desc:
-                    for exist_key, exist_val in corrections_items.items():
-                        # description 的核心词包含在已有概念名中，或反之
-                        if _concept_overlap(file_desc, exist_key):
-                            existing = exist_val
-                            concept = exist_key
-                            dedup_matched = True
-                            break
-
-            if existing.get("preferred") == entry["preferred"]:
-                continue  # 未变化
-
-            # 去重匹配到的中文条目通常更完整（经多次合并），新的英文版
-            # preferred 较短时跳过，避免用不完整内容覆盖
-            if dedup_matched and len(existing.get("preferred", "")) > len(entry.get("preferred", "")):
-                continue
-            entry["update_count"] = existing.get("update_count", 0) + 1
-            corrections_items[concept] = entry
-            if existing:
-                stats["corrections_updated"] += 1
-                stats["details"].append(f"更新纠正: {concept}")
-            else:
-                stats["corrections_added"] += 1
-                stats["details"].append(f"新增纠正: {concept}")
-
-        elif target == "profile_likes":
-            for item in _extract_likes(fm, body):
-                if item not in likes_set:
-                    likes_set.add(item)
-                    stats["profile_likes_added"] += 1
-                    stats["details"].append(f"新增偏好(喜欢): {item}")
-
-        elif target == "profile_dislikes":
-            for item in _extract_dislikes(fm, body):
-                if item not in dislikes_set:
-                    dislikes_set.add(item)
-                    stats["profile_dislikes_added"] += 1
-                    stats["details"].append(f"新增偏好(避免): {item}")
-
-        elif target == "profile_notes":
-            note = _extract_note(fm, body)
-            if note and note not in notes_list:
-                notes_list.append(note)
-                stats["profile_notes_added"] += 1
-                stats["details"].append(f"新增备注: {note[:80]}")
-
-        elif target == "profile":
-            # 处理用户人设
-            if "iris" in filename.lower() or "身份" in filename:
-                persona = _extract_persona(fm, body)
-                if persona and iris_profile.get("iris_persona", {}).get("description") != persona:
-                    iris_profile.setdefault("iris_persona", {})["description"] = persona
-                    persona_updated = True
-                    stats["details"].append("更新 Iris 人设")
-            # 同时提取 likes/dislikes/notes
-            for item in _extract_likes(fm, body):
-                if item not in likes_set:
-                    likes_set.add(item)
-                    stats["profile_likes_added"] += 1
-            for item in _extract_dislikes(fm, body):
-                if item not in dislikes_set:
-                    dislikes_set.add(item)
-                    stats["profile_dislikes_added"] += 1
+        _sync_one(state, sf)
 
     # 回写
-    has_changes = bool(
-        stats["profile_likes_added"]
-        or stats["profile_dislikes_added"]
-        or stats["profile_notes_added"]
-        or stats["corrections_added"]
-        or stats["corrections_updated"]
-        or persona_updated
-    )
-
-    if has_changes:
-        iris_profile["user_preferences"]["likes"] = sorted(likes_set)
-        iris_profile["user_preferences"]["dislikes"] = sorted(dislikes_set)
-        iris_profile["user_preferences"]["notes"] = notes_list
-        iris_profile["updated_at"] = datetime.now().isoformat(timespec="seconds")
-        iris_corrections["updated_at"] = datetime.now().isoformat(timespec="seconds")
-
+    if state.has_changes:
+        state.finalize()
         if not dry_run:
-            profile_path.parent.mkdir(parents=True, exist_ok=True)
-            profile_path.write_text(
-                json.dumps(iris_profile, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-            corrections_path.parent.mkdir(parents=True, exist_ok=True)
-            corrections_path.write_text(
-                json.dumps(iris_corrections, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            for path, payload in ((profile_path, iris_profile), (corrections_path, iris_corrections)):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    stats["synced"] = has_changes
+    stats = state.stats
+    stats["synced"] = state.has_changes
     stats["dry_run"] = dry_run
     return stats
 

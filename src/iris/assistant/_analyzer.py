@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from iris.feed._topic_detector import _parse_json_safe
 
@@ -269,61 +269,84 @@ class SegmentAnalyzer:
         # 列表字段
         for field in list_fields:
             value = data.get(field)
-            if not isinstance(value, list):
-                continue
-            items = []
-            for item in value:
-                if len(items) >= _MAX_ITEMS:
-                    break
-                if item is None:
-                    continue
-                text = item.strip() if isinstance(item, str) else str(item).strip()
-                if text:
-                    items.append(text[:_MAX_ITEM_CHARS])
-            result[field] = items
-        # decisions 字段：支持 {"text":"...","confidence":"confirmed"} 或纯字符串
+            if isinstance(value, list):
+                result[field] = _norm_str_list(value)
+        # 结构化字段：decisions / todos 支持 dict 或纯字符串两种格式
         decisions_data = data.get("decisions")
         if isinstance(decisions_data, list):
-            from iris.assistant.models import DecisionItem
-            decisions = []
-            for item in decisions_data:
-                if len(decisions) >= _MAX_ITEMS:
-                    break
-                if isinstance(item, dict):
-                    text = str(item.get("text", "")).strip()
-                    conf = str(item.get("confidence", "proposed")).strip()
-                    if text and conf in ("confirmed", "proposed", "tentative"):
-                        decisions.append(DecisionItem(text=text[:_MAX_ITEM_CHARS], confidence=conf))
-                elif isinstance(item, str):
-                    decisions.append(DecisionItem(text=item.strip()[:_MAX_ITEM_CHARS]))
-            result["decisions"] = decisions
-        # todos 字段：支持 {"text":"...","assignee":"...","deadline":"..."} 或纯字符串
+            result["decisions"] = _norm_items(decisions_data, _norm_decision)
         todos_data = data.get("todos")
         if isinstance(todos_data, list):
-            from iris.assistant.models import TodoItem
-            todos = []
-            for item in todos_data:
-                if len(todos) >= _MAX_ITEMS:
-                    break
-                if isinstance(item, dict):
-                    text = str(item.get("text", "")).strip()
-                    if text:
-                        todos.append(TodoItem(
-                            text=text[:_MAX_ITEM_CHARS],
-                            assignee=str(item.get("assignee", "")).strip()[:50],
-                            deadline=str(item.get("deadline", "")).strip()[:50],
-                        ))
-                elif isinstance(item, str):
-                    todos.append(TodoItem(text=item.strip()[:_MAX_ITEM_CHARS]))
-            result["todos"] = todos
+            result["todos"] = _norm_items(todos_data, _norm_todo)
         # speaker 字段
         speaker_data = data.get("speaker")
         if isinstance(speaker_data, dict):
-            from iris.assistant.models import SpeakerLabel
-            result["speaker"] = SpeakerLabel(
-                speaker_id=str(speaker_data.get("speaker_id", "")).strip()[:20],
-                role_hint=str(speaker_data.get("role_hint", "")).strip()[:20],
-                turn_index=int(speaker_data.get("turn_index", 0)) if speaker_data.get("turn_index") else 0,
-                is_turn_change=bool(speaker_data.get("is_turn_change", False)),
-            )
+            result["speaker"] = _norm_speaker(speaker_data)
         return result
+
+
+# ── _normalize 的字段级归一化 helper ──────────────────────────
+
+def _norm_str_list(value: list) -> List[str]:
+    """字符串列表：None 跳过、非 str 转 str、去空、截断、限条数。"""
+    items: List[str] = []
+    for item in value:
+        if len(items) >= _MAX_ITEMS:
+            break
+        if item is None:
+            continue
+        text = item.strip() if isinstance(item, str) else str(item).strip()
+        if text:
+            items.append(text[:_MAX_ITEM_CHARS])
+    return items
+
+
+def _norm_items(value: list, convert) -> list:
+    """结构化列表：逐项 convert（返回 None 跳过），限条数。"""
+    out: list = []
+    for item in value:
+        if len(out) >= _MAX_ITEMS:
+            break
+        obj = convert(item)
+        if obj is not None:
+            out.append(obj)
+    return out
+
+
+def _norm_decision(item: Any):
+    from iris.assistant.models import DecisionItem
+    if isinstance(item, dict):
+        text = str(item.get("text", "")).strip()
+        conf = str(item.get("confidence", "proposed")).strip()
+        if text and conf in ("confirmed", "proposed", "tentative"):
+            return DecisionItem(text=text[:_MAX_ITEM_CHARS], confidence=conf)
+        return None
+    if isinstance(item, str):
+        return DecisionItem(text=item.strip()[:_MAX_ITEM_CHARS])
+    return None
+
+
+def _norm_todo(item: Any):
+    from iris.assistant.models import TodoItem
+    if isinstance(item, dict):
+        text = str(item.get("text", "")).strip()
+        if not text:
+            return None
+        return TodoItem(
+            text=text[:_MAX_ITEM_CHARS],
+            assignee=str(item.get("assignee", "")).strip()[:50],
+            deadline=str(item.get("deadline", "")).strip()[:50],
+        )
+    if isinstance(item, str):
+        return TodoItem(text=item.strip()[:_MAX_ITEM_CHARS])
+    return None
+
+
+def _norm_speaker(speaker_data: dict):
+    from iris.assistant.models import SpeakerLabel
+    return SpeakerLabel(
+        speaker_id=str(speaker_data.get("speaker_id", "")).strip()[:20],
+        role_hint=str(speaker_data.get("role_hint", "")).strip()[:20],
+        turn_index=int(speaker_data.get("turn_index", 0)) if speaker_data.get("turn_index") else 0,
+        is_turn_change=bool(speaker_data.get("is_turn_change", False)),
+    )
