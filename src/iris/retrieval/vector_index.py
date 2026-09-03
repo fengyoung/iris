@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 
 import numpy as np
 
+from iris.core.exceptions import IrisRuntimeError
+
 _VECTORS_NPY = "vectors.npy"
 _IDS_JSON = "ids.json"
 _META_JSON = "meta.json"
@@ -21,7 +23,7 @@ _CURRENT_JSON = "current.json"
 _GENERATIONS_DIR = "generations"
 
 
-class VectorIndexModelMismatchError(RuntimeError):
+class VectorIndexModelMismatchError(IrisRuntimeError):
     """embedder 模型与已有索引不一致：新旧向量空间不可混用，拒绝增量写入。"""
 
 

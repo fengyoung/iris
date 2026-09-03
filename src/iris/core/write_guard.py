@@ -11,13 +11,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List
+from typing import TYPE_CHECKING, List
 
-from iris.config.loader import ConfigBundle
+from iris.core.exceptions import IrisError
 from iris.utils.shared import atomic_write_bytes, atomic_write_text
 
+if TYPE_CHECKING:  # 仅用于类型标注；运行期不导入，避免 core ↔ config.loader 循环导入
+    from iris.config.loader import ConfigBundle
 
-class WriteGuardError(PermissionError):
+
+class WriteGuardError(IrisError, PermissionError):
     """写入路径不在允许范围内。"""
 
 

@@ -25,18 +25,20 @@ from .write_guard import (
     validate_write_path,
 )
 
+from .exceptions import IrisError, IrisRuntimeError, IrisValueError, StorageError
+
 # 可选：SQLite 存储（高性能场景替代 JSON）
 try:
-    from .storage import ChunkStore, StorageError
+    from .storage import ChunkStore
 except ImportError:
     from typing import Any as _AnyType
     ChunkStore: _AnyType = None
-    class StorageError(RuntimeError):
-        """SQLite 存储不可用时的占位异常类型。"""
-        pass
 
 __all__ = [
     "DOC_TYPES",
+    "IrisError",
+    "IrisRuntimeError",
+    "IrisValueError",
     "LLMRequest",
     "LLMResponse",
     "FileLock",

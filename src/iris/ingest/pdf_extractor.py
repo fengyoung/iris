@@ -7,8 +7,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List
 
+from iris.core.exceptions import IrisRuntimeError
 
-class PDFExtractorError(RuntimeError):
+
+class PDFExtractorError(IrisRuntimeError):
     """PDF 提取相关错误。"""
 
 

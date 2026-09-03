@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from iris.complex_input.detector import EncodedImage
+from iris.core.exceptions import IrisRuntimeError
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ _DEFAULT_WHISPER_MODEL = "small"
 _FRAME_WIDTH = 768
 
 
-class VideoAdapterError(RuntimeError):
+class VideoAdapterError(IrisRuntimeError):
     """视频适配器相关错误（ffmpeg 缺失 / 文件无法打开等致命错误）。"""
 
 

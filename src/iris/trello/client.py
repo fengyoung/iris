@@ -18,6 +18,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib import error, request
 from urllib.parse import quote, urlparse
 
+from iris.core.exceptions import IrisRuntimeError
+
 TRELLO_API_BASE = "https://api.trello.com/1"
 _TRELLO_DOMAIN = "api.trello.com"
 _CUSTOM_DNS = "8.8.8.8"
@@ -72,7 +74,7 @@ def _make_trello_url(path: str) -> str:
     return f"https://{_TRELLO_DOMAIN}{path}"
 
 
-class TrelloClientError(RuntimeError):
+class TrelloClientError(IrisRuntimeError):
     """Trello API 错误。"""
 
 

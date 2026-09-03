@@ -13,10 +13,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from iris.core.exceptions import IrisRuntimeError
+
 logger = logging.getLogger(__name__)
 
 
-class FeishuClientError(RuntimeError):
+class FeishuClientError(IrisRuntimeError):
     """飞书 API 调用错误。"""
 
 

@@ -9,9 +9,10 @@ import sys
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, TextIO
+from typing import TYPE_CHECKING, Any, Dict, Optional, TextIO
 
-from iris.config.loader import ConfigBundle
+if TYPE_CHECKING:  # 仅用于类型标注；运行期不导入，避免 utils ↔ config.loader ↔ core 循环导入
+    from iris.config.loader import ConfigBundle
 
 # 日志文件大小限制（超过后自动归档）
 _MAX_LOG_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB

@@ -1,4 +1,4 @@
-.PHONY: test test-unit test-integration test-cov lint lint-fix format clean audit install-dev all
+.PHONY: test test-unit test-integration test-cov lint lint-fix format typecheck clean audit install-dev all
 
 # 运行全部测试
 test: test-unit test-integration
@@ -26,6 +26,10 @@ lint-fix:
 # 代码格式化
 format:
 	ruff format src scripts tests
+
+# 静态类型检查（非阻断基线：只输出错误数与明细，不影响退出码；配置见 pyproject [tool.mypy]）
+typecheck:
+	-mypy src/iris
 
 # 依赖安全审计（需安装 pip-audit: pip install pip-audit）
 audit:

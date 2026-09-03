@@ -113,6 +113,7 @@ max-complexity = 20
 python_version = "3.11"
 ignore_missing_imports = true
 check_untyped_defs = false
-warn_unused_ignores = true
+# 可选依赖（networkx/httpx）有无 stubs 会改变 ignore 是否"多余"，不开 warn_unused_ignores 以免基线随环境漂移
+warn_unused_ignores = false
 show_error_codes = true
 exclude = ["^tests/", "^scripts/"]
