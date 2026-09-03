@@ -1,7 +1,7 @@
 # Iris 3.30.1 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
-> 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
+> 逐版变更记录与版本历史统一归档于 [CHANGELOG.md](CHANGELOG.md)；本文件只承载现行架构 / 配置 / 约定。
 
 ---
 
@@ -140,35 +140,3 @@ iris3/
 ## Claude Code Skill（10 个项目级）
 
 `iris-daily-start`（每日启动维护）· `iris-wiki`（发现→审核→生成）· `iris-feishu-import`（飞书文档/聊天导入）· `iris-feed`（群聊话题检测→简报）· `iris-meeting`（转写→纪要→归档）· `iris-ask`（问答）· `iris-process`（图片/PDF/DOCX/视频）· `iris-report`（分析报告/思维导图/双周报）· `iris-health`（质量巡检）· `iris-okr-check`（OKR 双周逐项检查）。
-
----
-
-## 近期变更
-
-**当前 v3.30.1 (2026-09-03)** — 主线合并:0902-alpha(v3.30.0 三阶段质量优化)并入 main 主干,统一版本 = v3.30.0 全部质量改动 + main 并行发布的 v3.29.2 提醒引擎停滞修复 + v3.29.3 deep-eval 准确性校验修复(alpha 自 v3.29.1 分出,未含此两项)。源码自动合并零冲突(183 源码文件),仅 pyproject/CHANGELOG/CLAUDE/README 四处版本文档冲突。验证:合并后全量 pytest 3,274 通过(unit 2,185 / integration 1,089)、ruff 零告警。协议 3.21(不变);产品 3.30.0→**3.30.1**。
-
-**v3.30.0 (2026-09-03)** — 三阶段质量优化(开源冲刺 → 代码质量 → 长期改进,3 次独立提交 + 1 次 release)。**阶段 1**:测试数据个人用户名泛化(全库残留 0);启用 F401 门禁并清理 395 处未使用导入(130 文件 / -380 行),`__init__.py` 与 `app/cli/handlers.py` facade 例外;修复 ruff 误删的两处 re-export 链(`discovery_utils` 改从 `_constants` 取 `PAGE_TYPE_PRIORITY`);SECURITY.md 补「仓库元数据」节固化 git 历史不重写结论。**阶段 2**:`wiki/asr/corrector.py` 1,542→873 行(拆 `_hotkey.py` CGEventTap 监听/热键解析、`_trie.py` Aho-Corasick、`_diff.py` 词级差异,来源判定并入 `_clipboard_io.py`)、`assistant/live.py` 1,044→871 行(拆 `_audio_capture.py` MergeBuffer 合并缓冲+噪音门控、`_batch_processor.py` 批文本组装/检索去重/分析结果应用/建议判定),旧导入路径全部 re-export 兼容;ruff C901 `max-complexity=20` 门禁,11 个 >20 函数全部重构达标(`_panel._build` 53、`handle_build_asr_prompt` 48、`run_sync` 34、`_tick` 28、`lint_wiki` 27、`_stage1_filter_files` 24、`_apply_extracted` 23、`_diff_changes` 23、`_normalize` 23、`_is_wiki_broken_link` 21、`cmd_run` 21);库层 print→logger(`core/storage.py` FTS5 降级、`feishu/chat_digest.py` 时间范围解析,守护进程/评估进度等用户可见输出保留)。**阶段 3**:新建 `core/exceptions.py`——`IrisError` → `IrisRuntimeError(+RuntimeError)` / `IrisValueError(+ValueError)`,19 个模块异常挂接且原标准库父类保留在 MRO(既有 `except RuntimeError` 不受影响),`StorageError` 迁入并消除 `core/__init__.py` 的 ImportError 回退重复定义;顺带修复异常迁移暴露的循环导入 `config.loader → core/__init__ → write_guard → config.loader`(`write_guard.py` / `utils/logging.py` 的 `ConfigBundle` 改 TYPE_CHECKING);mypy 非阻断基线(`make typecheck`,pre-commit manual 阶段,不接 CI):**193 errors / 53 files**(assistant 58 · wiki 53 · app 22;union-attr 51 · assignment 33 · arg-type 32);新拆模块专项单测 +208(`_audio_capture` / `_batch_processor` / `asr/_diff` / `asr/_hotkey` / `scripts/sync_memory` 后者此前零测试)+ 异常体系 +49。附带发现并修复 `MergeBuffer` 首句 push 产出空 Flush 的语义错误(live 侧曾靠噪音门控吞掉)。验证:ruff 0 告警;pytest 全量 3,261 通过;覆盖率 65.82%→68%(fail_under 55→65);6 个底层模块冷启动 import 无环;`asr-corrector` / `meeting-live-assistant` / `build-asr-prompt --help` 可运行。协议 3.21(不变);app 配置 3.7(不变);产品 3.29.1→**3.30.0**。
-
-**v3.29.3 (2026-09-03)** — deep-eval 准确性校验修复(`evaluation/_reference_parser.py`/`_source_locator.py`/`deep_eval.py` + 3 个 prompt 模板,回归测试 +11):三处缺陷叠加致引用「无法验证」或拿不到证据误判。①**引用解析失配**——Wiki 参考来源普遍 `- [path.md:line] 描述`(列表符号 `-/*/+`/反引号包裹/行号范围),`parse_references` 原只匹配无前缀裸格式,列表符号致整行失配丢弃;修复剥列表符号 + 去反引号 + 支持 `[path.md:start-end]` 范围(取起始行)+ 无行号 `[path.md]`。②**行号失真无兜底**——LLM 生成行号常漂移 frontmatter/引言,`lookup()` 按行号取到 YAML 元数据而非正文;新增 `SourceLocator.lookup_relevant()` 按描述关键词 **TF-IDF² 相关性召回** 证据 chunk(稀有词人名/数字主导、跳过 frontmatter、按文档缓存),`AccuracyVerifier._build_source_context()` 与行号内容合并送 LLM(截断 3500)。③**模板填充根因**——三评估模板双花括号 `{{x}}` 被 `.format()` 转义成字面 `{x}` 不替换,LLM 收到占位符本身;改单花括号 `{x}`。验证:deep_eval 相关 52+11=63 全过、全量 3,017 通过、ruff 零告警。协议 3.21(不变);产品 3.29.2→**3.29.3**。
-
-**v3.29.2 (2026-09-02)** — 提醒引擎项目停滞误判修复(`src/iris/analysis/reminders.py` +8 行):拍照3.0等含版本号项目被误判停滞(138 天)——项目页 slug 去点号(拍照3.0→拍照30)且丢失词边界,`_project_keywords` 产出的关键词(拍照30AI外观定级)永远匹配不到带点文档(拍照3.0主观项检测/AI外观定级),三重兜底失效。修复:①数字点号变体——对 2 位数字组生成插点变体(30→3.0,环视排除年份 2026);②**title 词段补充**——`_source_dir_freshest` 读取 frontmatter title(保留原始写法"拍照3.0 AI外观定级项目"),按空格切分词段产出"拍照3.0""AI外观定级""外观定级"等关键词,覆盖 slug 丢失的词边界;③`project_stall_ignore` 配置补 4 个调薪完结项目。效果:daily-start 停滞信号 6→1(拍照3.0外观定级误判消除,调薪完结不再告警)。验证:reminders 测试 28+2=30 全过、ruff 零告警、真实引擎验证(停滞信号 6→1)。协议 3.21(不变);产品 3.29.1→**3.29.2**。
-
-**v3.29.1 (2026-09-02)** — Wiki 增量更新指纹预检补全(`src/iris/wiki/generator.py`):修复 daily-start 卡死——`update_all_pages()` 对全部 241 页每页无差别调 LLM(并发 6 路)判断是否需更新,241 次长 prompt 调用压垮 zz_tokenhub 中转(超时 + finish_reason=stop/length 无 content),进程阻塞在网络上 15 分钟无页面落盘。根因:v3.28.4 已实现 `is_wiki_stale()` 指纹预检(source_fingerprint 源文档 hash 全未变→页面新鲜→零 LLM 跳过,discovery/metrics 均已用),但 `update_all_pages` 漏用此路径。修复:加载 chunk_hash_index,每页先 `is_wiki_stale(path, hash_index)` 判定,源文档未变直接返回 no_changes(跳过 LLM),仅过时页面走增量更新;判定异常兜底照常走 LLM(不因预检漏更)。效果:daily-start Wiki 更新从 241 次 LLM 调用降至 ~0 次(源文档无变化场景),全跳过 ~5s。验证:wiki_generator 相关 unit 85 + integration 5 通过、ruff 零告警、真实 daily-start 跑通(exit 0:chunks 6820/vector 6820/graph 241 节点 2115 边/人物 176 无歧义)。协议 3.21(不变);产品 3.29.0→**3.29.1**。
-
-**v3.29.0 (2026-09-01)** — 飞书消息图片理解沉淀(9 文件 / +测试 17):`MessageImageAnalyzer`(`feishu/image_analyzer.py`)下载→多模态 LLM→描述,按 image_key 跨管道共享缓存(data/image_analysis/)+ enabled/max_per_run 控制;`FeishuClient.download_message_image()`(`im +messages-resources-download`,区别于文档图 `docs +media-download`);feed 管道 Step2b 插桩 + `RawMessage.content_for_prompt()` 三级回退(描述>[图片]>原文);chat-digest 注入 `image_descriptions`;配置 `image_understanding:{enabled,max_per_run}`(feed 落 feeds.json#topic_config / chat-digest 落 feishu_ingest.json#chat_digest,默认 true/10)。已知边界:只处理 msg_type==image 独立图,post 内嵌图不单独分析;单张失败降级[图片]占位。端到端:图验先遣队 feed-collect(5 张播报图识别为直检率看板)+ chat-digest 跑通。验证:全量 3,004 通过、ruff 零告警。协议 3.21(不变);产品 3.28.5→**3.29.0**。
-
-**v3.28.5 (2026-09-01)** — LLM 调用统一到 LLMService 单一口径（7 文件 / +56 -69）：消除「已建 LLMService 却又 `get_provider()` 取回底层 provider 绕过响应缓存」的残留路径。① scripts — `extract_travel_invoice.py` / `extract_weekly_reports.py` 改 `LLMService`；② ASR — `hotwords.extract` / `extractor.generate_misreadings` 接口改 `llm: LLMService`；③ 检索 — `LLMQueryPlanner` 参数名 `llm_provider` 实为 provider（命名误导）+ `enhanced.py` 直接传 `LLMService`；④ 命令 — `build-asr-prompt` 改传 `llm_service`。统一适配 `provider.generate(LLMRequest(...))` → `llm.generate(prompt, route_context=...)`。保留（非绕过）：`corrector` 的 `_provider` fallback（测试注入/降级）、`route-model` 的 `ModelRouter`（查询路由）、`get_provider()` 诊断用途、`force_model`。验证：全量 unit 1,910 通过、ruff 零告警。协议 3.21（不变）；app 配置 3.7（不变）；产品 3.28.4→**3.28.5**。
-
-**v3.28.4 (2026-09-01)** — 提醒引擎项目停滞判定兜底（8 文件 / +242 -9，回归测试 +5）：① 三重兜底消除误报 — `project_stalled` 原先只信项目页 source_fingerprint（生成时证据快照可能陈旧），软硬一体/XRay/视频稽查/数据标注平台/售后归因/AI巡检等活跃项目被误报；修复 — 指纹 → SOURCE 同名文档（剥离链/英文 token/连词变体）→ **内容级匹配**（周报正文含项目活动但文件名仅含人名；前缀变体「数据标注平台」→「标注平台」；名单类文档仅提及不算活跃）；② `project_stall_ignore` 配置 — 已完结/已移交/维护期项目不再告警；③ 模板/生成器根因修复 — `[[Wiki-链接]]` 示例文字被 LLM 当真实链接复制进页面（存量 24 文件已清零），改为禁止输出示例占位符。验证：提醒 28 全过、全量 unit 1,606、ruff 零告警。协议 3.21（不变）；app 配置 3.6→**3.7**；产品 3.28.3→**3.28.4**。
-
-**v3.28.3 (2026-09-01)** — 开源前信息安全复审：全库二次脱敏（文档/测试/模板/Skill 中的真实姓名、业务指标与内部项目名泛化），git 历史作者邮箱迁移至 noreply，CI 权限最小化（`contents: read`），`.gitignore` 补 `.env.*`。协议 3.21（不变）；产品 3.28.2→**3.28.3**。
-
-**v3.28.2 (2026-09-01)** — batch-transcribe 批量会议纪要修复（3 文件 / +111，回归测试 +2）：`TranscribeMeetingPipeline.run_batch` 从未实现，批量命令一执行即抛 `AttributeError`；补全实现（按扩展名分流音视频 Whisper 转写/已有转写文本、单文件失败不中断批量、批量层 TaskReporter 埋点）+ handler 补传 `--to-source`（此前批量模式丢失归档能力）。协议 3.21（不变）；产品 3.28.1→**3.28.2**。
-
-**v3.28.1 (2026-08-30)** — 两条修复线合并（14 代码+测试文件 / 回归测试 +26）：① **LLM 思考文本污染修复**（2 文件 / +7）— `_extract_chat_completions_text` 在 `content` 为空时静默回退返回 `reasoning_content`，思考模型（deepseek-v4-flash）max_tokens 耗尽时把思考当最终输出（实测某期双周报 Stage 4b 审查 13k 思考字符写入归档文件）；修复 — content 为空直接抛 `LLMProviderError`（走重试/降级链，绝不产出「伪成功」垃圾文本），Stage 4b 失败回退 Stage 4a 组装稿；② **深度审查批次 1 数据止损**（12 文件 / +19）— P0×6：记忆裁剪方向反转（`lifecycle.summarize()` `[-10:]` 保留最新）、chunker 增量丢 chunk（增量无条件保留）、向量索引增量只增不改不删（按 `document_hash` 重嵌 + 差集清理，ids.json 新增 doc_hashes）、wikilink 注入吞正文（URL 排除全角标点 + 合并区原文切片重建）、feed pending 队列覆盖（新增 `append_pending` 锁内合并 + topic_id 去重）、person_enricher 清空手工 email（空值保留原行 + 备份只写一次）；P1×4：文件日志从未生效（`isinstance(app, dict)` → `hasattr(x,"get")`）、会话挖掘懒触发从未执行（`shared_pool.submit` 不存在 → `get_executor().submit` + 时间戳后置）、建议提问 TypeError 被吞（CONF_ICON+text 渲染入 try）、会议助理埋点目录错位（`data_root` 改传 `_pid_dir`）；附带 `_load_archive_config` 缺配置回退 `.example`。**升级需执行一次 `build-chunks --write-summary` + `build-vector-index --force-rebuild` 清理存量死数据。**验证：全量 2,970 通过，ruff 零告警。协议 3.21（不变）；产品 3.28.0→**3.28.1**。
-
-**v3.28.0 → v3.19.24 主题索引**（完整条目见 [CHANGELOG.md](CHANGELOG.md)）：
-
-v3.28.0 工程可靠性治理（SQLite 生命周期/稳定 inode 锁/统一原子写/向量索引 generation 发布/LLM 缓存治理/IRIS_PROJECT_ROOT）· v3.27.2 LLM 配置修复+新视觉模型默认 · v3.27.1 双周报写作风格固化 · v3.27.0 任务面板 task-panel · v3.26.3 面板稳定化+并发加固 · v3.26.2 面板双主题 · v3.26.1 会议助理全量优化 · v3.26.0 AI 会议参谋 · v3.24.x 会议助理×asr-corrector 优化系列 · v3.23.x 实时会议助理落地系列 · v3.22.5 热键门控 · v3.22.4 周报日期标注 · v3.22.3 知识库体检修复 · v3.22.2 wikilink 残留清理 · v3.22.1 噪音过滤+图谱重建 · v3.22.0 开源信息脱敏 · v3.21.1 SOURCE 归档适配 · v3.21.0 SOURCE 元数据工程 · v3.20.x feed 文档提取/覆盖率提升 · v3.19.24-26 质量加固/feed 质量/检索时效性
-
-> 更早版本摘要（v3.12.x ~ v3.19.10）见 [CHANGELOG.md](CHANGELOG.md)。
