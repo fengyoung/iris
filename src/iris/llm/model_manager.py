@@ -7,6 +7,8 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from iris.core.exceptions import IrisRuntimeError
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -34,7 +36,7 @@ def decode_model_ref(ref: str) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 
-class ModelManagerError(RuntimeError):
+class ModelManagerError(IrisRuntimeError):
     """模型管理相关错误。"""
 
 

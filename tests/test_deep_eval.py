@@ -1,13 +1,11 @@
 """深度评估模块测试（从 iris2 迁移）。"""
 
-import pytest
 from iris.evaluation.deep_eval import (
     parse_references,
     extract_page_title,
     ReferenceEntry,
     SourceLocator,
     AccuracyVerifier,
-    AccuracyVerdict,
     DeepEvalResult,
 )
 

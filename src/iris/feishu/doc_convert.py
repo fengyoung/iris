@@ -15,10 +15,10 @@ from iris.feishu.client import FeishuClient, FeishuClientError
 
 logger = logging.getLogger(__name__)
 from iris.feishu._shared import (
-    resolve_pic_dir, resolve_source_sub_dir, resolve_source_root,
-    resolve_dedup_path, load_dedup_index, save_dedup_index,
+    resolve_pic_dir, resolve_source_sub_dir, resolve_dedup_path, load_dedup_index, save_dedup_index,
     upsert_dedup_item, sanitize_title, extract_date, now_iso,
 )
+from iris.core.exceptions import IrisRuntimeError
 from iris.core.write_guard import safe_write_text
 
 # ── 常量 ────────────────────────────────────────────────────
@@ -27,7 +27,7 @@ _IMAGE_PATTERN = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 from iris.utils.constants import IMAGE_EXTENSIONS_WITH_SVG as _PIC_EXTENSIONS
 
 
-class FeishuDocConvertError(RuntimeError):
+class FeishuDocConvertError(IrisRuntimeError):
     """文档转换错误。"""
 
 

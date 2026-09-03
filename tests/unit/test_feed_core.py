@@ -1,10 +1,7 @@
 """feed 包单元测试 — 消息过滤器 / 游标追踪 / 话题类型。"""
 
-import json
-import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 from iris.feed._message_filter import MessageFilter
 from iris.feed._cursor_tracker import CursorTracker
@@ -109,7 +106,6 @@ class TestCursorTracker:
     def test_atomic_save(self, tmp_path):
         """验证 _save 使用 atomic_write_json（临时文件+os.replace 模式）。"""
         import os
-        from iris.utils.shared import atomic_write_json
         tracker = CursorTracker(tmp_path)
         cursor_file = tmp_path / "feed_cursors.json"
         # 记录写入前的 inode

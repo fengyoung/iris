@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from iris.trello.llm import _extract_json_block
 from iris.trello.models import TrelloLabel, TrelloList, TrelloCard, TrelloBoard, TrelloOverview

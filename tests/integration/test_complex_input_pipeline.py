@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from iris.complex_input.detector import ComplexityResult, EncodedImage
 from iris.complex_input.pipeline import ComplexInputPipeline, PipelineResult, _safe_format

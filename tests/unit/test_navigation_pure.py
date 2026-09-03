@@ -6,10 +6,8 @@ _char_sequence_match 等核心函数。
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 from iris.wiki.navigation import (
     append_changelog,

@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from pathlib import Path
 
-import pytest
 
 from iris.wiki.discovery_utils import (
     append_sample,

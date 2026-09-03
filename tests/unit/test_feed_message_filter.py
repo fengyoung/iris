@@ -1,8 +1,6 @@
 """feed 包单元测试 — 消息噪音过滤（内部函数 + MessageFilter）。"""
 
-import pytest
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
 
 from iris.feed._message_filter import (
     _is_system_message,

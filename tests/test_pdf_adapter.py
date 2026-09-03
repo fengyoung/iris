@@ -3,20 +3,14 @@
 from __future__ import annotations
 
 import base64
-import os
-import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from iris.complex_input.detector import EncodedImage
 from iris.complex_input.pdf_adapter import (
     PdfAdapter,
     PdfAdapterError,
-    PdfContent,
-    _DEFAULT_MAX_RENDER_PAGES,
-    _DEFAULT_MAX_TEXT_CHARS,
 )
 
 # ── 辅助函数 ──────────────────────────────────────────────

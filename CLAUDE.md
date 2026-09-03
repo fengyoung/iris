@@ -1,4 +1,4 @@
-# Iris 3.29.3 — 项目执行说明
+# Iris 3.30.1 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -7,9 +7,9 @@
 
 ## 项目概览
 
-**当前规模**：~43,000 行 / 176 个源码文件 / 27 模块 · CLI 67 命令 · 测试 3,017（unit 1,928 / integration 1,089）· 覆盖率 65.82% · 10 个项目级 Skill · Wiki 241 页 · 知识图谱节点 220 / 关系边 1,858（wikilink 1,225 + LLM 633）· 数据源 900+ 文档 / 6,771 Chunk（text-embedding-v3 / 1,024 维）
+**当前规模**：~43,000 行 / 183 个源码文件 / 27 模块 · CLI 67 命令 · 测试 3,274（pytest 全量：unit 2,185 / integration 1,089，含参数化）· 覆盖率 68%（`fail_under` 65）· mypy 基线 193 errors（非阻断）· 10 个项目级 Skill · Wiki 241 页 · 知识图谱节点 220 / 关系边 1,858（wikilink 1,225 + LLM 633）· 数据源 900+ 文档 / 6,771 Chunk（text-embedding-v3 / 1,024 维）
 
-**近期新增能力**：工程可靠性治理（SQLite 生命周期、稳定 inode 文件锁、统一原子写、向量索引 generation 发布、跨进程 LLM 缓存治理）· 任务面板 `taskpanel/`（Web 只读 + TaskReporter 埋点 + 探测兜底 + 常驻守护）· 实时会议助理 `assistant/`（逐段提炼要点/风险/决策点 + 实时提示提问 + 过程文档）· YAML frontmatter 标准化注入（`core/frontmatter.py`）+ 批量补全（`frontmatter_batch.py`，正则+LLM+备份恢复）· wikilink 自动注入引擎（零 LLM 成本）· LLM 用量追踪（SQLite WAL + embedding 纳入）· LLM 响应缓存 + embedding 向量缓存（LRU+TTL）· LLM 熔断器（threshold=5 / reset 60s）· 记忆自动更新引擎（双通道）· 多 Agent 并发安全（FileLock + SQLite WAL + Agent 隔离）· ASR 实时校正引擎（Aho-Corasick + LLM 编辑助手 + 反馈反向优化）· CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit · constraints.txt 可复现构建
+**近期新增能力**：三阶段质量优化（F401/C901 门禁、`IrisError` 统一异常体系、mypy 基线、corrector/live 模块拆分）· 工程可靠性治理（SQLite 生命周期、稳定 inode 文件锁、统一原子写、向量索引 generation 发布、跨进程 LLM 缓存治理）· 任务面板 `taskpanel/`（Web 只读 + TaskReporter 埋点 + 探测兜底 + 常驻守护）· 实时会议助理 `assistant/`（逐段提炼要点/风险/决策点 + 实时提示提问 + 过程文档）· YAML frontmatter 标准化注入（`core/frontmatter.py`）+ 批量补全（`frontmatter_batch.py`，正则+LLM+备份恢复）· wikilink 自动注入引擎（零 LLM 成本）· LLM 用量追踪（SQLite WAL + embedding 纳入）· LLM 响应缓存 + embedding 向量缓存（LRU+TTL）· LLM 熔断器（threshold=5 / reset 60s）· 记忆自动更新引擎（双通道）· 多 Agent 并发安全（FileLock + SQLite WAL + Agent 隔离）· ASR 实时校正引擎（Aho-Corasick + LLM 编辑助手 + 反馈反向优化）· CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit · constraints.txt 可复现构建
 
 **关键路径**：
 
@@ -92,7 +92,7 @@ PDF=PyMuPDF 提取文字 + 逐页渲染；DOCX=python-docx 段落+表格文字�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.29.3 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.30.1 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.21 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | app 3.7（其余独立演进） | 配置文件 Schema |
 
@@ -111,6 +111,9 @@ Python 3.11+ · OpenAI 兼容 LLM API（DeepSeek / 百炼 / Qwen）· Pydantic v
 - **长任务埋点规则（v3.27.0 起）**：新增长任务/常驻命令（分钟级以上）必须评估接入 `taskpanel.TaskReporter` 埋点——启动注册、关键阶段 `report_phase()`、结束写终态；不接需说明理由（如探测兜底即可）。
 - **持久化规则（v3.28.0 起）**：共享状态读-改-写必须在 `FileLock` 临界区内完成，`.lock` 释放后必须保留；单文件 `atomic_write_text/bytes/json`，多文件制品 generation 目录写全后原子切换指针。
 - **资源生命周期规则（v3.28.0 起）**：SQLite 等持久资源必须显式 `close()` 或使用上下文管理器；不得依赖垃圾回收释放文件描述符。
+- **异常规则（v3.30.0 起）**：新增自定义异常必须继承 `iris.core.exceptions` 的 `IrisRuntimeError`（外部依赖/运行期失败）或 `IrisValueError`（输入/配置不合法）；需要额外标准库父类时用多继承 `class X(IrisError, PermissionError)`。调用方捕获优先 `except IrisError`。
+- **复杂度规则（v3.30.0 起）**：ruff C901 门禁 `max-complexity = 20`，新增/修改函数超限 CI 直接失败；拆分手法优先「分阶段私有方法」「表驱动分派」「状态对象」，不要靠 `# noqa: C901` 绕过。
+- **导入规则（v3.30.0 起）**：F401 已启用；仅包 `__init__.py` 与 `app/cli/handlers.py`（facade）允许 re-export 未使用导入；其余模块需要保留给外部导入的符号必须显式 `__all__` 或在真正的定义处导入。`iris.core.exceptions` 零依赖，底层模块（config/utils）只从它导入，不得 `from iris.core import ...`（会经 `core/__init__` 触发循环导入）。
 
 ---
 
@@ -121,7 +124,7 @@ iris3/
 ├── src/iris/          # 27 模块（见下）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
-├── tests/             # 3,017 用例（unit 1,928 / integration 1,089）
+├── tests/             # 3,274 用例（pytest 全量：unit 2,185 / integration 1,089，conftest 自动打标记）
 ├── config/            # *.json gitignored，*.example 版本控制
 ├── data/              # 运行时数据（全 gitignore）
 ├── .claude/skills/    # 项目级 Skill（10 个）
@@ -130,7 +133,7 @@ iris3/
 └── Makefile · pyproject.toml · README · CLAUDE · CHANGELOG.md
 ```
 
-**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配/共享线程池）· `memory`（记忆 6 子模块：含 `session_miner.py`）· `qa`（检索问答+图谱注入+`memory_updater.py` 双通道记忆提取）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF+BM25缓存）· `wiki`（Wiki 体系 + backlink/graph + ASR 校正引擎，最大模块；`wiki/asr/` 含 corrector/coverage/feedback/prompt_optimizer/_progress 等 10 子模块）· `feed`（飞书聊天记录→话题检测→简报生成，11 文件 / 9 命令）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估 + 引用解析）· `complex_input`（多模态三阶段）· `output`（格式化+DOCX）· `assistant`（实时 AI 会议参谋：本地 ASR+校正+检索+批量分析+话题/说话人+洞察推送+面板/文档，12 文件）· `app/cli`（65 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（paths.py / shared.py）· `trello`（看板）· `taskpanel`（任务埋点 + Web 只读展示 + 常驻守护，7 文件）。
+**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计）· `core`（类型/锁/写保护/存储/Agent 适配/共享线程池/`exceptions.py` 统一异常基类）· `memory`（记忆 6 子模块：含 `session_miner.py`）· `qa`（检索问答+图谱注入+`memory_updater.py` 双通道记忆提取）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF+BM25缓存）· `wiki`（Wiki 体系 + backlink/graph + ASR 校正引擎，最大模块；`wiki/asr/` 含 corrector/_hotkey/_trie/_diff/_clipboard_io/_text_detector/coverage/feedback/prompt_optimizer 等 14 子模块）· `feed`（飞书聊天记录→话题检测→简报生成，11 文件 / 9 命令）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估 + 引用解析）· `complex_input`（多模态三阶段）· `output`（格式化+DOCX）· `assistant`（实时 AI 会议参谋：本地 ASR+校正+检索+批量分析+话题/说话人+洞察推送+面板/文档，14 文件；`live.py` 编排 + `_audio_capture.py` 合并缓冲 + `_batch_processor.py` 批处理纯逻辑）· `app/cli`（65 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（paths.py / shared.py）· `trello`（看板）· `taskpanel`（任务埋点 + Web 只读展示 + 常驻守护，7 文件）。
 
 ---
 
@@ -142,7 +145,11 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.29.3 (2026-09-03)** — deep-eval 准确性校验修复(`evaluation/_reference_parser.py`/`_source_locator.py`/`deep_eval.py` + 3 个 prompt 模板,回归测试 +11):三处缺陷叠加致引用「无法验证」或拿不到证据误判。①**引用解析失配**——Wiki 参考来源普遍 `- [path.md:line] 描述`(列表符号 `-/*/+`/反引号包裹/行号范围),`parse_references` 原只匹配无前缀裸格式,列表符号致整行失配丢弃;修复剥列表符号 + 去反引号 + 支持 `[path.md:start-end]` 范围(取起始行)+ 无行号 `[path.md]`。②**行号失真无兜底**——LLM 生成行号常漂移 frontmatter/引言,`lookup()` 按行号取到 YAML 元数据而非正文;新增 `SourceLocator.lookup_relevant()` 按描述关键词 **TF-IDF² 相关性召回** 证据 chunk(稀有词人名/数字主导、跳过 frontmatter、按文档缓存),`AccuracyVerifier._build_source_context()` 与行号内容合并送 LLM(截断 3500)。③**模板填充根因**——三评估模板双花括号 `{{x}}` 被 `.format()` 转义成字面 `{x}` 不替换,LLM 收到占位符本身;改单花括号 `{x}`。验证:deep_eval 相关 52+11=63 全过、全量 3,017 通过、ruff 零告警。协议 3.21(不变);产品 3.29.2→**3.29.3**。
+**当前 v3.30.1 (2026-09-03)** — 主线合并:0902-alpha(v3.30.0 三阶段质量优化)并入 main 主干,统一版本 = v3.30.0 全部质量改动 + main 并行发布的 v3.29.2 提醒引擎停滞修复 + v3.29.3 deep-eval 准确性校验修复(alpha 自 v3.29.1 分出,未含此两项)。源码自动合并零冲突(183 源码文件),仅 pyproject/CHANGELOG/CLAUDE/README 四处版本文档冲突。验证:合并后全量 pytest 3,274 通过(unit 2,185 / integration 1,089)、ruff 零告警。协议 3.21(不变);产品 3.30.0→**3.30.1**。
+
+**v3.30.0 (2026-09-03)** — 三阶段质量优化(开源冲刺 → 代码质量 → 长期改进,3 次独立提交 + 1 次 release)。**阶段 1**:测试数据个人用户名泛化(全库残留 0);启用 F401 门禁并清理 395 处未使用导入(130 文件 / -380 行),`__init__.py` 与 `app/cli/handlers.py` facade 例外;修复 ruff 误删的两处 re-export 链(`discovery_utils` 改从 `_constants` 取 `PAGE_TYPE_PRIORITY`);SECURITY.md 补「仓库元数据」节固化 git 历史不重写结论。**阶段 2**:`wiki/asr/corrector.py` 1,542→873 行(拆 `_hotkey.py` CGEventTap 监听/热键解析、`_trie.py` Aho-Corasick、`_diff.py` 词级差异,来源判定并入 `_clipboard_io.py`)、`assistant/live.py` 1,044→871 行(拆 `_audio_capture.py` MergeBuffer 合并缓冲+噪音门控、`_batch_processor.py` 批文本组装/检索去重/分析结果应用/建议判定),旧导入路径全部 re-export 兼容;ruff C901 `max-complexity=20` 门禁,11 个 >20 函数全部重构达标(`_panel._build` 53、`handle_build_asr_prompt` 48、`run_sync` 34、`_tick` 28、`lint_wiki` 27、`_stage1_filter_files` 24、`_apply_extracted` 23、`_diff_changes` 23、`_normalize` 23、`_is_wiki_broken_link` 21、`cmd_run` 21);库层 print→logger(`core/storage.py` FTS5 降级、`feishu/chat_digest.py` 时间范围解析,守护进程/评估进度等用户可见输出保留)。**阶段 3**:新建 `core/exceptions.py`——`IrisError` → `IrisRuntimeError(+RuntimeError)` / `IrisValueError(+ValueError)`,19 个模块异常挂接且原标准库父类保留在 MRO(既有 `except RuntimeError` 不受影响),`StorageError` 迁入并消除 `core/__init__.py` 的 ImportError 回退重复定义;顺带修复异常迁移暴露的循环导入 `config.loader → core/__init__ → write_guard → config.loader`(`write_guard.py` / `utils/logging.py` 的 `ConfigBundle` 改 TYPE_CHECKING);mypy 非阻断基线(`make typecheck`,pre-commit manual 阶段,不接 CI):**193 errors / 53 files**(assistant 58 · wiki 53 · app 22;union-attr 51 · assignment 33 · arg-type 32);新拆模块专项单测 +208(`_audio_capture` / `_batch_processor` / `asr/_diff` / `asr/_hotkey` / `scripts/sync_memory` 后者此前零测试)+ 异常体系 +49。附带发现并修复 `MergeBuffer` 首句 push 产出空 Flush 的语义错误(live 侧曾靠噪音门控吞掉)。验证:ruff 0 告警;pytest 全量 3,261 通过;覆盖率 65.82%→68%(fail_under 55→65);6 个底层模块冷启动 import 无环;`asr-corrector` / `meeting-live-assistant` / `build-asr-prompt --help` 可运行。协议 3.21(不变);app 配置 3.7(不变);产品 3.29.1→**3.30.0**。
+
+**v3.29.3 (2026-09-03)** — deep-eval 准确性校验修复(`evaluation/_reference_parser.py`/`_source_locator.py`/`deep_eval.py` + 3 个 prompt 模板,回归测试 +11):三处缺陷叠加致引用「无法验证」或拿不到证据误判。①**引用解析失配**——Wiki 参考来源普遍 `- [path.md:line] 描述`(列表符号 `-/*/+`/反引号包裹/行号范围),`parse_references` 原只匹配无前缀裸格式,列表符号致整行失配丢弃;修复剥列表符号 + 去反引号 + 支持 `[path.md:start-end]` 范围(取起始行)+ 无行号 `[path.md]`。②**行号失真无兜底**——LLM 生成行号常漂移 frontmatter/引言,`lookup()` 按行号取到 YAML 元数据而非正文;新增 `SourceLocator.lookup_relevant()` 按描述关键词 **TF-IDF² 相关性召回** 证据 chunk(稀有词人名/数字主导、跳过 frontmatter、按文档缓存),`AccuracyVerifier._build_source_context()` 与行号内容合并送 LLM(截断 3500)。③**模板填充根因**——三评估模板双花括号 `{{x}}` 被 `.format()` 转义成字面 `{x}` 不替换,LLM 收到占位符本身;改单花括号 `{x}`。验证:deep_eval 相关 52+11=63 全过、全量 3,017 通过、ruff 零告警。协议 3.21(不变);产品 3.29.2→**3.29.3**。
 
 **v3.29.2 (2026-09-02)** — 提醒引擎项目停滞误判修复(`src/iris/analysis/reminders.py` +8 行):拍照3.0等含版本号项目被误判停滞(138 天)——项目页 slug 去点号(拍照3.0→拍照30)且丢失词边界,`_project_keywords` 产出的关键词(拍照30AI外观定级)永远匹配不到带点文档(拍照3.0主观项检测/AI外观定级),三重兜底失效。修复:①数字点号变体——对 2 位数字组生成插点变体(30→3.0,环视排除年份 2026);②**title 词段补充**——`_source_dir_freshest` 读取 frontmatter title(保留原始写法"拍照3.0 AI外观定级项目"),按空格切分词段产出"拍照3.0""AI外观定级""外观定级"等关键词,覆盖 slug 丢失的词边界;③`project_stall_ignore` 配置补 4 个调薪完结项目。效果:daily-start 停滞信号 6→1(拍照3.0外观定级误判消除,调薪完结不再告警)。验证:reminders 测试 28+2=30 全过、ruff 零告警、真实引擎验证(停滞信号 6→1)。协议 3.21(不变);产品 3.29.1→**3.29.2**。
 

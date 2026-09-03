@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 from iris.core.frontmatter import (
     DOC_TYPES,
     build_frontmatter,

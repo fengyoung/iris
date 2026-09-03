@@ -7,12 +7,10 @@
 
 from __future__ import annotations
 
-import json
 import logging
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 from iris.config.loader import ConfigBundle
 from iris.feishu.client import FeishuClient, FeishuClientError

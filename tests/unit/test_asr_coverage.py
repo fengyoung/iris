@@ -1,9 +1,7 @@
 """ASR 覆盖分析 — 单元测试。"""
 
-import pytest
 from iris.wiki.asr._types import CoverageReport, DictQualityReport, AsrTerm
 from iris.wiki.asr.coverage import (
-    analyze_coverage,
     analyze_dict_quality,
     render_coverage_text,
     render_dict_quality_text,

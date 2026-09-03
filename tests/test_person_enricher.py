@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from iris.wiki.person_enricher import EnrichResult, EnrichSummary
 

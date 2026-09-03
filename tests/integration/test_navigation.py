@@ -1,7 +1,5 @@
 """测试 iris.wiki.navigation — Wiki 导航构建与辅助函数。"""
 
-import pytest
-from pathlib import Path
 from iris.wiki.navigation import (
     NavBuildResult,
     _char_sequence_match,

@@ -4,8 +4,7 @@ import pytest
 from pathlib import Path
 
 from iris.config.models import (
-    ConfigBundleV2, AppConfig, QAConfig, LLMConfig, ModelItem,
-    RoleModels, DefaultStrategy, RoutingRule, RoutingConfig,
+    ConfigBundleV2, QAConfig, ModelItem,
     WikiConfig, PageTypeConfig, DataSourceConfig, DataSourceItem,
 )
 

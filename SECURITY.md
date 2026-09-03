@@ -23,6 +23,13 @@ Iris 项目遵循以下安全实践：
 - 所有 API 密钥通过环境变量或 macOS Keychain 管理
 - `.env` 和 `config/*.json` 文件已在 `.gitignore` 中排除
 - 项目提供的 `.example` 文件使用占位符，不含真实凭证
+- 加载 `.env` 时检测到明文 Key/Token 会输出安全提醒，建议迁移到 Keychain
+
+### 仓库元数据
+
+- Git 提交作者统一使用 GitHub noreply 邮箱；仓库账号名本身为公开信息，不视为泄露
+- 测试数据、文档与模板中的人名、项目名、业务指标均已泛化（v3.22.0 / v3.28.3 两轮脱敏）
+- 提交前 pre-commit 含私钥检测（`detect-private-key`）与大文件拦截
 
 ### 文件路径安全
 

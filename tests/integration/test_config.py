@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 
 import pytest
 
 from iris.config.loader import (
-    ConfigBundle,
     ConfigError,
     load_config_bundle,
     load_env_file,

@@ -16,11 +16,13 @@ from __future__ import annotations
 import subprocess
 from typing import List, Optional
 
+from iris.core.exceptions import IrisRuntimeError
+
 # Keychain 服务标识符（所有 Iris 密钥存储在同一 service 下）
 KEYCHAIN_SERVICE = "com.iris.assistant"
 
 
-class KeychainError(RuntimeError):
+class KeychainError(IrisRuntimeError):
     """密钥链操作相关错误。"""
 
 

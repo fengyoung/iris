@@ -9,8 +9,10 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
+from iris.core.exceptions import IrisValueError
 
-class ValidationError(ValueError):
+
+class ValidationError(IrisValueError):
     """输入验证失败。"""
 
 

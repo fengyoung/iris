@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import types
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import pytest
 
 from iris.analysis._biweekly_collector import BiweeklyCollector
 

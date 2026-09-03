@@ -20,3 +20,13 @@ repos:
       - id: detect-private-key
       - id: check-added-large-files
         args: ['--maxkb=500']
+
+  # 类型检查：manual 阶段，不随普通 commit 触发；按需 `pre-commit run mypy --hook-stage manual`
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.14.1
+    hooks:
+      - id: mypy
+        stages: [manual]
+        files: ^src/iris/
+        additional_dependencies: ["pydantic>=2.0"]
+        args: [--config-file=pyproject.toml]

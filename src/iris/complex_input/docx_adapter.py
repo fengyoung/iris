@@ -15,9 +15,11 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
+
+from iris.core.exceptions import IrisRuntimeError
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +30,7 @@ _NS_DRAWING = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}dra
 _NS_PICT = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pict'
 
 
-class DocxAdapterError(RuntimeError):
+class DocxAdapterError(IrisRuntimeError):
     """DOCX 适配器相关错误。"""
 
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 from iris.config.loader import ConfigBundle
 from iris.utils.paths import resolve_source_root

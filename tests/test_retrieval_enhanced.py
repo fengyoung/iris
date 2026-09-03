@@ -4,14 +4,11 @@ from __future__ import annotations
 
 import time
 import threading
-from typing import List
 from unittest.mock import MagicMock
 
-import pytest
 
 from iris.retrieval.enhanced import (
     QueryRewriter,
-    RewrittenQuery,
     _rrf_fuse,
     _parse_ranked_ids,
     _apply_rank_order,

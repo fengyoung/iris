@@ -1,8 +1,6 @@
 """feed 包单元测试 — OKR 加载 / 解析 / 查询。"""
 
-import pytest
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from iris.feed._okr_loader import (
     KR,

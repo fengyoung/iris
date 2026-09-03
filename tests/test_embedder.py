@@ -1,6 +1,5 @@
 """测试 iris.retrieval.embedder — 文本向量化模块。"""
 
-import pytest
 from iris.retrieval.embedder import (
     EmbedderError,
     TextEmbedder,

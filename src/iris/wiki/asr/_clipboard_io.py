@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import time
 
@@ -100,4 +101,58 @@ def _replace_text_in_place(corrected: str, raw_text: str) -> bool:
         ], timeout=max(5, int(raw_length * 0.1)))
         return True
     except Exception:
+        return False
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 剪贴板来源判定：区分「语音输入转写」与「手动复制」
+# ═══════════════════════════════════════════════════════════════════
+
+# 富文本剪贴板类型特征标记
+_RICH_INDICATORS = (
+    "html", "rtf", "rich", "styled",
+    "public.html", "public.rtf", "com.apple",
+)
+
+
+def _looks_like_written_chinese(text: str) -> bool:
+    """廉价预检查：文本是否更像书面中文而非 ASR 口语转写。
+
+    ASR 口语转写的典型特征：无标点或标点稀疏、同音错字多；
+    书面中文则标点规范。
+
+    此函数用于在调用昂贵的 osascript（_clipboard_has_rich_text）之前
+    快速过滤掉明显的手动复制文本，减少子进程开销。
+
+    Returns:
+        True 如果文本更像书面中文（建议进一步检查富文本格式）
+    """
+    # 含规范标点（中文句号/逗号/分号/问号）≥2 → 更像书面中文；
+    # 否则不阻塞，走后续检查
+    punct_count = len(re.findall(r"[。，；？、]", text))
+    return punct_count >= 2
+
+
+def _clipboard_has_rich_text() -> bool:
+    """检查剪贴板是否包含富文本格式（HTML/RTF/Styled）。
+
+    vocotype ASR 输出为纯文本（public.utf8-plain-text），不含富文本类型。
+    用户从浏览器/文档手动复制的内容通常附带 HTML/RTF 格式，
+    以此区分「语音输入转写」和「手动复制」两种剪贴板写入来源。
+
+    Returns:
+        True 如果剪贴板含富文本格式（大概率是手动复制），False 如果仅纯文本。
+    """
+    try:
+        result = subprocess.run(
+            [
+                "osascript", "-e",
+                'tell application "System Events" to get the name of every clipboard type',
+            ],
+            capture_output=True, text=True, timeout=3,
+        )
+        types_str = result.stdout.strip().lower()
+        return any(ind in types_str for ind in _RICH_INDICATORS)
+    except Exception:
+        # 检测失败时不拦截，避免影响正常校正
         return False

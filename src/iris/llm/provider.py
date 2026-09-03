@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_TEMPERATURE = 0.2
 
 from iris.config.loader import ConfigBundle
+from iris.core.exceptions import IrisRuntimeError
 from iris.core.llm_types import LLMRequest, LLMResponse  # 从 core/ 迁移（消除循环依赖）
 from iris.llm.model_manager import ModelManager, ModelManagerError
 from iris.llm.router import ModelRouter, RoutingDecision
@@ -55,7 +56,7 @@ class _CircuitBreaker:
 _circuit_breaker = _CircuitBreaker()
 
 
-class LLMProviderError(RuntimeError):
+class LLMProviderError(IrisRuntimeError):
     """LLM provider 相关错误。"""
 
 

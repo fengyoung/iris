@@ -24,12 +24,7 @@ from ._helpers import render_evidence_blocks, render_structured_evidence
 from ._biweekly_collector import BiweeklyCollector
 from ._biweekly_cache import BiweeklyCache
 from ._biweekly_helpers import (
-    _collect_direction_concepts,
     _build_boundaries_text,
-    _extract_previous_direction_sections,
-    _build_multi_report_dedup_text,
-    _extract_key_bullets,
-    _extract_direction_section,
     _s3_build_direction_index,
     _s3_index_briefs_by_direction,
     _s3_build_concept_boundaries,
@@ -43,12 +38,8 @@ from ._biweekly_helpers import (
     _build_local_fallback,
     _try_parse_json,
     _parse_review_json,
-    DEFAULT_REPORT_SECTIONS,
     _load_report_sections,
     _build_local_report,
-    _resolve_section_content,
-    _pick_group_line,
-    _render_group_lines,
     DEFAULT_STYLE_GUIDE,
     assemble_biweekly_sections,
 )
@@ -71,6 +62,60 @@ class ReportResponse:
         return {"query": self.query, "mode": self.mode, "markdown": self.markdown,
                 "blocks": self.blocks, "structured": self.structured,
                 "llm": self.llm, "review": self.review, "revised": self.revised}
+
+
+_S1_LEVELS = ("high", "medium", "low", "none")
+
+
+def _s1_build_inventory(files: list) -> str:
+    """Stage 1 文件清单：一行一个文件（标签 | 日期 | 目录 | 字数 | 作者 | 摘要）。"""
+    lines = []
+    for f in files:
+        preview = f["content"][:300].replace("\n", " ")
+        author_tag = f"| 作者: {f['author']}" if f.get("author") else ""
+        lines.append(
+            f"[{f['label']}] | {f['date'].strftime('%m%d')} | {f['dir']} | "
+            f"{f['char_count']}字{author_tag} | 摘要：{preview}"
+        )
+    return "\n".join(lines)
+
+
+def _s1_build_owner_map(directions: list) -> str:
+    """owner → 子方向映射文本，供 S1 prompt 使用。"""
+    lines: list[str] = []
+    for d in directions:
+        for sa in d.get("sub_areas", []) or []:
+            for owner_name in _parse_owner_list(sa.get("owner", "")):
+                if owner_name:
+                    lines.append(f"  - {owner_name} → {d.get('name','')} / {sa.get('name','')}")
+    return "\n".join(lines) if lines else "（无）"
+
+
+def _s1_all_low(d_name: str, all_labels: set) -> dict:
+    """Stage 1 失败兜底：所有文件归入 low。"""
+    return {"direction_name": d_name, "high": [], "medium": [],
+            "low": [{"label": label} for label in all_labels], "none": []}
+
+
+def _s1_fallback_assign(parsed: dict, direction: dict, files: list) -> None:
+    """LLM 全空时的规则分配：作者是本方向 owner → high；成员周报 → medium；其余 → low。"""
+    dir_owners = {
+        on
+        for sa in (direction.get("sub_areas") or [])
+        for on in _parse_owner_list(sa.get("owner", ""))
+        if on
+    }
+    for f in files:
+        label = f.get("label", "")
+        if not label:
+            continue
+        if f.get("author") and f["author"] in dir_owners:
+            level, reason = "high", "owner 匹配兜底（LLM 全空）"
+        elif f.get("dir") == "成员周报":
+            level, reason = "medium", "成员周报兜底（LLM 全空）"
+        else:
+            level, reason = "low", "全空兜底（LLM 全空）"
+        parsed.setdefault(level, []).append({"label": label, "reason": reason})
 
 
 class AnalysisReportService:
@@ -357,27 +402,9 @@ class AnalysisReportService:
 
     def _stage1_filter_files(self, directions: list, files: list) -> dict:
         """按方向并行过滤文件（LLM 语义判定，结果缓存）。"""
-        inventory_lines = []
-        for f in files:
-            preview = f["content"][:300].replace("\n", " ")
-            author_tag = f"| 作者: {f['author']}" if f.get("author") else ""
-            inventory_lines.append(
-                f"[{f['label']}] | {f['date'].strftime('%m%d')} | {f['dir']} | "
-                f"{f['char_count']}字{author_tag} | 摘要：{preview}"
-            )
-        file_inventory = "\n".join(inventory_lines)
+        file_inventory = _s1_build_inventory(files)
         all_labels = {f["label"] for f in files}
-
-        # 构建 owner → 子方向映射，供 S1 prompt 使用
-        owner_map_lines: list[str] = []
-        for d in directions:
-            for sa in d.get("sub_areas", []) or []:
-                for owner_name in _parse_owner_list(sa.get("owner", "")):
-                    if owner_name:
-                        owner_map_lines.append(
-                            f"  - {owner_name} → {d.get('name','')} / {sa.get('name','')}"
-                        )
-        owner_map_text = "\n".join(owner_map_lines) if owner_map_lines else "（无）"
+        owner_map_text = _s1_build_owner_map(directions)
 
         inv_hash = self._cache.content_hash(file_inventory, 2000)
         dir_hash = self._cache.content_hash(
@@ -389,75 +416,11 @@ class AnalysisReportService:
             return cached
 
         def _filter_one(direction: dict) -> dict:
-            d_id = direction.get("id", 0)
-            d_name = direction.get("name", f"方向{d_id}")
+            return self._s1_filter_direction(
+                direction, files, file_inventory, all_labels, owner_map_text)
 
-            dir_def = json.dumps(direction, ensure_ascii=False, indent=2)
-            prompt = self._prompt_loader.render("biweekly_stage1_filter.md", {
-                "direction_def": dir_def,
-                "file_inventory": file_inventory,
-                "direction_id": str(d_id),
-                "owner_map": owner_map_text,
-            })
-
-            result = self._llm.generate(prompt=prompt, route_context={
-                "input_type": "text", "task_type": "analysis",
-                "complexity": "standard", "use_case": "biweekly_report_stage1",
-            })
-
-            parsed = _try_parse_json(result.text)
-            if not parsed:
-                logger.warning("  Stage 1 过滤 %s 失败，所有文件归入 low", d_name)
-                return {"direction_name": d_name,
-                        "high": [], "medium": [],
-                        "low": [{"label": label} for label in all_labels], "none": []}
-
-            for level in ("high", "medium", "low", "none"):
-                items = parsed.get(level, [])
-                parsed[level] = [i for i in items
-                                 if isinstance(i, dict) and i.get("label", "") in all_labels]
-
-            # ── 全空兜底：LLM 返回有效 JSON 但四个级别全空时触发 ──
-            total_assigned = sum(
-                len(parsed.get(lv, [])) for lv in ("high", "medium", "low", "none")
-            )
-            if total_assigned == 0:
-                logger.warning(
-                    "  Stage 1 过滤 %s: LLM 返回全空，触发 owner-map + 成员周报兜底",
-                    d_name,
-                )
-                # 1) 提取本方向的 owner 集合
-                dir_owners: set = set()
-                for sa in (direction.get("sub_areas") or []):
-                    for on in _parse_owner_list(sa.get("owner", "")):
-                        if on:
-                            dir_owners.add(on)
-                # 2) 分配所有文件
-                for f in files:
-                    label = f.get("label", "")
-                    if not label:
-                        continue
-                    if f.get("author") and f["author"] in dir_owners:
-                        parsed.setdefault("high", []).append({
-                            "label": label,
-                            "reason": "owner 匹配兜底（LLM 全空）",
-                        })
-                    elif f.get("dir") == "成员周报":
-                        parsed.setdefault("medium", []).append({
-                            "label": label,
-                            "reason": "成员周报兜底（LLM 全空）",
-                        })
-                    else:
-                        parsed.setdefault("low", []).append({
-                            "label": label,
-                            "reason": "全空兜底（LLM 全空）",
-                        })
-
-            parsed["direction_name"] = d_name
-            logger.info("  %s: high=%d medium=%d low=%d",
-                        d_name[:25], len(parsed.get("high", [])),
-                        len(parsed.get("medium", [])), len(parsed.get("low", [])))
-            return parsed
+        def _dir_name(d: dict) -> str:
+            return d.get("name", f"方向{d.get('id','?')}")
 
         dir_file_map: dict = {}
         _s1_timeout = max(240, len(directions) * 60)
@@ -469,36 +432,64 @@ class AnalysisReportService:
                         r = future.result()
                         dir_file_map[r["direction_name"]] = r
                     except Exception:
-                        d = futures[future]
-                        d_name = d.get("name", f"方向{d.get('id','?')}")
+                        d_name = _dir_name(futures[future])
                         logger.exception("  Stage 1 过滤失败 %s", d_name)
-                        dir_file_map[d_name] = {
-                            "direction_name": d_name,
-                            "high": [], "medium": [],
-                            "low": [{"label": label} for label in all_labels], "none": [],
-                        }
+                        dir_file_map[d_name] = _s1_all_low(d_name, all_labels)
             except FuturesTimeoutError:
                 logger.error("Stage 1 过滤超时（%ds），已处理 %d/%d 个方向",
                              _s1_timeout, len(dir_file_map), len(directions))
                 # 补跑超时的方向（逐个调用，不再并行）
-                completed_names = set(dir_file_map.keys())
                 for d in directions:
-                    d_name = d.get("name", f"方向{d.get('id','?')}")
-                    if d_name not in completed_names:
-                        logger.warning("  → 补跑超时方向: %s", d_name[:30])
-                        try:
-                            r = _filter_one(d)
-                            dir_file_map[r["direction_name"]] = r
-                        except Exception:
-                            logger.exception("  Stage 1 补跑失败 %s", d_name)
-                            dir_file_map[d_name] = {
-                                "direction_name": d_name,
-                                "high": [], "medium": [],
-                                "low": [{"label": label} for label in all_labels], "none": [],
-                            }
+                    d_name = _dir_name(d)
+                    if d_name in dir_file_map:
+                        continue
+                    logger.warning("  → 补跑超时方向: %s", d_name[:30])
+                    try:
+                        r = _filter_one(d)
+                        dir_file_map[r["direction_name"]] = r
+                    except Exception:
+                        logger.exception("  Stage 1 补跑失败 %s", d_name)
+                        dir_file_map[d_name] = _s1_all_low(d_name, all_labels)
 
         self._cache.save_stage1_filter(inv_hash, dir_hash, dir_file_map)
         return dir_file_map
+
+    def _s1_filter_direction(self, direction: dict, files: list, file_inventory: str,
+                             all_labels: set, owner_map_text: str) -> dict:
+        """单方向 LLM 语义过滤：解析失败 → 全 low；四级全空 → owner-map/成员周报兜底。"""
+        d_id = direction.get("id", 0)
+        d_name = direction.get("name", f"方向{d_id}")
+
+        prompt = self._prompt_loader.render("biweekly_stage1_filter.md", {
+            "direction_def": json.dumps(direction, ensure_ascii=False, indent=2),
+            "file_inventory": file_inventory,
+            "direction_id": str(d_id),
+            "owner_map": owner_map_text,
+        })
+        result = self._llm.generate(prompt=prompt, route_context={
+            "input_type": "text", "task_type": "analysis",
+            "complexity": "standard", "use_case": "biweekly_report_stage1",
+        })
+
+        parsed = _try_parse_json(result.text)
+        if not parsed:
+            logger.warning("  Stage 1 过滤 %s 失败，所有文件归入 low", d_name)
+            return _s1_all_low(d_name, all_labels)
+
+        for level in _S1_LEVELS:
+            parsed[level] = [i for i in parsed.get(level, [])
+                             if isinstance(i, dict) and i.get("label", "") in all_labels]
+
+        # ── 全空兜底：LLM 返回有效 JSON 但四个级别全空时触发 ──
+        if sum(len(parsed.get(lv, [])) for lv in _S1_LEVELS) == 0:
+            logger.warning("  Stage 1 过滤 %s: LLM 返回全空，触发 owner-map + 成员周报兜底", d_name)
+            _s1_fallback_assign(parsed, direction, files)
+
+        parsed["direction_name"] = d_name
+        logger.info("  %s: high=%d medium=%d low=%d",
+                    d_name[:25], len(parsed.get("high", [])),
+                    len(parsed.get("medium", [])), len(parsed.get("low", [])))
+        return parsed
 
     # ── Stage 2: 文件深度摘要 ─────────────────────────────────
 

@@ -5,16 +5,11 @@
 
 from __future__ import annotations
 
-import json
-import tempfile
-from datetime import datetime, timedelta
-from pathlib import Path
+from datetime import datetime
 
-import pytest
 
-from iris.analysis.service import (
-    AnalysisReportService,
-    _resolve_source_root,
+from iris.analysis.service import AnalysisReportService, _resolve_source_root
+from iris.analysis._biweekly_helpers import (
     _build_file_manifest,
     _build_local_fallback,
     _try_parse_json,
@@ -35,7 +30,7 @@ class TestResolveSourceRoot:
 
     def test_enabled_existing_path(self, tmp_path):
         """启用的数据源且路径存在时返回路径。"""
-        from iris.config.loader import ConfigBundle, make_config_bundle
+        from iris.config.loader import make_config_bundle
 
         source_dir = tmp_path / "SOURCE"
         source_dir.mkdir()
@@ -54,7 +49,7 @@ class TestResolveSourceRoot:
 
     def test_disabled_source(self, tmp_path):
         """已禁用数据源返回 None。"""
-        from iris.config.loader import ConfigBundle, make_config_bundle
+        from iris.config.loader import make_config_bundle
 
         source_dir = tmp_path / "SOURCE"
         source_dir.mkdir()
@@ -73,7 +68,7 @@ class TestResolveSourceRoot:
 
     def test_nonexistent_path(self, tmp_path):
         """路径不存在返回 None。"""
-        from iris.config.loader import ConfigBundle, make_config_bundle
+        from iris.config.loader import make_config_bundle
 
         bundle = make_config_bundle(
             root=tmp_path,
@@ -382,7 +377,6 @@ class TestStage4bReviewFallback:
         return svc
 
     def test_llm_failure_returns_assembled(self):
-        from iris.analysis.service import AnalysisReportService
         from iris.llm import LLMProviderError
 
         class _FakeLLM:
@@ -401,7 +395,6 @@ class TestStage4bReviewFallback:
         assert out == assembled
 
     def test_llm_success_returns_reviewed_text(self):
-        from iris.analysis.service import AnalysisReportService
 
         class _FakeLLM:
             def generate(self, **kwargs):

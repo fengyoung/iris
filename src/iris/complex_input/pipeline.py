@@ -15,7 +15,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from iris.complex_input.detector import (
     ComplexityResult,
-    EncodedImage,
     InputDetector,
 )
 from iris.config.loader import ConfigBundle
@@ -233,7 +232,6 @@ class ComplexInputPipeline:
         VIDEO 通过 VideoAdapter 抽帧 + 音轨转写后送入多模态模型。
         其余未知类型返回明确提示。
         """
-        from iris.utils.constants import FILE_TYPE_IMAGE as _IMG
         from iris.utils.constants import FILE_TYPE_PDF as _PDF
         from iris.utils.constants import FILE_TYPE_DOCUMENT as _DOC
         from iris.utils.constants import FILE_TYPE_VIDEO as _VIDEO

@@ -1,6 +1,6 @@
 [project]
 name = "iris"
-version = "3.29.3"
+version = "3.30.1"
 description = "工作知识助手 — 个人知识库与飞书团队知识库集成"
 requires-python = ">=3.11"
 license = {text = "MIT"}
@@ -21,6 +21,7 @@ dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "ruff>=0.15,<0.16",
+    "mypy>=1.10,<2",
     "pip-audit>=2.9,<3",
     "pre-commit>=4,<5",
 ]
@@ -73,15 +74,27 @@ exclude_lines = [
     "raise NotImplementedError",
 ]
 show_missing = true
-fail_under = 55
+fail_under = 65
 
 [tool.ruff.lint]
-ignore = ["BLE001", "E402", "F401"]
+# 默认规则集（E/F）之外启用 C901 圈复杂度门禁（阈值见 [tool.ruff.lint.mccabe]）。
+# BLE001: 宽泛捕获是有意的容错策略（见下方 per-file 说明）
+# E402: 有意延迟导入以避免循环依赖
+extend-select = ["C901"]
+ignore = ["BLE001", "E402"]
+
+[tool.ruff.lint.mccabe]
+# 新增/修改函数圈复杂度 ≤ 20；存量 10–19 区间的函数（~90 个）不在本轮治理范围
+max-complexity = 20
 
 [tool.ruff.lint.per-file-ignores]
 # BLE001: Do not catch blind exception — 项目架构大量依赖外部服务
 # (LLM API / 飞书 API / 文件 I/O)，宽泛捕获是有意的容错策略。
 "src/iris/**/*.py" = ["BLE001"]
+# F401: 包 __init__.py 中的导入是对外 re-export，属公开 API。
+"src/iris/**/__init__.py" = ["F401"]
+# F401: handlers.py 是 _handlers/ 子模块的向后兼容 facade（re-export 全部 handler）。
+"src/iris/app/cli/handlers.py" = ["F401"]
 # E402: 有意延迟导入以避免循环依赖（wiki 内部模块 / feishu / llm provider）
 "src/iris/app/cli/_handlers/_wiki.py" = ["E402"]
 "src/iris/feishu/doc_convert.py" = ["E402"]
@@ -93,3 +106,14 @@ ignore = ["BLE001", "E402", "F401"]
 "src/iris/wiki/navigation.py" = ["E402"]
 # 测试中常用未读取的构造结果和 mock 绑定来验证副作用。
 "tests/**/*.py" = ["E741", "F841"]
+
+[tool.mypy]
+# v3.30.0 引入：非阻断基线。仅 `make typecheck` 手动运行，不接 CI；
+# 基线错误数记录在 CHANGELOG，后续迭代逐步收敛后再考虑 strict 化与 CI 门禁。
+python_version = "3.11"
+ignore_missing_imports = true
+check_untyped_defs = false
+# 可选依赖（networkx/httpx）有无 stubs 会改变 ignore 是否"多余"，不开 warn_unused_ignores 以免基线随环境漂移
+warn_unused_ignores = false
+show_error_codes = true
+exclude = ["^tests/", "^scripts/"]

@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import types
 
-import pytest
 
-from iris.qa.context import PromptContextPacker, PackedPromptContext, _compress_text
+from iris.qa.context import PromptContextPacker, _compress_text
 from iris.qa.models import AnswerBlock, Citation
 
 

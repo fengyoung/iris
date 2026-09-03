@@ -1292,6 +1292,60 @@ class WeeklyReportMarkdownGenerator:
 # ─────────────────────────────────────────────────────────
 
 
+def _fetch_feishu_doc_if_link_only(extracted: Dict) -> None:
+    """飞书链接型邮件：拉取文档正文替换 content（就地修改 extracted）。"""
+    content = extracted.get("content", "")
+    if not FeishuDocFetcher.is_link_only_email(content):
+        return
+    print("    检测到飞书链接型邮件，尝试拉取文档内容...")
+    feishu_url = FeishuDocFetcher.extract_feishu_url(content)
+    if not feishu_url:
+        return
+    doc_content = FeishuDocFetcher.fetch_doc_content(feishu_url)
+    if not doc_content:
+        return
+    extracted["content"] = doc_content
+    extracted["content_source"] = "feishu_doc"
+    if len(doc_content) >= 100:
+        extracted["needs_advanced_model"] = False
+
+
+def _is_unchanged_since_last_run(report: Dict, msg_id: str) -> bool:
+    """内容去重：与上次处理的 hash 一致 → True（跳过）。"""
+    current_hash = _content_hash(report)
+    prev = _load_processed_state().get("processed_ids", {}).get(msg_id)
+    prev_hash = prev.get("content_hash", "") if isinstance(prev, dict) else ""
+    if prev and current_hash == prev_hash:
+        print("     ⏭️  内容未变化，跳过")
+        return True
+    if prev:
+        print("     🔁 内容已变化，重新提取")
+    return False
+
+
+def _process_one_report(report: Dict, ai_processor, generator, args) -> Optional[str]:
+    """提取 → 飞书正文拉取 → 去重 → AI → 生成。返回文件路径；去重跳过返回 None。"""
+    msg_id = report.get("message_id", "")
+    extracted = EmailExtractor.extract(report)
+    report["extracted"] = extracted
+    _fetch_feishu_doc_if_link_only(extracted)
+
+    content_len = len(extracted.get("content", ""))
+    needs_adv = extracted.get("needs_advanced_model", False)
+    print(f"    提取: {content_len} 字符{' (需要高级模型)' if needs_adv else ''}")
+
+    if not args.force and _is_unchanged_since_last_run(report, msg_id):
+        return None
+
+    if ai_processor and not args.skip_ai:
+        report = ai_processor.process_email(report)
+
+    filepath = generator.save_markdown(report)
+    mark_processed(msg_id, report)
+    print(f"    生成: {os.path.basename(filepath)}")
+    return filepath
+
+
 def cmd_run(args: argparse.Namespace) -> None:
     """执行完整周报提取流水线：扫描 → 过滤 → 提取 → AI → 生成。"""
     from iris.config.loader import load_config_bundle
@@ -1376,64 +1430,17 @@ def cmd_run(args: argparse.Namespace) -> None:
     skipped_by_dedup = 0
 
     for i, report in enumerate(weekly_reports, 1):
-        msg_id = report.get("message_id", "")
-        sender = report.get("sender_name", "Unknown")
-        subject = report.get("subject", "")[:50]
-        print(f"[{i}/{len(weekly_reports)}] {sender} - {subject}")
-
+        print(f"[{i}/{len(weekly_reports)}] {report.get('sender_name', 'Unknown')}"
+              f" - {report.get('subject', '')[:50]}")
         try:
-            # 提取内容
-            extracted = EmailExtractor.extract(report)
-            report["extracted"] = extracted
-
-            content = extracted.get("content", "")
-            content_len = len(content)
-            needs_adv = extracted.get("needs_advanced_model", False)
-
-            # ── 飞书文档链接检测与内容拉取 ─────────────────
-            if FeishuDocFetcher.is_link_only_email(content):
-                print("    检测到飞书链接型邮件，尝试拉取文档内容...")
-                feishu_url = FeishuDocFetcher.extract_feishu_url(content)
-                if feishu_url:
-                    doc_content = FeishuDocFetcher.fetch_doc_content(feishu_url)
-                    if doc_content:
-                        extracted["content"] = doc_content
-                        extracted["content_source"] = "feishu_doc"
-                        if len(doc_content) >= 100:
-                            extracted["needs_advanced_model"] = False
-                        content_len = len(doc_content)
-                        needs_adv = extracted.get("needs_advanced_model", False)
-
-            print(f"    提取: {content_len} 字符{' (需要高级模型)' if needs_adv else ''}")
-
-            # ── 内容去重检查 ─────────────────────────────
-            if not args.force:
-                current_hash = _content_hash(report)
-                state = _load_processed_state()
-                prev = state.get("processed_ids", {}).get(msg_id)
-                prev_hash = prev.get("content_hash", "") if isinstance(prev, dict) else ""
-                if prev and current_hash == prev_hash:
-                    print("     ⏭️  内容未变化，跳过")
-                    skipped_by_dedup += 1
-                    continue
-                if prev and current_hash != prev_hash:
-                    print("     🔁 内容已变化，重新提取")
-
-            # AI 处理
-            if ai_processor and not args.skip_ai:
-                report = ai_processor.process_email(report)
-
-            # 生成 Markdown
-            filepath = generator.save_markdown(report)
-            generated_files.append(filepath)
-            mark_processed(msg_id, report)
-            print(f"    生成: {os.path.basename(filepath)}")
-
+            filepath = _process_one_report(report, ai_processor, generator, args)
         except Exception as e:
             print(f"    ❌ 处理失败: {e}")
-
-    # ── 汇总 ──────────────────────────────────────────
-    print()
+            continue
+        if filepath is None:
+            skipped_by_dedup += 1
+        else:
+            generated_files.append(filepath)
 
     # ── 汇总 ──────────────────────────────────────────
     print()

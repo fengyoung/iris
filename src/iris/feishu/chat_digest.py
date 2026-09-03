@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -14,10 +13,11 @@ from iris.feishu.client import FeishuClient, FeishuClientError
 from iris.feishu._shared import (
     resolve_source_sub_dir, resolve_dedup_path,
     load_dedup_index, save_dedup_index, upsert_dedup_item,
-    sanitize_title, extract_date, now_iso,
+    sanitize_title, now_iso,
 )
 from iris.llm import LLMService, LLMProviderError
 from iris.feishu.image_analyzer import MessageImageAnalyzer
+from iris.core.exceptions import IrisRuntimeError
 from iris.core.write_guard import safe_write_text
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ _SYSTEM_MSG_KEYWORDS = [
 _TZ = timezone(timedelta(hours=8))
 
 
-class ChatDigestError(RuntimeError):
+class ChatDigestError(IrisRuntimeError):
     """聊天提炼错误。"""
 
 
@@ -252,7 +252,7 @@ class ChatDigester:
             start = now - timedelta(days=days)
             return start.isoformat(), now.isoformat()
         except ValueError:
-            print(f"[chat-digest] 无法解析时间范围 '{time_range}'，使用默认 {DEFAULT_RANGE_DAYS} 天", file=sys.stderr)
+            logger.warning("[chat-digest] 无法解析时间范围 '%s'，使用默认 %d 天", time_range, DEFAULT_RANGE_DAYS)
             start = now - timedelta(days=DEFAULT_RANGE_DAYS)
             return start.isoformat(), now.isoformat()
 

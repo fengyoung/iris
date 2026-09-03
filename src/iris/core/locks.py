@@ -19,13 +19,15 @@ from pathlib import Path
 from types import TracebackType
 from typing import Optional, Type
 
+from iris.core.exceptions import IrisRuntimeError
+
 logger = logging.getLogger("iris.core.locks")
 
 _LOCK_TIMEOUT = 30  # 最大等待秒数
 _LOCK_CHECK_INTERVAL = 0.1  # 轮询间隔
 
 
-class FileLockError(RuntimeError):
+class FileLockError(IrisRuntimeError):
     """文件锁相关错误。"""
 
 

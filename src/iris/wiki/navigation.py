@@ -13,9 +13,9 @@ from iris.config.loader import ConfigBundle
 
 logger = logging.getLogger(__name__)
 
-from .searcher import WikiSearcher, _read_wiki_page, _infer_title_from_filename, FRONTMATTER_RE
+from .searcher import FRONTMATTER_RE
 from ._constants import (
-    get_wiki_dir, get_display_name, get_all_types, get_type_config_map,
+    get_display_name, get_type_config_map,
     LINT_STALE_DAYS,
 )
 
@@ -161,59 +161,66 @@ def _atomic_write(path: Path, text: str, bundle=None) -> None:
         path.write_text(text, encoding="utf-8")
 
 
+_LINK_NORM_RE = re.compile(r"[\s·\-–—，,、。\.\(\)（）【】\[\]]+")
+_LINK_DECIMAL_RE = re.compile(r"(\d+)\.?(\d*)")
+
+
+def _norm_link(s: str) -> str:
+    """去空格/标点（如 "AgenticCloud与AIAgent" ↔ "Agentic Cloud 与 AI Agent"）。"""
+    return _LINK_NORM_RE.sub("", s)
+
+
+def _decimalize(s: str) -> str:
+    """连写数字修复（如 "v10" ↔ "v1.0", "20AI" ↔ "2.0 AI"）。"""
+    return _LINK_DECIMAL_RE.sub(
+        lambda m: m.group(1) + "." + m.group(2) if m.group(2) else m.group(1), s)
+
+
+def _is_excluded_link(target: str) -> bool:
+    """不应视为断裂的链接：源文档引用 / 超短噪音 / 技术术语 / 外部业务概念。"""
+    if SOURCE_REF_PATTERN.match(target) or NOISE_LINK_PATTERN.match(target):
+        return True
+    if target in KNOWN_TECH_TERMS:
+        return True
+    return any(p.match(target) for p in EXTERNAL_CONCEPT_PATTERNS)
+
+
+def _matches_any_title(target: str, page_titles: dict) -> bool:
+    """按匹配阶梯逐级放宽：精确 → 子串 → 前缀 → 归一化 → 字符子序列 → 数字修复。"""
+    if target in page_titles:
+        return True
+    # 模糊匹配（子串包含）
+    if any(target in pt or pt in target for pt in page_titles):
+        return True
+    # 前缀匹配（如 "AlphaTeam" → "AlphaTeam2026年目标与规划"）
+    if len(target) >= 4 and any(
+        pt.startswith(target) or target.startswith(pt) for pt in page_titles
+    ):
+        return True
+    # 去空格/标点后匹配
+    target_norm = _norm_link(target)
+    for pt in page_titles:
+        pt_norm = _norm_link(pt)
+        if target_norm == pt_norm:
+            return True
+        if len(target_norm) >= 6 and (target_norm in pt_norm or pt_norm in target_norm):
+            return True
+    # 字符级有序子序列匹配（如 "AlphaProject" → "AlphaProject手机拆修检测项目"）
+    if len(target) >= 6 and any(_char_sequence_match(target, pt) for pt in page_titles):
+        return True
+    # 连写数字修复
+    target_decimal = _decimalize(target_norm)
+    return any(target_decimal == _decimalize(_norm_link(pt)) for pt in page_titles)
+
+
 def _is_wiki_broken_link(target: str, page_titles: dict) -> str | None:
     """判断一个 [[link]] 是否为真正的断裂 Wiki 链接。
 
-    Returns None 如果不应视为断裂（技术术语、源文档引用、噪音），返回错误标签。
+    Returns None 如果不应视为断裂（技术术语、源文档引用、噪音、可匹配到页面），
+    否则返回错误标签 "broken"。
     """
-    # 源文档引用（含路径前缀如 "会议纪要/20260518-..."）
-    if SOURCE_REF_PATTERN.match(target):
+    if _is_excluded_link(target) or _matches_any_title(target, page_titles):
         return None
-    # 超短噪音
-    if NOISE_LINK_PATTERN.match(target):
-        return None
-    # 知名技术术语
-    if target in KNOWN_TECH_TERMS:
-        return None
-    # 外部业务概念（不需 Wiki 页面）
-    for pattern in EXTERNAL_CONCEPT_PATTERNS:
-        if pattern.match(target):
-            return None
-    # 精确匹配
-    if target in page_titles:
-        return None
-    # 模糊匹配（子串包含）
-    for pt in page_titles:
-        if target in pt or pt in target:
-            return None
-    # 前缀匹配（如 "AlphaTeam" → "AlphaTeam2026年目标与规划"）
-    if len(target) >= 4:
-        for pt in page_titles:
-            if pt.startswith(target) or target.startswith(pt):
-                return None
-    # 去空格/标点后匹配（如 "AgenticCloud与AIAgent" ↔ "Agentic Cloud 与 AI Agent"）
-    def _norm(s: str) -> str:
-        return re.sub(r"[\s·\-–—，,、。\.\(\)（）【】\[\]]+", "", s)
-    target_norm = _norm(target)
-    for pt in page_titles:
-        pt_norm = _norm(pt)
-        if target_norm == pt_norm:
-            return None
-        if len(target_norm) >= 6 and (
-            target_norm in pt_norm or pt_norm in target_norm
-        ):
-            return None
-    # 字符级有序子序列匹配（如 "AlphaProject" → "AlphaProject手机拆修检测项目"）
-    if len(target) >= 6:
-        for pt in page_titles:
-            if _char_sequence_match(target, pt):
-                return None
-    # 连写数字修复（如 "v10" ↔ "v1.0", "20AI" ↔ "2.0 AI"）
-    target_decimal = re.sub(r"(\d+)\.?(\d*)", lambda m: m.group(1) + "." + m.group(2) if m.group(2) else m.group(1), target_norm)
-    for pt in page_titles:
-        pt_decimal = re.sub(r"(\d+)\.?(\d*)", lambda m: m.group(1) + "." + m.group(2) if m.group(2) else m.group(1), _norm(pt))
-        if target_decimal == pt_decimal:
-            return None
     return "broken"
 
 
@@ -267,40 +274,44 @@ def _discover_index_paths(metadata_dir: Path) -> tuple:
     return scan_path, chunk_path, vector_dir
 
 
-def lint_wiki(wiki_root: Path, data_root: Optional[Path] = None) -> Dict[str, Any]:
-    """全面 Wiki 健康检查 + 索引质量检查。"""
-    import json as _json
-    import re as _re
+_LINT_LINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
+
+
+def _page_age_days(content: str) -> Optional[int]:
+    """从页面内容解析 updated 时间并返回距今天数；解析失败返回 None。"""
     from datetime import datetime, timezone
+    updated_str = _parse_updated_from_content(content)
+    if not updated_str:
+        return None
+    try:
+        updated = datetime.fromisoformat(updated_str)
+    except (ValueError, TypeError):
+        return None
+    if updated.tzinfo is None:
+        updated = updated.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - updated).days
 
-    if not wiki_root.exists():
-        return {"error": "Wiki 根目录不存在", "page_count": 0}
 
-    LINK_RE = _re.compile(r"\[\[([^\]]+)\]\]")
+def _lint_scan_pages(wiki_root: Path) -> Dict[str, Any]:
+    """扫描全部页面：出链、frontmatter/summary 缺失、过时、draft。"""
+    from .context_loader import WikiContextLoader
 
-    # ── 扫描所有页面 ────────────────────────────────────
     all_links: Dict[str, List[str]] = {}
     page_titles: Dict[str, Path] = {}
-    page_info_dict: Dict[str, dict] = {}
     page_count = 0
     no_frontmatter: List[str] = []
     no_summary: List[str] = []
     zero_outbound: List[str] = []
     stale_pages: List[str] = []
     old_pages: List[str] = []
-    broken_links: List[str] = []
 
-    from .context_loader import WikiContextLoader
-    loader = WikiContextLoader(wiki_root)
-    for page_info in loader.load_pages():
+    for page_info in WikiContextLoader(wiki_root).load_pages():
         title = page_info.title
-        status = page_info.status
-        summary = page_info.summary
         md_file = page_info.path
+        rel = str(md_file.relative_to(wiki_root))
 
         if not title:
-            no_frontmatter.append(str(md_file.relative_to(wiki_root)))
-
+            no_frontmatter.append(rel)
         page_titles[title] = md_file
         page_count += 1
 
@@ -309,131 +320,130 @@ def lint_wiki(wiki_root: Path, data_root: Optional[Path] = None) -> Dict[str, An
         except (OSError, UnicodeDecodeError):
             continue
 
-        # 提取链接
-        links = LINK_RE.findall(content)
-        actual_links = []
-        for link in links:
-            actual = link.split("|")[0].strip() if "|" in link else link.strip()
-            actual_links.append(actual)
+        # 提取链接（[[title|alias]] 取 title）
+        actual_links = [link.split("|")[0].strip() for link in _LINT_LINK_RE.findall(content)]
         all_links[title] = actual_links
-
         if not actual_links:
             zero_outbound.append(title)
-
-        # 摘要检查
-        if not summary:
-            no_summary.append(str(md_file.relative_to(wiki_root)))
-
-        # 过时检查（90天未更新）
-        updated_str = _parse_updated_from_content(content)
-        if updated_str:
-            try:
-                updated = datetime.fromisoformat(updated_str)
-                if updated.tzinfo is None:
-                    updated = updated.replace(tzinfo=timezone.utc)
-                days = (datetime.now(timezone.utc) - updated).days
-                if days > LINT_STALE_DAYS:
-                    old_pages.append(f"{title} ({days}天)")
-            except (ValueError, TypeError):
-                pass
-
+        if not page_info.summary:
+            no_summary.append(rel)
+        # 过时检查（LINT_STALE_DAYS 天未更新）
+        days = _page_age_days(content)
+        if days is not None and days > LINT_STALE_DAYS:
+            old_pages.append(f"{title} ({days}天)")
         # Draft 状态
-        if status == "draft":
-            rel = str(md_file.relative_to(wiki_root))
-            if rel not in stale_pages:
-                stale_pages.append(rel)
+        if page_info.status == "draft" and rel not in stale_pages:
+            stale_pages.append(rel)
 
-        page_info_dict[title] = {
-            "path": str(md_file.relative_to(wiki_root)),
-                "type": page_info.page_type,
-                "status": status,
-                "outbound_count": len(actual_links),
-            }
+    return {
+        "all_links": all_links, "page_titles": page_titles, "page_count": page_count,
+        "no_frontmatter": no_frontmatter, "no_summary": no_summary,
+        "zero_outbound": zero_outbound, "stale_pages": stale_pages, "old_pages": old_pages,
+    }
 
-    # ── 断裂链接（按规则过滤） ──────────────────────────
+
+def _lint_broken_links(all_links: Dict[str, List[str]], page_titles: dict) -> tuple[List[str], int]:
+    """断裂链接（按规则过滤）→ (broken_links, raw_broken_count)。"""
     raw_broken_count = 0
+    broken_links: List[str] = []
     for source_title, links in all_links.items():
         for link_title in links:
-            if link_title not in page_titles:
-                raw_broken_count += 1
-                if _is_wiki_broken_link(link_title, page_titles) is not None:
-                    broken_links.append(f"{source_title} → [[{link_title}]]")
+            if link_title in page_titles:
+                continue
+            raw_broken_count += 1
+            if _is_wiki_broken_link(link_title, page_titles) is not None:
+                broken_links.append(f"{source_title} → [[{link_title}]]")
+    return broken_links, raw_broken_count
 
-    # 统计排除的链接
-    excluded_links = raw_broken_count - len(broken_links)
+
+def _lint_index_quality(data_root: Path, page_titles: dict) -> Dict[str, Any]:
+    """索引质量：扫描/切块/向量索引信息 + Wiki 覆盖度。"""
+    import json as _json
+
+    info: Dict[str, Any] = {}
+    metadata_dir = data_root / "metadata"
+    # 自动发现数据源（而非硬编码 "main_source"）
+    scan_path, chunk_path, vector_dir = _discover_index_paths(metadata_dir)
+
+    # 扫描信息
+    info["source_documents"] = 0
+    if scan_path and scan_path.exists():
+        scan = _json.loads(scan_path.read_text(encoding="utf-8"))
+        info["source_documents"] = scan.get("document_count", 0)
+        info["last_scanned"] = scan.get("scanned_at", "")
+
+    # 切块信息
+    chunks: list = []
+    if chunk_path and chunk_path.exists():
+        chunk_data = _json.loads(chunk_path.read_text(encoding="utf-8"))
+        chunks = chunk_data.get("chunks", [])
+        sources = {c.get("relative_path", "") for c in chunks}
+        info["total_chunks"] = len(chunks)
+        info["chunked_documents"] = len(sources)
+        if info["source_documents"] > 0:
+            info["chunk_coverage_pct"] = round(len(sources) / info["source_documents"] * 100, 1)
+    else:
+        info["total_chunks"] = 0
+        info["chunked_documents"] = 0
+
+    # 向量索引信息
+    if vector_dir and vector_dir.exists():
+        vec_files = list(vector_dir.glob("*"))
+        info["vector_index_exists"] = True
+        info["vector_index_files"] = len(vec_files)
+        info["vector_index_size_kb"] = round(
+            sum(f.stat().st_size for f in vec_files if f.is_file()) / 1024, 1)
+    else:
+        info["vector_index_exists"] = False
+
+    # Wiki 覆盖度
+    source_files = {c["relative_path"].split("/")[0] for c in chunks if c.get("relative_path")}
+    info["wiki_page_count"] = len(page_titles)
+    info["wiki_source_coverage_pct"] = round(
+        len(source_files) / max(info["source_documents"], 1) * 100, 1)
+    return info
+
+
+def lint_wiki(wiki_root: Path, data_root: Optional[Path] = None) -> Dict[str, Any]:
+    """全面 Wiki 健康检查 + 索引质量检查。"""
+    if not wiki_root.exists():
+        return {"error": "Wiki 根目录不存在", "page_count": 0}
+
+    # ── 扫描所有页面 ────────────────────────────────────
+    scan = _lint_scan_pages(wiki_root)
+    page_titles: Dict[str, Path] = scan["page_titles"]
+
+    # ── 断裂链接（按规则过滤） ──────────────────────────
+    broken_links, raw_broken_count = _lint_broken_links(scan["all_links"], page_titles)
+    excluded_links = raw_broken_count - len(broken_links)  # 统计排除的链接
 
     # ── 孤立页（使用 BacklinkBuilder 统一检测） ──────────
     from iris.wiki.backlink import BacklinkBuilder
     backlink_builder = BacklinkBuilder(wiki_root)
     backlink_index = backlink_builder.build()
-    orphan_pages_full = backlink_index.orphans
-    orphan_pages = sorted([
+    orphan_pages = sorted(
         str(page_titles[t].relative_to(wiki_root))
-        for t in orphan_pages_full
+        for t in backlink_index.orphans
         if t in page_titles
-    ])
-
+    )
     # 持久化反向引用索引（供 graph 等模块使用）
     if data_root:
         backlink_builder.save(data_root / "graph" / "backlink_index.json")
 
     # ── 索引质量检查 ────────────────────────────────────
-    index_info: Dict[str, Any] = {}
-    if data_root:
-        metadata_dir = data_root / "metadata"
-        # 自动发现数据源（而非硬编码 "main_source"）
-        scan_path, chunk_path, vector_dir = _discover_index_paths(metadata_dir)
-
-        # 扫描信息
-        if scan_path and scan_path.exists():
-            scan = _json.loads(scan_path.read_text(encoding="utf-8"))
-            index_info["source_documents"] = scan.get("document_count", 0)
-            index_info["last_scanned"] = scan.get("scanned_at", "")
-        else:
-            index_info["source_documents"] = 0
-
-        # 切块信息
-        if chunk_path and chunk_path.exists():
-            chunk_data = _json.loads(chunk_path.read_text(encoding="utf-8"))
-            chunks = chunk_data.get("chunks", [])
-            index_info["total_chunks"] = len(chunks)
-            sources = set(c.get("relative_path", "") for c in chunks)
-            index_info["chunked_documents"] = len(sources)
-            if index_info.get("source_documents", 0) > 0:
-                cov = len(sources) / index_info["source_documents"] * 100
-                index_info["chunk_coverage_pct"] = round(cov, 1)
-        else:
-            index_info["total_chunks"] = 0
-            index_info["chunked_documents"] = 0
-
-        # 向量索引信息
-        if vector_dir and vector_dir.exists():
-            vec_files = list(vector_dir.glob("*"))
-            index_info["vector_index_exists"] = True
-            index_info["vector_index_files"] = len(vec_files)
-            index_info["vector_index_size_kb"] = round(
-                sum(f.stat().st_size for f in vec_files if f.is_file()) / 1024, 1
-            )
-        else:
-            index_info["vector_index_exists"] = False
-
-        # Wiki 覆盖度
-        source_files = set()
-        if chunk_path and chunk_path.exists():
-            for c in chunks:
-                src = c.get("relative_path", "")
-                if src:
-                    source_files.add(src.split("/")[0])
-        wiki_topics = set(page_titles.keys())
-        index_info["wiki_page_count"] = len(wiki_topics)
-        index_info["wiki_source_coverage_pct"] = round(len(source_files) / max(index_info.get("source_documents", 1), 1) * 100, 1)
+    index_info = _lint_index_quality(data_root, page_titles) if data_root else {}
 
     # ── 内容质量评分 ──────────────────────────────────────
     quality = _compute_content_quality(page_titles, wiki_root)
 
+    stale_pages = scan["stale_pages"]
+    no_frontmatter = scan["no_frontmatter"]
+    no_summary = scan["no_summary"]
+    zero_outbound = scan["zero_outbound"]
+    old_pages = scan["old_pages"]
     return {
         # Wiki 健康
-        "page_count": page_count,
+        "page_count": scan["page_count"],
         "content_quality": quality,
         "by_type": {
             cfg["name"]: len([p for p in (wiki_root / cfg["dir"]).glob("*.md")
@@ -465,7 +475,6 @@ def lint_wiki(wiki_root: Path, data_root: Optional[Path] = None) -> Dict[str, An
 def fix_wiki(wiki_root: Path) -> Dict[str, Any]:
     """自动修复 Wiki 常见问题。"""
     import re as _re
-    from datetime import datetime as _dt
 
     if not wiki_root.exists():
         return {"error": "Wiki 根目录不存在", "actions": 0}
@@ -550,7 +559,6 @@ def _parse_updated_from_content(content: str) -> str:
 def _compute_content_quality(page_titles: dict, wiki_root: Path) -> Dict[str, Any]:
     """计算 Wiki 内容质量：信息密度 + 重复检测。"""
     import re
-    from collections import Counter
 
     pages = []
     for title, path in page_titles.items():

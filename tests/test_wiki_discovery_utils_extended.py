@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import tempfile
-import os
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import pytest
 
 from iris.wiki.discovery_utils import (
     normalize_title,

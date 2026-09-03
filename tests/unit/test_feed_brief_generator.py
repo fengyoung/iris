@@ -1,9 +1,7 @@
 """feed 包单元测试 — 简报生成（文件名 / 模板渲染 / 文档匹配）。"""
 
-import pytest
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 from iris.feed._brief_generator import (
     _sanitize_filename,

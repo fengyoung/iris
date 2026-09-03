@@ -1,9 +1,7 @@
 """feed 包单元测试 — 配置加载 / WatchChat / FeedConfig / FeedConfigManager。"""
 
 import json
-import pytest
-from pathlib import Path
-from unittest.mock import patch, MagicMock, mock_open
+from unittest.mock import patch
 
 from iris.feed.feed_config import (
     WatchChat,

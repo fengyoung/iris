@@ -9,11 +9,13 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from iris.core.exceptions import IrisRuntimeError
+
 _EMBED_CACHE_MAXSIZE = 128
 _EMBED_CACHE_TTL = 600.0  # embedding 结果内容不变，使用较长 TTL
 
 
-class EmbedderError(RuntimeError):
+class EmbedderError(IrisRuntimeError):
     """Embedding 相关错误。"""
 
 

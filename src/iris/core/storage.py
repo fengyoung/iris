@@ -8,11 +8,9 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from iris.core.exceptions import StorageError  # noqa: F401 — 兼容 from iris.core.storage import StorageError
+
 logger = logging.getLogger("iris.core.storage")
-
-
-class StorageError(RuntimeError):
-    """存储层相关错误。"""
 
 
 class ChunkStore:
@@ -107,8 +105,7 @@ class ChunkStore:
             conn.executescript(self.FTS_SCHEMA)
             conn.executescript(self.FTS_TRIGGERS)
         except sqlite3.OperationalError as exc:
-            import sys
-            print(f"[ChunkStore] FTS5 初始化失败（全文搜索将降级为 LIKE 查询）: {exc}", file=sys.stderr)
+            logger.warning("[ChunkStore] FTS5 初始化失败（全文搜索将降级为 LIKE 查询）: %s", exc)
         conn.commit()
 
     def close(self) -> None:

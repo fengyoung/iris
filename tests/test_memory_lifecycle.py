@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from iris.memory.lifecycle import MemoryLifecycle, DEFAULT_CORRECTION_AGE_DAYS
+from iris.memory.lifecycle import MemoryLifecycle
 
 
 # ── fixtures ────────────────────────────────────────────────────────

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import os
 import plistlib
-import types
 
 import pytest
 

@@ -1,8 +1,12 @@
-# Iris 3.29.3
+# Iris 3.30.1
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 版本
+
+**v3.30.1** — [主线合并 0902-alpha → main](CHANGELOG.md)：将 v3.30.0（三阶段质量优化：F401/C901 门禁、`IrisError` 统一异常体系、mypy 非阻断基线、corrector/live 模块拆分）并入 main 主干，补齐 main 并行发布的 v3.29.2 提醒引擎停滞修复与 v3.29.3 deep-eval 准确性校验修复（alpha 未含）。源码零冲突自动合并。全量 pytest 3,274 通过。协议版本 3.21（不变）。
+
+**v3.30.0** — [三阶段质量优化](CHANGELOG.md)：① 开源冲刺——F401 门禁 + 395 处未使用导入清理、测试数据残留泛化；② 代码质量——`corrector.py` 1,542→873 / `live.py` 1,044→871 模块拆分（旧导入路径兼容），ruff C901 `max-complexity=20` 门禁并重构全部 11 个超限函数（最高 53），库层 print→logger；③ 长期改进——`IrisError` 统一异常基类（19 个异常挂接、原标准库父类保留）、mypy 非阻断基线 193 errors（`make typecheck`）、新拆模块与 `sync_memory` 专项单测 +257。附带修复循环导入 `config.loader ↔ core/__init__` 与 `MergeBuffer` 首句空 Flush。覆盖率 65.82%→68%（`fail_under` 55→65），全量 3,261 用例通过。协议版本 3.21（不变）。
 
 **v3.29.3** — [deep-eval 准确性校验修复](CHANGELOG.md)：修复 `deep-eval` 引用「无法验证」的三处叠加缺陷——① 引用解析失配（Wiki 参考来源普遍 `- [path.md:line] 描述` 列表符号/反引号/行号范围，解析器只认裸格式致整行丢弃），现剥列表符号+去反引号+支持 `[path.md:start-end]` 范围；② 行号失真无兜底（LLM 生成行号漂移 frontmatter，取到元数据非正文），新增 `SourceLocator.lookup_relevant()` TF-IDF² 相关性召回证据 chunk 与行号内容合并送 LLM；③ 评估 prompt 模板双花括号 `{{x}}` 被 `.format()` 转义成字面不替换（LLM 收到占位符本身），改单花括号根因修复。回归测试 +11，deep-eval 相关 63 全过。协议版本 3.21（不变）。
 

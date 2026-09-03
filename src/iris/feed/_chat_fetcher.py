@@ -9,6 +9,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
+from iris.core.exceptions import IrisRuntimeError
 from iris.feed._cursor_tracker import CursorTracker
 from iris.feed._feishu_bridge import FeishuBridge
 from iris.feed._types import RawMessage
@@ -17,7 +18,7 @@ from iris.feed.feed_config import WatchChat
 logger = logging.getLogger(__name__)
 
 
-class ChatFetchError(RuntimeError):
+class ChatFetchError(IrisRuntimeError):
     """消息获取失败（网络/API错误，不同于无新消息）。"""
 
 

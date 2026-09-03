@@ -29,7 +29,7 @@ from iris.config.loader import ConfigBundle
 from iris.llm import LLMProviderError
 from iris.utils.shared import atomic_write_json, now_iso
 
-from ._constants import get_display_name, get_all_types
+from ._constants import get_display_name
 from ._graph_engine import GraphEdge, GraphNode, _GraphEngine
 from ._relation_extractor import RelationExtractor
 from .backlink import BacklinkBuilder, BacklinkIndex

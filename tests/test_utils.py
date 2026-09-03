@@ -1,8 +1,6 @@
 """M14 原子写入 + M5 日志归档 + M9 常量统一 专项测试。"""
 
 import os
-import pytest
-from pathlib import Path
 
 
 # ── M14: _atomic_write 原子写入 ──────────────────────────────
@@ -199,7 +197,6 @@ class TestPromptTemplateFallback:
         """_build_generic_prompt 优先从模板加载。"""
         # 间接验证：调用 _build_generic_prompt，结果应包含模板内容
         from iris.wiki.generator import WikiGenerator
-        from iris.config.loader import ConfigBundle
 
         # 构造最小 generator 实例
         gen = WikiGenerator.__new__(WikiGenerator)

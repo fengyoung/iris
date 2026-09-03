@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from iris.feed._chat_fetcher import ChatFetcher
 from iris.feed._brief_generator import BriefGenerator
@@ -27,7 +27,7 @@ from iris.feed._message_filter import MessageFilter
 from iris.feed._okr_loader import OKRLoader, extract_dept_keyword
 from iris.feed._topic_detector import TopicDetector
 from iris.feed._types import PipelineResult
-from iris.feed.feed_config import FeedConfig, FeedConfigManager, load_feed_config
+from iris.feed.feed_config import FeedConfigManager
 from iris.feishu.client import FeishuClient
 from iris.feishu.image_analyzer import MessageImageAnalyzer
 

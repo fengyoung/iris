@@ -5,23 +5,22 @@ from __future__ import annotations
 import json
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from iris.config.loader import ConfigBundle
 from iris.ingest.chunker import ChunkSlim
 
 from ._constants import get_wiki_dir, get_wiki_prefix
 from ._wiki_io import slugify_title
-from .discovery_rules import GENERIC_TERM_SUPPRESS, PERSON_PATTERNS
+from .discovery_rules import GENERIC_TERM_SUPPRESS
 from .discovery_types import CandidateItem
 from .discovery_utils import (
     append_sample, normalize_title, find_parent_title, canonicalize_title,
     infer_page_type, is_high_value_title, is_high_value_term,
     path_weight, extract_terms, extract_persons, build_candidates,
     suppress_path_concentrated_noise, cluster_and_resolve,
-    is_wiki_stale, parse_wiki_generated_at,
+    is_wiki_stale,
 )
-from .searcher import WikiSearcher
 
 
 # 周报模板固定文本/章节标题噪音（出现在内容或 section_path 中的非主题文本，不应成为 Wiki 候选）

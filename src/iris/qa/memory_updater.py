@@ -238,6 +238,31 @@ class MemoryUpdater:
             logger.debug("LLM 记忆提取响应 JSON 解析失败: %.200s", text)
             return None
 
+    # 偏好类字段：(extracted 键, profile.user_preferences 键, 展示名, 单条长度上限, 是否排序)
+    _PREF_FIELDS = (
+        ("new_likes", "likes", "偏好(喜欢)", 80, True),
+        ("new_dislikes", "dislikes", "偏好(避免)", 80, True),
+        ("new_styles", "style_preferences", "回答风格偏好", 120, True),
+        ("new_notes", "notes", "备注", 500, False),
+    )
+
+    @staticmethod
+    def _merge_pref(prefs: Dict[str, Any], key: str, new_items: List[Any],
+                    max_len: int, sort: bool) -> int:
+        """把新条目去重合入 prefs[key]，返回新增数。sort=True 存为有序集合，否则保序追加。"""
+        existing = list(prefs.get(key, []))
+        seen = set(existing)
+        added = 0
+        for item in new_items:
+            text = str(item).strip()
+            if text and text not in seen and len(text) < max_len:
+                existing.append(text)
+                seen.add(text)
+                added += 1
+        if added:
+            prefs[key] = sorted(existing) if sort else existing
+        return added
+
     def _apply_extracted(self, extracted: Dict[str, Any]) -> List[str]:
         """将 LLM 提取的记忆写入 long_term 存储（单次 load-modify-save）。"""
         updates: List[str] = []
@@ -245,65 +270,14 @@ class MemoryUpdater:
         prefs = profile.setdefault("user_preferences", {})
         profile_changed = False
 
-        # ── 偏好（喜欢）──
-        new_likes = extracted.get("new_likes", [])
-        if new_likes:
-            existing_likes = set(prefs.get("likes", []))
-            added = 0
-            for item in new_likes:
-                text = str(item).strip()
-                if text and text not in existing_likes and len(text) < 80:
-                    existing_likes.add(text)
-                    added += 1
+        for src_key, pref_key, label, max_len, sort in self._PREF_FIELDS:
+            new_items = extracted.get(src_key, [])
+            if not new_items:
+                continue
+            added = self._merge_pref(prefs, pref_key, new_items, max_len, sort)
             if added:
-                prefs["likes"] = sorted(existing_likes)
                 profile_changed = True
-                updates.append(f"LLM 提取偏好(喜欢): +{added} 条")
-
-        # ── 偏好（避免）──
-        new_dislikes = extracted.get("new_dislikes", [])
-        if new_dislikes:
-            existing_dislikes = set(prefs.get("dislikes", []))
-            added = 0
-            for item in new_dislikes:
-                text = str(item).strip()
-                if text and text not in existing_dislikes and len(text) < 80:
-                    existing_dislikes.add(text)
-                    added += 1
-            if added:
-                prefs["dislikes"] = sorted(existing_dislikes)
-                profile_changed = True
-                updates.append(f"LLM 提取偏好(避免): +{added} 条")
-
-        # ── 回答风格偏好 ──
-        new_styles = extracted.get("new_styles", [])
-        if new_styles:
-            existing_styles = set(prefs.get("style_preferences", []))
-            added = 0
-            for item in new_styles:
-                text = str(item).strip()
-                if text and text not in existing_styles and len(text) < 120:
-                    existing_styles.add(text)
-                    added += 1
-            if added:
-                prefs["style_preferences"] = sorted(existing_styles)
-                profile_changed = True
-                updates.append(f"LLM 提取回答风格偏好: +{added} 条")
-
-        # ── 备注 ──
-        new_notes = extracted.get("new_notes", [])
-        if new_notes:
-            existing_notes = list(prefs.get("notes", []))
-            added = 0
-            for item in new_notes:
-                text = str(item).strip()
-                if text and text not in existing_notes and len(text) < 500:
-                    existing_notes.append(text)
-                    added += 1
-            if added:
-                prefs["notes"] = existing_notes
-                profile_changed = True
-                updates.append(f"LLM 提取备注: +{added} 条")
+                updates.append(f"LLM 提取{label}: +{added} 条")
 
         if profile_changed:
             profile["updated_at"] = _now_iso()
@@ -312,33 +286,37 @@ class MemoryUpdater:
         # ── 纠正规则（独立存储，不受 profile 合并影响）──
         new_corrections = extracted.get("new_corrections", [])
         if new_corrections:
-            corrections = self._correction_memory.load()
-            items = corrections.setdefault("items", {})
-            for corr in new_corrections:
-                concept = str(corr.get("concept", "")).strip()
-                preferred = str(corr.get("preferred", "")).strip()
-                if not concept or not preferred or len(concept) > 40:
-                    continue
-                existing = items.get(concept, {})
-                entry = {
-                    "preferred": preferred,
-                    "update_count": int(existing.get("update_count", 0)) + 1,
-                    "updated_at": _now_iso(),
-                    "last_source": f"[LLM] {corr.get('context', 'from conversation')}"
-                }
-                items[concept] = entry
+            updates.extend(self._apply_corrections(new_corrections))
 
-                # Phase 3：冲突自动解决 — 纠正 ≥ 3 次触发
-                if entry["update_count"] >= 3:
-                    resolved = self._auto_resolve_conflict(concept, entry, items)
-                    if resolved:
-                        updates.append(f"LLM 提取纠正 + 自动裁决: {concept} => {preferred}")
-                        continue
-                updates.append(f"LLM 提取纠正规则: {concept} => {preferred}")
+        return updates
 
-            corrections["updated_at"] = _now_iso()
-            self._correction_memory.save(corrections)
+    def _apply_corrections(self, new_corrections: List[Dict[str, Any]]) -> List[str]:
+        """写入纠正规则；update_count ≥ 3 触发 Phase 3 自动裁决。"""
+        updates: List[str] = []
+        corrections = self._correction_memory.load()
+        items = corrections.setdefault("items", {})
+        for corr in new_corrections:
+            concept = str(corr.get("concept", "")).strip()
+            preferred = str(corr.get("preferred", "")).strip()
+            if not concept or not preferred or len(concept) > 40:
+                continue
+            existing = items.get(concept, {})
+            entry = {
+                "preferred": preferred,
+                "update_count": int(existing.get("update_count", 0)) + 1,
+                "updated_at": _now_iso(),
+                "last_source": f"[LLM] {corr.get('context', 'from conversation')}"
+            }
+            items[concept] = entry
 
+            # Phase 3：冲突自动解决 — 纠正 ≥ 3 次触发
+            if entry["update_count"] >= 3 and self._auto_resolve_conflict(concept, entry, items):
+                updates.append(f"LLM 提取纠正 + 自动裁决: {concept} => {preferred}")
+                continue
+            updates.append(f"LLM 提取纠正规则: {concept} => {preferred}")
+
+        corrections["updated_at"] = _now_iso()
+        self._correction_memory.save(corrections)
         return updates
 
     # ── Phase 3：冲突自动解决 ──────────────────────────────────

@@ -16,5 +16,6 @@ beautifulsoup4==4.14.3  # weekly
 
 # 开发与质量工具
 ruff==0.15.4
+mypy==1.14.1
 pip-audit==2.9.0
 pre-commit==4.5.1

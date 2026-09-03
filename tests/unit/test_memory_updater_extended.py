@@ -9,7 +9,6 @@ from iris.qa.memory_updater import (
     MemoryUpdater,
     IMPLICIT_CORRECTION_RE,
     _MIN_QUESTION_LENGTH,
-    _MIN_CONFIDENCE,
 )
 
 

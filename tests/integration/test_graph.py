@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
-import pytest
 
-from iris.wiki.backlink import BacklinkBuilder, BacklinkIndex
 from iris.wiki.graph import GraphEdge, GraphNode, WikiGraph, _safe_filename
 from iris.wiki._relation_extractor import RelationExtractor
 from iris.utils.shared import now_iso
@@ -54,7 +50,7 @@ def _make_wiki_root(tmp_path: Path, label: str = "") -> Path:
 
 def _make_config_bundle(tmp_path: Path, wiki_root: Path):
     """创建最小化 ConfigBundle。"""
-    from iris.config.loader import ConfigBundle, make_config_bundle
+    from iris.config.loader import make_config_bundle
     return make_config_bundle(
         root=tmp_path,
         app={"app": {"name": "Test"}},

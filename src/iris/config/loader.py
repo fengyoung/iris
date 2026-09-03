@@ -15,11 +15,12 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from iris.config.models import ConfigBundleV2
+from iris.core.exceptions import IrisValueError
 
 logger = logging.getLogger(__name__)
 
 
-class ConfigError(ValueError):
+class ConfigError(IrisValueError):
     """配置文件不合法时抛出。"""
 
 

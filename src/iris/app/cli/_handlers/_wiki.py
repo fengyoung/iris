@@ -262,78 +262,10 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
             print(f"[asr]   ... Phase 2 完成 ({time.monotonic() - _t2:.1f}s): "
                   f"{total_mappings} 映射", file=sys.stderr)
 
-            # ── 反馈反向优化：在 LLM 误识别生成之后应用 ──
-            # 时序要求：提升映射 append 进 mis_asr 后不再被 generate_misreadings
-            # 整体覆盖；僵尸淘汰面对的是已填充的规则；补充热词随后统一写盘
-            _fb_removed, _fb_promoted, _fb_hotwords = 0, 0, 0
-            from iris.wiki.asr.feedback import (
-                load_corrections, build_feedback_recommendations,
-                apply_feedback_optimizations,
-            )
-            feedback_path = data_dir / "asr_feedback.jsonl"
-            if feedback_path.exists():
-                try:
-                    corrections = load_corrections(str(feedback_path))
-                    if len(corrections) >= 50:
-                        # 僵尸判定时间窗：仅上次部署词典中已有的规则参与淘汰，
-                        # 防止本次新生成规则被误判为僵尸（生成→淘汰→再生成振荡）
-                        history_rules = _load_history_replace_rules(data_dir)
-                        recs = build_feedback_recommendations(
-                            corrections, terms, hotwords,
-                            min_samples=50, promote_threshold=3,
-                            history_rules=history_rules,
-                        )
-                        # 应用优化
-                        _fb_removed, _fb_promoted, _fb_hotwords = \
-                            apply_feedback_optimizations(terms, hotwords, recs)
-                        # 输出摘要
-                        _parts = []
-                        if _fb_removed:
-                            _parts.append(f"淘汰 {_fb_removed} 条僵尸规则")
-                        if _fb_promoted:
-                            _parts.append(f"提升 {_fb_promoted} 条 LLM 发现")
-                        if _fb_hotwords:
-                            _parts.append(f"补充 {_fb_hotwords} 个热词")
-                        if _parts:
-                            print(
-                                f"[asr] 📊 反馈反向优化（{len(corrections)} 条记录）: "
-                                + ", ".join(_parts),
-                                file=sys.stderr,
-                            )
-                        else:
-                            print(
-                                f"[asr] 📊 反馈分析完成（{len(corrections)} 条记录），"
-                                f"无需优化",
-                                file=sys.stderr,
-                            )
-                    else:
-                        print(
-                            f"[asr] ⏭ 反馈数据不足（{len(corrections)}<50 条），"
-                            f"跳过反向优化",
-                            file=sys.stderr,
-                        )
-                except Exception as _fb_exc:
-                    print(
-                        f"[asr] ⚠ 反馈分析失败（不影响主流程）: {_fb_exc}",
-                        file=sys.stderr,
-                    )
+            _apply_asr_feedback(terms, hotwords, data_dir)
 
-            max_mappings = getattr(args, "max_mappings", 2000) or 2000
+            max_mappings = _resolve_max_mappings(args, logger)
             max_chars = getattr(args, "max_chars", 20) or 20
-            # 从 profile 配置读取 max_mappings 覆盖（优先级：CLI 参数 > profile > 默认值）
-            import json as _profile_json
-            profile_path = resolve_data_path("config/asr_profiles.json")
-            if profile_path.exists() and getattr(args, "max_mappings", None) is None:
-                try:
-                    with open(profile_path) as _pf:
-                        _profiles = _profile_json.load(_pf)
-                    _profile_name = getattr(args, "profile", "default") or "default"
-                    _profile_cfg = _profiles.get(_profile_name, _profiles.get("default", {}))
-                    _profile_max = _profile_cfg.get("max_mappings")
-                    if _profile_max is not None:
-                        max_mappings = int(_profile_max)
-                except Exception as e:
-                    logger.debug("加载 asr_profiles.json 中 max_mappings 失败，使用默认值: %s", e)
             replace_path = f"asr-replace-dict-{today}.json"
             if args.output_file and mode == "replace-dict":
                 replace_path = args.output_file
@@ -371,19 +303,8 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
             )
 
         # 写入文件
-        if args.output_file:
-            out = Path(args.output_file)
-            clean_stem = _strip_version_suffix(out.stem)
-            version_tag = f"v{new_version.version}"
-            out = out.with_name(f"{clean_stem}_{version_tag}{out.suffix}")
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(prompt, encoding="utf-8")
-            output_path = str(out)
-        else:
-            auto_path = bundle.root / "output" / f"asr-prompt-v{new_version.version}-{today}.md"
-            auto_path.parent.mkdir(parents=True, exist_ok=True)
-            auto_path.write_text(prompt, encoding="utf-8")
-            output_path = str(auto_path)
+        output_path = _write_asr_prompt(prompt, args.output_file, new_version.version,
+                                        bundle.root / "output" / f"asr-prompt-v{new_version.version}-{today}.md")
 
         # 持久化版本
         new_version.prompt_text = prompt
@@ -395,97 +316,11 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
     # ── 部署到 vocotype（--deploy） ───────────────────────
     deployed: List[str] = []
     if getattr(args, "deploy", False):
-        import shutil
-        from datetime import datetime as _dt
-
-        VOCO_DIR = os.environ.get(
-            "IRIS_VOCOTYPE_DIR",
-            os.path.expanduser("~/Library/Application Support/VocoType"),
-        )
-        voco_path = Path(VOCO_DIR)
-
-        if voco_path.exists():
-            # 备份
-            backup_dir = resolve_data_path("output/") / "vocotype-backup" / _dt.now().strftime("%Y%m%d-%H%M%S")
-            backup_dir.mkdir(parents=True, exist_ok=True)
-            for fname in ("hotwords.txt", "postprocess.json", "ai_settings.json"):
-                src = voco_path / fname
-                if src.exists():
-                    shutil.copy2(str(src), str(backup_dir / fname))
-            deployed.append(f"备份: {backup_dir}")
-
-            # 部署热词（合并手动热词）
-            if hotwords_file and hotwords:
-                merged = list(hotwords)
-                manual_path = resolve_data_path("data/asr_manual_hotwords.txt")
-                if manual_path.exists():
-                    try:
-                        manual_words = [
-                            line.strip() for line in
-                            manual_path.read_text(encoding="utf-8").splitlines()
-                            if line.strip() and not line.strip().startswith("#")
-                        ]
-                        # 去重：保留手动词（可能不在 LLM 生成的列表中）
-                        existing = set(merged)
-                        added = 0
-                        for w in manual_words:
-                            if w not in existing:
-                                merged.append(w)
-                                existing.add(w)
-                                added += 1
-                        if added:
-                            deployed.append(f"手动热词 +{added}")
-                    except Exception as e:
-                        logger.warning("合并手动热词失败 (%s): %s", manual_path, e)
-                (voco_path / "hotwords.txt").write_text(
-                    "\n".join(merged) + "\n", encoding="utf-8"
-                )
-                deployed.append(f"hotwords.txt ({len(merged)} 词)")
-
-            # 写入 vocotype ai_settings.json：关闭 LLM 优化 + 清空替换词典
-            ai_settings_path = voco_path / "ai_settings.json"
-            if ai_settings_path.exists():
-                try:
-                    ai_settings = json.loads(ai_settings_path.read_text(encoding="utf-8"))
-                    if "global" in ai_settings:
-                        ai_settings["global"]["enabled"] = False
-                    ai_settings_path.write_text(
-                        json.dumps(ai_settings, ensure_ascii=False, indent=2),
-                        encoding="utf-8",
-                    )
-                    deployed.append("ai_settings.json (LLM 优化已关闭)")
-                except Exception as e:
-                    logger.warning("写入 ai_settings.json 失败: %s", e)
-
-            # 写入 postprocess.json：清空 replace_map
-            pp_path = voco_path / "postprocess.json"
-            if pp_path.exists():
-                try:
-                    pp = json.loads(pp_path.read_text(encoding="utf-8"))
-                    pp["replace_map"] = {}
-                    pp_path.write_text(
-                        json.dumps(pp, ensure_ascii=False, indent=2),
-                        encoding="utf-8",
-                    )
-                    deployed.append("postprocess.json (替换词典已清空)")
-                except Exception as e:
-                    logger.warning("写入 postprocess.json 失败: %s", e)
-
-            # 部署到 Iris data/
-            data_dir = resolve_data_path("data/")
-            data_dir.mkdir(parents=True, exist_ok=True)
-            if replace_dict_file:
-                shutil.copy2(replace_dict_file, str(data_dir / "asr_replace_dict.json"))
-                deployed.append("data/asr_replace_dict.json")
-            if prompt and output_path:
-                shutil.copy2(output_path, str(data_dir / "asr_prompt.md"))
-                deployed.append("data/asr_prompt.md")
-        else:
-            deployed.append(f"⚠ vocotype 目录不存在: {VOCO_DIR}")
+        deployed = _deploy_asr_to_vocotype(
+            hotwords, hotwords_file, replace_dict_file, prompt, output_path, logger)
 
     # ── 总耗时汇总 ─────────────────────────────────────
-    _elapsed = time.monotonic() - _t0
-    _summary_parts = [f"总耗时 {_elapsed:.1f}s"]
+    _summary_parts = [f"总耗时 {time.monotonic() - _t0:.1f}s"]
     if hotwords:
         _summary_parts.append(f"热词 {len(hotwords)}")
     if terms:
@@ -494,6 +329,32 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
     print(file=sys.stderr)
 
     # ── 输出报告 ─────────────────────────────────────────
+    payload = _asr_prompt_payload(
+        hotwords, hotwords_file, terms, replace_dict_file,
+        prompt, output_path, new_version if prompt else None, deployed)
+    _emit_output(args.command, payload, pretty=args.pretty)
+    return 0
+
+
+# ── build-asr-prompt 子步骤 ─────────────────────────────
+
+
+def _write_asr_prompt(prompt: str, output_file: str, version: str, auto_path: Path) -> str:
+    """写校正提示词：--output-file 时在 stem 后附 _v{ver}；否则写 auto_path。返回实际路径。"""
+    if output_file:
+        out = Path(output_file)
+        out = out.with_name(f"{_strip_version_suffix(out.stem)}_v{version}{out.suffix}")
+    else:
+        out = auto_path
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(prompt, encoding="utf-8")
+    return str(out)
+
+
+def _asr_prompt_payload(hotwords: List[str], hotwords_file: str, terms: List,
+                        replace_dict_file: str, prompt: str, output_path: str,
+                        new_version, deployed: List[str]) -> Dict[str, Any]:
+    """build-asr-prompt 输出报告。"""
     payload: Dict[str, Any] = {}
     if hotwords_file:
         payload["hotwords_file"] = hotwords_file
@@ -501,19 +362,165 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
     if replace_dict_file:
         payload["replace_dict_file"] = replace_dict_file
         if terms:
-            payload["replace_mapping_count"] = sum(
-                len(t.mis_asr) for t in terms
-            )
-    if prompt:
+            payload["replace_mapping_count"] = sum(len(t.mis_asr) for t in terms)
+    if prompt and new_version is not None:
         payload["version"] = new_version.version
         payload["output_file"] = output_path
         payload["fingerprint"] = new_version.fingerprint[:8]
         payload["prompt_chars"] = len(prompt)
     if deployed:
         payload["deployed"] = deployed
+    return payload
 
-    _emit_output(args.command, payload, pretty=args.pretty)
-    return 0
+
+def _apply_asr_feedback(terms: List, hotwords: List[str], data_dir: Path) -> None:
+    """反馈反向优化：在 LLM 误识别生成之后应用（就地修改 terms / hotwords）。
+
+    时序要求：提升映射 append 进 mis_asr 后不再被 generate_misreadings
+    整体覆盖；僵尸淘汰面对的是已填充的规则；补充热词随后统一写盘。
+    """
+    from iris.wiki.asr.feedback import (
+        load_corrections, build_feedback_recommendations,
+        apply_feedback_optimizations,
+    )
+    feedback_path = data_dir / "asr_feedback.jsonl"
+    if not feedback_path.exists():
+        return
+    try:
+        corrections = load_corrections(str(feedback_path))
+        if len(corrections) < 50:
+            print(f"[asr] ⏭ 反馈数据不足（{len(corrections)}<50 条），跳过反向优化", file=sys.stderr)
+            return
+        # 僵尸判定时间窗：仅上次部署词典中已有的规则参与淘汰，
+        # 防止本次新生成规则被误判为僵尸（生成→淘汰→再生成振荡）
+        history_rules = _load_history_replace_rules(data_dir)
+        recs = build_feedback_recommendations(
+            corrections, terms, hotwords,
+            min_samples=50, promote_threshold=3,
+            history_rules=history_rules,
+        )
+        removed, promoted, added_hw = apply_feedback_optimizations(terms, hotwords, recs)
+        parts = []
+        if removed:
+            parts.append(f"淘汰 {removed} 条僵尸规则")
+        if promoted:
+            parts.append(f"提升 {promoted} 条 LLM 发现")
+        if added_hw:
+            parts.append(f"补充 {added_hw} 个热词")
+        if parts:
+            print(f"[asr] 📊 反馈反向优化（{len(corrections)} 条记录）: " + ", ".join(parts),
+                  file=sys.stderr)
+        else:
+            print(f"[asr] 📊 反馈分析完成（{len(corrections)} 条记录），无需优化", file=sys.stderr)
+    except Exception as exc:
+        print(f"[asr] ⚠ 反馈分析失败（不影响主流程）: {exc}", file=sys.stderr)
+
+
+def _resolve_max_mappings(args, logger) -> int:
+    """替换词典条数上限：CLI 参数 > asr_profiles.json 对应 profile > 默认 2000。"""
+    cli_value = getattr(args, "max_mappings", None)
+    if cli_value is not None:
+        return cli_value or 2000
+    profile_path = resolve_data_path("config/asr_profiles.json")
+    if profile_path.exists():
+        try:
+            with open(profile_path) as pf:
+                profiles = json.load(pf)
+            profile_name = getattr(args, "profile", "default") or "default"
+            profile_cfg = profiles.get(profile_name, profiles.get("default", {}))
+            profile_max = profile_cfg.get("max_mappings")
+            if profile_max is not None:
+                return int(profile_max)
+        except Exception as e:
+            logger.debug("加载 asr_profiles.json 中 max_mappings 失败，使用默认值: %s", e)
+    return 2000
+
+
+def _merge_manual_hotwords(hotwords: List[str], deployed: List[str], logger) -> List[str]:
+    """合并 data/asr_manual_hotwords.txt 中的手动热词（去重，保留手动词）。"""
+    merged = list(hotwords)
+    manual_path = resolve_data_path("data/asr_manual_hotwords.txt")
+    if not manual_path.exists():
+        return merged
+    try:
+        manual_words = [
+            line.strip() for line in manual_path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        existing = set(merged)
+        added = 0
+        for w in manual_words:
+            if w not in existing:
+                merged.append(w)
+                existing.add(w)
+                added += 1
+        if added:
+            deployed.append(f"手动热词 +{added}")
+    except Exception as e:
+        logger.warning("合并手动热词失败 (%s): %s", manual_path, e)
+    return merged
+
+
+def _patch_json_file(path: Path, mutate, label: str, deployed: List[str], logger) -> None:
+    """读 JSON → mutate(dict) → 写回；失败只记 warning 不中断部署。"""
+    if not path.exists():
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        mutate(data)
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        deployed.append(label)
+    except Exception as e:
+        logger.warning("写入 %s 失败: %s", path.name, e)
+
+
+def _deploy_asr_to_vocotype(hotwords: List[str], hotwords_file: str, replace_dict_file: str,
+                            prompt: str, output_path: str, logger) -> List[str]:
+    """--deploy：备份 vocotype 配置 → 写热词 → 关闭 vocotype 自带 LLM/替换 → 同步到 Iris data/。"""
+    import shutil
+    from datetime import datetime as _dt
+
+    voco_dir = os.environ.get(
+        "IRIS_VOCOTYPE_DIR", os.path.expanduser("~/Library/Application Support/VocoType"))
+    voco_path = Path(voco_dir)
+    deployed: List[str] = []
+    if not voco_path.exists():
+        return [f"⚠ vocotype 目录不存在: {voco_dir}"]
+
+    # 备份
+    backup_dir = resolve_data_path("output/") / "vocotype-backup" / _dt.now().strftime("%Y%m%d-%H%M%S")
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    for fname in ("hotwords.txt", "postprocess.json", "ai_settings.json"):
+        src = voco_path / fname
+        if src.exists():
+            shutil.copy2(str(src), str(backup_dir / fname))
+    deployed.append(f"备份: {backup_dir}")
+
+    # 部署热词（合并手动热词）
+    if hotwords_file and hotwords:
+        merged = _merge_manual_hotwords(hotwords, deployed, logger)
+        (voco_path / "hotwords.txt").write_text("\n".join(merged) + "\n", encoding="utf-8")
+        deployed.append(f"hotwords.txt ({len(merged)} 词)")
+
+    # 写入 vocotype ai_settings.json：关闭 LLM 优化；postprocess.json：清空 replace_map
+    def _disable_llm(d: dict) -> None:
+        if "global" in d:
+            d["global"]["enabled"] = False
+    _patch_json_file(voco_path / "ai_settings.json", _disable_llm,
+                     "ai_settings.json (LLM 优化已关闭)", deployed, logger)
+    _patch_json_file(voco_path / "postprocess.json", lambda d: d.__setitem__("replace_map", {}),
+                     "postprocess.json (替换词典已清空)", deployed, logger)
+
+    # 部署到 Iris data/
+    data_dir = resolve_data_path("data/")
+    data_dir.mkdir(parents=True, exist_ok=True)
+    if replace_dict_file:
+        shutil.copy2(replace_dict_file, str(data_dir / "asr_replace_dict.json"))
+        deployed.append("data/asr_replace_dict.json")
+    if prompt and output_path:
+        shutil.copy2(output_path, str(data_dir / "asr_prompt.md"))
+        deployed.append("data/asr_prompt.md")
+    return deployed
 
 
 # ── 辅助函数（wiki 相关） ─────────────────────────────

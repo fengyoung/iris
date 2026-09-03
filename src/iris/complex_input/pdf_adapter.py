@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from iris.complex_input.detector import EncodedImage
+from iris.core.exceptions import IrisRuntimeError
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ _DEFAULT_MAX_TEXT_CHARS = 8000
 _DEFAULT_RENDER_SCALE = 2.0
 
 
-class PdfAdapterError(RuntimeError):
+class PdfAdapterError(IrisRuntimeError):
     """PDF 适配器相关错误。"""
 
 

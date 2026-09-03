@@ -4,7 +4,6 @@ wiki/_constants.py — build_domain_context 测试。
 
 from __future__ import annotations
 
-import pytest
 
 from iris.wiki.generator import WikiGenerator, _slugify_title
 from iris.wiki._constants import build_domain_context

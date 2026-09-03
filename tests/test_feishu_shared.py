@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
-import pytest
 
 from iris.feishu._shared import (
     resolve_source_root,
     resolve_source_sub_dir,
     resolve_pic_dir,
-    resolve_dedup_path,
     load_dedup_index,
     save_dedup_index,
     upsert_dedup_item,

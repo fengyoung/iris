@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import subprocess
 from unittest.mock import patch
 
-import pytest
 from iris.trello.client import (
     _is_ipv4,
     _resolve_via_dns,
