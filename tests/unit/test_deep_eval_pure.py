@@ -46,6 +46,60 @@ class TestParseReferences:
         assert refs[0].line_number is None
         assert "描述内容" in refs[0].description
 
+    # ── 回归：Wiki 参考来源普遍使用 "- " 列表符号，解析器必须剥离 ──
+    def test_bullet_single_line(self):
+        content = "## 参考来源\n- [docs/file.md:10] 这是描述\n"
+        refs = parse_references(content)
+        assert len(refs) == 1
+        assert refs[0].source_path == "docs/file.md"
+        assert refs[0].line_number == 10
+        assert refs[0].description == "这是描述"
+
+    def test_bullet_no_line_number(self):
+        content = "## 参考来源\n- [docs/file.md] 描述内容\n"
+        refs = parse_references(content)
+        assert len(refs) == 1
+        assert refs[0].source_path == "docs/file.md"
+        assert refs[0].line_number is None
+        assert refs[0].description == "描述内容"
+
+    def test_bullet_range_keeps_description(self):
+        # 行号范围 [x.md:A-B] 必须保留描述，取起始行号
+        content = "## 参考来源\n- [docs/file.md:3-10] 范围引用描述\n"
+        refs = parse_references(content)
+        assert len(refs) == 1
+        assert refs[0].source_path == "docs/file.md"
+        assert refs[0].line_number == 3
+        assert refs[0].description == "范围引用描述"
+
+    def test_bullet_backtick_wrapped(self):
+        content = "## 参考来源\n- `[docs/file.md:15]` 反引号包裹描述\n"
+        refs = parse_references(content)
+        assert len(refs) == 1
+        assert refs[0].source_path == "docs/file.md"
+        assert refs[0].line_number == 15
+        assert refs[0].description == "反引号包裹描述"
+
+    def test_bullet_nested_numbered(self):
+        content = "## 参考来源\n- 1. docs/file.md:50 嵌套编号描述\n"
+        refs = parse_references(content)
+        assert len(refs) == 1
+        assert refs[0].source_path == "docs/file.md"
+        assert refs[0].line_number == 50
+        assert refs[0].description == "嵌套编号描述"
+
+    def test_bullet_real_long_path_range(self):
+        # 真实 Wiki 形态：中文长路径 + 行号范围 + 列表符号
+        content = (
+            "## 参考来源\n"
+            "- [02-部门管理/2026/组织架构-v202606.md:3-10] 该文档列出了组织结构。\n"
+        )
+        refs = parse_references(content)
+        assert len(refs) == 1
+        assert refs[0].source_path == "02-部门管理/2026/组织架构-v202606.md"
+        assert refs[0].line_number == 3
+        assert refs[0].description == "该文档列出了组织结构。"
+
     def test_format2_numbered_with_line(self):
         content = "## 参考来源\n1. docs/file.md:50 这是一段描述\n"
         refs = parse_references(content)

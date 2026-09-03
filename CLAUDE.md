@@ -1,4 +1,4 @@
-# Iris 3.29.2 — 项目执行说明
+# Iris 3.29.3 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -7,7 +7,7 @@
 
 ## 项目概览
 
-**当前规模**：~43,000 行 / 176 个源码文件 / 27 模块 · CLI 67 命令 · 测试 1,851（unit 1,606 / integration 245）· 覆盖率 65.82% · 10 个项目级 Skill · Wiki 241 页 · 知识图谱节点 220 / 关系边 1,858（wikilink 1,225 + LLM 633）· 数据源 900+ 文档 / 6,771 Chunk（text-embedding-v3 / 1,024 维）
+**当前规模**：~43,000 行 / 176 个源码文件 / 27 模块 · CLI 67 命令 · 测试 3,017（unit 1,928 / integration 1,089）· 覆盖率 65.82% · 10 个项目级 Skill · Wiki 241 页 · 知识图谱节点 220 / 关系边 1,858（wikilink 1,225 + LLM 633）· 数据源 900+ 文档 / 6,771 Chunk（text-embedding-v3 / 1,024 维）
 
 **近期新增能力**：工程可靠性治理（SQLite 生命周期、稳定 inode 文件锁、统一原子写、向量索引 generation 发布、跨进程 LLM 缓存治理）· 任务面板 `taskpanel/`（Web 只读 + TaskReporter 埋点 + 探测兜底 + 常驻守护）· 实时会议助理 `assistant/`（逐段提炼要点/风险/决策点 + 实时提示提问 + 过程文档）· YAML frontmatter 标准化注入（`core/frontmatter.py`）+ 批量补全（`frontmatter_batch.py`，正则+LLM+备份恢复）· wikilink 自动注入引擎（零 LLM 成本）· LLM 用量追踪（SQLite WAL + embedding 纳入）· LLM 响应缓存 + embedding 向量缓存（LRU+TTL）· LLM 熔断器（threshold=5 / reset 60s）· 记忆自动更新引擎（双通道）· 多 Agent 并发安全（FileLock + SQLite WAL + Agent 隔离）· ASR 实时校正引擎（Aho-Corasick + LLM 编辑助手 + 反馈反向优化）· CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit · constraints.txt 可复现构建
 
@@ -92,7 +92,7 @@ PDF=PyMuPDF 提取文字 + 逐页渲染；DOCX=python-docx 段落+表格文字�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.29.2 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.29.3 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.21 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | app 3.7（其余独立演进） | 配置文件 Schema |
 
@@ -121,7 +121,7 @@ iris3/
 ├── src/iris/          # 27 模块（见下）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
-├── tests/             # 1,851 用例（unit 1,606 / integration 245）
+├── tests/             # 3,017 用例（unit 1,928 / integration 1,089）
 ├── config/            # *.json gitignored，*.example 版本控制
 ├── data/              # 运行时数据（全 gitignore）
 ├── .claude/skills/    # 项目级 Skill（10 个）
@@ -142,7 +142,9 @@ iris3/
 
 ## 近期变更
 
-**当前 v3.29.2 (2026-09-02)** — 提醒引擎项目停滞误判修复(`src/iris/analysis/reminders.py` +8 行):拍照3.0等含版本号项目被误判停滞(138 天)——项目页 slug 去点号(拍照3.0→拍照30)且丢失词边界,`_project_keywords` 产出的关键词(拍照30AI外观定级)永远匹配不到带点文档(拍照3.0主观项检测/AI外观定级),三重兜底失效。修复:①数字点号变体——对 2 位数字组生成插点变体(30→3.0,环视排除年份 2026);②**title 词段补充**——`_source_dir_freshest` 读取 frontmatter title(保留原始写法"拍照3.0 AI外观定级项目"),按空格切分词段产出"拍照3.0""AI外观定级""外观定级"等关键词,覆盖 slug 丢失的词边界;③`project_stall_ignore` 配置补 4 个调薪完结项目。效果:daily-start 停滞信号 6→1(拍照3.0外观定级误判消除,调薪完结不再告警)。验证:reminders 测试 28+2=30 全过、ruff 零告警、真实引擎验证(停滞信号 6→1)。协议 3.21(不变);产品 3.29.1→**3.29.2**。
+**当前 v3.29.3 (2026-09-03)** — deep-eval 准确性校验修复(`evaluation/_reference_parser.py`/`_source_locator.py`/`deep_eval.py` + 3 个 prompt 模板,回归测试 +11):三处缺陷叠加致引用「无法验证」或拿不到证据误判。①**引用解析失配**——Wiki 参考来源普遍 `- [path.md:line] 描述`(列表符号 `-/*/+`/反引号包裹/行号范围),`parse_references` 原只匹配无前缀裸格式,列表符号致整行失配丢弃;修复剥列表符号 + 去反引号 + 支持 `[path.md:start-end]` 范围(取起始行)+ 无行号 `[path.md]`。②**行号失真无兜底**——LLM 生成行号常漂移 frontmatter/引言,`lookup()` 按行号取到 YAML 元数据而非正文;新增 `SourceLocator.lookup_relevant()` 按描述关键词 **TF-IDF² 相关性召回** 证据 chunk(稀有词人名/数字主导、跳过 frontmatter、按文档缓存),`AccuracyVerifier._build_source_context()` 与行号内容合并送 LLM(截断 3500)。③**模板填充根因**——三评估模板双花括号 `{{x}}` 被 `.format()` 转义成字面 `{x}` 不替换,LLM 收到占位符本身;改单花括号 `{x}`。验证:deep_eval 相关 52+11=63 全过、全量 3,017 通过、ruff 零告警。协议 3.21(不变);产品 3.29.2→**3.29.3**。
+
+**v3.29.2 (2026-09-02)** — 提醒引擎项目停滞误判修复(`src/iris/analysis/reminders.py` +8 行):拍照3.0等含版本号项目被误判停滞(138 天)——项目页 slug 去点号(拍照3.0→拍照30)且丢失词边界,`_project_keywords` 产出的关键词(拍照30AI外观定级)永远匹配不到带点文档(拍照3.0主观项检测/AI外观定级),三重兜底失效。修复:①数字点号变体——对 2 位数字组生成插点变体(30→3.0,环视排除年份 2026);②**title 词段补充**——`_source_dir_freshest` 读取 frontmatter title(保留原始写法"拍照3.0 AI外观定级项目"),按空格切分词段产出"拍照3.0""AI外观定级""外观定级"等关键词,覆盖 slug 丢失的词边界;③`project_stall_ignore` 配置补 4 个调薪完结项目。效果:daily-start 停滞信号 6→1(拍照3.0外观定级误判消除,调薪完结不再告警)。验证:reminders 测试 28+2=30 全过、ruff 零告警、真实引擎验证(停滞信号 6→1)。协议 3.21(不变);产品 3.29.1→**3.29.2**。
 
 **v3.29.1 (2026-09-02)** — Wiki 增量更新指纹预检补全(`src/iris/wiki/generator.py`):修复 daily-start 卡死——`update_all_pages()` 对全部 241 页每页无差别调 LLM(并发 6 路)判断是否需更新,241 次长 prompt 调用压垮 zz_tokenhub 中转(超时 + finish_reason=stop/length 无 content),进程阻塞在网络上 15 分钟无页面落盘。根因:v3.28.4 已实现 `is_wiki_stale()` 指纹预检(source_fingerprint 源文档 hash 全未变→页面新鲜→零 LLM 跳过,discovery/metrics 均已用),但 `update_all_pages` 漏用此路径。修复:加载 chunk_hash_index,每页先 `is_wiki_stale(path, hash_index)` 判定,源文档未变直接返回 no_changes(跳过 LLM),仅过时页面走增量更新;判定异常兜底照常走 LLM(不因预检漏更)。效果:daily-start Wiki 更新从 241 次 LLM 调用降至 ~0 次(源文档无变化场景),全跳过 ~5s。验证:wiki_generator 相关 unit 85 + integration 5 通过、ruff 零告警、真实 daily-start 跑通(exit 0:chunks 6820/vector 6820/graph 241 节点 2115 边/人物 176 无歧义)。协议 3.21(不变);产品 3.29.0→**3.29.1**。
 

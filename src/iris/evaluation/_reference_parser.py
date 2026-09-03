@@ -23,9 +23,9 @@ from iris.evaluation._types import ReferenceEntry
 
 # ── 参考来源解析模式 ──
 
-# 格式1: [path.md:line] desc
+# 格式1: [path.md:line] desc 或 [path.md:start-end] desc（行号范围取起始行）
 BRACKET_PATTERN = re.compile(
-    r"(?:\d+\.)?\s*\[([^\]]+\.md)(?::(\d+))?\](.*)"
+    r"(?:\d+\.)?\s*\[([^\]]+\.md)(?::(\d+)(?:-\d+)?)?\](.*)"
 )
 # 格式2: 1. path.md:line（章节注释）desc
 NUMBERED_PATH_PATTERN = re.compile(
@@ -48,8 +48,10 @@ INLINE_CONTENT_PATTERN = re.compile(
 def parse_references(wiki_content: str) -> List[ReferenceEntry]:
     """从 Wiki 页面内容中解析 ## 参考来源 下的所有引用条目。
 
-    支持多种引用格式：
+    支持多种引用格式（均可带 "- / * / +" 列表符号前缀，方括号可被反引号包裹）：
     - [path.md:line] desc
+    - [path.md:start-end] desc（行号范围，取起始行）
+    - [path.md] desc（无行号）
     - 1. path.md:line（章节注释）desc
     - 1. path.md:line desc
     - 1. path.md desc（无行号）
@@ -65,6 +67,16 @@ def parse_references(wiki_content: str) -> List[ReferenceEntry]:
         line = line.strip()
         if not line:
             continue
+
+        # 剥离行首列表符号（- / * / +），Wiki 参考来源普遍使用 "- [path.md:line] desc"
+        # 形式；不剥离会导致下方各 .match() 模式因 "- " 前缀整体失配。
+        line = re.sub(r"^[-*+]\s+", "", line).strip()
+        if not line:
+            continue
+
+        # 去掉包裹方括号的反引号："`[path.md:line]` desc" -> "[path.md:line] desc"
+        line = re.sub(r"`(\[)", r"\1", line)
+        line = re.sub(r"(\])`", r"\1", line)
 
         # 跳过内联内容格式
         if INLINE_CONTENT_PATTERN.match(line):

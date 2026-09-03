@@ -90,6 +90,11 @@ def _get_page_accuracy_prompt() -> str:
     return _load_prompt_template("page_accuracy_check.md") or _PAGE_ACCURACY_FALLBACK
 
 
+# 准确性校验送入 LLM 的源上下文长度上限（字符）。
+# 合并行号定位内容与描述相关内容后需截断，避免超长 prompt。
+_SOURCE_CONTEXT_MAX = 3500
+
+
 class AccuracyVerifier:
     """准确性校验器：逐条审核 Wiki 引用是否与源文档一致。"""
 
@@ -173,6 +178,27 @@ class AccuracyVerifier:
             return True
         return False
 
+    def _build_source_context(self, entry: ReferenceEntry, base_content: str) -> str:
+        """合并行号定位内容与描述相关 chunk，规避引用行号失真。
+
+        Wiki 引用的行号由 LLM 生成，常漂移至 frontmatter/引言区，按行号取到的
+        是元数据而非正文。此处按描述关键词补检源文档相关 chunk 并与行号内容合并，
+        让 LLM 拿到可支撑/反驳描述的证据。定位器无相关检索能力时原样返回。
+        """
+        desc = entry.description.strip()
+        relevant = None
+        if desc and hasattr(self._locator, "lookup_relevant"):
+            try:
+                relevant = self._locator.lookup_relevant(entry.source_path, desc)
+            except Exception:  # 相关性检索失败不阻断评估，回退行号内容
+                relevant = None
+        if not relevant:
+            return base_content
+        base = (base_content or "").strip()
+        if base and base not in relevant:
+            return relevant + "\n\n" + base
+        return relevant
+
     def _verify_one(self, entry: ReferenceEntry) -> AccuracyVerdict:
         """校验单条引用。"""
         # 定位源
@@ -193,9 +219,12 @@ class AccuracyVerifier:
                 detail="Wiki 引用的描述为空，无法校验",
             )
 
+        # 放宽上下文：行号定位常落在 frontmatter，补按描述取相关 chunk 后合并
+        source_content = self._build_source_context(entry, source_content)
+
         # 调用 LLM
         prompt = _get_accuracy_prompt().format(
-            source_content=source_content.strip(),
+            source_content=source_content.strip()[:_SOURCE_CONTEXT_MAX],
             wiki_description=entry.description.strip(),
         )
 

@@ -1,3 +1,12 @@
+## v3.29.3 (2026-09-03)
+
+**deep-eval 准确性校验修复 — 引用解析 + 证据召回 + 模板填充根因**（8 文件 / +303，回归测试 +11）：`deep-eval`（Wiki 深度评估）准确性校验此前三处缺陷叠加，导致大量引用「无法验证」或拿不到证据误判。
+
+- **① 引用解析失配**（`src/iris/evaluation/_reference_parser.py`）— Wiki 参考来源普遍写作 `- [path.md:line] 描述`（列表符号 `-/*/+` 前缀）、反引号包裹 `` `[path.md:line]` ``、行号范围 `[path.md:3-10]` 三种形态，而 `parse_references` 原模式只匹配无前缀裸格式——列表符号让各 `.match()` 模式因 `"- "` 前缀整体失配，整行引用被静默丢弃。修复 — 剥离行首列表符号 + 去掉包裹反引号；`BRACKET_PATTERN` 支持 `start-end` 行号范围（取起始行）；无行号 `[path.md]` 引用保留。
+- **② 行号失真无兜底**（`_source_locator.py` 新增 `lookup_relevant()` / `deep_eval.py` 新增 `_build_source_context()`）— Wiki 引用行号由 LLM 生成，常漂移至 frontmatter/引言区，`lookup()` 按行号取到的是 YAML 元数据而非正文，准确性校验拿不到证据。修复 — 按引用描述关键词做 **TF-IDF² 相关性召回**（IDF 平方使稀有词——人名/数字——主导排序，避免 frontmatter 命中泛化词挤占证据 chunk；`skip_frontmatter` 跳过元数据块、全跳过极端场景放宽兜底；按文档缓存 token 索引），`AccuracyVerifier` 将相关 chunk 与行号定位内容合并送入 LLM（`_SOURCE_CONTEXT_MAX=3500` 截断），让 LLM 拿到可支撑/反驳描述的证据，定位器无检索能力时原样回退。
+- **③ Prompt 模板填充根因**（`templates/prompt/{accuracy,comprehensiveness,page_accuracy}_check.md`）— 三个评估模板用双花括号 `{{source_content}}`，Python `.format()` 只将其转义为字面 `{source_content}` 而不替换 → LLM 收到的是占位符文本本身，准确性校验整体「无法验证」。修复 — 改单花括号 `{var}` 使 `.format()` 真正填充。
+- 验证：deep-eval 相关 52+11=63 全过（新增：列表符号/无行号/行号范围/反引号/嵌套编号/真实中文长路径引用解析、`lookup_relevant` 证据优先于 frontmatter + 缺文档返回 None、三模板 `.format()` 填充回归）；全量 3,017 通过（unit 1,928 含新 6 / integration 1,089 含新 5）；ruff 零告警。协议版本 3.21（不变）；产品版本 3.29.2→**3.29.3**。
+
 ## v3.29.2 (2026-09-02)
 
 **提醒引擎项目停滞误判修复**（`src/iris/analysis/reminders.py` / 回归测试 +2）：拍照3.0 等含版本号项目被误判停滞（138 天）——项目页 slug 文件名**去点号**（拍照3.0 → 拍照30）且**丢失词边界**（拍照3.0 AI外观定级 → 拍照30AI外观定级），`_project_keywords` 从 slug 产出的关键词（拍照30AI外观定级 / 30AI）永远匹配不到带点/分段命名的文档（拍照3.0主观项检测 / AI外观定级业务应用反馈），v3.28.4 的三重兜底（指纹→SOURCE 同名→内容级）全部失效。

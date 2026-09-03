@@ -1,13 +1,13 @@
 你正在审核 Wiki 页面内容是否与原始工作文档一致。
 
 【源文档片段】
-{{source_content}}
+{source_content}
 
 【Wiki 页面标题】
-{{wiki_title}}
+{wiki_title}
 
 【Wiki 页面关键内容（摘要）】
-{{wiki_content_snippet}}
+{wiki_content_snippet}
 
 请判定：Wiki 页面中与上述源文档片段相关的内容，是否与源文档一致？
 - consistent: 完全一致，没有事实错误

@@ -121,6 +121,51 @@ class TestSourceLocator:
         # 不存在的文件
         assert locator.lookup("SOURCE/nonexistent.md") is None
 
+    def test_lookup_relevant_prefers_evidence_over_frontmatter(self, tmp_path):
+        """回归：相关性定位应命中含稀有词的证据 chunk，而非泛化词的 frontmatter。"""
+        import json
+        summary_path = tmp_path / "chunk_summary.json"
+        summary_path.write_text(json.dumps({
+            "chunks": [
+                {
+                    "relative_path": "SOURCE/org.md",
+                    "line_start": 1, "line_end": 8,
+                    # frontmatter：命中大量泛化词（组织/部门/数据），但无人名
+                    "content": "---\ntitle: 组织架构\ntype: 部门管理\ndate: 2026\n---",
+                },
+                {
+                    "relative_path": "SOURCE/org.md",
+                    "line_start": 9, "line_end": 20,
+                    "content": "# 组织架构\n数据智能部 组织结构 文档 说明",
+                },
+                {
+                    "relative_path": "SOURCE/org.md",
+                    "line_start": 21, "line_end": 40,
+                    # 证据 chunk：含稀有人名
+                    "content": "数据标注组 Leader 王柳坤，成员 刘佳蓉 归属此组，直报冯扬。",
+                },
+            ],
+        }, ensure_ascii=False), encoding="utf-8")
+
+        locator = SourceLocator([str(summary_path)])
+        locator.load()
+
+        desc = "该文档列出组织结构，包含刘佳蓉的部门归属及上级信息"
+        rel = locator.lookup_relevant("SOURCE/org.md", desc)
+        assert rel is not None
+        # 关键：证据内容被取到
+        assert "刘佳蓉" in rel
+        # frontmatter 元数据不应作为证据主体出现
+        assert not rel.lstrip().startswith("---")
+
+    def test_lookup_relevant_missing_doc(self, tmp_path):
+        import json
+        summary_path = tmp_path / "chunk_summary.json"
+        summary_path.write_text(json.dumps({"chunks": []}), encoding="utf-8")
+        locator = SourceLocator([str(summary_path)])
+        locator.load()
+        assert locator.lookup_relevant("SOURCE/nope.md", "任意描述") is None
+
     def test_find_sibling_sources(self, tmp_path):
         import json
         summary_path = tmp_path / "chunk_summary.json"
@@ -404,3 +449,45 @@ class TestSourceLocatorFallbackWarning:
         with caplog.at_level(logging.WARNING, logger="iris.evaluation._source_locator"):
             locator.lookup_with_context("SOURCE/doc.md", line_number=999)
         assert any("无精确匹配" in r.message for r in caplog.records)
+
+
+# ── Prompt 模板填充回归 ────────────────────────────────────────────
+
+
+class TestPromptTemplateFilling:
+    """回归：评估 Prompt 模板必须能被 .format() 正确填充。
+
+    历史缺陷：模板文件使用双花括号 {{x}}，.format() 只把其转义成字面 {x}
+    而不替换，导致 LLM 收到的是占位符文本本身，准确性校验全部"无法验证"。
+    """
+
+    def test_accuracy_prompt_fills_placeholders(self):
+        from iris.evaluation.deep_eval import _get_accuracy_prompt
+        prompt = _get_accuracy_prompt().format(
+            source_content="SRC_CONTENT_X", wiki_description="DESC_Y"
+        )
+        assert "{source_content}" not in prompt
+        assert "{wiki_description}" not in prompt
+        assert "SRC_CONTENT_X" in prompt
+        assert "DESC_Y" in prompt
+
+    def test_page_accuracy_prompt_fills_placeholders(self):
+        from iris.evaluation.deep_eval import _get_page_accuracy_prompt
+        prompt = _get_page_accuracy_prompt().format(
+            source_content="SRC_X", wiki_title="TITLE_Y",
+            wiki_content_snippet="SNIPPET_Z",
+        )
+        assert "{source_content}" not in prompt
+        assert "{wiki_title}" not in prompt
+        assert "{wiki_content_snippet}" not in prompt
+        assert "SRC_X" in prompt and "TITLE_Y" in prompt
+
+    def test_comprehensiveness_prompt_fills_placeholders(self):
+        from iris.evaluation.deep_eval import _get_comprehensiveness_prompt
+        prompt = _get_comprehensiveness_prompt().format(
+            wiki_title="TITLE_A", wiki_content_snippet="SNIP_B",
+            candidate_source="CAND_C",
+        )
+        assert "{wiki_title}" not in prompt
+        assert "{candidate_source}" not in prompt
+        assert "TITLE_A" in prompt and "CAND_C" in prompt

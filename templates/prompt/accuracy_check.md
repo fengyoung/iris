@@ -1,10 +1,10 @@
 你正在审核 Wiki 内容是否与原始工作文档一致。
 
 【源文档片段】
-{{source_content}}
+{source_content}
 
 【Wiki 描述】
-{{wiki_description}}
+{wiki_description}
 
 请判定：Wiki 的描述是否与源文档一致？
 - consistent: 完全一致，没有事实错误
