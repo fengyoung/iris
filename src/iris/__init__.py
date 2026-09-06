@@ -6,4 +6,4 @@
   config/*.json      数据版本（配置文件 Schema，独立演进）
 """
 
-__version__ = "3.21"
+__version__ = "3.22"

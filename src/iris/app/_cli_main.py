@@ -17,7 +17,7 @@ from iris.app.cli.handlers import COMMAND_HANDLERS
 
 
 COMMANDS = [
-    "check-config", "route-model", "diagnose", "status", "agent-spec",
+    "check-config", "route-model", "diagnose", "llm-bench", "status", "agent-spec",
     "scan-source", "build-chunks", "build-vector-index",
     "search", "ask", "build-report", "build-mindmap", "build-biweekly-report",
     "discover-wiki", "discover-wiki-auto", "build-wiki",
@@ -212,6 +212,14 @@ def build_parser() -> argparse.ArgumentParser:
                         help="frontmatter-batch 列出所有备份")
     parser.add_argument("--restore", default="",
                         help="frontmatter-batch 从指定时间戳备份恢复")
+    # llm-bench
+    parser.add_argument("--channel", default="", help="llm-bench 只看某通道（zz_tokenhub/deepseek/bailian）")
+    parser.add_argument("--bench-model", action="append", default=None,
+                        help="llm-bench 只看某 model_id（可多次）")
+    parser.add_argument("--concurrency", type=int, default=4, help="llm-bench 吞吐阶段并行数")
+    parser.add_argument("--max-tokens", type=int, default=3000, help="llm-bench 散文输出上限")
+    parser.add_argument("--phase1-only", action="store_true", help="llm-bench 只测连接/TTFT")
+    parser.add_argument("--phase2-only", action="store_true", help="llm-bench 只测吞吐（跳过连接阶段，TTFT 列为空）")
     return parser
 
 

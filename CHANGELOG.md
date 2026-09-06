@@ -1,3 +1,11 @@
+## v3.32.0 (2026-09-06)
+
+**新增 `iris llm-bench` — LLM 通道/模型 连接速度(TTFT) + 吞吐基准命令**（11 文件 / +683；引擎 + 注册 + 单测 10 项）。动机：一次全量连通性排查发现 16 个 (channel×model) 组合里 4 个不可达（tokenhub 对 `qwen3.7-max`/`glm5.3*` 404、bailian `qwen3.7-plus` 免费额度 403）与 2 个极不稳（gpt-5.6-sol/luna），且 tokenhub 中继 `usage.completion_tokens` 严重虚高——据此沉淀为可复用命令。
+
+- **引擎 `llm/benchmark.py`**（两阶段、测量口径自洽、不依赖中继 usage）：Phase1 连接速度=流式短答测「请求→首可见正文」TTFT（短答 prompt + max_tokens 给足，规避思考模型被思考截断误判“无正文”）；Phase2 吞吐=中文散文流式输出统计正文生成窗字符/分，估 TPM 按中文≈1.5 字符/token 折算——**以实测字符为准**（实测 tokenhub 对 Qwen 系列 svc usage 虚高且不随 max_tokens 变化，svc_tok 仅列参照）。思考型模型思考 token 计入 TTFT/总耗时、不计入正文窗速率。单模型失败不中断，逐条记入 rows。
+- **注册 `iris llm-bench`**：`--channel` / `--bench-model`(可多次) / `--concurrency` / `--max-tokens` / `--phase1-only` / `--phase2-only` / `--pretty`（默认 JSON 供 Skill 消费，`--pretty` 输出对齐表格）。`scripts/llm_bench.py` 收敛为引擎薄封装（人类表格版）。CLI 命令集 67→**68**；协议版本 3.21→**3.22**。
+- 验证：ruff 零告警；`test_llm_benchmark.py` 10 项通过（命令注册/parser flags/盘点过滤/指标公式/序列化渲染纯函数，离线不触网）；全量 pytest 3,286→**3,296**（unit 2,207 / integration 1,089）；单模型端到端 `iris llm-bench --bench-model deepseek-v4-flash-zz` 输出正常。产品版本 3.31.0→**3.32.0**；app 配置版本 3.7（不变）。
+
 ## v3.31.0 (2026-09-03)
 
 **sync-memory 双向化 — CC 记忆 ↔ Iris 长期记忆持久互通 + 前向备注噪音治理**（4 文件 / +344；回归 `test_sync_memory.py` 至 90 项，全量 pytest 3,286 通过）。此前记忆同步仅 CC→Iris 单向（daily-start 阶段 1 自动执行），且前向会把 `reference` / 无标记 `feedback` 类 CC 记忆隐式降级为 Iris「备注」——dry-run 实测每次灌入 5 条低价值/重复噪音。全量审计（分支记忆逐字节 diff、前向 dry-run、反向逐条覆盖探测）确认：iris3 家族分支记忆与主库一致、Iris 27 条纠正全部已有 CC 对应——两边「记住同一套信息」在实质层面已成立，缺的是**防止未来漂移的反向机制**。

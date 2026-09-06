@@ -1,4 +1,4 @@
-# Iris 3.31.0
+# Iris 3.32.0
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
@@ -130,7 +130,7 @@ cp config/*.json.example config/  # 然后编辑各 .json 填入实际值
 ```
 iris3/
 ├── src/iris/           # 27 模块
-│   ├── app/cli/        # CLI 入口 + 67 个公开命令
+│   ├── app/cli/        # CLI 入口 + 68 个公开命令
 │   ├── analysis/       # 分析服务（报告/思维导图/双周报）
 │   ├── complex_input/  # 多模态三阶段（图片/PDF/DOCX/VIDEO）
 │   ├── config/         # 配置加载 + Pydantic 校验
@@ -166,6 +166,7 @@ iris3/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.32.0** | 2026-09-06 | 新增 `iris llm-bench`：LLM 通道/模型 连接速度（流式首可见 TTFT）+ 吞吐基准（字符口径，规避 tokenhub 中继 usage 虚高）；引擎 `llm/benchmark.py` + 纯函数单测 10 项，全量 3,296 通过。协议版本 3.21→3.22（命令集 67→68） |
 | **v3.31.0** | 2026-09-03 | sync-memory 双向化：新增 Iris→CC 反向通道（Iris 运行期自主纠正 → CC 记忆文件 + MEMORY.md 物化，五级覆盖判定防重复）+ 前向收紧（reference/无标记 feedback 不再隐式灌 Iris 备注）+ daily-start 自动双向 + CLI `--forward-only`；`test_sync_memory.py` 至 90 项，全量 3,286 通过。协议版本 3.21（不变） |
 | **v3.30.1** | 2026-09-03 | 主线合并 0902-alpha → main：并入 v3.30.0 三阶段质量优化（F401/C901 门禁、`IrisError` 统一异常体系、mypy 基线、corrector/live 拆分），补齐 v3.29.2/v3.29.3 修复；源码零冲突，全量 3,274 通过。协议版本 3.21（不变） |
 | **v3.30.0** | 2026-09-03 | 三阶段质量优化：开源冲刺（F401 门禁 + 395 导入清理 + 测试数据脱敏）→ 代码质量（C901≤20 重构 11 函数、corrector/live 拆分、print→logger）→ 长期改进（`IrisError` 异常体系 19 挂接、mypy 基线 193、专项单测 +257）；覆盖率 68%。协议版本 3.21（不变） |
