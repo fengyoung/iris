@@ -103,6 +103,21 @@ def test_check_env_empty_lines(capsys):
         os.unlink(env_path)
 
 
+def test_check_env_ignores_channel_url_and_refs(capsys):
+    """.env 含 TOKENHUB_BASE_URL 等 URL / keychain 引用 → 不计为明文凭证（回归）。"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
+        f.write("IRIS_ZZ_TOKENHUB_BASE_URL=https://tokenhub.example.com/v1\n")
+        f.write("LARK_APP_SECRET=\n")
+        f.write("DEEPSEEK_API_KEY=keychain:deepseek\n")
+        env_path = Path(f.name)
+    try:
+        _check_plaintext_keys(env_path)
+        captured = capsys.readouterr()
+        assert "安全提醒" not in captured.err
+    finally:
+        os.unlink(env_path)
+
+
 # ── _atomic_write_json ────────────────────────────────────
 
 

@@ -1,4 +1,4 @@
-# Iris 3.32.0 — 项目执行说明
+# Iris 3.32.1 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 逐版变更记录与版本历史统一归档于 [CHANGELOG.md](CHANGELOG.md)；本文件只承载现行架构 / 配置 / 约定。
@@ -7,7 +7,7 @@
 
 ## 项目概览
 
-**当前规模**：~43,000 行 / 183 个源码文件 / 27 模块 · CLI 68 命令 · 测试 3,296（pytest 全量：unit 2,207 / integration 1,089，含参数化）· 覆盖率 68%（`fail_under` 65）· mypy 基线 193 errors（非阻断）· 10 个项目级 Skill · Wiki 241 页 · 知识图谱节点 220 / 关系边 1,858（wikilink 1,225 + LLM 633）· 数据源 900+ 文档 / 6,771 Chunk（text-embedding-v3 / 1,024 维）
+**当前规模**：~43,000 行 / 183 个源码文件 / 27 模块 · CLI 68 命令 · 测试 3,297（pytest 全量：unit 2,207 / integration 1,090，含参数化）· 覆盖率 68%（`fail_under` 65）· mypy 基线 193 errors（非阻断）· 10 个项目级 Skill · Wiki 241 页 · 知识图谱节点 220 / 关系边 1,858（wikilink 1,225 + LLM 633）· 数据源 900+ 文档 / 6,771 Chunk（text-embedding-v3 / 1,024 维）
 
 **近期新增能力**：三阶段质量优化（F401/C901 门禁、`IrisError` 统一异常体系、mypy 基线、corrector/live 模块拆分）· 工程可靠性治理（SQLite 生命周期、稳定 inode 文件锁、统一原子写、向量索引 generation 发布、跨进程 LLM 缓存治理）· 任务面板 `taskpanel/`（Web 只读 + TaskReporter 埋点 + 探测兜底 + 常驻守护）· 实时会议助理 `assistant/`（逐段提炼要点/风险/决策点 + 实时提示提问 + 过程文档）· YAML frontmatter 标准化注入（`core/frontmatter.py`）+ 批量补全（`frontmatter_batch.py`，正则+LLM+备份恢复）· wikilink 自动注入引擎（零 LLM 成本）· LLM 用量追踪（SQLite WAL + embedding 纳入）· LLM 响应缓存 + embedding 向量缓存（LRU+TTL）· LLM 熔断器（threshold=5 / reset 60s）· 记忆自动更新引擎（双通道）· 多 Agent 并发安全（FileLock + SQLite WAL + Agent 隔离）· ASR 实时校正引擎（Aho-Corasick + LLM 编辑助手 + 反馈反向优化）· CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit · constraints.txt 可复现构建 · sync-memory 双向化（CC↔Iris 记忆互通 + 前向备注噪音治理，daily-start 自动双向，见 `scripts/sync_memory.py`）· `llm-bench`（LLM 通道/模型 连接速度 TTFT + 吞吐基准，字符口径规避中继 usage 虚高，引擎 `llm/benchmark.py`）
 
@@ -92,7 +92,7 @@ PDF=PyMuPDF 提取文字 + 逐页渲染；DOCX=python-docx 段落+表格文字�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.32.0 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.32.1 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.22 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | app 3.7（其余独立演进） | 配置文件 Schema |
 
@@ -124,7 +124,7 @@ iris3/
 ├── src/iris/          # 27 模块（见下）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
-├── tests/             # 3,296 用例（pytest 全量：unit 2,207 / integration 1,089，conftest 自动打标记）
+├── tests/             # 3,297 用例（pytest 全量：unit 2,207 / integration 1,090，conftest 自动打标记）
 ├── config/            # *.json gitignored，*.example 版本控制
 ├── data/              # 运行时数据（全 gitignore）
 ├── .claude/skills/    # 项目级 Skill（10 个）

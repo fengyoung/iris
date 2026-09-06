@@ -1,3 +1,11 @@
+## v3.32.1 (2026-09-06)
+
+**明文 API Key 检测误报修复 — TOKENHUB 渠道名被 TOKEN 子串误判**（2 代码文件；回归 +1）。`.env` 明文密钥探测（`config/loader.py::_check_plaintext_keys`，启动进程级安全提醒）原用裸关键字子串匹配变量名，`IRIS_ZZ_TOKENHUB_BASE_URL` 因含子串 `TOKEN` 被误判为「明文 API Key/Token」——每次运行 Iris 命令都弹安全提醒；而该值实为 tokenhub 中转网关 base URL（`https://.../v1`），非凭证。真实密钥早已迁 macOS Keychain，`.env` 内 `LARK_APP_SECRET` 为空，仅此一处误报。
+
+- **修复① 变量名改词段匹配**：`_SECRET_KEY_NAME_RE = (^|_)(API_?KEY|SECRET|TOKEN)($|_)`——`TOKEN` 须作为独立词段（`_TOKEN` 词尾 / `_TOKEN_` 词中）才算凭证类变量名；`TOKENHUB` 为拼接词（TOKEN 后紧跟 H）不再命中。`DEEPSEEK_API_KEY` / `BAILIAN_API_KEY` / `LARK_APP_SECRET` / `TRELLO_TOKEN` 等仍正常告警。
+- **修复② 值形态门禁**：值为 `http(s)://` URL、`${VAR}` 引用、`keychain:` 引用或空值时一律跳过——均非明文密钥（空值占位原有逻辑保留）。
+- 验证：`test_config_security.py` 12 项通过（新增回归 `test_check_env_ignores_channel_url_and_refs`：TOKENHUB URL + 空 SECRET + `keychain:` 引用不告警）；反向确认真实形态 `DEEPSEEK_API_KEY=sk-...` 仍触发告警；ruff 零告警；全量 pytest 3,296→**3,297** 通过（unit 2,207 / integration 1,090，103s）。协议版本 3.22（不变，CLI 命令集未变）；app 配置版本 3.7（不变）；产品版本 3.32.0→**3.32.1**。
+
 ## v3.32.0 (2026-09-06)
 
 **新增 `iris llm-bench` — LLM 通道/模型 连接速度(TTFT) + 吞吐基准命令**（11 文件 / +683；引擎 + 注册 + 单测 10 项）。动机：一次全量连通性排查发现 16 个 (channel×model) 组合里 4 个不可达（tokenhub 对 `qwen3.7-max`/`glm5.3*` 404、bailian `qwen3.7-plus` 免费额度 403）与 2 个极不稳（gpt-5.6-sol/luna），且 tokenhub 中继 `usage.completion_tokens` 严重虚高——据此沉淀为可复用命令。

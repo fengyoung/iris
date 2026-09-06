@@ -376,6 +376,10 @@ def _warn_unresolved_placeholders(loaded: Dict[str, Any]) -> None:
         _scan(config_data, config_name)
 
 
+# 凭证类变量名：API_KEY/APIKEY/SECRET，或作为独立词段出现的 TOKEN。
+# 用「词段」匹配而非裸子串，避免 TOKENHUB_BASE_URL 这类渠道名被 TOKEN 误判为明文凭证。
+_SECRET_KEY_NAME_RE = re.compile(r"(^|_)(API_?KEY|SECRET|TOKEN)($|_)", re.IGNORECASE)
+
 _plaintext_keys_warned = False
 _plaintext_keys_lock = threading.Lock()
 
@@ -393,12 +397,18 @@ def _check_plaintext_keys(env_path: Optional[Path]) -> None:
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        if "=" in stripped and any(kw in stripped.upper() for kw in ("API_KEY", "APIKEY", "TOKEN", "SECRET")):
-            # 跳过空值占位（如 LARK_APP_SECRET=）
-            val = stripped.split("=", 1)[1].strip().strip('"').strip("'")
-            if not val:
-                continue
-            key_count += 1
+        if "=" not in stripped:
+            continue
+        key_name, val = stripped.split("=", 1)
+        key_name = key_name.strip()
+        val = val.strip().strip('"').strip("'")
+        # 仅凭证类变量名计数；TOKENHUB_BASE_URL 等渠道名不再命中。
+        if not _SECRET_KEY_NAME_RE.search(key_name):
+            continue
+        # 跳过空值与引用形态（URL / ${VAR} / keychain: 均非明文密钥）。
+        if not val or val.lower().startswith(("http://", "https://", "keychain:", "${")):
+            continue
+        key_count += 1
     if key_count:
         with _plaintext_keys_lock:
             if _plaintext_keys_warned:

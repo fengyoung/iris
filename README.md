@@ -1,4 +1,4 @@
-# Iris 3.32.0
+# Iris 3.32.1
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
@@ -166,6 +166,7 @@ iris3/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.32.1** | 2026-09-06 | 明文 API Key 检测误报修复：`.env` 探测改词段匹配（TOKENHUB_BASE_URL 渠道名不再被 `TOKEN` 子串误判）+ URL/keychain/`${VAR}` 值形态门禁；回归 +1，全量 3,297 通过。协议版本 3.22（不变） |
 | **v3.32.0** | 2026-09-06 | 新增 `iris llm-bench`：LLM 通道/模型 连接速度（流式首可见 TTFT）+ 吞吐基准（字符口径，规避 tokenhub 中继 usage 虚高）；引擎 `llm/benchmark.py` + 纯函数单测 10 项，全量 3,296 通过。协议版本 3.21→3.22（命令集 67→68） |
 | **v3.31.0** | 2026-09-03 | sync-memory 双向化：新增 Iris→CC 反向通道（Iris 运行期自主纠正 → CC 记忆文件 + MEMORY.md 物化，五级覆盖判定防重复）+ 前向收紧（reference/无标记 feedback 不再隐式灌 Iris 备注）+ daily-start 自动双向 + CLI `--forward-only`；`test_sync_memory.py` 至 90 项，全量 3,286 通过。协议版本 3.21（不变） |
 | **v3.30.1** | 2026-09-03 | 主线合并 0902-alpha → main：并入 v3.30.0 三阶段质量优化（F401/C901 门禁、`IrisError` 统一异常体系、mypy 基线、corrector/live 拆分），补齐 v3.29.2/v3.29.3 修复；源码零冲突，全量 3,274 通过。协议版本 3.21（不变） |
