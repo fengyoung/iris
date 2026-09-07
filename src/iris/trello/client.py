@@ -3,6 +3,10 @@
 DNS 解析使用独立子进程 dig + 线程安全缓存，通过 URL 重写（IP 替换域名）
 + 自定义 Host 头实现，避免全局 socket.getaddrinfo monkey-patch。
 IP 直连时通过自定义 HTTPS 连接设置正确的 SNI hostname，确保证书校验通过。
+
+v3.32.x：curl 作为首选传输（对本机间歇性网络更稳健），urllib 兜底；
+仅幂等读(GET)自动重试 + DNS 负缓存；写操作(POST/PUT/DELETE)单次执行不重发，
+避免网络抖动下重复提交。
 """
 
 from __future__ import annotations
@@ -24,9 +28,14 @@ TRELLO_API_BASE = "https://api.trello.com/1"
 _TRELLO_DOMAIN = "api.trello.com"
 _CUSTOM_DNS = "8.8.8.8"
 _DNS_CACHE_TTL = 3600  # DNS 缓存有效期（秒）
+_REQUEST_MAX_ATTEMPTS = 2    # 幂等(GET)网络层重试次数
+_REQUEST_BACKOFF_BASE = 0.5  # 重试退避基数（秒）
+_DEFAULT_TIMEOUT = 15        # 网络请求超时（秒）
+# 幂等方法才允许自动重试（避免写操作在网络抖动下重复提交）
+_IDEMPOTENT_METHODS = frozenset({"GET"})
 
-# DNS 缓存：{host: (ip, timestamp)}，由 _dns_lock 保护
-_dns_cache: Dict[str, Tuple[str, float]] = {}
+# DNS 缓存：{host: (ip|None, timestamp)}，None 表示负缓存（dig 失败需用 hostname）
+_dns_cache: Dict[str, Tuple[Optional[str], float]] = {}
 _dns_lock = threading.Lock()
 
 
@@ -39,12 +48,13 @@ def _is_ipv4(s: str) -> bool:
 
 
 def _resolve_via_dns(host: str, dns_server: str = _CUSTOM_DNS) -> str:
-    """通过 dig 命令解析主机名（线程安全，带 TTL 缓存）。"""
+    """通过 dig 命令解析主机名（线程安全，带 TTL 缓存 / 负缓存）。"""
     now = time.monotonic()
     with _dns_lock:
         cached = _dns_cache.get(host)
         if cached and (now - cached[1]) < _DNS_CACHE_TTL:
-            return cached[0]
+            # 负缓存（None）表示 dig 失败，回退 hostname
+            return cached[0] or host
     try:
         result = subprocess.run(
             ["dig", f"@{dns_server}", "+short", host],
@@ -58,7 +68,9 @@ def _resolve_via_dns(host: str, dns_server: str = _CUSTOM_DNS) -> str:
                 return line
     except (subprocess.SubprocessError, OSError, ValueError):
         pass
-    # 降级：返回原始主机名，依赖系统 DNS
+    # 负缓存：dig 失败/无 IPv4 结果，缓存失败状态避免反复阻塞
+    with _dns_lock:
+        _dns_cache[host] = (None, now)
     return host
 
 
@@ -76,6 +88,10 @@ def _make_trello_url(path: str) -> str:
 
 class TrelloClientError(IrisRuntimeError):
     """Trello API 错误。"""
+
+
+class _TrelloNetworkError(TrelloClientError):
+    """Trello 网络层传输失败（可重试；重试后回退 curl）。"""
 
 
 class _TrelloHTTPSConnection(http.client.HTTPSConnection):
@@ -106,6 +122,7 @@ class TrelloClient:
     def __init__(self, api_key: str, token: str):
         self._key = api_key
         self._token = token
+        self._timeout = _DEFAULT_TIMEOUT
 
     def get(self, path: str, **params: Any) -> Dict[str, Any]:
         return self._request("GET", path, params=params)
@@ -222,6 +239,35 @@ class TrelloClient:
         qs = "&".join(f"{quote(k)}={quote(_serialize(v))}" for k, v in params.items()
                        if v is not None)
         full_path = f"/1{path}?{qs}"
+        idempotent = method in _IDEMPOTENT_METHODS
+
+        last_exc: Optional[Exception] = None
+        # 首选 curl 传输（对本机间歇性网络更稳健；macOS/Linux 自带 curl）
+        attempts = _REQUEST_MAX_ATTEMPTS if idempotent else 1
+        for attempt in range(attempts):
+            try:
+                return self._request_via_curl(method, full_path)
+            except _TrelloNetworkError as exc:
+                last_exc = exc
+                if idempotent and attempt < attempts - 1:
+                    time.sleep(_REQUEST_BACKOFF_BASE * (2 ** attempt))
+
+        # 写操作（POST/PUT/DELETE）不自动重试、不回退，单次失败直接抛，避免重复提交
+        if not idempotent:
+            if last_exc is not None:
+                raise last_exc
+            raise
+
+        # 幂等读：curl 重试耗尽后回退 urllib（curl 不可用时兜底）
+        try:
+            return self._request_urllib(method, full_path)
+        except _TrelloNetworkError:
+            if last_exc is not None:
+                raise last_exc
+            raise
+
+    def _request_urllib(self, method: str, full_path: str) -> Any:
+        """urllib 主路径：URL 构建 + IP 直连 + urlopen。"""
         url = _make_trello_url(full_path)
         parsed = urlparse(url)
 
@@ -234,14 +280,38 @@ class TrelloClient:
 
         ssl_context = ssl.create_default_context()
         try:
-            with request.urlopen(req, timeout=30, context=ssl_context) as resp:
+            with request.urlopen(req, timeout=self._timeout, context=ssl_context) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
         except error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             raise TrelloClientError(f"Trello HTTP {exc.code}: {detail}") from exc
-        except error.URLError as exc:
-            raise TrelloClientError(f"Trello 网络错误: {exc}") from exc
+        except (error.URLError, OSError) as exc:
+            raise _TrelloNetworkError(f"Trello 网络错误: {exc}") from exc
         return self._parse_response(raw)
+
+    def _request_via_curl(self, method: str, full_path: str) -> Any:
+        """curl 兜底传输：urllib 网络层失败时回退（curl 对本机间歇性网络更稳健）。"""
+        url = f"https://{_TRELLO_DOMAIN}{full_path}"
+        marker = "\n__IRIS_TRELLO_CODE__"
+        cmd = [
+            "curl", "-s", "-g", "--max-time", str(self._timeout),
+            "-X", method, "-w", marker + "%{http_code}", url,
+        ]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=self._timeout + 10)
+        except (subprocess.SubprocessError, OSError) as exc:
+            raise _TrelloNetworkError(f"Trello 网络错误: curl 不可用 {exc}") from exc
+        if r.returncode != 0:
+            raise _TrelloNetworkError(f"Trello 网络错误: curl {r.stderr.strip()[:120]}")
+
+        code = ""
+        body = r.stdout
+        if marker in body:
+            body, code = body.rsplit(marker, 1)
+        code = code.strip()
+        if code in ("200", "201", "204"):
+            return self._parse_response(body)
+        raise TrelloClientError(f"Trello HTTP {code}: {body[:200]}")
 
     def _request_via_ip(self, method: str, req: request.Request,
                         parsed) -> Any:
@@ -253,7 +323,7 @@ class TrelloClient:
             selector += "?" + parsed.query
 
         ssl_context = ssl.create_default_context()
-        conn = _TrelloHTTPSConnection(hostname, port, context=ssl_context, timeout=30)
+        conn = _TrelloHTTPSConnection(hostname, port, context=ssl_context, timeout=self._timeout)
         conn._sni_hostname = _TRELLO_DOMAIN
 
         try:
@@ -263,7 +333,7 @@ class TrelloClient:
             if resp.status >= 400:
                 raise TrelloClientError(f"Trello HTTP {resp.status}: {raw}")
         except (socket.timeout, OSError, ssl.SSLError) as exc:
-            raise TrelloClientError(f"Trello 网络错误: {exc}") from exc
+            raise _TrelloNetworkError(f"Trello 网络错误: {exc}") from exc
         finally:
             conn.close()
         return self._parse_response(raw)

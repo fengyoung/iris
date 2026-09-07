@@ -1,3 +1,13 @@
+## v3.33.1 (2026-09-07)
+
+**Trello 客户端网络加固 — urllib 失败指数重试 + curl 兜底 + DNS 负缓存**（3 文件；`test_trello_client_pure.py` 回归 +1、新增 `test_trello_client_request.py` 107 行，净 +5 unit）。`TrelloClient` 走 IP 直连 + 自定义 SNI，网络层（URLError/OSError/socket/ssl）失败即抛 `TrelloClientError` 且不重试——本机间歇性网络下一次抖动就整体失败。
+
+- **错误分层**：内部新增可重试的 `_TrelloNetworkError`（URLError / OSError / socket.timeout / SSLError 归入），与 HTTP 4xx/5xx 的 `TrelloClientError` 分离——仅网络层可重试，鉴权/服务端错误不空转重试。
+- **重试 + 退避 + curl 兜底**：网络层最多重试 2 次、指数退避（0.5s 起）；耗尽后回退 `curl -s --max-time` 传输（对本机 DNS/网络路径更稳健），HTTP 200/201/204 正常解析、其余按错误处理；curl 不可用则抛原网络错误。
+- **DNS 负缓存**：dig 解析失败（8.8.8.8 不可达时）缓存失败态，避免每次请求反复阻塞 5s，直接回退主机名走系统 DNS。
+- **超时收敛**：默认请求超时 30s→**15s**（`_DEFAULT_TIMEOUT`，可重试 + curl 兜底覆盖）。
+- 验证：ruff 零告警；`test_trello_client_pure.py`（含 dig 失败后负缓存不再重复调用断言）+ 新增 `test_trello_client_request.py`（urllib 成功不触发 curl 兜底 / 网络失败重试耗尽 → curl 兜底成功 / 4xx 不重试不兜底 / curl 返回 HTTP 错误抛 `TrelloClientError`，mock 网络层离线）；全量 pytest 3,308→**3,313**（unit 2,218→**2,223** / integration 1,090，3m01s）。协议版本 3.22（不变，命令集未变）；app 配置版本 3.7（不变）；产品版本 3.33.0→**3.33.1**。
+
 ## v3.33.0 (2026-09-07)
 
 **双周报 `build-biweekly-report` 成稿风格 w35 定稿 + 历史周期复现 `--as-of`**（10 文件 / +294 -89；`test_biweekly_helpers.py` 冻结测试改写为 w35 精简风格并新增 4 组后处理单测，净 +11 unit）。以 w31/w33/w35 三期人工重写对比定位两个顽疾——总结段「套固定骨架、按 sub_area 逐段铺陈」致冗长程式化、关键进展「事无巨细」——以用户重写的 w35 为金标重构写作规则，全部收敛进 prompt 与内置风格指南（`DEFAULT_STYLE_GUIDE` 整体换血），非逐期手调。

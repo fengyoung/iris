@@ -7,6 +7,8 @@ from unittest.mock import patch
 from iris.trello.client import (
     _is_ipv4,
     _resolve_via_dns,
+    _dns_cache,
+    _dns_lock,
     TRELLO_API_BASE,
     _CUSTOM_DNS,
 )
@@ -73,6 +75,20 @@ class TestResolveViaDns:
             result2 = _resolve_via_dns("cache-test.example.com")
             assert result1 == result2
             assert mock_run.call_count == 1  # 第二次走缓存
+
+    def test_negative_cache_avoids_repeat_dig(self):
+        """dig 失败后应负缓存，避免每次调用都阻塞 5s。"""
+        with _dns_lock:
+            _dns_cache.pop("neg.example.com", None)
+
+        with patch("subprocess.run", side_effect=OSError("dig nope")):
+            first = _resolve_via_dns("neg.example.com")
+        assert first == "neg.example.com"
+
+        with patch("subprocess.run") as mock_run:
+            second = _resolve_via_dns("neg.example.com")
+        assert second == "neg.example.com"
+        mock_run.assert_not_called()  # 负缓存命中，不再跑 dig
 
 
 class TestTrelloApiBase:
