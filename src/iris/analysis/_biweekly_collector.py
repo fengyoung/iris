@@ -166,13 +166,15 @@ class BiweeklyCollector:
 
     # ── 文件收集 ───────────────────────────────────────────────
 
-    def collect_recent_files(self, since_date: datetime) -> list[dict]:
-        """收集近两周的数据源文件。
+    def collect_recent_files(self, since_date: datetime,
+                             end_date: Optional[datetime] = None) -> list[dict]:
+        """收集数据源文件（时间窗 [since_date, end_date]，end_date 为空则无上界）。
 
         扫描目录由 config.app.biweekly_report.data_sources 控制，
         默认：成员周报、会议纪要、讨论思考、方案报告。
         按文件名 YYYYMMDD 过滤（fallback 到 frontmatter 日期）。
         成员周报每人只保留最新一份。
+        end_date：复现历史周期时传入（如 --as-of 20260830），排除截止后的文件。
         """
         _DEFAULT_DIR_MAP = {
             "方案报告": ("03-方案报告", "方案报告"),
@@ -214,6 +216,8 @@ class BiweeklyCollector:
                 if d is None:
                     d = self._extract_date_from_frontmatter(raw_content)
                 if d is None or d < since_date:
+                    continue
+                if end_date is not None and d > end_date:
                     continue
 
                 content = raw_content

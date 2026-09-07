@@ -188,8 +188,12 @@ def _s3_build_concept_boundaries(directions: list) -> dict:
     return boundary_by_dir
 
 
-def _s3_load_historical_context(collector, directions: list) -> tuple[dict, dict]:
+def _s3_load_historical_context(collector, directions: list,
+                                as_of: Optional[datetime] = None) -> tuple[dict, dict]:
     """加载多期历史双周报，提取去重参考。
+
+    Args:
+        as_of: 复现历史周期时传截止日期（视为"当天"），用于把基准期报告从去重历史中排除。
 
     Returns:
         (multi_dedup, prev_by_dir)
@@ -197,7 +201,7 @@ def _s3_load_historical_context(collector, directions: list) -> tuple[dict, dict
         - prev_by_dir: {dir_name: content} — 最近一期按方向章节（兼容）
     """
     recent_reports = collector.load_recent_biweeklies(since_days=35)
-    today = datetime.now().strftime("%Y%m%d")
+    today = (as_of or datetime.now()).strftime("%Y%m%d")
     history_reports = [r for r in recent_reports
                        if r["date"].strftime("%Y%m%d") != today]
     multi_dedup: dict = {}
@@ -220,7 +224,7 @@ def _s3_extract_strategic_insights(briefs_for_dir: list) -> str:
                 strategic_insights.append(si)
     if not strategic_insights:
         return ""
-    insight_lines = ["## 战略洞察（来自讨论思考，优先用于战略分析段）", ""]
+    insight_lines = ["## 战略洞察（来自本期讨论与会议纪要，优先用于总结段的判断与决策）", ""]
     insight_lines.extend(f"- {si}" for si in strategic_insights)
     return "\n".join(insight_lines) + "\n"
 
@@ -538,6 +542,71 @@ def _render_group_lines(structured, name, *, fallback):
 _s3_logger = logging.getLogger(__name__)
 
 
+def _strip_review_scaffolding(markdown: str) -> str:
+    """剔除 Stage 4b 审查模型偶发回吐的 prompt 辅助标题段（如「OP 方向摘要」「OP 核心指标状态」）。
+
+    这些标题源自 stage4 prompt 的上下文章节名，非双周报正文；一旦模型在结尾复述即整段删除。
+    """
+    m = re.search(r'(?m)^#+\s*OP\s+', markdown)
+    if not m:
+        return markdown
+    return markdown[:m.start()].rstrip()
+
+
+def _normalize_key_progress_heading(markdown: str) -> str:
+    """把 Stage 3 偶发输出的「关键进展：」正文行统一为「### 关键进展」三级标题。"""
+    result: list[str] = []
+    for line in markdown.splitlines():
+        core = line.strip()
+        if re.fullmatch(r'#*\s*关键进展\s*[:：]?\s*', core):
+            result.append("### 关键进展")
+        else:
+            result.append(line)
+    return "\n".join(result)
+
+
+def _strip_direction_quotes(markdown: str) -> str:
+    """删除每个「## 方向」标题下紧跟的 OP 定位引用块（w35 风格不再保留引用行）。"""
+    out: list[str] = []
+    lines = markdown.splitlines()
+    after_head = False
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("## "):
+            out.append(line)
+            i += 1
+            after_head = True
+            continue
+        if not after_head:
+            out.append(line)
+            i += 1
+            continue
+        # 标题之后：跳过空行
+        if not line.strip():
+            out.append(line)
+            i += 1
+            continue
+        # 首个非空内容若为引用块 → 整块丢弃
+        if line.lstrip().startswith(">"):
+            while i < len(lines):
+                s = lines[i].strip()
+                if s.startswith(">"):
+                    i += 1
+                    continue
+                if s == "":
+                    nxt = lines[i + 1].strip() if i + 1 < len(lines) else ""
+                    if nxt.startswith(">"):
+                        i += 1
+                        continue
+                break
+        else:
+            out.append(line)
+            i += 1
+        after_head = False
+    return "\n".join(out)
+
+
 def _s3_check_subarea_order(direction_name: str, section: str, sub_areas: list) -> None:
     """检查 Stage 3 输出中子方向出现顺序是否和 sub_areas 定义一致。
 
@@ -589,21 +658,25 @@ def _s3_check_subarea_order(direction_name: str, section: str, sub_areas: list) 
 # ═══════════════════════════════════════════════════════════════════
 
 DEFAULT_STYLE_GUIDE: dict = {
-    "narrative_voice": "决策者视角，有判断有观点，不罗列事实；以「我们」视角行文",
-    "paragraph_structure": "引用块(OP方向定位) → 总结段(方向总览1-2句 + 按 sub_area 逐项目「目标→思考→决策→下一步」) → 关键进展(项目级聚合条目+≤3子项)",
+    "narrative_voice": "决策者视角，讲判断与取舍，不流水账；判断自然融入叙述，不逐句以「我们」开头",
+    "paragraph_structure": "方向总览(1-2句定性本期状态) → 每个有判断/决策点的项目单独起一段 2-4 行短段(段间留白；≥2 个判断点严禁揉成一个长段、严禁逐项目平铺铺陈、不用固定骨架) → 关键进展(每方向 2-4 个聚合条目，同项目合并，每条加粗结论 + ≤3 个单行子项 + 来源)",
     "citation_style": "（来源：标签1 / 标签2），原样复制不修改",
-    "density_note": "每方向3-6条关键进展（每项目1个聚合条目，子项≤3），每条含量化数据+来源",
+    "density_note": "总结段全方向 ≤400 字，只留判断与取舍；关键进展每方向 2-4 条，只收里程碑/量化突破/判断被证实或推翻/影响决策的进展",
     "strategic_patterns": [
-        "总结段按项目展开「思考→决策」链：项目目标 → 判断/归因（事实简短带过）→ 由此做出的决策 → 下一步",
-        "用'但'、'然而'标记结构性风险，用'下一步'指明行动方向",
-        "关键进展按项目聚合，同项目进展合并进一个条目，禁止拆散并列",
+        "先问「这条判断值不值得单独讲给老板」：不为覆盖 sub_area、不为凑字数而写",
+        "判断与决策用自然语言融入叙述，禁止「最主要的目标是…我们的思考主线是…拆解归因后判断…基于此做出决策…下一步…」固定骨架句式连排",
+        "总结段分段展开：≥2 个判断点必须各自成段、段间留白，严禁把多个项目的判断揉成一个超长单段",
+        "用'但'、'然而'标记结构性风险，用明确的取舍与下一步指明行动方向",
+        "总结段判断优先取自讨论/会议纪要提炼的战略洞察；成员周报例行进展仅作关键进展事实来源",
+        "关键进展按项目聚合，同项目合并进一个条目；例行部署、次要微调、纯状态一律不入",
     ],
     "writing_rules": [
-        "每个方向一个 ## 章节，标题为「方向简称：一句话点明本期核心主题」",
-        "总结段必须有「思考→决策」链，禁止流水账式事实罗列",
-        "关键进展每条子项须含量化数据",
+        "每个方向一个 ## 章节，标题用精炼方向简称，冒号副题 ≤12 字或不加",
+        "总结段必须有判断与取舍，禁止流水账式事实罗列、禁止模板句式套用；无判断点的项目并入总览不单列",
+        "总结段每个有判断点的项目单独一段（2-4 行），段与段间留空行，不要连成长段",
+        "关键进展每条以 **加粗一句话结论** 开头（点明本期分量），子项只保留核心事实 + 1-2 个量化数据 + 来源",
         "引用标签放在句末括号内",
-        "无实质进展方向标注「本期无显著进展」",
+        "无实质进展方向/指标标注「本期无实质进展」即可，不硬凑",
     ],
 }
 

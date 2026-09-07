@@ -18,6 +18,9 @@ from iris.analysis._biweekly_helpers import (
     _s3_build_direction_index,
     _s3_check_subarea_order,
     _s3_extract_strategic_insights,
+    _normalize_key_progress_heading,
+    _strip_direction_quotes,
+    _strip_review_scaffolding,
 )
 
 
@@ -328,9 +331,11 @@ class TestS3CheckSubareaOrder:
         assert caplog.records == []
 
 
-class TestW31StyleFrozen:
-    """防回归：Stage 3 模板与默认风格指南必须保持固化风格
-    （总结段「思考→决策」+ 关键进展项目级聚合 ≤3 子项）。"""
+class TestW35StyleLean:
+    """防回归：Stage 3 模板与默认风格指南须保持「w35 精简风格」——
+    总结段=方向总览 + 只展开有判断/决策点的项目（反程式化、篇幅克制）；
+    关键进展=每方向 2-4 条 + 「关键」门槛，不要求与 sub_area 一一对应；
+    low 相关文件不作关键进展来源。"""
 
     @staticmethod
     def _template_text() -> str:
@@ -338,33 +343,115 @@ class TestW31StyleFrozen:
         p = Path(__file__).resolve().parents[2] / "templates" / "prompt" / "biweekly_stage3_direction.md"
         return p.read_text(encoding="utf-8")
 
-    def test_summary_requires_think_decision_chain(self):
+    def test_summary_requires_judgment_and_decision(self):
         text = self._template_text()
-        assert "思考" in text and "决策" in text
-        assert "最主要的目标" in text
-        assert "我们的思考主线" in text
-        assert "以「我们」视角行文" in text
-        assert "事实仅作判断依据" in text
+        assert "判断" in text and "决策" in text
+        assert "判断是目的" in text
+        assert "读者标尺" in text
 
-    def test_summary_forbids_flow_account(self):
+    def test_summary_anti_formulaic_and_length_budget(self):
         text = self._template_text()
-        assert "禁止流水账" in text or "错误（流水账）" in text
+        assert "反程式化" in text
+        assert "禁止逐句套用" in text
+        assert "固定骨架句式" in text
+        assert "≤400 字" in text
 
-    def test_progress_requires_project_aggregation(self):
+    def test_summary_force_split_short_paragraphs(self):
         text = self._template_text()
-        assert "项目级聚合" in text
-        assert "最多 3 个子 bullet" in text
-        assert "严禁拆散" in text
-        assert "挑选最关键" in text
+        assert "分段硬约束" in text
+        assert "严禁把多个项目的判断揉成一个超长段落" in text
+        assert "≤150 字" in text
 
-    def test_progress_requires_covered_subareas(self):
+    def test_summary_not_forced_per_subarea(self):
         text = self._template_text()
-        assert "子方向覆盖" in text
-        assert "本期无重要进展" in text
+        assert "并入方向总览，不单独成段" in text
+        assert "不为覆盖而写" in text
+        assert "有判断才展开" in text
 
-    def test_default_style_guide_matches_w31(self):
+    def test_progress_value_gate_and_cap(self):
+        text = self._template_text()
+        assert "条数硬顶" in text
+        assert "2-4 个聚合条目" in text
+        assert "「关键」门槛" in text
+        assert "不要求与 sub_area 一一对应" in text
+        assert "例行部署、次要指标微调、纯状态或计划描述" in text
+        assert "不构成关键进展" in text
+
+    def test_progress_project_aggregation_kept(self):
+        text = self._template_text()
+        assert "项目级聚合（硬约束）" in text
+        assert "严禁把同一项目拆成多个并列条目" in text
+
+    def test_progress_low_files_not_source(self):
+        text = self._template_text()
+        assert "low 相关" in text
+        assert "默认不作为关键进展来源" in text
+
+    def test_default_style_guide_matches_lean(self):
         from iris.analysis._biweekly_helpers import DEFAULT_STYLE_GUIDE
-        assert "逐项目" in DEFAULT_STYLE_GUIDE["paragraph_structure"]
-        assert "思考→决策" in "".join(DEFAULT_STYLE_GUIDE["strategic_patterns"])
-        assert "关键进展按项目聚合" in "".join(DEFAULT_STYLE_GUIDE["strategic_patterns"])
-        assert "禁止流水账式事实罗列" in "".join(DEFAULT_STYLE_GUIDE["writing_rules"])
+        assert "短段" in DEFAULT_STYLE_GUIDE["paragraph_structure"]
+        assert "严禁" in DEFAULT_STYLE_GUIDE["paragraph_structure"]
+        assert "≤400 字" in DEFAULT_STYLE_GUIDE["density_note"]
+        patterns = "".join(DEFAULT_STYLE_GUIDE["strategic_patterns"])
+        assert "固定骨架句式连排" in patterns
+        assert "严禁把多个项目的判断揉成一个超长单段" in patterns
+        assert "成员周报例行进展仅作关键进展事实来源" in patterns
+        rules = "".join(DEFAULT_STYLE_GUIDE["writing_rules"])
+        assert "禁止流水账式事实罗列" in rules
+        assert "无判断点的项目并入总览不单列" in rules
+
+
+class TestStripReviewScaffolding:
+    def test_strips_trailing_op_sections(self):
+        md = ("*时间周期：2026.08.16～2026.08.30*\n\n"
+              "## 图验技术\n\n正文……\n\n"
+              "## OP 方向摘要\n用于完整性检查的辅助内容\n\n"
+              "## OP 核心指标状态\n指标回吐内容\n")
+        out = _strip_review_scaffolding(md)
+        assert out.startswith("*时间周期")
+        assert "## 图验技术" in out
+        assert "OP 方向摘要" not in out
+        assert "OP 核心指标" not in out
+        assert out.endswith("正文……")
+
+    def test_no_op_scaffolding_returns_unchanged(self):
+        md = "*时间周期：x*\n\n## 图验技术\n\n正文"
+        assert _strip_review_scaffolding(md) == md
+
+
+class TestNormalizeKeyProgressHeading:
+    def test_plain_text_line_to_heading(self):
+        md = "## 图验技术\n\n正文\n\n关键进展：\n\n- a"
+        out = _normalize_key_progress_heading(md)
+        assert "### 关键进展" in out
+        assert "关键进展：\n" not in out
+
+    def test_already_heading_kept(self):
+        md = "### 关键进展\n- a"
+        out = _normalize_key_progress_heading(md)
+        assert out == "### 关键进展\n- a"
+
+    def test_sentence_mention_not_touched(self):
+        md = "本章的关键进展：详见下文。"
+        assert _normalize_key_progress_heading(md) == md
+
+
+class TestStripDirectionQuotes:
+    def test_removes_quote_after_direction_heading(self):
+        md = ("## 图验技术\n\n> 战略定位句。\n\n正文内容\n\n"
+              "## 质检执行智能化\n\n> 另一句定位。\n\n正文")
+        out = _strip_direction_quotes(md)
+        assert "> 战略定位句。" not in out
+        assert "> 另一句定位。" not in out
+        assert out.count("## ") == 2
+        assert "正文内容" in out
+
+    def test_quote_only_first_content_after_head_removed(self):
+        md = "## 方向\n\n> 引用\n\n> 引用续行\n\n正文\n> 保留的正文引用"
+        out = _strip_direction_quotes(md)
+        assert "> 引用续行" not in out
+        assert "> 保留的正文引用" in out
+
+    def test_no_quote_keeps_content(self):
+        md = "## 图验技术\n\n直接正文。"
+        assert _strip_direction_quotes(md) == md

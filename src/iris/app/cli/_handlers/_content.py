@@ -90,9 +90,11 @@ def handle_build_biweekly_report(args, bundle, logger) -> int:
     query = getattr(args, "query", "") or ""
     style_from = getattr(args, "style_from", "") or None
     dry_run = getattr(args, "dry_run", False)
+    as_of = getattr(args, "as_of", "") or None
     # 默认走 llm 模式，LLM 不可用时 service 内部自动降级为 local
     result = service.build_biweekly_report(query=query, mode="llm",
-                                           style_from=style_from, dry_run=dry_run)
+                                           style_from=style_from, dry_run=dry_run,
+                                           as_of=as_of)
     payload = result.to_dict()
 
     # dry-run 模式不写文件，直接输出预览

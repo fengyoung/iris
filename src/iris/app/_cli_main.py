@@ -111,6 +111,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--asr", default="", help="meeting-live-assistant ASR 模式（local|remote，默认从 app.json 读取）")
     parser.add_argument("--to-source", action="store_true", help="输出归档到 SOURCE（会议纪要→05/，双周报→06/）")
     parser.add_argument("--style-from", default="", help="build-biweekly-report 风格参考文件路径")
+    parser.add_argument("--as-of", default="", help="build-biweekly-report 复现历史周期截止日期 YYYYMMDD（窗口=[as-of-14d, as-of]，默认今天）")
     parser.add_argument("--whisper-model", default="base", help="Whisper 模型规格")
     parser.add_argument("--force", action="store_true", help="强制重新转写")
     parser.add_argument("--files", default="", help="batch-transcribe 文件列表（逗号分隔）")

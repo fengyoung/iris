@@ -40,6 +40,9 @@ from ._biweekly_helpers import (
     _parse_review_json,
     _load_report_sections,
     _build_local_report,
+    _strip_review_scaffolding,
+    _normalize_key_progress_heading,
+    _strip_direction_quotes,
     DEFAULT_STYLE_GUIDE,
     assemble_biweekly_sections,
 )
@@ -193,7 +196,8 @@ class AnalysisReportService:
 
     def build_biweekly_report(self, *, query: str = "", mode: str = "llm",
                               style_from: Optional[str] = None,
-                              dry_run: bool = False) -> ReportResponse:
+                              dry_run: bool = False,
+                              as_of: Optional[str] = None) -> ReportResponse:
         """多阶段流水线：文件圈选 → 智能摘要 → 方向合成 → 终稿审查。
 
         Stage 0a: OP 文档解析 → 结构化方向定义（缓存）
@@ -204,8 +208,17 @@ class AnalysisReportService:
         Stage 4:  终稿组装 + 质量审查修订
 
         dry_run=True 时：仅收集文件 + 解析 OP，输出清单和方向匹配预览，不执行 LLM 阶段。
+
+        as_of: 复现历史周期（如 "20260830"），窗口 = [as_of - lookback_days, as_of]，
+               历史去重把 as_of 当日报告视为"当天"排除。默认 None = 今天。
         """
         now = datetime.now()  # 本地时间，与文件名日期语义一致
+        if as_of:
+            try:
+                now = datetime.strptime(as_of, "%Y%m%d")
+            except ValueError:
+                logger.warning("  as_of 格式应为 YYYYMMDD，忽略并回退到今天: %s", as_of)
+                now = datetime.now()
         biweekly_cfg = self._config.app.get("biweekly_report", {})
         lookback_days = biweekly_cfg.get("lookback_days", 14)
         two_weeks_ago = now - timedelta(days=lookback_days)
@@ -215,7 +228,7 @@ class AnalysisReportService:
             query = f"近两周({period})工作进展"
 
         op_doc = self._collector.load_op_document()
-        files = self._collector.collect_recent_files(two_weeks_ago)
+        files = self._collector.collect_recent_files(two_weeks_ago, end_date=now)
 
         if not files:
             return ReportResponse(query=query, mode="llm",
@@ -274,7 +287,8 @@ class AnalysisReportService:
             logger.info("Stage 3: 单方向章节合成…")
             max_items = biweekly_cfg.get("max_items_per_direction", 4)
             sections = self._stage3_synthesize_directions(
-                directions, style_guide, dir_file_map, file_briefs, max_items=max_items)
+                directions, style_guide, dir_file_map, file_briefs,
+                max_items=max_items, as_of=now)
 
             # ── Stage 4a: 纯结构组装（无 LLM） ──
             logger.info("Stage 4a: 终稿结构组装…")
@@ -284,7 +298,14 @@ class AnalysisReportService:
             logger.info("Stage 4b: LLM 质量审查修订…")
             markdown = self._stage4b_review(period, assembled, directions, max_items=max_items)
 
-            # 后处理
+            # 后处理：剔除 Stage4b 偶发回吐的 prompt 辅助标题段（OP 方向摘要/指标等）
+            markdown = _strip_review_scaffolding(markdown)
+            # 「关键进展」统一为 ### 标题；去掉方向下 OP 定位引用块（w35 风格）
+            markdown = _normalize_key_progress_heading(markdown)
+            markdown = _strip_direction_quotes(markdown)
+            markdown = re.sub(r'\n[ \t]*\n(?:[ \t]*\n)+', '\n\n', markdown)  # 折叠多余空行
+            # 去掉 Stage4b 偶发复述的纯文本「时间周期」行（斜体 *时间周期* 头保留）
+            markdown = re.sub(r'(?m)^\s*时间周期\s*[:：][^\n]*\n', '', markdown)
             markdown = markdown.strip()
             if not markdown.startswith("*时间周期"):
                 markdown = f"*时间周期：{period}*\n\n{markdown}"
@@ -663,7 +684,8 @@ class AnalysisReportService:
 
     def _stage3_synthesize_directions(self, directions: list, style_guide: dict,
                                       dir_file_map: dict, file_briefs: dict,
-                                      max_items: int = 4) -> dict:
+                                      max_items: int = 4,
+                                      as_of: Optional[datetime] = None) -> dict:
         """按方向并行合成章节。Returns {direction_name: markdown_section}."""
         style_text = json.dumps(style_guide, ensure_ascii=False, indent=2)
 
@@ -674,8 +696,8 @@ class AnalysisReportService:
             file_briefs, dir_by_name, dir_by_id)
         # 概念边界
         boundary_by_dir = _s3_build_concept_boundaries(directions)
-        # 历史上下文（去重 + 风格参考）
-        ctx = _s3_load_historical_context(self._collector, directions)
+        # 历史上下文（去重 + 风格参考）；as_of 视为"当天"排除基准期报告
+        ctx = _s3_load_historical_context(self._collector, directions, as_of=as_of)
         multi_dedup, prev_by_dir = ctx
 
         # 并行合成每个方向的章节
@@ -721,9 +743,10 @@ class AnalysisReportService:
         briefs_for_dir = dir_brief_index.get(d_name, [])
 
         # 按优先级排序 brief，并限制传入的 brief 数量
-        # 子方向数 × 9：每个子方向最多 3 条进展 × 每条进展引用约 3 份 brief
+        # 每方向最终只产出 2-4 个聚合条目 × 每条引用 ≤3 份 brief，素材上限无需过大；
+        # 保留余量覆盖低相关背景，但避免海量 brief 稀释提炼（子方向数 × 4）
         sub_count = len(direction.get("sub_areas", [])) or 3
-        max_briefs = max(sub_count * 9, 12)  # 至少 12 条，确保有足够素材
+        max_briefs = max(sub_count * 4, 8)  # 至少 8 份，确保有足够素材
         if len(briefs_for_dir) > max_briefs:
             briefs_for_dir = _sort_briefs_by_priority(briefs_for_dir, direction, dir_file_map)
             briefs_for_dir = briefs_for_dir[:max_briefs]
@@ -787,8 +810,7 @@ class AnalysisReportService:
         logger.info("  %s: 合成完成 (%d 字)", d_name[:25], len(section))
         return d_name, section
 
-    @staticmethod
-    def _s3_format_briefs(briefs_for_dir: list, direction: dict) -> str:
+    def _s3_format_briefs(self, briefs_for_dir: list, direction: dict) -> str:
         """将 brief 列表格式化为 LLM 输入文本。按子领域或 dir_type 分组。"""
         brief_lines = []
         if not briefs_for_dir:
@@ -802,10 +824,7 @@ class AnalysisReportService:
             for sub_name, items in sub_groups.items():
                 brief_lines.append(f"### {sub_name}（{len(items)} 份）")
                 for b in items:
-                    md = b.get("brief_md", "")
-                    if md:
-                        brief_lines.append(md)
-                        brief_lines.append("")
+                    self._append_brief_block(brief_lines, b)
         else:
             by_dir_type: dict = {}
             for b in briefs_for_dir:
@@ -813,12 +832,20 @@ class AnalysisReportService:
             for dir_type, items in by_dir_type.items():
                 brief_lines.append(f"### {dir_type}（{len(items)} 份）")
                 for b in items:
-                    md = b.get("brief_md", "")
-                    if md:
-                        brief_lines.append(md)
-                        brief_lines.append("")
+                    self._append_brief_block(brief_lines, b)
 
         return "\n".join(brief_lines) if brief_lines else "（本期无相关文件）"
+
+    def _append_brief_block(self, brief_lines: list, b: dict) -> None:
+        """追加一份 brief 的 markdown；Stage 1 判为 low 的加警示标记（供模型区分主次）。"""
+        md = b.get("brief_md", "")
+        if not md:
+            return
+        if b.get("_s1_level") == "low":
+            brief_lines.append("> ⚠️ 相关度：低（仅供总结段背景参考，默认不作为关键进展来源）")
+            brief_lines.append("")
+        brief_lines.append(md)
+        brief_lines.append("")
 
     # ── Stage 4a: 纯结构组装（无 LLM） ──────────────────────
 
