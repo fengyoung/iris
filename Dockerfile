@@ -21,9 +21,11 @@ RUN pip install --no-cache-dir \
     -e ".[transcribe,graph,async,weekly]" \
     -c constraints.txt
 
-# 复制测试和开发工具（可选，用于运行测试）
-COPY tests/ tests/
-COPY Makefile .
+# 生产镜像不应在启动时执行完整测试套件。
+RUN useradd --create-home --uid 10001 iris \
+    && chown -R iris:iris /app
+USER iris
 
-# 默认运行测试
-CMD ["make", "test"]
+# 使用者可通过 docker run ... iris <command> 覆盖命令；默认显示 CLI 帮助。
+ENTRYPOINT ["iris"]
+CMD ["--help"]

@@ -30,7 +30,7 @@ def _show_banner(command: str) -> None:
 # ── 输出 ─────────────────────────────────────────────────
 
 
-def _emit_output(command: str, payload: Dict[str, Any], *, pretty: bool) -> None:
+def _emit_output(command: str, payload: Any, *, pretty: bool) -> None:
     if pretty:
         rendered = format_payload(command, payload)
         if rendered:

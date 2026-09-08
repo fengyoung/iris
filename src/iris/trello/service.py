@@ -18,6 +18,14 @@ class TrelloService:
         self._board: Optional[Dict[str, Any]] = None
         self._labels: Dict[str, TrelloLabel] = {}
 
+    def _require_board(self) -> Dict[str, Any]:
+        """返回已初始化看板；把运行时不变量显式化。"""
+        if self._board is None:
+            self.ensure_board()
+        if self._board is None:  # 防御性保护，亦便于静态分析
+            raise TrelloClientError("看板初始化失败")
+        return self._board
+
     def ensure_board(self) -> TrelloBoard:
         org = self._client.find_organization_by_name(self._config["workspace_name"])
         if org is None:
@@ -43,14 +51,14 @@ class TrelloService:
         )
 
     def _ensure_default_lists(self) -> None:
-        board_id = self._board["id"]
+        board_id = self._require_board()["id"]
         for list_name in self._config["default_lists"]:
             existing = self._client.find_list_by_name(board_id, list_name)
             if existing is None:
                 self._client.create_list(board_id, list_name)
 
     def _ensure_labels(self) -> None:
-        board_id = self._board["id"]
+        board_id = self._require_board()["id"]
         label_configs: Dict[str, Dict[str, str]] = self._config["labels"]
         for key, cfg in label_configs.items():
             existing = self._client.find_label_by_color(board_id, cfg["color"])
@@ -61,11 +69,11 @@ class TrelloService:
                 self._labels[key] = TrelloLabel(id=existing["id"], name=cfg["name"], color=cfg["color"])
 
     def _load_lists(self) -> List[TrelloList]:
-        raw = self._client.list_lists(self._board["id"])
+        raw = self._client.list_lists(self._require_board()["id"])
         return [TrelloList(id=item["id"], name=item["name"], id_board=item["idBoard"]) for item in raw]
 
     def _load_labels(self) -> List[TrelloLabel]:
-        raw = self._client.list_labels(self._board["id"])
+        raw = self._client.list_labels(self._require_board()["id"])
         return [TrelloLabel(id=item["id"], name=item.get("name", ""), color=item.get("color")) for item in raw]
 
     def get_lists(self) -> List[TrelloList]:
@@ -84,7 +92,7 @@ class TrelloService:
         try:
             return self._find_list(name)
         except TrelloClientError:
-            raw = self._client.create_list(self._board["id"], name)
+            raw = self._client.create_list(self._require_board()["id"], name)
             return TrelloList(id=raw["id"], name=raw["name"], id_board=raw["idBoard"])
 
     def _get_label_id(self, category: str) -> str:
@@ -165,7 +173,7 @@ class TrelloService:
     def search_cards(self, query: str) -> List[TrelloCard]:
         if self._board is None:
             self.ensure_board()
-        raw = self._client.search(query, board_id=self._board["id"])
+        raw = self._client.search(query, board_id=self._require_board()["id"])
         return [self._parse_card(item) for item in raw]
 
     def overview(self) -> TrelloOverview:
@@ -197,7 +205,7 @@ class TrelloService:
                         today.append(card)
                     if due_dt <= week_end:
                         this_week.append(card)
-        return TrelloOverview(board_name=self._board["name"], total_incomplete=len(all_cards),
+        return TrelloOverview(board_name=self._require_board()["name"], total_incomplete=len(all_cards),
                               by_list=by_list, by_category=by_category, today=today, this_week=this_week, overdue=overdue)
 
     def today_cards(self) -> List[TrelloCard]:
@@ -211,7 +219,8 @@ class TrelloService:
             self.ensure_board()
         overview = self.overview()
         lists = self._load_lists()
-        return {"board_name": overview.board_name, "board_id": self._board["id"], "board_url": self._board.get("url", ""),
+        board = self._require_board()
+        return {"board_name": overview.board_name, "board_id": board["id"], "board_url": board.get("url", ""),
                 "total_lists": len(lists), "list_names": [lst.name for lst in lists],
                 "total_incomplete": overview.total_incomplete, "by_list": overview.by_list,
                 "by_category": overview.by_category, "today_count": len(overview.today),

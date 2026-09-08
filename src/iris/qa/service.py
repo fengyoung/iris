@@ -47,6 +47,7 @@ class QAService:
                                   retrieval_total_hits=0, mode="memory_update", blocks=[],
                                   structured={"memory_updates": quick_updates}, llm={"memory_updates": quick_updates})
             session_state = self._memory.save_interaction(question=question, mode=response.mode, blocks=[], wiki_hits=[])
+            assert response.llm is not None
             response.llm.setdefault("session_memory", session_state)
             self._logger.log("qa_ask", response.to_dict())
             return response
@@ -79,6 +80,7 @@ class QAService:
             response = QAResponse(question=response.question, answer=response.answer, retrieval_total_hits=response.retrieval_total_hits,
                                   mode=response.mode, blocks=response.blocks, structured=response.structured, llm={"session_memory": session_state})
         else:
+            assert response.llm is not None
             response.llm.setdefault("session_memory", session_state)
             if all_updates:
                 response.llm.setdefault("memory_updates", all_updates)

@@ -102,16 +102,14 @@ class TestSafeWriteText:
         with pytest.raises(WriteGuardError):
             safe_write_text(outside, "content", config_bundle)
 
-    def test_write_outside_allowed_with_existing_flag(self, config_bundle, temp_project):
-        """allow_existing_outside=True 且文件已存在，允许写入。"""
+    def test_write_outside_allowed_with_existing_flag_still_rejected(self, config_bundle, temp_project):
+        """文件已存在不能成为越权覆盖的授权条件。"""
         outside = Path("/tmp/iris_test_existing.md")
         outside.parent.mkdir(parents=True, exist_ok=True)
         try:
             outside.write_text("existing", encoding="utf-8")
-            result = safe_write_text(
-                outside, "updated", config_bundle, allow_existing_outside=True
-            )
-            assert result.exists()
+            with pytest.raises(WriteGuardError):
+                safe_write_text(outside, "updated", config_bundle, allow_existing_outside=True)
         finally:
             outside.unlink(missing_ok=True)
 

@@ -199,7 +199,7 @@ class MeetingLiveAssistant:
         self._retriever = RetrieverAdapter(bundle)
         from iris.utils.prompting import PromptTemplateLoader
         self._analyzer = SegmentAnalyzer(
-            self._llm,
+            self._llm,  # type: ignore[arg-type]
             PromptTemplateLoader(bundle),
             model=self._cfg.llm_model,
         )
@@ -240,7 +240,7 @@ class MeetingLiveAssistant:
             _logger.info("ASR 引擎就绪（本地 Paraformer）· 模型 %s · 热词 %d 字",
                          model_dir, len(hotwords))
         else:
-            self._asr_engine = None
+            self._asr_engine = None  # type: ignore[assignment]
             _logger.info("ASR 模式: %s（remote 待实现）", self._asr_cfg.mode)
 
         self._pool = ThreadPoolExecutor(max_workers=2)
@@ -360,7 +360,7 @@ class MeetingLiveAssistant:
                 registry.unregister()
                 # v3.26.3: 清理 session logger 文件 handler（e2e 测试防句柄泄漏）
                 teardown_session_logger()
-            self._task_reporter = None
+            self._task_reporter = None  # type: ignore[assignment]
         return 0
 
     # ── 线程逻辑 ────────────────────────────────────────────
@@ -497,7 +497,7 @@ class MeetingLiveAssistant:
         elif ch == "d":
             state = self._session.state
             # 从各段分析中收集 confirmed 决策（state.decisions 是累计去重字符串，无置信度）
-            confirmed = []
+            confirmed: list[str] = []
             for s in state.segments:
                 if s.analysis:
                     for d in s.analysis.decisions:
@@ -565,7 +565,7 @@ class MeetingLiveAssistant:
                 else:
                     # LLM 校正关闭：仅提交检索（deep 降级为返回原文）
                     from concurrent.futures import Future as _Future
-                    _f = _Future()
+                    _f: Future = _Future()
                     _f.set_result(fast)
                     self._futures[seg.seq] = (
                         _f,
@@ -687,7 +687,8 @@ class MeetingLiveAssistant:
         all_hits: list = []
         for seg, (deep, hits) in zip(analyzable, results):
             if deep != seg.corrected_text:
-                _logger.info("🤖 LLM 校正 段%d: %s → %s", seg.seq, seg.corrected_text, deep)
+                _logger.info("LLM 校正段%d完成（文本长度 %d -> %d）", seg.seq,
+                             len(seg.corrected_text), len(deep))
                 seg.corrected_text = deep
                 self._corrector.push_context(deep, speaker_id=speaker_id_of(seg))
             batch_texts.append(segment_line(seg))
@@ -780,7 +781,7 @@ class MeetingLiveAssistant:
             analysis_unavailable=first.analysis is None,
             state=self._session.state,
             topic=self._session.state.current_topic,
-            alerts=alerts if alerts else None,
+            alerts=alerts,
             rms_level=rms_level(self._last_rms, self._last_threshold)),
             feed=self._feed)
         self._writer.maybe_rewrite(self._session.state)
@@ -831,7 +832,7 @@ class MeetingLiveAssistant:
                 entries.append((seg, futures))
         # 一次性 wait 所有 futures（共享同一超时窗）
         flat = [f for _, fs in entries if fs is not None for f in fs]
-        done_all = set()
+        done_all: set[Future] = set()
         if flat:
             done_all, _ = wait(flat, timeout=_PARALLEL_WAIT_SEC)
         results = []

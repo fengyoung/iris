@@ -52,7 +52,7 @@ pip install -e ".[dev]" -c constraints.txt
 pre-commit install
 
 # 快速命令（Makefile）
-make test            # 运行全部测试（2,970 用例，150 文件）
+make test            # 运行全部测试（3,317 用例）
 make test-unit       # 纯逻辑单元测试（0.5s 快速反馈）
 make test-integration # 集成测试
 make test-cov        # 运行测试 + 覆盖率报告
@@ -60,6 +60,7 @@ make lint            # Ruff 代码检查
 make lint-fix        # Ruff 自动修复
 make format          # 代码格式化
 make audit           # 依赖安全审计
+make typecheck       # 严格 mypy 类型检查（CI 门禁）
 make clean           # 清理缓存
 
 # 或直接使用 pytest

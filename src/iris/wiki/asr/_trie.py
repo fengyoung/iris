@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from collections import deque
-from typing import Dict, List, Optional, Tuple
+from typing import Deque, Dict, List, Optional, Tuple
 
 
 class _TrieNode:
@@ -46,7 +46,7 @@ class _AhoCorasick:
 
     def _build_failure_links(self) -> None:
         """BFS 构建失败链接。"""
-        queue = deque()
+        queue: Deque[_TrieNode] = deque()
         for ch, child in self._root.children.items():
             child.fail = self._root
             queue.append(child)
@@ -58,7 +58,7 @@ class _AhoCorasick:
                 fail = current.fail
                 while fail is not None and ch not in fail.children:
                     fail = fail.fail
-                child.fail = fail.children[ch] if fail else self._root
+                child.fail = fail.children[ch] if fail is not None else self._root
                 # 合并输出
                 if child.fail:
                     child.output.extend(child.fail.output)
@@ -84,7 +84,7 @@ class _AhoCorasick:
         write_pos = 0  # 写指针：result_chars 中有效内容的长度
         i = 0
         n = len(text)
-        node = self._root
+        node: Optional[_TrieNode] = self._root
 
         while i < n:
             ch = text[i]
@@ -98,6 +98,7 @@ class _AhoCorasick:
                 i += 1
                 continue
 
+            assert node is not None
             node = node.children[ch]
 
             # 检查当前节点是否有输出

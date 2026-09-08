@@ -31,7 +31,8 @@ class TextEmbedder:
         self._cache: OrderedDict[str, Tuple[List[float], float]] = OrderedDict()
         self._cache_lock = threading.Lock()
         self._data_dir = data_dir
-        self._tracker = None  # 延迟初始化
+        from iris.llm.usage_tracker import UsageTracker
+        self._tracker: Optional[UsageTracker] = None  # 延迟初始化
 
     @property
     def model(self) -> str:

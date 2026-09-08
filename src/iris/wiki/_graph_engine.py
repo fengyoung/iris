@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Deque, Dict, List, Optional, Set, Tuple
 
 # ── 数据结构 ──────────────────────────────────────────────────
 
@@ -137,7 +137,7 @@ class _GraphEngine:
                 return None
         else:
             # 纯 Python BFS
-            queue = deque([(from_id, [])])
+            queue: Deque[Tuple[str, List[GraphEdge]]] = deque([(from_id, [])])
             visited = {from_id}
             while queue:
                 current, path = queue.popleft()
@@ -168,7 +168,7 @@ class _GraphEngine:
     def bridges(self, nodes: Dict[str, Any], min_degree: int = 3) -> List[Dict[str, Any]]:
         """查找桥接节点。"""
         if self._nx is not None:
-            bridges_list: List[Dict[str, Any]] = []
+            nx_bridges: List[Dict[str, Any]] = []
             for node_id, node in nodes.items():
                 if node_id not in self._nx:
                     continue
@@ -180,33 +180,33 @@ class _GraphEngine:
                     if neighbor in nodes:
                         neighbor_types.add(nodes[neighbor].page_type)
                 if len(neighbor_types) >= 2:
-                    bridges_list.append({
+                    nx_bridges.append({
                         "node_id": node_id, "title": node.title,
                         "page_type": node.page_type,
                         "connected_types": sorted(neighbor_types),
                         "degree": degree,
                     })
-            bridges_list.sort(key=lambda b: b["degree"], reverse=True)
-            return bridges_list
+            nx_bridges.sort(key=lambda b: b["degree"], reverse=True)
+            return nx_bridges
         else:
-            bridges_list: List[Dict[str, Any]] = []
+            local_bridges: List[Dict[str, Any]] = []
             for node_id, node in nodes.items():
                 neighbor_ids = set(self._adjacency.get(node_id, []))
                 if len(neighbor_ids) < min_degree:
                     continue
-                neighbor_types: Set[str] = set()
+                local_neighbor_types: Set[str] = set()
                 for nid in neighbor_ids:
                     if nid in nodes:
-                        neighbor_types.add(nodes[nid].page_type)
-                if len(neighbor_types) >= 2:
-                    bridges_list.append({
+                        local_neighbor_types.add(nodes[nid].page_type)
+                if len(local_neighbor_types) >= 2:
+                    local_bridges.append({
                         "node_id": node_id, "title": node.title,
                         "page_type": node.page_type,
-                        "connected_types": sorted(neighbor_types),
+                        "connected_types": sorted(local_neighbor_types),
                         "degree": len(neighbor_ids),
                     })
-            bridges_list.sort(key=lambda b: b["degree"], reverse=True)
-            return bridges_list
+            local_bridges.sort(key=lambda b: b["degree"], reverse=True)
+            return local_bridges
 
     def degree_stats(self, node_ids: Set[str]) -> Dict[str, Any]:
         """计算度分布统计。"""
@@ -216,7 +216,7 @@ class _GraphEngine:
             degrees = {nid: len(self._adjacency.get(nid, [])) for nid in node_ids}
         if degrees:
             avg = sum(degrees.values()) / len(degrees)
-            max_node = max(degrees, key=degrees.get)
+            max_node = max(degrees, key=lambda node_id: degrees[node_id])
             return {"avg_degree": round(avg, 2), "max_degree": degrees[max_node],
                     "max_degree_node": max_node}
         return {"avg_degree": 0, "max_degree": 0, "max_degree_node": ""}

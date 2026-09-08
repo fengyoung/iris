@@ -272,7 +272,7 @@ class MeetingState(BaseModel):
                 target.append(text)
 
     def update_topic(self, topic: str, topic_change: bool, topic_summary: str,
-                     seg_seq: int) -> Optional[dict]:
+                     seg_seq: int) -> Optional[TopicRecord]:
         """处理话题变化。返回被关闭的旧话题 info（无变化返回 None）。
 
         v3.25.4 修复两个状态机缺陷 + 话题粒度去重：

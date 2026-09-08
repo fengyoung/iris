@@ -105,8 +105,9 @@ class MessageImageAnalyzer:
         """下载并分析单张图片，返回描述；任一环节失败或受控返回 None。"""
         if not self._enabled:
             return None
-        if image_key in self._load_index():
-            return self._index[image_key]["description"]
+        index = self._load_index()
+        if image_key in index:
+            return index[image_key]["description"]
         if self._used >= self._max_per_run:
             logger.debug("图片理解预算已用尽(%d)，跳过 %s", self._max_per_run, image_key)
             return None
@@ -125,7 +126,9 @@ class MessageImageAnalyzer:
             return None
 
         self._used += 1
-        self._index[image_key] = {"description": description}
+        index = self._load_index()
+        index[image_key] = {"description": description}
+        self._index = index
         self._save_index()
         return description
 

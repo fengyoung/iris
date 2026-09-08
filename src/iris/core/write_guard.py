@@ -71,6 +71,25 @@ def resolve_allowed_paths(bundle: ConfigBundle) -> List[Path]:
         if guard not in resolved:
             resolved.append(guard)
 
+    # 用户配置的知识库和数据源是业务输出目录，必须显式纳入守卫范围。
+    # 不能用“文件已存在”作为授权依据，否则任意已有路径都可被覆盖。
+    for candidate in (
+        bundle.root / "config",
+        bundle.app.get("paths", {}).get("wiki_root"),
+        getattr(bundle.wiki, "wiki_root", None),
+    ):
+        if candidate:
+            p = Path(str(candidate))
+            if not p.is_absolute():
+                p = bundle.root / p
+            resolved.append(p.resolve())
+    for cfg in bundle.data_source.get("sources", {}).values():
+        if cfg.get("enabled") and cfg.get("path"):
+            p = Path(str(cfg["path"]))
+            if not p.is_absolute():
+                p = bundle.root / p
+            resolved.append(p.resolve())
+
     return resolved
 
 
@@ -125,7 +144,7 @@ def safe_write_text(
         写入后的路径
     """
     target = Path(str(path))
-    if is_write_guard_enabled(bundle) and not (allow_existing_outside and target.exists()):
+    if is_write_guard_enabled(bundle):
         validate_write_path(target, bundle)
     target.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_text(target, content, encoding=encoding)
@@ -141,7 +160,7 @@ def safe_write_bytes(
 ) -> Path:
     """安全、原子地写入二进制文件。"""
     target = Path(str(path))
-    if is_write_guard_enabled(bundle) and not (allow_existing_outside and target.exists()):
+    if is_write_guard_enabled(bundle):
         validate_write_path(target, bundle)
     target.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_bytes(target, content)

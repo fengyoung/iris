@@ -46,7 +46,7 @@ class TranscribeMeetingPipeline:
             stem = source.stem
             source_type = "audio"
         else:
-            source = Path(transcript_path)
+            source = Path(transcript_path or "")
             # 仅文件名 → 在配置的转写目录查找
             if not source.is_absolute() and not source.exists():
                 default_dir = self._get_transcript_search_dir()
@@ -135,7 +135,7 @@ class TranscribeMeetingPipeline:
                 _participants = self._extract_participants(minutes)
                 if _participants:
                     _fm_fields["participants"] = _participants
-                minutes = inject_frontmatter(minutes, _fm_fields)
+                minutes = inject_frontmatter(minutes, dict(_fm_fields))
             except Exception:
                 pass  # frontmatter 注入失败不应阻塞纪要生成
 

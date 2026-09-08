@@ -329,10 +329,7 @@ def load_config_bundle(
     feishu_ingest_config = _load_optional_config(config_root, "feishu_ingest.json", env, root)
 
     # ── 通过 Pydantic v2 构建类型安全配置（自动校验） ─────────
-    try:
-        from pydantic import ValidationError
-    except ImportError:
-        ValidationError = None
+    from pydantic import ValidationError
 
     try:
         return ConfigBundleV2.from_dicts(
@@ -345,7 +342,7 @@ def load_config_bundle(
             feishu_ingest_dict=feishu_ingest_config,
         )
     except Exception as exc:
-        if ValidationError and isinstance(exc, ValidationError):
+        if isinstance(exc, ValidationError):
             # 格式化 Pydantic 字段级错误为可读形式
             errors = "; ".join(
                 f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}"

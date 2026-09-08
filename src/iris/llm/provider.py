@@ -211,7 +211,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
                 model=model_name, provider=provider_name,
                 route_role="forced", matched_rule="force_model",
                 prompt_tokens=pt, completion_tokens=ct,
-                source=source,
+                source=str(source),
             )
             return LLMResponse(
                 text=text, selected_role="forced", provider=provider_name,
@@ -249,7 +249,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
             model=model_name, provider=provider_name,
             route_role=role, matched_rule=decision.matched_rule,
             prompt_tokens=pt, completion_tokens=ct,
-            source=source,
+            source=str(source),
         )
         return LLMResponse(
             text=text, selected_role=role, provider=provider_name,
@@ -430,7 +430,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
             route_role=_role, matched_rule=decision.matched_rule,
             prompt_tokens=pt, completion_tokens=ct,
             is_multimodal=True,
-            source=m_source,
+            source=str(m_source),
         )
         return text
 

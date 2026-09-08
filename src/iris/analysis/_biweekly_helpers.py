@@ -413,7 +413,7 @@ def _build_file_manifest(files: list[dict]) -> str:
     MAX_CHARS = 2000
     lines = []
     # 按目录分组
-    groups = OrderedDict()
+    groups: OrderedDict[str, list[dict]] = OrderedDict()
     for f in files:
         groups.setdefault(f["dir"], []).append(f)
 

@@ -54,6 +54,13 @@ class TestAtomicWrite:
 
 # ── M5: IrisLogger 原子归档 ──────────────────────────────────
 
+
+def test_structured_log_redacts_credentials():
+    from iris.utils.logging import _normalize
+    payload = _normalize({"api_key": "sk-secret-value", "detail": "token=abcdefghi"})
+    assert payload["api_key"] == "[REDACTED]"
+    assert "abcdefghi" not in payload["detail"]
+
 class TestLoggerRotation:
     """验证日志归档使用 os.rename 原子操作。"""
 

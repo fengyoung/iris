@@ -72,15 +72,17 @@ class ChatDigester:
             return {"status": "error", "error": "需要 --group 或 --user"}
 
         # 1. 解析目标
-        identifier, target_name, target_type = "", "", ""
+        identifier: str = ""
+        target_name: str = ""
+        target_type: str = ""
         try:
             if group:
-                identifier = self._client.search_group_by_name(group)
+                identifier = self._client.search_group_by_name(group) or ""
                 if not identifier:
                     return {"status": "error", "error": f"未找到群聊: {group}"}
                 target_name, target_type = group, "group"
             else:
-                identifier = self._resolve_user_open_id(user)
+                identifier = self._resolve_user_open_id(user) or ""
                 if not identifier:
                     return {"status": "error", "error": f"未找到用户: {user}"}
                 target_name, target_type = user, "user"
@@ -201,7 +203,7 @@ class ChatDigester:
 
     def digest_from_config(self, **kwargs) -> List[Dict[str, Any]]:
         """从配置文件读取目标列表并批量提炼。"""
-        cfg = self._bundle.feishu_ingest or {}
+        cfg: Any = self._bundle.feishu_ingest or {}
         targets = cfg.get("chat_digest", {}).get("targets", [])
         return [
             r for t in targets if t.get("enabled", True)
@@ -235,7 +237,7 @@ class ChatDigester:
         """解析时间范围，返回带时区的 (start, end) ISO 字符串。"""
         now = datetime.now(_TZ)
         if not time_range:
-            cfg = self._bundle.feishu_ingest or {}
+            cfg: Any = self._bundle.feishu_ingest or {}
             days = cfg.get("chat_digest", {}).get("default_range_days", DEFAULT_RANGE_DAYS)
             start = now - timedelta(days=days)
             return start.isoformat(), now.isoformat()

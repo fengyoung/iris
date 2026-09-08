@@ -293,6 +293,8 @@ class _HotkeyMonitor:
 
     def _on_flags_changed(self, event: Any) -> None:
         """修饰键变化：读取 flags 判断组合键是否按下。"""
+        if _CG is None:
+            return
         cur_mask = _flags_to_mask(_CG.CGEventGetFlags(event))
         now_held = (cur_mask & self._mask) == self._mask if self._mask > 0 else False
         # 如果热键还包含非修饰键，额外检查
@@ -302,6 +304,8 @@ class _HotkeyMonitor:
 
     def _on_key_event(self, event_type: int, event: Any) -> None:
         """非修饰键按下/释放（仅对包含字母/功能键的热键组合有意义）。"""
+        if _CG is None:
+            return
         keycode = _CG.CGEventGetIntegerValueField(event, _FIELD_KEYCODE)
         if keycode != self._keycode:
             return
@@ -338,6 +342,8 @@ class _HotkeyMonitor:
     @staticmethod
     def _declare_signatures() -> None:
         """显式设置 CG / CF 函数签名，防止 64 位下指针/整型截断。"""
+        if _CG is None or _CF is None:
+            raise RuntimeError("macOS CoreGraphics/CoreFoundation 不可用")
         # CGEventTapCreate
         _CG.CGEventTapCreate.restype = ctypes.c_void_p
         _CG.CGEventTapCreate.argtypes = [
@@ -375,6 +381,10 @@ class _HotkeyMonitor:
 
     def _run_loop(self) -> None:
         """后台线程：创建 CGEventTap，运行 CFRunLoop。"""
+        if _CG is None or _CF is None:
+            self._alive = False
+            self._ready.set()
+            return
         # 搭建 C 回调 → Python 方法的桥接：
         # py_object 包装 self → addressof 取 C 指针 → refcon 传递
         # 回调中 POINTER(py_object) 解引用 → .value 取回 Python 对象

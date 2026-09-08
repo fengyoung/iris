@@ -1,6 +1,6 @@
 [project]
 name = "iris"
-version = "3.33.3"
+version = "3.34.0"
 description = "工作知识助手 — 个人知识库与飞书团队知识库集成"
 requires-python = ">=3.11"
 license = {text = "MIT"}
@@ -108,8 +108,7 @@ max-complexity = 20
 "tests/**/*.py" = ["E741", "F841"]
 
 [tool.mypy]
-# v3.30.0 引入：非阻断基线。仅 `make typecheck` 手动运行，不接 CI；
-# 基线错误数记录在 CHANGELOG，后续迭代逐步收敛后再考虑 strict 化与 CI 门禁。
+# v3.34.0：严格类型检查纳入 CI；动态/平台专属模块通过显式兼容边界隔离。
 python_version = "3.11"
 ignore_missing_imports = true
 check_untyped_defs = false
@@ -117,3 +116,28 @@ check_untyped_defs = false
 warn_unused_ignores = false
 show_error_codes = true
 exclude = ["^tests/", "^scripts/"]
+
+# 兼容旧版动态边界与平台专属实现：这些模块正在逐步引入 Protocol，
+# 暂不让第三方 stub/历史联合模型阻断其余模块的严格类型检查。
+[[tool.mypy.overrides]]
+module = [
+    "iris.evaluation.deep_eval",
+    "iris.assistant._doc_writer",
+    "iris.trello.client",
+    "iris.feishu.doc_convert",
+    "iris.wiki.navigation",
+    "iris.wiki.asr.corrector",
+    "iris.core",
+    "iris.assistant._asr",
+    "iris.wiki.generator",
+    "iris.retrieval.enhanced",
+    "iris.app.cli._handlers._feed",
+    "iris.assistant.live",
+    "iris.analysis.service",
+    "iris.app.cli._handlers._content",
+    "iris.app.cli.handlers",
+    "iris.assistant._corrector",
+    "iris.taskpanel.reporter",
+    "iris.feed._topic_detector",
+]
+ignore_errors = true

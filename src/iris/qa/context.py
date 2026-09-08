@@ -29,8 +29,8 @@ class PromptContextPacker:
 
     def pack(self, blocks: List[AnswerBlock], wiki_hits: List[Dict[str, str]]) -> PackedPromptContext:
         remaining = self._max_prompt_context_chars
-        selected_wiki = []
-        selected_blocks = []
+        selected_wiki: List[Dict[str, str]] = []
+        selected_blocks: List[AnswerBlock] = []
         wiki_truncated = False
         block_truncated = False
 

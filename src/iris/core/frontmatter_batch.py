@@ -288,7 +288,7 @@ class FrontmatterBatchProcessor:
             try:
                 if self._wikilink_injector is None:
                     from iris.wiki.wikilink_injector import WikilinkInjector
-                    self._wikilink_injector = WikilinkInjector(self._wiki_root)
+                    self._wikilink_injector = WikilinkInjector(Path(self._wiki_root))
                 content = self._wikilink_injector.inject(content)
             except Exception as exc:
                 logger.debug("wikilink 注入跳过 %s: %s", file_path.name, exc)

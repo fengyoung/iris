@@ -185,7 +185,7 @@ class MarkdownChunker:
                             chunks=all_chunks, build_stats={"reused_documents": reused_documents,
                                                             "rebuilt_documents": rebuilt_documents,
                                                             "cleaned_documents": cleaned_documents,
-                                                            "rebuilt_paths": rebuilt_paths})
+                                                            "rebuilt_paths": len(rebuilt_paths)})
 
     def write_summary(self, summary: ChunkSummary) -> Path:
         self._metadata_dir.mkdir(parents=True, exist_ok=True)
@@ -259,7 +259,7 @@ def _chunk_pdf_document(document: DocumentRecord, *, max_chunk_chars: int, max_p
         extractor = PDFExtractor()
         markdown_text = extractor.extract_as_markdown(Path(document.path))
     except Exception:
-        return []
+        return
     yield from _chunk_lines(markdown_text.splitlines(), document,
                             max_chunk_chars=max_chunk_chars, max_preview_chars=max_preview_chars,
                             overlap_chars=overlap_chars)
@@ -366,7 +366,7 @@ def _split_content(content: str, *, max_chunk_chars: int, overlap_chars: int = 0
     if len(paragraphs) <= 1:
         return _apply_overlap(_split_hard(normalized, max_chunk_chars=max_chunk_chars), overlap_chars)
     chunks: List[str] = []
-    current = []
+    current: List[str] = []
     current_len = 0
     for paragraph in paragraphs:
         extra = len(paragraph) + (2 if current else 0)
@@ -418,7 +418,7 @@ def _split_hard(content: str, *, max_chunk_chars: int) -> List[str]:
     if len(sentences) <= 1:
         return [content[i:i + max_chunk_chars] for i in range(0, len(content), max_chunk_chars)]
     chunks: List[str] = []
-    current = []
+    current: List[str] = []
     current_len = 0
     for sentence in sentences:
         if not sentence:

@@ -26,7 +26,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-import requests
+import requests  # type: ignore[import-untyped]
 
 # 中文正文的估算 token 密度（qwen/deepseek 系中文 tokenizer 约 1.5 字符/token）
 CHARS_PER_TOKEN = 1.5

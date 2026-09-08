@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Protocol
 
 from iris.feed._topic_detector import _parse_json_safe
 
@@ -21,6 +21,14 @@ _HEAD_CHARS = 1000             # 截断时保留头部（会议背景/开场）
 _TAIL_CHARS = 3000             # 截断时保留尾部（结论/行动项）
 
 
+class _TemplateLoader(Protocol):
+    def render(self, name: str, values: Dict[str, str]) -> str: ...
+
+
+class _LLMService(Protocol):
+    def generate(self, prompt: str, **kwargs: Any) -> Any: ...
+
+
 class SegmentAnalyzer:
     """LLM 结构化分析；llm_service 为鸭子类型（.generate(...) -> .text）。
 
@@ -28,7 +36,7 @@ class SegmentAnalyzer:
     会议流程不中断。
     """
 
-    def __init__(self, llm_service: object, template_loader: object, *, model: str = ""):
+    def __init__(self, llm_service: _LLMService, template_loader: _TemplateLoader, *, model: str = ""):
         self._llm = llm_service
         self._loader = template_loader
         self._model = model

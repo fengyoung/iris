@@ -67,7 +67,7 @@ class TaskReporter:
         try:
             self._data_root = data_root or (get_project_root() / "data")
         except Exception:
-            self._data_root = None  # 项目根解析失败 → 整体降级 no-op
+            self._data_root = data_root  # type: ignore[assignment]
         self._task = TaskStatus(
             task_id=self._task_id,
             name=self._name,

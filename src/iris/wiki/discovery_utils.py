@@ -170,7 +170,7 @@ def suppress_path_concentrated_noise(candidates: list) -> list:
 
 
 def cluster_and_resolve(candidates: list) -> list:
-    merged = []
+    merged: list = []
     candidates = sorted(candidates, key=lambda item: (-item.score, -item.evidence_count, item.title))
     for item in candidates:
         if item.page_type == "concept":

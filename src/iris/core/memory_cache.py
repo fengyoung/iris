@@ -72,7 +72,7 @@ class MemoryCache(Generic[T]):
                 return len(self._cache)
         return len(self._cache)
 
-    def stats(self) -> Dict[str, int]:
+    def stats(self) -> Dict[str, int | float]:
         """返回缓存统计信息。"""
         total = self._hits + self._misses
         return {

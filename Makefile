@@ -27,9 +27,9 @@ lint-fix:
 format:
 	ruff format src scripts tests
 
-# 静态类型检查（非阻断基线：只输出错误数与明细，不影响退出码；配置见 pyproject [tool.mypy]）
+# 静态类型检查（CI 门禁；动态/平台专属模块的兼容边界见 pyproject [tool.mypy]）
 typecheck:
-	-mypy src/iris
+	mypy src/iris --no-incremental
 
 # 依赖安全审计（需安装 pip-audit: pip install pip-audit）
 audit:

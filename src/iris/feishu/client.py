@@ -56,7 +56,7 @@ class FeishuClient:
 
 
         cmd = [self.LARK_CLI] + args + ["--as", self._as, "--format", "json"]
-        last_error = None
+        last_error: Exception | None = None
 
         for attempt in range(retries):
             proc = None

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from iris.config.loader import ConfigBundle
 
@@ -72,9 +72,10 @@ class WorkingContextStore:
             raise
         return payload
 
-    def update(self, *, current_task: str = None, pending_items: List[str] = None,
-               recent_changes: List[str] = None, notes: str = None, append_pending: List[str] = None,
-               append_changes: List[str] = None) -> Dict[str, Any]:
+    def update(self, *, current_task: Optional[str] = None, pending_items: Optional[List[str]] = None,
+               recent_changes: Optional[List[str]] = None, notes: Optional[str] = None,
+               append_pending: Optional[List[str]] = None,
+               append_changes: Optional[List[str]] = None) -> Dict[str, Any]:
         """增量更新工作上下文的指定字段。"""
         from iris.core.locks import FileLock
         with FileLock(self._path):

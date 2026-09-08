@@ -188,7 +188,7 @@ class ModelItem(BaseConfigModel):
     priority: int = Field(default=0)
     cost_level: str = Field(default="low")
     reasoning_level: Literal["standard", "advanced"] = "standard"
-    supported_inputs: List[Literal["text", "image"]] = Field(default_factory=lambda: ["text"])
+    supported_inputs: List[Literal["text", "image"]] = Field(default_factory=lambda: ["text"])  # type: ignore[arg-type]
     use_cases: List[str] = Field(default_factory=list)
     notes: str = ""
     api_base_url: str = ""
@@ -344,7 +344,7 @@ class ConfigBundleV2(BaseConfigModel):
 
     @property
     def wiki_root_path(self) -> Path:
-        return Path(self.wiki.wiki_root)
+        return Path(self.wiki.wiki_root if self.wiki else "")
 
     @property
     def metadata_dir(self) -> Path:
