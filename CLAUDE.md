@@ -1,4 +1,4 @@
-# Iris 3.33.2 — 项目执行说明
+# Iris 3.33.3 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 逐版变更记录与版本历史统一归档于 [CHANGELOG.md](CHANGELOG.md)；本文件只承载现行架构 / 配置 / 约定。
@@ -92,7 +92,7 @@ PDF=PyMuPDF 提取文字 + 逐页渲染；DOCX=python-docx 段落+表格文字�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.33.2 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.33.3 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.22 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | app 3.7（其余独立演进） | 配置文件 Schema |
 

@@ -1,3 +1,7 @@
+## v3.33.3 (2026-09-08)
+
+**例行发版，无功能变更**（4 文档文件）。仅产品版本号递增 3.33.2→**3.33.3**；协议版本 3.22（不变，命令集未变）；app 配置版本 3.7（不变）。代码零改动，全量测试基线维持 3,315。
+
 ## v3.33.2 (2026-09-08)
 
 **Trello `create_list` 参数顺序 bug 修复 — done 归档建列表 name/idBoard 互换致 400**（2 文件；`test_trello_service.py` 回归 +2）。`TrelloClient.create_list` 签名原为 `(name, board_id)`，而 `TrelloService._find_or_create_list` 按 `(board_id, name)` 位置传参——POST /lists 时 `name` 与 `idBoard` 互换，Trello 返回 400 invalid value for idBoard，卡片 done 归档的建列表链路整体失败。
