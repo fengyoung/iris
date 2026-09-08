@@ -145,7 +145,7 @@ class ASREngine:
         if rms < 0.05 and (time.monotonic() - self._last_speech_at) < _NOISE_FREEZE_SEC:
             self._noise_floor = (self._NOISE_FLOOR_ALPHA * rms +
                                  (1 - self._NOISE_FLOOR_ALPHA) * self._noise_floor)
-        threshold = self._effective_threshold
+        threshold = self.effective_threshold
         self._total_frames += 1
 
         if rms > threshold:

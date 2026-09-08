@@ -303,7 +303,7 @@ def build_feedback_recommendations(
                  if not k.startswith(_LLM_PREFIX)}
     result["dict_hit_count"] = sum(dict_hits.values())
     result["dict_hit_rate"] = (
-        result["dict_hit_count"] / max(len(corrections), 1)
+        float(result["dict_hit_count"]) / max(len(corrections), 1)  # type: ignore[arg-type]
     )
 
     # ── 2. 僵尸规则检测 ──────────────────────────────────
@@ -371,7 +371,7 @@ def build_feedback_recommendations(
         w for w, f in sorted(word_freq.items(), key=lambda x: -x[1])
         if f >= 2
     ]
-    result["new_hotword_count"] = len(result["new_hotwords"])
+    result["new_hotword_count"] = len(result["new_hotwords"])  # type: ignore[arg-type]
 
     return result
 

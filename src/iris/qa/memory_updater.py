@@ -12,7 +12,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from iris.config.loader import ConfigBundle
 from iris.memory import CorrectionMemoryStore, UserProfileMemoryStore
@@ -20,6 +20,8 @@ from iris.qa.helpers import EXPLICIT_MEMORY_RE
 from iris.utils.llm_parsing import extract_json_object
 
 logger = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    from iris.llm.service import LLMService
 
 IMPLICIT_CORRECTION_RE = re.compile(
     r"(不是\s*[^。；;]{2,40}?(?:而是|是)\s*[^。；;]{2,40})|"
@@ -42,7 +44,7 @@ class MemoryUpdater:
         self._config = config
         self._profile_memory = UserProfileMemoryStore(config)
         self._correction_memory = CorrectionMemoryStore(config)
-        self._llm_service = None     # 惰性初始化
+        self._llm_service: Optional[LLMService] = None     # 惰性初始化
         self._mine_state_path = self._resolve_mine_state_path(config)
 
     # ── 公共接口 ────────────────────────────────────────────────
@@ -74,7 +76,7 @@ class MemoryUpdater:
 
         # ── 通道 2：LLM 深度分析 ──
         if self._should_deep_analyze(question, answer):
-            llm_updates = self._apply_llm_channel(question, answer, context)
+            llm_updates = self._apply_llm_channel(question, answer or "", context)
             updates.extend(llm_updates)
 
         # ── 汇总并触发维护检查 ──
@@ -301,7 +303,7 @@ class MemoryUpdater:
             if not concept or not preferred or len(concept) > 40:
                 continue
             existing = items.get(concept, {})
-            entry = {
+            entry: Dict[str, Any] = {
                 "preferred": preferred,
                 "update_count": int(existing.get("update_count", 0)) + 1,
                 "updated_at": _now_iso(),
@@ -310,7 +312,8 @@ class MemoryUpdater:
             items[concept] = entry
 
             # Phase 3：冲突自动解决 — 纠正 ≥ 3 次触发
-            if entry["update_count"] >= 3 and self._auto_resolve_conflict(concept, entry, items):
+            update_count = int(entry["update_count"])
+            if update_count >= 3 and self._auto_resolve_conflict(concept, entry, items):
                 updates.append(f"LLM 提取纠正 + 自动裁决: {concept} => {preferred}")
                 continue
             updates.append(f"LLM 提取纠正规则: {concept} => {preferred}")

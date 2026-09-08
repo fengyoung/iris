@@ -47,7 +47,7 @@ def resolve_pic_dir(bundle: ConfigBundle) -> Path:
 
     优先级：feishu_ingest.pic_dir > SOURCE/../Pic > data/pic。
     """
-    feishu = bundle.feishu_ingest or {}
+    feishu: Any = bundle.feishu_ingest or {}
     pic = feishu.get("pic_dir", "")
     if pic:
         p = Path(pic).expanduser().resolve()
@@ -73,7 +73,7 @@ def resolve_dedup_path(bundle: ConfigBundle, config_key: str, fallback: str) -> 
         config_key: feishu_ingest 中的子路径，如 "doc_convert.dedup_index"
         fallback: 默认文件名
     """
-    feishu = bundle.feishu_ingest or {}
+    feishu: Any = bundle.feishu_ingest or {}
     cfg = feishu
     for part in config_key.split("."):
         if isinstance(cfg, dict):

@@ -57,7 +57,7 @@ class MeetingSession:
                     )
             self._pending = seg
             if on_publish is not None:
-                on_publish(seg)
+                on_publish(seg)  # type: ignore[operator]
             self._cond.notify()
         return seg
 
@@ -138,7 +138,7 @@ class MeetingSession:
         if not prev:
             return ""
         # 最多取 2 段，时间跨度 ≤ 30s（以当前真实时间为基准，v3.26.1 修正）
-        recent = []
+            recent: list[str] = []
         now = datetime.now()
         for s in reversed(prev):
             if len(recent) >= 2:

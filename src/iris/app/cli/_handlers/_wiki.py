@@ -23,7 +23,7 @@ def handle_discover_wiki(args, bundle, logger) -> int:
 
     discovery = CandidateDiscovery(bundle)
     candidates = discovery.discover(limit=args.limit, incremental=args.incremental)
-    payload = {"items": [{"title": item.title, "page_type": item.page_type, "query": item.query,
+    payload: Dict[str, Any] = {"items": [{"title": item.title, "page_type": item.page_type, "query": item.query,
                           "score": item.score, "evidence_count": item.evidence_count,
                           "sample_paths": item.sample_paths, "rationale": item.rationale,
                           "has_wiki": item.has_wiki, "wiki_stale": item.wiki_stale,
@@ -73,7 +73,7 @@ def handle_build_wiki(args, bundle, logger) -> int:
         title = args.title or args.query
         _tr.report_phase("build_page", f"生成单页：{args.page_type} {title}")
         draft = generator.build_page(query=args.query, page_type=args.page_type, title=title)
-        payload = {"page_type": draft.page_type, "title": draft.title, "slug": draft.slug,
+        payload: Dict[str, Any] = {"page_type": draft.page_type, "title": draft.title, "slug": draft.slug,
                    "output_path": draft.output_path, "markdown": draft.markdown}
         if args.write:
             write_result = generator.write_page(draft, overwrite=args.overwrite, backup=args.backup)

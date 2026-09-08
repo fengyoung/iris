@@ -78,7 +78,8 @@ class WikiNavigationBuilder:
 
         if write:
             index_path = self._wiki_root / "index.md"
-            index_path.write_text(index_content, encoding="utf-8")
+            from iris.core.write_guard import safe_write_text
+            safe_write_text(index_path, index_content, self._config)
 
         total = sum(len(v) for v in pages.values())
         index_str = str(self._wiki_root / "index.md") if write else "(dry-run)"

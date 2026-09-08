@@ -1,4 +1,4 @@
-# Iris 3.33.2
+# Iris 3.34.0
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
@@ -94,7 +94,7 @@ SOURCE/                     LLM-WIKI/
 - macOS Keychain（可选密钥存储）
 - PyMuPDF / python-docx（PDF/DOCX 处理）
 - ffmpeg（视频抽帧/抽音轨，视频处理必需）+ openai-whisper（音轨转写，可选）
-- 2,970 个测试用例（150 个测试文件），覆盖率 65.82%
+- 3,317 个测试用例（pytest 全量），覆盖率约 68%；Ruff 与严格 mypy 门禁通过
 
 ## 开发环境
 
@@ -150,13 +150,13 @@ iris3/
 │       └── asr/         #   ASR 提示词子系统（术语提取/热词/Prompt优化/版本管理）
 ├── scripts/            # CLI 入口 + 委托脚本
 ├── templates/          # Prompt / Wiki 模板
-├── tests/              # 2,970 用例（150 文件）
+├── tests/              # 3,317 用例
 │   ├── unit/           #   纯逻辑单元测试（1,580 用例）
 │   └── integration/    #   集成测试（245 用例）
 ├── config/             # *.json gitignored，*.example 版本控制
 ├── .github/workflows/  # CI 流水线（Python 3.11-3.13 矩阵）
 ├── Makefile            # 常用开发命令
-├── Dockerfile          # 开发容器
+├── Dockerfile          # 非 root CLI 运行镜像
 └── pyproject.toml      # 项目配置 + pytest/coverage/ruff 设置
 ```
 
@@ -166,6 +166,7 @@ iris3/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.34.0** | 2026-09-08 | 工程安全与质量发布：Trello 凭证不再暴露于进程参数，写入守卫取消已有文件绕过，日志敏感字段脱敏；统一原子写入，Docker 改为非 root CLI 镜像；CI 增加 wheel 构建、严格 mypy 与 macOS CLI smoke；新增发布检查清单。全量 3,317 通过，协议版本 3.22、app 数据版本 3.7 均不变。 |
 | **v3.33.2** | 2026-09-08 | Trello `create_list` 参数顺序 bug 修复：签名 `(name, board_id)` → `(board_id, name)`，与调用方位置传参对齐，done 归档建列表 name/idBoard 互换致 400 的链路恢复。回归 +2 unit，全量 3,315 通过。协议版本 3.22（不变） |
 | **v3.33.1** | 2026-09-07 | Trello 客户端网络加固：urllib 网络失败指数重试（≤2 次）→ curl 兜底传输、DNS 负缓存防 dig 反复阻塞、请求超时 30s→15s、网络层错误与 HTTP 错误分层（仅网络层可重试）。净 +5 unit，全量 3,313 通过。协议版本 3.22（不变） |
 | **v3.33.0** | 2026-09-07 | 双周报 `build-biweekly-report` 成稿风格 w35 定稿：总结段「总览 + 每判断点短段」反固定骨架、关键进展每方向 2-4 条价值门槛、`strategic_insights` 抽取纳入会议纪要、low 素材隔离、Stage4 辅助段剔除等确定性后处理；新增 `--as-of` 历史周期复现。净 +11 unit，全量 3,308 通过。协议版本 3.22（不变） |

@@ -201,13 +201,13 @@ class DocWriter:
         if state.decisions:
             parts.append("## ✅ 决策汇总")
             for d in state.decisions:
-                parts.append(f"- {d}")
+                parts.append(f"- {getattr(d, 'text', d)}")
             parts.append("")
         # 待办汇总
         if state.todos:
             parts.append("## 📋 待办汇总")
             for t in state.todos:
-                parts.append(f"- {t}")
+                parts.append(f"- {getattr(t, 'text', t)}")
             parts.append("")
         # 风险汇总（前 10 条）
         if state.risks:
@@ -320,7 +320,7 @@ class DocWriter:
                 if field:
                     if label == "决策点":
                         # DecisionItem → 带置信度标注的字符串
-                        parts = [
+                        parts: list[str] = [
                             f"{CONF_ICON.get(d.confidence, '')}{d.text}"
                             for d in field
                         ]

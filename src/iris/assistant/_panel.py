@@ -17,7 +17,7 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from ._theme import DARK, THEMES, Theme
 from .models import CONF_ICON, DECISION_FG, MeetingState, VoiceSegment
@@ -86,7 +86,7 @@ class PanelDisplay:
     # v3.26.1 音频电平
     rms_level: float = 0.0                 # 当前 RMS 相对阈值（0-1）
     # v3.26.1 系统告警
-    alerts: list[str] = None                # 面板级告警消息列表
+    alerts: list[str] | None = None         # 面板级告警消息列表
 
 
 def _wrap(text: str, width: int) -> list[str]:
@@ -148,8 +148,8 @@ _FEED_HEIGHT = 4        # 洞察推送区（不含标题行）
 _ALERT_HEIGHT = 2       # 系统告警区
 
 
-def _fill_line(text: str, width: int, *, theme: Theme, fg: int = None,
-               bg: int = None, bold: bool = False, dim: bool = False,
+def _fill_line(text: str, width: int, *, theme: Theme, fg: int | None = None,
+               bg: int | None = None, bold: bool = False, dim: bool = False,
                colored: bool = False) -> str:
     """CJK 感知的填充到指定显示宽度（左右留边距），并包裹主题色。
 
@@ -194,7 +194,7 @@ class PanelRenderer:
 
     # ── 公开接口 ──────────────────────────────────────────
 
-    def render(self, display: PanelDisplay, feed: object = None) -> None:
+    def render(self, display: PanelDisplay, feed: Any = None) -> None:
         with self._lock:
             if not self._alt_screen_active:
                 sys.stdout.write(_ENTER_ALT)
@@ -206,7 +206,7 @@ class PanelRenderer:
         """退出统计帧（退出 alt-screen，恢复终端回滚历史；整帧全区填充）。"""
         analyzed = [s for s in state.segments
                     if s.analysis_started_at and s.analysis_done_at]
-        total_elapsed = sum(s.analysis_done_at - s.analysis_started_at for s in analyzed)
+        total_elapsed = sum((s.analysis_done_at or 0) - (s.analysis_started_at or 0) for s in analyzed)
         avg_elapsed = total_elapsed / len(analyzed) if analyzed else 0
         w = _box_width()
         t = self._theme
@@ -249,7 +249,7 @@ class PanelRenderer:
 
     # ── 帧渲染 ────────────────────────────────────────────
 
-    def _build(self, d: PanelDisplay, feed: object = None) -> str:
+    def _build(self, d: PanelDisplay, feed: Any = None) -> str:
         """整帧渲染：标题 → 语音/分析区 → 洞察推送 → 告警 → VU → 累计统计 → 底边。"""
         w = _box_width()
         cw = w - 4  # 内容宽度
@@ -329,6 +329,8 @@ class PanelRenderer:
     def _segment_suffix(d: PanelDisplay) -> str:
         """段状态后缀：时间 · 字数 · 说话人 · 分析状态。"""
         seg = d.seg
+        if seg is None:
+            return ""
         text = seg.corrected_text or seg.raw_text
         parts = [f"{seg.started_at.strftime('%H:%M:%S')} · {len(text)} 字"]
         if seg.speaker and seg.speaker.speaker_id:
@@ -348,6 +350,8 @@ class PanelRenderer:
     def _build_segment_block(self, lines: list, d: PanelDisplay, w: int, cw: int) -> None:
         """语音文本（固高 3 行）+ 状态后缀 + 分析结果区。"""
         t = self._theme
+        if d.seg is None:
+            return
         text = d.seg.corrected_text or d.seg.raw_text
         lines.append(_fill_line("", w, theme=t))  # 空行
 
@@ -378,6 +382,9 @@ class PanelRenderer:
         """分析结果（语义色块，固高 2 行 + 可选追问 2 行）；无结果时按状态占位。"""
         t = self._theme
         seg = d.seg
+        if seg is None:
+            self._blank_lines(lines, _ANALYSIS_HEIGHT, w)
+            return
         if seg.analysis is not None and seg.analysis.has_content:
             self._build_analysis_content(lines, seg.analysis, w, cw)
         elif seg.analysis_status == VoiceSegment.ANALYSIS_SKIPPED:

@@ -88,8 +88,7 @@ class BiweeklyCollector:
             # 按嵌入日期降序
             candidates.sort(
                 key=lambda p: (
-                    int(self._extract_date_from_path(p.name).strftime("%Y%m%d"))
-                    if self._extract_date_from_path(p.name) else 0
+                    int(date.strftime("%Y%m%d")) if (date := self._extract_date_from_path(p.name)) else 0
                 ),
                 reverse=True,
             )

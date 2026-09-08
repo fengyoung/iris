@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from iris.trello.client import (
@@ -30,6 +31,16 @@ def test_get_prefers_curl_no_urllib_fallback():
     assert result == [{"id": "x"}]
     curl.assert_called_once_with("GET", "/1/members/me/organizations?key=k&token=t")
     urllib.assert_not_called()
+
+
+def test_curl_credentials_are_passed_via_stdin_not_argv():
+    c = TrelloClient("secret-key", "secret-token")
+    with patch("subprocess.run") as run:
+        run.return_value = SimpleNamespace(returncode=0, stdout='{}\n__IRIS_TRELLO_CODE__200', stderr='')
+        c._request_via_curl("GET", "/1/cards?key=secret-key&token=secret-token")
+        argv = run.call_args.args[0]
+        assert "secret-key" not in argv and "secret-token" not in argv
+        assert "secret-key" in run.call_args.kwargs["input"]
 
 
 def test_get_curl_fails_then_urllib_fallback():

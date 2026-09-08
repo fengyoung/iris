@@ -52,8 +52,8 @@ def handle_build_report(args, bundle, logger) -> int:
             payload["format"] = report_format
         except (ValueError, RuntimeError) as exc:
             output_path = output_path.with_suffix(".md")
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(result.markdown, encoding="utf-8")
+            from iris.core.write_guard import safe_write_text
+            safe_write_text(output_path, result.markdown, bundle)
             payload["output_file"] = str(output_path)
             payload["format"] = "md"
             payload["format_error"] = str(exc)
@@ -142,7 +142,8 @@ def handle_build_biweekly_report(args, bundle, logger) -> int:
             markdown = inject_frontmatter(markdown, _fm_fields)
         except Exception:
             pass  # frontmatter 注入失败不阻塞双周报生成
-        path.write_text(markdown, encoding="utf-8")
+        from iris.core.write_guard import safe_write_text
+        safe_write_text(path, markdown, bundle)
         payload["output_file"] = str(path)
 
     _emit_output(args.command, payload, pretty=args.pretty)

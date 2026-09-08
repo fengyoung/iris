@@ -559,6 +559,6 @@ class ComplexInputPipeline:
         if not output_path:
             return
 
+        from iris.utils.shared import atomic_write_text
         p = Path(output_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(result.stage3_output, encoding="utf-8")
+        atomic_write_text(p, result.stage3_output)

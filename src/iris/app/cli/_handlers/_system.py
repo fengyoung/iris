@@ -199,7 +199,7 @@ def _daily_wiki_maintenance(bundle, chunk_summaries) -> tuple:
     from iris.wiki import WikiNavigationBuilder, append_changelog
 
     wiki_update_result = {"status": "skipped", "reason": "无 chunk 数据"}
-    person_enrich_result = {"status": "skipped", "reason": "无 wiki_root 配置"}
+    person_enrich_result: dict[str, Any] = {"status": "skipped", "reason": "无 wiki_root 配置"}
     graph_result = {"status": "skipped", "reason": "无 wiki_root 配置"}
 
     if not bundle.wiki:

@@ -211,8 +211,8 @@ class BacklinkBuilder:
         inbound: Dict[str, List[str]] = {}
         raw_links = 0
 
-        for source_title, linked_titles in pages.items():
-            for target_title in linked_titles:
+        for source_title, page_links in pages.items():
+            for target_title in page_links:
                 raw_links += 1
                 inbound.setdefault(target_title, []).append(source_title)
 

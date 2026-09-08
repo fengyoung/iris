@@ -5,11 +5,12 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import re
 import sys
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional, TextIO
+from typing import TYPE_CHECKING, Any, Dict, Optional, TextIO, cast
 
 if TYPE_CHECKING:  # 仅用于类型标注；运行期不导入，避免 utils ↔ config.loader ↔ core 循环导入
     from iris.config.loader import ConfigBundle
@@ -19,6 +20,8 @@ _MAX_LOG_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 # 标准化的日志级别
 _LOG_LEVELS = {"debug": 10, "info": 20, "warning": 30, "error": 40}
+_SENSITIVE_KEYS = frozenset({"api_key", "token", "access_token", "secret", "password", "authorization"})
+_SECRET_RE = re.compile(r"(?i)(?:sk-[A-Za-z0-9_-]{8,}|token[=: ]+[A-Za-z0-9._-]{8,})")
 
 
 class IrisLogger:
@@ -124,11 +127,16 @@ class IrisLogger:
 
 def _normalize(value: Any) -> Any:
     if is_dataclass(value):
-        return asdict(value)
+        return asdict(cast(Any, value))
     if isinstance(value, dict):
-        return {key: _normalize(item) for key, item in value.items()}
+        return {
+            key: "[REDACTED]" if str(key).lower() in _SENSITIVE_KEYS else _normalize(item)
+            for key, item in value.items()
+        }
     if isinstance(value, (list, tuple)):
         return [_normalize(item) for item in value]
     if isinstance(value, (set, frozenset)):
         return sorted(_normalize(item) for item in value)
+    if isinstance(value, str):
+        return _SECRET_RE.sub("[REDACTED]", value)
     return value

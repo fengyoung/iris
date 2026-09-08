@@ -733,7 +733,7 @@ sources:
             if isinstance(r, Exception):
                 processed.append({"status": "error", "title": items[i][0], "reason": str(r)})
             else:
-                processed.append(r)
+                processed.append(r)  # type: ignore[arg-type]
 
         updated = [r for r in processed if r.get("status") == "updated"]
         unchanged = [r for r in processed if r.get("status") == "no_changes"]

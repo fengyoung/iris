@@ -97,7 +97,6 @@ def handle_feed_setup(args, bundle, _logger) -> int:
 
 def _save_and_finish(wc_list: list, config_path: Path) -> int:
     """保存配置并结束。"""
-    import json
     config = {
         "version": 1,
         "watch_chats": wc_list,
@@ -113,8 +112,8 @@ def _save_and_finish(wc_list: list, config_path: Path) -> int:
         "okr_mapping": {"enabled": True, "strict_match": False},
     }
     config_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(config, f, ensure_ascii=False, indent=2)
+    from iris.utils.shared import atomic_write_json
+    atomic_write_json(config_path, config)
     print(f"\n✅ 配置已保存到 {config_path}")
     print(f"   已关注 {len(wc_list)} 个会话")
     return 0

@@ -78,7 +78,7 @@ class PDFExtractor:
                     if not block_text:
                         continue
                     raw_lines.append(block_text)
-                    inferred_level = self._infer_level(block_text, font_info["size"], font_info["bold"])
+                    inferred_level = self._infer_level(block_text, float(font_info["size"]), bool(font_info["bold"]))
                     if inferred_level > 0 and len(block_text) < 200:
                         if current_content:
                             sections.append(PDFSection(title=current_title, level=current_level,

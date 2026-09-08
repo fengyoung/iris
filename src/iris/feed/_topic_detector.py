@@ -164,7 +164,7 @@ _PHASE2_DEEP_SUMMARIZE_PROMPT = """你是一个信息分析助手。请对以下
 
 def _load_history_topics(brief_dir: Path, max_count: int = 50) -> List[Dict[str, Any]]:
     """从本地简报目录加载最近的话题列表。"""
-    topics = []
+    topics: List[Dict[str, Any]] = []
     if not brief_dir.exists():
         return topics
     for month_dir in sorted(brief_dir.iterdir(), reverse=True):
@@ -346,7 +346,7 @@ class TopicDetector:
             logger.error("Phase 1 LLM 调用失败，退回简单检测: %s", e)
             return self._simple_detect(candidates)
 
-        topics = []
+        topics: List[DetectedTopic] = []
         exec_date = datetime.now().strftime("%Y%m%d")
         for idx, item in enumerate(items):
             if not item.get("is_valuable", True):
@@ -514,7 +514,7 @@ class TopicDetector:
 
     def _simple_detect(self, candidates: List[Tuple[str, List[RawMessage]]]) -> List[DetectedTopic]:
         """简单话题检测（消息量少时直接用规则，不调 LLM）。"""
-        topics = []
+        topics: List[DetectedTopic] = []
         exec_date = datetime.now().strftime("%Y%m%d")
         for idx, (chat_name, msgs) in enumerate(candidates):
             first_content = msgs[0].content.strip()

@@ -1,3 +1,13 @@
+## v3.34.0 (2026-09-08)
+
+**安全、可靠性与发布工程治理**
+
+- **P0 安全**：Trello curl 传输不再将凭证暴露在进程参数中；写入守卫取消“目标已存在即可绕过”路径校验；日志对 API 凭证、令牌和会议正文等敏感字段统一脱敏。
+- **P1 工程**：共享文件写入统一采用原子/受控写入；Docker 镜像默认以非 root 用户运行 `iris` CLI；CI 增加 wheel 构建、macOS CLI smoke 和严格 mypy 检查。
+- **P2 质量**：新增 `RELEASE_CHECKLIST.md`；类型检查从历史基线升级为 CI 门禁，动态/平台专属模块通过显式兼容边界隔离；补充安全、写入和 Trello 回归测试。
+- **验证**：pytest 3,317 passed；Ruff 全部通过；`mypy src/iris --no-incremental` 通过；`git diff --check` 通过。Docker daemon 未启动，未执行本机容器构建验证。
+- **版本层**：产品版本 `3.33.2` → `3.34.0`；协议版本 `3.22` 不变；app 数据版本 `3.7` 不变。
+
 ## v3.33.2 (2026-09-08)
 
 **Trello `create_list` 参数顺序 bug 修复 — done 归档建列表 name/idBoard 互换致 400**（2 文件；`test_trello_service.py` 回归 +2）。`TrelloClient.create_list` 签名原为 `(name, board_id)`，而 `TrelloService._find_or_create_list` 按 `(board_id, name)` 位置传参——POST /lists 时 `name` 与 `idBoard` 互换，Trello 返回 400 invalid value for idBoard，卡片 done 归档的建列表链路整体失败。

@@ -53,7 +53,7 @@ class Theme:
 
     # ── 样式组装 ──────────────────────────────────────────
 
-    def style(self, text: str, *, fg: int = None, bg: int = None,
+    def style(self, text: str, *, fg: int | None = None, bg: int | None = None,
               bold: bool = False, dim: bool = False) -> str:
         """给文本包裹 ANSI 样式。fg/bg 为 None 时用默认（主文本色/面板底色）。"""
         fg = self.fg_text if fg is None else fg

@@ -124,16 +124,16 @@ class TrelloClient:
         self._token = token
         self._timeout = _DEFAULT_TIMEOUT
 
-    def get(self, path: str, **params: Any) -> Dict[str, Any]:
+    def get(self, path: str, **params: Any) -> Any:
         return self._request("GET", path, params=params)
 
-    def post(self, path: str, **params: Any) -> Dict[str, Any]:
+    def post(self, path: str, **params: Any) -> Any:
         return self._request("POST", path, params=params)
 
-    def put(self, path: str, **params: Any) -> Dict[str, Any]:
+    def put(self, path: str, **params: Any) -> Any:
         return self._request("PUT", path, params=params)
 
-    def delete(self, path: str, **params: Any) -> Dict[str, Any]:
+    def delete(self, path: str, **params: Any) -> Any:
         return self._request("DELETE", path, params=params)
 
     # ── Trello API 封装 ──────────────────────────────────────
@@ -293,12 +293,16 @@ class TrelloClient:
         """curl 兜底传输：urllib 网络层失败时回退（curl 对本机间歇性网络更稳健）。"""
         url = f"https://{_TRELLO_DOMAIN}{full_path}"
         marker = "\n__IRIS_TRELLO_CODE__"
-        cmd = [
-            "curl", "-s", "-g", "--max-time", str(self._timeout),
-            "-X", method, "-w", marker + "%{http_code}", url,
-        ]
+        # URL 中包含 API 凭证，但通过 curl config stdin 传递，避免出现在 ps 输出。
+        cmd = ["curl", "-s", "-g", "--config", "-", "-w", marker + "%{http_code}"]
+        config = "\n".join([
+            f'url = "{url}"',
+            f'request = "{method}"',
+            f'max-time = {self._timeout}',
+        ]) + "\n"
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=self._timeout + 10)
+            r = subprocess.run(cmd, input=config, capture_output=True, text=True,
+                               timeout=self._timeout + 10)
         except (subprocess.SubprocessError, OSError) as exc:
             raise _TrelloNetworkError(f"Trello 网络错误: curl 不可用 {exc}") from exc
         if r.returncode != 0:

@@ -203,7 +203,7 @@ def do_status(args) -> int:
 
     uptime = info.get("uptime_sec")
     uptime_str = ""
-    if uptime is not None:
+    if isinstance(uptime, (int, float)):
         m, s = divmod(int(uptime), 60)
         h, m = divmod(m, 60)
         uptime_str = f"，已运行 {h}小时{m}分" if h else (f"，已运行 {m}分{s}秒" if m else f"，已运行 {s}秒")

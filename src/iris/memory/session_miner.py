@@ -9,13 +9,15 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from iris.config.loader import ConfigBundle
 from iris.memory import SessionMemoryStore, UserProfileMemoryStore, CorrectionMemoryStore
 from iris.utils.llm_parsing import extract_json_object
 
 logger = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    from iris.llm.service import LLMService
 
 _MIN_TOPIC_COUNT_FOR_MINE = 3    # 主题出现 ≥ 3 次才纳入分析
 _MIN_CONFIDENCE = 0.5             # LLM 置信度阈值
@@ -29,7 +31,7 @@ class SessionPatternMiner:
         self._session_store = SessionMemoryStore(config)
         self._profile_memory = UserProfileMemoryStore(config)
         self._correction_memory = CorrectionMemoryStore(config)
-        self._llm_service = None
+        self._llm_service: Optional[LLMService] = None
 
     # ── 公共接口 ────────────────────────────────────────────────
 
