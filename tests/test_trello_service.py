@@ -168,3 +168,40 @@ class TestStatus:
         assert status["total_lists"] == 1
         assert status["list_names"] == ["TODO"]
         assert status["total_incomplete"] == 1
+
+
+class RecordingClient(FakeClient):
+    """记录 create_list 调用参数的替身。"""
+
+    def __init__(self, lists, cards_by_list=None):
+        super().__init__(lists, cards_by_list or {})
+        self.created_lists: list[dict] = []
+
+    def create_list(self, board_id, name):
+        self.created_lists.append({"idBoard": board_id, "name": name})
+        return {"id": f"new-{name}", "name": name, "idBoard": board_id}
+
+
+class TestFindOrCreateList:
+    """回归：create_list 必须以 (board_id, name) 传参。
+
+    历史 bug：client.create_list 签名为 (name, board_id)，而 service 按
+    (board_id, name) 位置传参，导致 POST /lists 的 name/idBoard 互换，
+    Trello 返回 400 invalid value for idBoard，done 归档链路整体失败。
+    """
+
+    def test_create_with_board_first(self):
+        svc = _make_service()
+        client = RecordingClient(lists=[{"id": "l1", "name": "TODO", "idBoard": "board1"}])
+        svc._client = client
+        lst = svc._find_or_create_list("DONE-202609")
+        assert lst.id == "new-DONE-202609"
+        assert client.created_lists == [{"idBoard": "board1", "name": "DONE-202609"}]
+
+    def test_existing_list_not_recreated(self):
+        svc = _make_service()
+        client = RecordingClient(lists=[{"id": "l1", "name": "TODO", "idBoard": "board1"}])
+        svc._client = client
+        lst = svc._find_or_create_list("TODO")
+        assert lst.id == "l1"
+        assert client.created_lists == []

@@ -1,3 +1,11 @@
+## v3.33.2 (2026-09-08)
+
+**Trello `create_list` 参数顺序 bug 修复 — done 归档建列表 name/idBoard 互换致 400**（2 文件；`test_trello_service.py` 回归 +2）。`TrelloClient.create_list` 签名原为 `(name, board_id)`，而 `TrelloService._find_or_create_list` 按 `(board_id, name)` 位置传参——POST /lists 时 `name` 与 `idBoard` 互换，Trello 返回 400 invalid value for idBoard，卡片 done 归档的建列表链路整体失败。
+
+- **签名对齐**：`create_list(self, name, board_id)` → `create_list(self, board_id, name)`，与调用方位置传参对齐；`self.post("/lists", name=name, idBoard=board_id)` 内部不变，语义归位。
+- **回归**：新增 `TestFindOrCreateList`（`RecordingClient` 记录 create 调用参数）：`test_create_with_board_first` 断言以 `(board_id, name)` 传参、`test_existing_list_not_recreated` 断言已有列表不复建。
+- 验证：ruff 零告警；trello 相关 28 项通过；全量 pytest 3,313→**3,315**（unit 2,223→**2,225** / integration 1,090，2m54s）。协议版本 3.22（不变，命令集未变）；app 配置版本 3.7（不变）；产品版本 3.33.1→**3.33.2**。
+
 ## v3.33.1 (2026-09-07)
 
 **Trello 客户端网络加固 — urllib 失败指数重试 + curl 兜底 + DNS 负缓存**（3 文件；`test_trello_client_pure.py` 回归 +1、新增 `test_trello_client_request.py` 107 行，净 +5 unit）。`TrelloClient` 走 IP 直连 + 自定义 SNI，网络层（URLError/OSError/socket/ssl）失败即抛 `TrelloClientError` 且不重试——本机间歇性网络下一次抖动就整体失败。

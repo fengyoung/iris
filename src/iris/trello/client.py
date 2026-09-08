@@ -171,7 +171,7 @@ class TrelloClient:
                 return lst
         return None
 
-    def create_list(self, name: str, board_id: str) -> Dict[str, Any]:
+    def create_list(self, board_id: str, name: str) -> Dict[str, Any]:
         return self.post("/lists", name=name, idBoard=board_id)
 
     def list_cards(self, list_id: str) -> List[Dict[str, Any]]:
