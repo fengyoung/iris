@@ -473,10 +473,76 @@ def lint_wiki(wiki_root: Path, data_root: Optional[Path] = None) -> Dict[str, An
     }
 
 
-def fix_wiki(wiki_root: Path) -> Dict[str, Any]:
-    """自动修复 Wiki 常见问题。"""
+def _should_skip_wiki_file(md_file: Path) -> bool:
+    """判断是否跳过该 Wiki 文件（索引/changelog/备份）。"""
+    return md_file.name in ("index.md", "changelog.md") or ".bak." in md_file.name
+
+
+def _fix_frontmatter(text: str) -> tuple[str, bool]:
+    """修复缺少结束 --- 的 frontmatter。
+
+    Returns:
+        (fixed_text, was_fixed)
+    """
+    if not text.startswith("---"):
+        return text, False
+
+    first_close = text.find("\n---\n", 1)
+    if first_close != -1:
+        return text, False
+
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if i > 0 and line.startswith("#") and not line.startswith("---"):
+            lines.insert(i, "---")
+            return "\n".join(lines), True
+    return text, False
+
+
+def _fix_status_draft(text: str) -> tuple[str, bool]:
+    """修复 status: draft → status: review。
+
+    Returns:
+        (fixed_text, was_fixed)
+    """
+    original = text
+    text = text.replace("\nstatus: draft\n", "\nstatus: review\n")
+    text = text.replace("\nstatus: 'draft'\n", "\nstatus: review\n")
+    return text, text != original
+
+
+def _fix_title_suffix(text: str) -> tuple[str, bool]:
+    """修复 title 被 LLM 改写成 "XX - 个人 Wiki" 格式。
+
+    Returns:
+        (fixed_text, was_fixed)
+    """
     import re as _re
 
+    title_fix = _re.sub(
+        r'^title:\s*["\']?(.+?)\s*[-–—]\s*(?:个人\s*Wiki|Wiki\s*页面)["\']?\s*$',
+        lambda m: f"title: {m.group(1).strip()}",
+        text,
+        flags=_re.MULTILINE,
+    )
+    return title_fix, title_fix != text
+
+
+def _clean_noise_wikilinks(text: str) -> tuple[str, bool]:
+    """清理超短噪音链接 [[.]]、[[#]]、[[---]] 等。
+
+    Returns:
+        (cleaned_text, was_cleaned)
+    """
+    import re as _re
+
+    cleaned = NOISE_WIKILINK_PATTERN.sub("", text)
+    cleaned = _re.sub(r"\[\[\]\]", "", cleaned)
+    return cleaned, cleaned != text
+
+
+def fix_wiki(wiki_root: Path) -> Dict[str, Any]:
+    """自动修复 Wiki 常见问题。"""
     if not wiki_root.exists():
         return {"error": "Wiki 根目录不存在", "actions": 0}
 
@@ -487,57 +553,47 @@ def fix_wiki(wiki_root: Path) -> Dict[str, Any]:
         "noise_links_cleaned": [],
     }
 
+    # 第一轮：修复所有问题
     for md_file in sorted(wiki_root.rglob("*.md")):
-        if md_file.name in ("index.md", "changelog.md") or ".bak." in md_file.name:
+        if _should_skip_wiki_file(md_file):
             continue
+
         text = md_file.read_text(encoding="utf-8")
+        modified = False
 
         # 修复缺少结束 --- 的 frontmatter
-        if text.startswith("---"):
-            first_close = text.find("\n---\n", 1)
-            text.find("\n---\n", first_close + 1) if first_close != -1 else -1
-            if first_close == -1:
-                lines = text.split("\n")
-                for i, line in enumerate(lines):
-                    if i > 0 and line.startswith("#") and not line.startswith("---"):
-                        lines.insert(i, "---")
-                        text = "\n".join(lines)
-                        actions["frontmatter_fixed"].append(md_file.name)
-                        break
+        text, fixed = _fix_frontmatter(text)
+        if fixed:
+            actions["frontmatter_fixed"].append(md_file.name)
+            modified = True
 
         # 修复 draft → review
-        text = text.replace("\nstatus: draft\n", "\nstatus: review\n")
-        text = text.replace("\nstatus: 'draft'\n", "\nstatus: review\n")
+        text, fixed = _fix_status_draft(text)
+        # status 修复稍后第二轮统一检查
 
-        # 修复 title 被 LLM 改写成 "XX - 个人 Wiki" 格式
-        title_fix = _re.sub(
-            r'^title:\s*["\']?(.+?)\s*[-–—]\s*(?:个人\s*Wiki|Wiki\s*页面)["\']?\s*$',
-            lambda m: f"title: {m.group(1).strip()}",
-            text,
-            flags=_re.MULTILINE,
-        )
-        if title_fix != text:
-            text = title_fix
+        # 修复 title 后缀
+        text, fixed = _fix_title_suffix(text)
+        if fixed:
             actions["title_fixed"].append(md_file.name)
+            modified = True
 
-        # 清理超短噪音链接 [[.]]、[[#]]、[[---]] 等（用 NOISE_WIKILINK_PATTERN 避免误删 frontmatter ---)
-        cleaned = NOISE_WIKILINK_PATTERN.sub("", text)
-        # 删除因清理产生的空 [[]]
-        cleaned = _re.sub(r"\[\[\]\]", "", cleaned)
-        if cleaned != text:
-            text = cleaned
+        # 清理噪音链接
+        text, fixed = _clean_noise_wikilinks(text)
+        if fixed:
             actions["noise_links_cleaned"].append(md_file.name)
+            modified = True
 
-        _atomic_write(md_file, text)
+        if modified or fixed:
+            _atomic_write(md_file, text)
 
-    # 检查 status 是否被修复
+    # 第二轮：再次检查 status（确保修复生效）
     for md_file in sorted(wiki_root.rglob("*.md")):
-        if md_file.name in ("index.md", "changelog.md") or ".bak." in md_file.name:
+        if _should_skip_wiki_file(md_file):
             continue
+
         text = md_file.read_text(encoding="utf-8")
         if "\nstatus: draft\n" in text or "\nstatus: 'draft'\n" in text:
-            text = text.replace("\nstatus: draft\n", "\nstatus: review\n")
-            text = text.replace("\nstatus: 'draft'\n", "\nstatus: review\n")
+            text, _ = _fix_status_draft(text)
             _atomic_write(md_file, text)
             if md_file.name not in actions["status_updated"]:
                 actions["status_updated"].append(md_file.name)
