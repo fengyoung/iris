@@ -176,6 +176,35 @@ class RelationExtractor:
 
     # ── 私有实现 ──────────────────────────────────────────────
 
+    def _filter_relevant_entities(self, body: str) -> str:
+        """过滤出页面内容中提到的实体，减少 prompt 长度。
+
+        策略：只保留在页面正文中出现的实体（标题或 id），最多保留 100 个。
+        """
+        body_lower = body.lower()
+        relevant: List[Tuple[str, str]] = []  # (node_id, line)
+
+        for node_id, node in sorted(self._nodes.items()):
+            # 检查标题或 node_id 是否在正文中出现
+            if node.title.lower() in body_lower or node_id.lower() in body_lower:
+                type_name = get_display_name(node.page_type)
+                line = f"{node_id}（{type_name}）: {node.summary[:80] if node.summary else node.title}"
+                relevant.append((node_id, line))
+
+                # 最多保留 100 个实体，避免 prompt 过长
+                if len(relevant) >= 100:
+                    break
+
+        if not relevant:
+            # 如果一个都没匹配到，返回所有实体（但限制数量）
+            lines: List[str] = []
+            for node_id, node in sorted(list(self._nodes.items())[:100]):
+                type_name = get_display_name(node.page_type)
+                lines.append(f"{node_id}（{type_name}）: {node.summary[:80] if node.summary else node.title}")
+            return "\n".join(lines)
+
+        return "\n".join(line for _, line in relevant)
+
     def _extract_page_relations(
         self,
         llm_service: LLMService,
@@ -184,7 +213,10 @@ class RelationExtractor:
         entity_list: str,
     ) -> List["GraphEdge"]:
         """对单个页面调用 LLM 提取关系三元组。"""
-        prompt = _RELATION_EXTRACT_PROMPT.replace("{{entity_list}}", entity_list)
+        # 优化：只传入页面内容中提到的实体，减少 prompt 长度
+        filtered_entities = self._filter_relevant_entities(body)
+
+        prompt = _RELATION_EXTRACT_PROMPT.replace("{{entity_list}}", filtered_entities)
         prompt = prompt.replace("{{page_title}}", node.id)
         prompt = prompt.replace("{{page_type}}", get_display_name(node.page_type))
         body_trimmed = body[:4000] if len(body) > 4000 else body
@@ -200,10 +232,11 @@ class RelationExtractor:
                     "complexity": "standard",
                 },
                 temperature=0,
-                max_tokens=2000,
+                max_tokens=8000,
             )
             edges = self._parse_triples(result.text, node.id)
         except LLMProviderError as exc:
+            # 输出截断（finish_reason=length）也会抛出 LLMProviderError，跳过继续处理下一页
             logger.warning("关系提取失败（LLM 错误）[%s]: %s", node.title, exc)
         except Exception as exc:
             logger.error("关系提取意外失败 [%s]: %s", node.title, exc, exc_info=True)
