@@ -695,18 +695,10 @@ def handle_asr_audit(args, bundle, logger) -> int:
 
 # ── asr-corrector ─────────────────────────────────────────
 
-def handle_asr_corrector(args, bundle, logger) -> int:
-    """启动 ASR 实时校正守护进程。"""
+def _load_asr_profile(profile_name: str, logger) -> dict:
+    """加载 ASR profile 配置。"""
     import json as _json
-    from pathlib import Path as _Path
 
-    from iris.wiki.asr.corrector import AsrCorrector
-    from iris.llm.service import LLMService
-
-    mode = getattr(args, "correct_mode", "full") or "full"
-    profile_name = getattr(args, "profile", "default") or "default"
-
-    # 加载 profile 配置
     profile_config: dict = {}
     profile_path = resolve_data_path("config/asr_profiles.json")
     if profile_path.exists():
@@ -716,65 +708,119 @@ def handle_asr_corrector(args, bundle, logger) -> int:
             profile_config = profiles.get(profile_name, profiles.get("default", {}))
         except Exception as e:
             logger.warning("加载 asr_profiles.json 失败，使用空 profile: %s", e)
+    return profile_config
 
-    # 加载替换词典
-    dict_path = profile_config.get(
-        "replace_dict",
-        str(resolve_data_path("data/asr_replace_dict.json")),
-    )
-    replace_dict: dict = {}
-    if _Path(dict_path).exists():
+
+def _load_asr_replace_dict(dict_path: str, args) -> tuple[dict, str | None]:
+    """加载 ASR 替换词典。
+
+    Returns:
+        (replace_dict, error_message) - 成功时 error_message 为 None
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    if not _Path(dict_path).exists():
+        return {}, f"替换词典不存在: {dict_path}，请先运行 build-asr-prompt --deploy"
+
+    try:
+        with open(dict_path) as f:
+            data = _json.load(f)
+        return data.get("replace_map", {}), None
+    except Exception:
+        return {}, f"替换词典加载失败: {dict_path}"
+
+
+def _init_asr_llm_provider(mode: str, llm_prompt: str, bundle, args):
+    """初始化 LLM Provider（仅 full 模式）。
+
+    Returns:
+        (provider, service, effective_mode) - 失败时降级为 fast 模式
+    """
+    from iris.llm.service import LLMService
+
+    if mode != "full" or not llm_prompt:
+        return None, None, mode
+
+    try:
+        service = LLMService(bundle)
+        provider = service.get_provider()
+        return provider, service, mode
+    except Exception as e:
+        print(f"[warn] LLM Provider 初始化失败: {e}", file=sys.stderr)
+        print("[warn] 将降级为 fast 模式（仅替换词典）", file=sys.stderr)
+        return None, None, "fast"
+
+
+def _configure_asr_corrector(corrector, provider, service, prompt_path: str, dict_path: str):
+    """配置 ASR 校正器（注入 provider、熔断器、路径）。"""
+    from pathlib import Path as _Path
+
+    if provider:
+        corrector.set_provider(provider)
+        # 注入 ASR 独立熔断器：更低阈值（2 次失败即熔断，30s 后半开）
         try:
-            with open(dict_path) as f:
-                data = _json.load(f)
-            replace_dict = data.get("replace_map", {})
+            from iris.llm.provider import _CircuitBreaker as _CB
+            _asr_breaker = _CB(threshold=2, reset_after=30.0)
+            provider.set_circuit_breaker(_asr_breaker)
+            print("[Iris] ASR 熔断器: threshold=2 reset=30s (独立实例)", file=sys.stderr)
         except Exception:
-            _emit_output("asr-corrector", {"error": f"替换词典加载失败: {dict_path}"}, pretty=args.pretty)
-            return 1
-    else:
-        _emit_output("asr-corrector", {"error": f"替换词典不存在: {dict_path}，请先运行 build-asr-prompt --deploy"}, pretty=args.pretty)
+            pass  # 降级：使用 provider 默认的全局熔断器
+
+        # 同时注入 LLMService
+        try:
+            corrector.set_llm_service(service)
+        except Exception:
+            pass  # LLMService 不可用时降级为直接 provider 调用
+
+    if prompt_path:
+        corrector.set_prompt_path(str(_Path(prompt_path)))
+    if dict_path:
+        corrector.set_dict_path(str(_Path(dict_path)))
+
+
+def handle_asr_corrector(args, bundle, logger) -> int:
+    """启动 ASR 实时校正守护进程。"""
+    from pathlib import Path as _Path
+    from iris.wiki.asr.corrector import AsrCorrector
+
+    mode = getattr(args, "correct_mode", "full") or "full"
+    profile_name = getattr(args, "profile", "default") or "default"
+
+    # 阶段 1：加载配置
+    profile_config = _load_asr_profile(profile_name, logger)
+
+    # 阶段 2：加载替换词典
+    dict_path = profile_config.get("replace_dict", str(resolve_data_path("data/asr_replace_dict.json")))
+    replace_dict, error = _load_asr_replace_dict(dict_path, args)
+    if error:
+        _emit_output("asr-corrector", {"error": error}, pretty=args.pretty)
         return 1
 
-    # 加载 LLM Prompt
-    prompt_path = profile_config.get(
-        "llm_prompt",
-        str(resolve_data_path("data/asr_prompt.md")),
-    )
+    # 阶段 3：加载 LLM Prompt
+    prompt_path = profile_config.get("llm_prompt", str(resolve_data_path("data/asr_prompt.md")))
     llm_prompt = ""
     if _Path(prompt_path).exists():
         llm_prompt = _Path(prompt_path).read_text(encoding="utf-8")
 
-    # LLM Provider（仅 full 模式）
-    provider = None
-    if mode == "full" and llm_prompt:
-        try:
-            service = LLMService(bundle)
-            provider = service.get_provider()
-        except Exception as e:
-            print(f"[warn] LLM Provider 初始化失败: {e}", file=sys.stderr)
-            print("[warn] 将降级为 fast 模式（仅替换词典）", file=sys.stderr)
-            mode = "fast"
+    # 阶段 4：初始化 LLM Provider
+    provider, service, mode = _init_asr_llm_provider(mode, llm_prompt, bundle, args)
 
-    # 反馈路径
+    # 阶段 5：提取运行参数
     feedback_path = str(resolve_data_path("data/asr_feedback.jsonl"))
-
-    # 近期上下文配置
     context_window_size = profile_config.get("context_window_size", 5)
     context_expire_minutes = profile_config.get("context_expire_minutes", 10)
     context_ab = getattr(args, "context_ab", False)
 
-    # LLM 降级链总超时（从 profile 读取，默认 8000ms）
     _llm_profile = profile_config.get("llm", {}) if isinstance(profile_config, dict) else {}
     llm_timeout_ms = _llm_profile.get("timeout_ms", 8000) if isinstance(_llm_profile, dict) else 8000
 
-    # ASR 文本长度上限（优先级：CLI 参数 > profile > 默认 500），
-    # 覆盖长语音场景（corrector 与 meeting-live-assistant 对齐可放宽）
     max_asr_length = getattr(args, "max_asr_length", None)
     if max_asr_length is None:
         max_asr_length = profile_config.get("max_asr_length", 500)
     max_asr_length = int(max_asr_length)
 
-    # 启动校正引擎
+    # 阶段 6：创建并配置校正引擎
     corrector = AsrCorrector(
         replace_dict=replace_dict,
         llm_prompt=llm_prompt,
@@ -787,29 +833,9 @@ def handle_asr_corrector(args, bundle, logger) -> int:
         max_asr_length=max_asr_length,
     )
 
-    if provider:
-        corrector.set_provider(provider)
-        # 注入 ASR 独立熔断器：更低阈值（2 次失败即熔断，30s 后半开）
-        # 实时场景不能容忍像批量任务那样连试 5 次才熔断
-        try:
-            from iris.llm.provider import _CircuitBreaker as _CB
-            _asr_breaker = _CB(threshold=2, reset_after=30.0)
-            provider.set_circuit_breaker(_asr_breaker)
-            print("[Iris] ASR 熔断器: threshold=2 reset=30s (独立实例)",
-                  file=sys.stderr)
-        except Exception:
-            pass  # 降级：使用 provider 默认的全局熔断器
-        # 同时注入 LLMService（推荐路径：享受缓存、熔断器）
-        try:
-            corrector.set_llm_service(service)
-        except Exception:
-            pass  # LLMService 不可用时降级为直接 provider 调用
+    _configure_asr_corrector(corrector, provider, service, prompt_path, dict_path)
 
-    if prompt_path:
-        corrector.set_prompt_path(str(_Path(prompt_path)))
-    if dict_path:
-        corrector.set_dict_path(str(_Path(dict_path)))
-
+    # 阶段 7：启动
     corrector.run_forever()
     return 0
 

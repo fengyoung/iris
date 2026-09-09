@@ -207,76 +207,115 @@ class LocalRetriever:
             return False
 
 
-def _score_chunk(query: str, query_tokens: List[str], chunk: ChunkRecord,
-                 *, total_docs: int = 0, avg_doc_len: float = 0.0,
-                 df: Dict[str, int] | None = None,
-                 query_plan: QueryPlan | None = None,
-                 bm25_k1: float = _BM25_K1, bm25_b: float = _BM25_B) -> Tuple[float, List[str]]:
-    title_lower = chunk.title.lower()
-    section_lower = " ".join(chunk.section_path).lower()
-    query_lower = query.lower().strip()
+def _adjust_weights_by_query_plan(query_plan: QueryPlan | None) -> tuple[float, float, float, float]:
+    """根据 query_plan 调整标题和章节权重。
 
-    if not query_lower:
-        return 0.0, []
-
-    # ── query_plan 权重调整 ──
+    Returns:
+        (title_bonus, title_token_bonus, section_bonus, section_token_bonus)
+    """
     title_bonus = 5.0
     title_token_bonus = 3.0
     section_bonus = 3.0
     section_token_bonus = 2.0
-    if query_plan is not None:
-        # 高优先级 focus_areas 提升标题权重
-        # 注意：当前 LLMQueryPlanner.enhance() 为占位实现，answer_focus 始终为空，
-        # 此分支待 LLM 增强启用后生效。
-        focus_mult = 1.0 + 0.5 * len([a for a in query_plan.answer_focus if a == "high"])
-        title_bonus *= focus_mult
-        title_token_bonus *= focus_mult
-        # entity_weights 如果指定了特定实体权重，额外加分
-        entity_mult = 1.0
-        if query_plan.entities:
-            entity_mult = 1.0 + 0.2 * len(query_plan.entities)
-            section_bonus *= entity_mult
-            section_token_bonus *= entity_mult
 
+    if query_plan is None:
+        return title_bonus, title_token_bonus, section_bonus, section_token_bonus
+
+    # 高优先级 focus_areas 提升标题权重
+    focus_mult = 1.0 + 0.5 * len([a for a in query_plan.answer_focus if a == "high"])
+    title_bonus *= focus_mult
+    title_token_bonus *= focus_mult
+
+    # entity_weights 如果指定了特定实体权重，额外加分
+    if query_plan.entities:
+        entity_mult = 1.0 + 0.2 * len(query_plan.entities)
+        section_bonus *= entity_mult
+        section_token_bonus *= entity_mult
+
+    return title_bonus, title_token_bonus, section_bonus, section_token_bonus
+
+
+def _calculate_title_section_score(
+    query_lower: str,
+    query_tokens: List[str],
+    title_lower: str,
+    section_lower: str,
+    title_bonus: float,
+    title_token_bonus: float,
+    section_bonus: float,
+    section_token_bonus: float,
+) -> tuple[float, List[str]]:
+    """计算标题和章节匹配得分。
+
+    Returns:
+        (score, matched_tokens)
+    """
     score = 0.0
     matched: List[str] = []
 
+    # 标题完整匹配
     if query_lower in title_lower:
         score += title_bonus
+
+    # 标题 token 匹配
     for token in query_tokens:
         if token in title_lower:
             score += title_token_bonus
             if token not in matched:
                 matched.append(token)
 
+    # 章节完整匹配
     if query_lower in section_lower:
         score += section_bonus
+
+    # 章节 token 匹配
     for token in query_tokens:
         if token in section_lower:
             score += section_token_bonus
             if token not in matched:
                 matched.append(token)
 
-    # 优先使用预计算的 token_freq（chunking 阶段已构建），避免每次搜索重新分词
+    return score, matched
+
+
+def _calculate_bm25_score(
+    query_tokens: List[str],
+    chunk: ChunkRecord,
+    total_docs: int,
+    avg_doc_len: float,
+    df: Dict[str, int] | None,
+    bm25_k1: float,
+    bm25_b: float,
+) -> tuple[float, List[str]]:
+    """计算 BM25 得分。
+
+    Returns:
+        (bm25_score, matched_tokens)
+    """
+    # 优先使用预计算的 token_freq
     if chunk.token_freq:
         freq = chunk.token_freq
         doc_len = sum(freq.values())
     else:
-        # 回退：兼容旧 chunk 数据（token_freq 为 None 或空 dict）
+        # 回退：兼容旧 chunk 数据
         content_tokens = tokenize(chunk.content)
         freq = defaultdict(int)
         for token in content_tokens:
             freq[token] += 1
         doc_len = len(content_tokens)
+
     N = max(total_docs, 1)
     avgdl = avg_doc_len if avg_doc_len > 0 else max(doc_len, 50)
     df_map = df if df is not None else {}
+
+    score = 0.0
+    matched: List[str] = []
 
     for qt in query_tokens:
         tf = freq.get(qt, 0)
         if tf > 0:
             dft = df_map.get(qt, _BM25_OOV_DF)
-            # 对未登录词使用平缓 IDF（等价于出现在 0 个文档中）
+            # 对未登录词使用平缓 IDF
             idf = math.log((N - dft + 0.5) / (max(dft, 1) + 0.5) + 1.0)
             norm = 1 - bm25_b + bm25_b * doc_len / avgdl
             bm25 = idf * (tf * (bm25_k1 + 1)) / (tf + bm25_k1 * norm)
@@ -284,7 +323,42 @@ def _score_chunk(query: str, query_tokens: List[str], chunk: ChunkRecord,
             if qt not in matched:
                 matched.append(qt)
 
-    return score, matched[:6]
+    return score, matched
+
+
+def _score_chunk(query: str, query_tokens: List[str], chunk: ChunkRecord,
+                 *, total_docs: int = 0, avg_doc_len: float = 0.0,
+                 df: Dict[str, int] | None = None,
+                 query_plan: QueryPlan | None = None,
+                 bm25_k1: float = _BM25_K1, bm25_b: float = _BM25_B) -> Tuple[float, List[str]]:
+    """对单个 chunk 进行评分（标题/章节匹配 + BM25）。"""
+    title_lower = chunk.title.lower()
+    section_lower = " ".join(chunk.section_path).lower()
+    query_lower = query.lower().strip()
+
+    if not query_lower:
+        return 0.0, []
+
+    # 阶段 1：根据 query_plan 调整权重
+    title_bonus, title_token_bonus, section_bonus, section_token_bonus = \
+        _adjust_weights_by_query_plan(query_plan)
+
+    # 阶段 2：计算标题和章节得分
+    title_section_score, matched_title_section = _calculate_title_section_score(
+        query_lower, query_tokens, title_lower, section_lower,
+        title_bonus, title_token_bonus, section_bonus, section_token_bonus
+    )
+
+    # 阶段 3：计算 BM25 得分
+    bm25_score, matched_bm25 = _calculate_bm25_score(
+        query_tokens, chunk, total_docs, avg_doc_len, df, bm25_k1, bm25_b
+    )
+
+    # 合并得分和匹配词
+    total_score = title_section_score + bm25_score
+    all_matched = matched_title_section + [t for t in matched_bm25 if t not in matched_title_section]
+
+    return total_score, all_matched[:6]
 
 
 def _chunk_to_hit(chunk: ChunkRecord, matched_terms: List[str], explanation: str) -> RetrievalHit:
