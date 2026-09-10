@@ -542,7 +542,6 @@ class TestTaskReporterDataRoot:
     """
 
     def test_data_root_equals_pid_dir(self, tmp_path):
-        assistant = _make_assistant(tmp_path)
         captured = {}
 
         class _CapturingReporter:
@@ -558,11 +557,17 @@ class TestTaskReporterDataRoot:
             def report_phase(self, *a, **kw):
                 pass
 
-        with patch("iris.core.locks.ProcessRegistry") as mock_registry, \
-             patch("iris.taskpanel.reporter.TaskReporter", _CapturingReporter), \
-             patch.object(assistant, "_audio_loop", side_effect=KeyboardInterrupt):
+        # 本例只验证 TaskReporter 的 data_root 传递，不能因本机是否安装
+        # FunASR 或是否已缓存模型而触发真实模型加载/网络访问。
+        with patch("iris.assistant.live._load_assistant_data", return_value=({}, "")), \
+             patch("iris.assistant.live.ASREngine", autospec=True), \
+             patch("iris.assistant.live.AudioCapture", autospec=True), \
+             patch("iris.core.locks.ProcessRegistry") as mock_registry, \
+             patch("iris.taskpanel.reporter.TaskReporter", _CapturingReporter):
+            assistant = _make_assistant(tmp_path)
             mock_registry.return_value = MagicMock()
-            assistant.run()
+            with patch.object(assistant, "_audio_loop", side_effect=KeyboardInterrupt):
+                assistant.run()
 
         assert captured["data_root"] == assistant._pid_dir, \
             "data_root 必须是 pid 目录本身（即 data 目录），不是它的父目录（回归核心断言）"

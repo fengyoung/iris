@@ -1,6 +1,6 @@
 [project]
 name = "iris"
-version = "3.34.2"
+version = "3.35.0"
 description = "工作知识助手 — 个人知识库与飞书团队知识库集成"
 requires-python = ">=3.11"
 license = {text = "MIT"}
@@ -111,7 +111,7 @@ max-complexity = 20
 # v3.34.0：严格类型检查纳入 CI；动态/平台专属模块通过显式兼容边界隔离。
 python_version = "3.11"
 ignore_missing_imports = true
-check_untyped_defs = false
+check_untyped_defs = true
 # 可选依赖（networkx/httpx）有无 stubs 会改变 ignore 是否"多余"，不开 warn_unused_ignores 以免基线随环境漂移
 warn_unused_ignores = false
 show_error_codes = true

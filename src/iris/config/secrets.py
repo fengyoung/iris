@@ -14,6 +14,8 @@ CLI 命令：
 from __future__ import annotations
 
 import subprocess
+import sys
+from ctypes import CDLL, POINTER, c_char_p, c_uint32, c_void_p, byref
 from typing import List, Optional
 
 from iris.core.exceptions import IrisRuntimeError
@@ -24,6 +26,56 @@ KEYCHAIN_SERVICE = "com.iris.assistant"
 
 class KeychainError(IrisRuntimeError):
     """密钥链操作相关错误。"""
+
+
+def _set_secret_native(key: str, value: str) -> bool:
+    """通过 Security.framework 写入密钥，避免 secret 出现在 argv。
+
+    返回 True 表示已在 macOS 原生路径处理；非 macOS 返回 False。
+    """
+    if sys.platform != "darwin":
+        return False
+    try:
+        security = CDLL("/System/Library/Frameworks/Security.framework/Security")
+        add = security.SecKeychainAddGenericPassword
+        add.restype = c_uint32
+        add.argtypes = [c_void_p, c_uint32, c_char_p, c_uint32, c_char_p,
+                        c_uint32, c_char_p, POINTER(c_void_p)]
+        service = KEYCHAIN_SERVICE.encode()
+        account = key.encode()
+        secret = value.encode()
+        item = c_void_p()
+        status = add(None, len(service), service, len(account), account,
+                     len(secret), secret, byref(item))
+        if status == 0:
+            return True
+
+        # 已存在时只修改密码内容，避免先删除再添加造成短暂丢失。
+        find = security.SecKeychainFindGenericPassword
+        find.restype = c_uint32
+        find.argtypes = [c_void_p, c_uint32, c_char_p, c_uint32, c_char_p,
+                         POINTER(c_uint32), POINTER(c_void_p), POINTER(c_void_p)]
+        password_len = c_uint32()
+        password_data = c_void_p()
+        existing = c_void_p()
+        status = find(None, len(service), service, len(account), account,
+                      byref(password_len), byref(password_data), byref(existing))
+        if status != 0 or not existing:
+            raise KeychainError(f"写入 Keychain 失败 (OSStatus={status})")
+        modify = security.SecKeychainItemModifyContent
+        modify.restype = c_uint32
+        modify.argtypes = [c_void_p, c_void_p, c_uint32, c_char_p]
+        status = modify(existing, None, len(secret), secret)
+        free_content = security.SecKeychainItemFreeContent
+        free_content.argtypes = [c_void_p, c_void_p]
+        free_content(None, password_data)
+        if status != 0:
+            raise KeychainError(f"写入 Keychain 失败 (OSStatus={status})")
+        return True
+    except KeychainError:
+        raise
+    except (OSError, AttributeError) as exc:
+        raise KeychainError(f"macOS Security.framework 不可用: {exc}") from exc
 
 
 def get_secret(key: str) -> Optional[str]:
@@ -64,6 +116,8 @@ def set_secret(key: str, value: str) -> None:
     Raises:
         KeychainError: 写入失败
     """
+    if _set_secret_native(key, value):
+        return
     try:
         # -U 允许覆盖已有条目，无需先删后加（避免删除成功但写入失败导致数据丢失）
         result = subprocess.run(

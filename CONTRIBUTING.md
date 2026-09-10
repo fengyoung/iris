@@ -52,7 +52,7 @@ pip install -e ".[dev]" -c constraints.txt
 pre-commit install
 
 # 快速命令（Makefile）
-make test            # 运行全部测试（3,317 用例）
+make test            # 运行全部测试（3,326 用例）
 make test-unit       # 纯逻辑单元测试（0.5s 快速反馈）
 make test-integration # 集成测试
 make test-cov        # 运行测试 + 覆盖率报告
@@ -60,6 +60,8 @@ make lint            # Ruff 代码检查
 make lint-fix        # Ruff 自动修复
 make format          # 代码格式化
 make audit           # 依赖安全审计
+python scripts/security_scan.py  # AST 安全静态扫描
+python scripts/generate_sbom.py --output dist/iris.spdx.json  # 生成 SPDX SBOM
 make typecheck       # 严格 mypy 类型检查（CI 门禁）
 make clean           # 清理缓存
 
@@ -81,12 +83,13 @@ python -m pytest tests/ -q --cov=iris --cov-report=term
 1. 更新 `pyproject.toml` 中的 `version` 字段
 2. 更新 `src/iris/__init__.py` 中的 `__version__`（仅在 CLI 命令集变更时）
 3. 更新 `CHANGELOG.md`，记录本版本的全部变更
-4. 提交变更：`git commit -m "chore: 升级产品版本 X.Y.Z → X.Y.Z+1"`
+4. 完成安全扫描和 SPDX SBOM 生成，并确认分层覆盖率在合并后通过全局与关键模块门禁
+5. 提交变更：`git commit -m "chore: 升级产品版本 X.Y.Z → X.Y.Z+1"`
 
 涉及持久化或并发逻辑时，同时检查 [工程可靠性设计](docs/engineering-reliability-design.md) 中的锁、原子发布和资源生命周期约定。
-5. 打 tag：`git tag -a vX.Y.Z+1 -m "Iris X.Y.Z+1"`
-6. 推送 tag：`git push origin vX.Y.Z+1`
-7. 在 GitHub Releases 页面基于 tag 创建 Release
+6. 打 tag：`git tag -a vX.Y.Z+1 -m "Iris X.Y.Z+1"`
+7. 推送 tag：`git push origin vX.Y.Z+1`
+8. 在 GitHub Releases 页面基于 tag 创建 Release
 
 > 注意：打 tag 前确保所有 CI 检查通过（`make all`）。
 

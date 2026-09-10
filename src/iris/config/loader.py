@@ -341,14 +341,14 @@ def load_config_bundle(
             meeting_routes=meeting_routes_config,
             feishu_ingest_dict=feishu_ingest_config,
         )
-    except Exception as exc:
-        if isinstance(exc, ValidationError):
-            # 格式化 Pydantic 字段级错误为可读形式
-            errors = "; ".join(
-                f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}"
-                for e in exc.errors()
-            )
-            raise ConfigError(f"配置校验失败: {errors}") from exc
+    except ValidationError as exc:
+        # 格式化 Pydantic 字段级错误为可读形式
+        errors = "; ".join(
+            f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}"
+            for e in exc.errors()
+        )
+        raise ConfigError(f"配置校验失败: {errors}") from exc
+    except (TypeError, ValueError, KeyError) as exc:
         raise ConfigError(f"配置加载异常: {exc}") from exc
 
 

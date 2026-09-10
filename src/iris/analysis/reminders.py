@@ -80,7 +80,7 @@ class ReminderEngine:
 
     def __init__(self, config):
         self._config = config
-        raw = {}
+        raw: dict[str, Any] = {}
         try:
             raw = (config.app or {}).get("reminders", {}) or {}
         except Exception:

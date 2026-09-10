@@ -1,6 +1,6 @@
 # Iris 工程可靠性使用指南
 
-> 适用版本：Iris 3.28.1+
+> 适用版本：Iris 3.35.0+
 
 ## 环境基线
 
@@ -20,6 +20,12 @@ iris workspace current
 `workspace current` 应返回该目录；`workspace list` 可查看已发现的工作空间。
 
 ## 配置迁移
+
+### 升级到 v3.35.0
+
+本版本无配置 schema 迁移。飞书文档中的远程图片会执行 HTTPS、DNS 公网地址、MIME 和 20 MiB 大小校验；不符合条件的图片会保留原 Markdown 引用并记录调试日志，不会阻断文档转换。若自定义 `feishu_ingest.pic_dir`，请确保它位于 `safety.allowed_write_paths` 内；默认 SOURCE 同级 `Pic/` 已纳入守卫范围。
+
+任务面板默认仅记录任务名；如调用方显式传入命令摘要，`--token`、`--secret`、`--password`、`--authorization`、`--api-key` 和 `--prompt` 参数会脱敏并截断，避免在面板历史中保存凭证或正文。
 
 ### 升级到 v3.28.1
 
@@ -75,6 +81,8 @@ make lint
 pytest -q
 git diff --check
 pip-audit
+python scripts/security_scan.py
+python scripts/generate_sbom.py --output dist/iris.spdx.json
 ```
 
 精确审计项目约束时，应基于 `constraints.txt` 和项目声明判断结果。不要把当前机器全局环境中与 Iris 无关的包漏洞计入项目结论。
@@ -85,6 +93,8 @@ pip-audit
 pytest -q tests/test_file_lock.py tests/test_llm_cache_lru.py \
   tests/test_vector_index.py tests/integration/test_storage.py
 ```
+
+CI 中覆盖率由 unit 与 integration 两阶段合并后统一判定，避免单独运行 unit 时的低覆盖率误报。若在本地复现 CI，可按工作流顺序执行两阶段并在第二阶段生成 JSON 报告后运行 `python scripts/check_coverage_thresholds.py coverage.json`。
 
 ## 故障排查
 

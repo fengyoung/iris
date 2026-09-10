@@ -21,6 +21,7 @@ Iris 项目遵循以下安全实践：
 ### API 密钥管理
 
 - 所有 API 密钥通过环境变量或 macOS Keychain 管理
+- macOS 写入 Keychain 时优先使用 Security.framework 原生 API，避免密钥出现在子进程参数中
 - `.env` 和 `config/*.json` 文件已在 `.gitignore` 中排除
 - 项目提供的 `.example` 文件使用占位符，不含真实凭证
 - 加载 `.env` 时检测到明文 Key/Token 会输出安全提醒，建议迁移到 Keychain
@@ -35,6 +36,7 @@ Iris 项目遵循以下安全实践：
 
 - 数据源和 Wiki 输出路径通过环境变量 `${IRIS_WORK_DOCS_DIR}` 和 `${IRIS_WIKI_ROOT}` 配置
 - 飞书文档图片下载在配置文件指定的目录范围内执行，防止路径逃逸
+- 远程图片仅接受 HTTPS 公网地址；DNS 解析结果会校验并固定连接，拒绝本机、内网、保留地址、非图片响应与超过 20 MiB 的内容
 - 临时文件和中间结果存储在项目 `data/` 目录下（gitignored）
 
 ### LLM 调用安全
@@ -51,8 +53,8 @@ pip list --outdated
 pip-audit  # 如安装
 ```
 
-CI 会在每次构建中执行依赖审计。若漏洞源暂时不可用，发布流程必须在联网环境重新执行，
-不得将“无法连接”视为审计通过。建议同时生成 SBOM（CycloneDX 或 SPDX）并随发布制品归档。
+CI 会在每次构建中执行依赖审计、AST 高风险调用扫描，并生成 SPDX 2.3 SBOM 作为构建制品。若漏洞源暂时不可用，发布流程必须在联网环境重新执行，
+不得将“无法连接”视为审计通过。
 
 ### 日志与诊断数据
 

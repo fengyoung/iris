@@ -1,18 +1,18 @@
-# Iris 3.34.2
+# Iris 3.35.0
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 最新动态
 
-**v3.34.2 (2026-09-09)** - P1/P2 优化完成：
-- ✅ 重构 3 个高复杂度函数（19/19/17 → 流水线架构）
-- ✅ 提取 12 个可复用辅助函数，提升可维护性
-- ✅ 新增异常处理最佳实践文档 `docs/EXCEPTION_HANDLING.md`
-- ✅ 代码质量从 B+ 提升至 A-
+**v3.35.0 (2026-09-10)** - 三阶段工程优化完成：
+- ✅ 飞书远程图片下载增加 HTTPS/公网 IP 固定连接、MIME 与 20 MiB 大小校验，防止 SSRF
+- ✅ Keychain 原生写入不再将密钥放入子进程参数；任务面板默认不记录完整命令参数
+- ✅ PID 注册、锁文件权限和写入守卫进一步加固，CI 增加安全扫描、SPDX SBOM 与关键模块覆盖率门禁
+- ✅ 测试隔离可选 ASR/系统命令边界，分层覆盖率在合并后统一判定
 
-**项目规模**：~41,869 行代码 / 185 文件 / 27 模块 / 3,317 测试用例 / 68% 覆盖率
+**项目规模**：~41,900 行代码 / 185 文件 / 27 模块 / 3,326 测试用例 / 68% 覆盖率
 
-详见 [CHANGELOG.md](CHANGELOG.md) 和 [优化报告](optimization_report_20260909.md)。
+详见 [CHANGELOG.md](CHANGELOG.md)、[本轮工程优化记录](docs/optimization-three-phase-20260910.md) 和 [优化报告](optimization_report_20260909.md)。
 
 ## 开发路线
 
@@ -106,7 +106,7 @@ SOURCE/                     LLM-WIKI/
 - macOS Keychain（可选密钥存储）
 - PyMuPDF / python-docx（PDF/DOCX 处理）
 - ffmpeg（视频抽帧/抽音轨，视频处理必需）+ openai-whisper（音轨转写，可选）
-- 3,317 个测试用例（pytest 全量），覆盖率约 68%；Ruff 与严格 mypy 门禁通过
+- 3,326 个测试用例（pytest 全量），覆盖率约 68%；Ruff、严格 mypy、AST 安全扫描与 SPDX SBOM 门禁通过
 
 ## 开发环境
 
@@ -162,7 +162,7 @@ iris3/
 │       └── asr/         #   ASR 提示词子系统（术语提取/热词/Prompt优化/版本管理）
 ├── scripts/            # CLI 入口 + 委托脚本
 ├── templates/          # Prompt / Wiki 模板
-├── tests/              # 3,317 用例
+├── tests/              # 3,326 用例
 │   ├── unit/           #   纯逻辑单元测试（1,580 用例）
 │   └── integration/    #   集成测试（245 用例）
 ├── config/             # *.json gitignored，*.example 版本控制

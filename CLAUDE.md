@@ -1,4 +1,4 @@
-# Iris 3.34.2 — 项目执行说明
+# Iris 3.35.0 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 逐版变更记录与版本历史统一归档于 [CHANGELOG.md](CHANGELOG.md)；本文件只承载现行架构 / 配置 / 约定。
@@ -7,11 +7,11 @@
 
 ## 项目概览
 
-**当前规模**：~41,863 行 / 185 个源码文件 / 27 模块 · CLI 68 命令 · 测试 3,317（pytest 全量）· 覆盖率约 68%（`fail_under` 65）· Ruff 与严格 mypy 门禁通过（动态/平台专属模块设显式兼容边界）· 10 个项目级 Skill · Wiki 238 页 · 知识图谱节点 238 / 关系边 2,724（wikilink 1,115 + LLM 1,609）· 数据源 900+ 文档 / 6,771 Chunk（text-embedding-v3 / 1,024 维）
+**当前规模**：~41,900 行 / 185 个源码文件 / 27 模块 · CLI 68 命令 · 测试 3,326（pytest 全量）· 覆盖率约 68%（`fail_under` 65）· Ruff、严格 mypy、AST 安全扫描与 SPDX SBOM 门禁通过（动态/平台专属模块设显式兼容边界）· 10 个项目级 Skill · Wiki 238 页 · 知识图谱节点 238 / 关系边 2,724（wikilink 1,115 + LLM 1,609）· 数据源 900+ 文档 / 6,771 Chunk（text-embedding-v3 / 1,024 维）
 
-本版本完成 P1/P2 代码质量优化：重构 3 个高复杂度函数（19/19/17 → 流水线架构）、提取 12 个可复用辅助函数、新增异常处理最佳实践文档。
+本版本完成三阶段工程优化：飞书远程图片下载 SSRF 防护与受控原子写、Keychain 原生写入与任务命令脱敏、锁/PID 并发加固，以及 SBOM、AST 扫描与关键模块覆盖率 CI 门禁。
 
-**近期新增能力**：P1/P2 优化（复杂度重构 + 异常处理文档化，v3.34.2）· 知识图谱 LLM 关系提取修复（智能实体过滤 + max_tokens 8000，v3.34.1）· 三阶段质量优化（F401/C901 门禁、`IrisError` 统一异常体系、mypy 基线、corrector/live 模块拆分）· 工程可靠性治理（SQLite 生命周期、稳定 inode 文件锁、统一原子写、向量索引 generation 发布、跨进程 LLM 缓存治理）· 任务面板 `taskpanel/`（Web 只读 + TaskReporter 埋点 + 探测兜底 + 常驻守护）· 实时会议助理 `assistant/`（逐段提炼要点/风险/决策点 + 实时提示提问 + 过程文档）· YAML frontmatter 标准化注入（`core/frontmatter.py`）+ 批量补全（`frontmatter_batch.py`，正则+LLM+备份恢复）· wikilink 自动注入引擎（零 LLM 成本）· LLM 用量追踪（SQLite WAL + embedding 纳入）· LLM 响应缓存 + embedding 向量缓存（LRU+TTL）· LLM 熔断器（threshold=5 / reset 60s）· 记忆自动更新引擎（双通道）· 多 Agent 并发安全（FileLock + SQLite WAL + Agent 隔离）· ASR 实时校正引擎（Aho-Corasick + LLM 编辑助手 + 反馈反向优化）· CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit · constraints.txt 可复现构建 · sync-memory 双向化（CC↔Iris 记忆互通 + 前向备注噪音治理，daily-start 自动双向，见 `scripts/sync_memory.py`）· `llm-bench`（LLM 通道/模型 连接速度 TTFT + 吞吐基准，字符口径规避中继 usage 虚高，引擎 `llm/benchmark.py`）· 双周报成稿 w35 定稿（总结段「总览 + 每判断点短段」反骨架、关键进展每方向 2-4 条价值门槛、`strategic_insights` 抽取纳入会议纪要、`--as-of` 历史周期复现）· Trello 客户端网络加固（urllib 网络失败指数重试 → curl 兜底传输 + DNS 负缓存 + `create_list` 参数顺序修复）
+**近期新增能力**：三阶段工程优化（SSRF 防护 + Keychain 原生写入 + CI 安全/供应链门禁，v3.35.0）· P1/P2 优化（复杂度重构 + 异常处理文档化，v3.34.2）· 知识图谱 LLM 关系提取修复（智能实体过滤 + max_tokens 8000，v3.34.1）· 三阶段质量优化（F401/C901 门禁、`IrisError` 统一异常体系、mypy 基线、corrector/live 模块拆分）· 工程可靠性治理（SQLite 生命周期、稳定 inode 文件锁、统一原子写、向量索引 generation 发布、跨进程 LLM 缓存治理）· 任务面板 `taskpanel/`（Web 只读 + TaskReporter 埋点 + 探测兜底 + 常驻守护）· 实时会议助理 `assistant/`（逐段提炼要点/风险/决策点 + 实时提示提问 + 过程文档）· YAML frontmatter 标准化注入（`core/frontmatter.py`）+ 批量补全（`frontmatter_batch.py`，正则+LLM+备份恢复）· wikilink 自动注入引擎（零 LLM 成本）· LLM 用量追踪（SQLite WAL + embedding 纳入）· LLM 响应缓存 + embedding 向量缓存（LRU+TTL）· LLM 熔断器（threshold=5 / reset 60s）· 记忆自动更新引擎（双通道）· 多 Agent 并发安全（FileLock + SQLite WAL + Agent 隔离）· ASR 实时校正引擎（Aho-Corasick + LLM 编辑助手 + 反馈反向优化）· CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit · constraints.txt 可复现构建 · sync-memory 双向化（CC↔Iris 记忆互通 + 前向备注噪音治理，daily-start 自动双向，见 `scripts/sync_memory.py`）· `llm-bench`（LLM 通道/模型 连接速度 TTFT + 吞吐基准，字符口径规避中继 usage 虚高，引擎 `llm/benchmark.py`）· 双周报成稿 w35 定稿（总结段「总览 + 每判断点短段」反骨架、关键进展每方向 2-4 条价值门槛、`strategic_insights` 抽取纳入会议纪要、`--as-of` 历史周期复现）· Trello 客户端网络加固（urllib 网络失败指数重试 → curl 兜底传输 + DNS 负缓存 + `create_list` 参数顺序修复）
 
 **关键路径**：
 
@@ -127,7 +127,7 @@ iris3/
 ├── src/iris/          # 27 模块（见下）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
-├── tests/             # 3,317 用例（pytest 全量，conftest 自动打标记）
+├── tests/             # 3,326 用例（pytest 全量，conftest 自动打标记）
 ├── config/            # *.json gitignored，*.example 版本控制
 ├── data/              # 运行时数据（全 gitignore）
 ├── .claude/skills/    # 项目级 Skill（10 个）

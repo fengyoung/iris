@@ -73,7 +73,7 @@ class FileLock:
         """获取锁，阻塞直到成功或超时。"""
         self._lock_path.parent.mkdir(parents=True, exist_ok=True)
 
-        fd = os.open(str(self._lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+        fd = os.open(str(self._lock_path), os.O_CREAT | os.O_RDWR, 0o600)
         self._fd = fd
 
         deadline = time.monotonic() + self._timeout
@@ -81,6 +81,8 @@ class FileLock:
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 # 获取锁成功
+                os.ftruncate(fd, 0)
+                os.lseek(fd, 0, os.SEEK_SET)
                 os.write(fd, str(os.getpid()).encode())
                 return
             except (IOError, OSError):
@@ -129,28 +131,40 @@ class ProcessRegistry:
     def __init__(self, name: str, pid_dir: Path):
         self._name = name
         self._pid_file = pid_dir / f"{name}.pid"
+        self._lock_file = pid_dir / f"{name}.pid.lock"
 
     def register(self) -> bool:
         """注册当前进程。返回 False 表示已有同名进程运行。"""
         self._pid_file.parent.mkdir(parents=True, exist_ok=True)
-        if self._pid_file.exists():
+        lock_fd = os.open(str(self._lock_file), os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            if self._pid_file.exists():
+                try:
+                    stale_pid = int(self._pid_file.read_text().strip())
+                    if self._is_alive(stale_pid):
+                        logger.warning("进程注册失败: %s (PID %d 仍在运行)", self._name, stale_pid)
+                        return False
+                    logger.debug("清理残留 PID 文件: %s (PID %d 已死)", self._name, stale_pid)
+                except (ValueError, OSError):
+                    pass  # 文件损坏，覆盖
+            fd = os.open(str(self._pid_file), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
             try:
-                stale_pid = int(self._pid_file.read_text().strip())
-                if self._is_alive(stale_pid):
-                    logger.warning("进程注册失败: %s (PID %d 仍在运行)", self._name, stale_pid)
-                    return False
-                # PID 文件残留（进程已死），覆盖
-                logger.debug("清理残留 PID 文件: %s (PID %d 已死)", self._name, stale_pid)
-            except (ValueError, OSError):
-                pass  # 文件损坏，覆盖
-        self._pid_file.write_text(str(os.getpid()))
-        logger.info("进程已注册: %s (PID %d)", self._name, os.getpid())
-        return True
+                os.write(fd, str(os.getpid()).encode())
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            logger.info("进程已注册: %s (PID %d)", self._name, os.getpid())
+            return True
+        finally:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            os.close(lock_fd)
 
     def unregister(self) -> None:
         """注销当前进程。"""
         try:
-            self._pid_file.unlink(missing_ok=True)
+            if self._pid_file.exists() and self._pid_file.read_text().strip() == str(os.getpid()):
+                self._pid_file.unlink(missing_ok=True)
             logger.debug("进程已注销: %s", self._name)
         except OSError:
             pass

@@ -200,6 +200,6 @@ class DocExtractor:
         from iris.feishu.doc_convert import FeishuDocConverter
         if self._bundle is not None:
             return FeishuDocConverter(self._bundle)
-        # fallback: 构造最小 bundle
-        from iris.config.loader import ConfigBundle
-        return FeishuDocConverter(ConfigBundle(self._source_dir.parent))
+        # ConfigBundleV2 已要求完整的 app/data_source/llm 配置，不能再
+        # 用旧版的单参数伪构造器静默生成无效对象。
+        raise ValueError("DocExtractor 转换文档需要传入完整 ConfigBundle")

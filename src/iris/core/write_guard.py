@@ -74,7 +74,6 @@ def resolve_allowed_paths(bundle: ConfigBundle) -> List[Path]:
     # 用户配置的知识库和数据源是业务输出目录，必须显式纳入守卫范围。
     # 不能用“文件已存在”作为授权依据，否则任意已有路径都可被覆盖。
     for candidate in (
-        bundle.root / "config",
         bundle.app.get("paths", {}).get("wiki_root"),
         getattr(bundle.wiki, "wiki_root", None),
     ):
@@ -86,6 +85,20 @@ def resolve_allowed_paths(bundle: ConfigBundle) -> List[Path]:
     for cfg in bundle.data_source.get("sources", {}).values():
         if cfg.get("enabled") and cfg.get("path"):
             p = Path(str(cfg["path"]))
+            if not p.is_absolute():
+                p = bundle.root / p
+            resolved.append(p.resolve())
+
+            # 飞书文档图片默认写入 SOURCE 同级 Pic/。该目录属于业务产物，
+            # 也必须经过同一写入守卫，避免图片下载路径绕过白名单。
+            resolved.append((p.resolve().parent / "Pic").resolve())
+
+    # 显式配置的飞书图片目录也纳入白名单。
+    feishu_cfg = getattr(bundle, "feishu_ingest", None)
+    if feishu_cfg:
+        pic_dir = feishu_cfg.get("pic_dir", "")
+        if pic_dir:
+            p = Path(str(pic_dir))
             if not p.is_absolute():
                 p = bundle.root / p
             resolved.append(p.resolve())
@@ -138,11 +151,11 @@ def safe_write_text(
         content: 文本内容
         bundle: 配置对象
         encoding: 文件编码
-        allow_existing_outside: 是否允许写入已存在的、不在允许范围内的文件
-
     Returns:
         写入后的路径
     """
+    # 保留旧参数仅为兼容调用方；它不再提供越权语义。
+    del allow_existing_outside
     target = Path(str(path))
     if is_write_guard_enabled(bundle):
         validate_write_path(target, bundle)
@@ -158,7 +171,11 @@ def safe_write_bytes(
     *,
     allow_existing_outside: bool = False,
 ) -> Path:
-    """安全、原子地写入二进制文件。"""
+    """安全、原子地写入二进制文件。
+
+    ``allow_existing_outside`` 仅为兼容旧调用方保留，永不绕过守卫。
+    """
+    del allow_existing_outside
     target = Path(str(path))
     if is_write_guard_enabled(bundle):
         validate_write_path(target, bundle)

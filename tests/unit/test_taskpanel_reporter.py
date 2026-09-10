@@ -13,6 +13,19 @@ from iris.taskpanel.store import read_current_all, read_history
 
 
 class TestIdentity:
+    def test_command_summary_redacts_sensitive_arguments(self, tmp_path):
+        with TaskReporter(
+            "sync",
+            command="sync --token super-secret --prompt '业务正文'",
+            data_root=tmp_path,
+        ) as reporter:
+            assert "super-secret" not in reporter.task.command
+            assert "业务正文" in reporter.task.command or "[REDACTED]" in reporter.task.command
+
+    def test_command_defaults_to_task_name(self, tmp_path):
+        with TaskReporter("sync", data_root=tmp_path) as reporter:
+            assert reporter.task.command == "sync"
+
     def test_task_id_format(self):
         task_id = generate_task_id("daily-start")
         # 形如 daily-start-20260816-112459-36597（任务名本身含 "-"，从右拆）
