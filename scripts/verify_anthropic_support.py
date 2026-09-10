@@ -23,7 +23,7 @@ def verify_anthropic_support():
     print("\n[1/4] 验证模块导入...")
     try:
         from iris.llm.provider import EnvironmentConfiguredLLMProvider
-        from iris.llm.service import LLMService
+        from iris.llm.service import LLMService  # noqa: F401  # 仅验证可导入性
         print("✅ 模块导入成功")
     except ImportError as e:
         print(f"❌ 模块导入失败: {e}")
@@ -77,7 +77,7 @@ def verify_anthropic_support():
                 print(f"✅ {line.strip()}")
                 break
     else:
-        print(f"❌ 测试失败")
+        print("❌ 测试失败")
         print(result.stdout[-500:] if len(result.stdout) > 500 else result.stdout)
         return False
 

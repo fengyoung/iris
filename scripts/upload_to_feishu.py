@@ -130,7 +130,7 @@ def create_feishu_doc(title: str, content: str) -> str:
         batch_size = 50
         for i in range(0, len(blocks), batch_size):
             batch = blocks[i:i+batch_size]
-            response = client._request(
+            client._request(
                 "POST",
                 f"https://open.feishu.cn/open-apis/docx/v1/documents/{doc_id}/blocks/{doc_id}/children",
                 json={
@@ -140,7 +140,7 @@ def create_feishu_doc(title: str, content: str) -> str:
             )
             print(f"  已上传 {min(i+batch_size, len(blocks))}/{len(blocks)} 个块")
 
-        print(f"\n✓ 文档创建完成！")
+        print("\n✓ 文档创建完成！")
         print(f"  标题: {title}")
         print(f"  URL: {doc_url}")
 

@@ -1,3 +1,9 @@
+## v3.36.0 (2026-09-10) — Anthropic 多模态集成 + 三阶段工程优化
+
+合并 v3.34.3（Anthropic 多模态 API）与 v3.35.0（SSRF 防护 + Keychain 原生写入 + CI 安全门禁）。
+
+- **LLM 多协议支持**：`generate_multimodal` 新增 Anthropic 分支，自动转换 OpenAI 格式 → Anthropic Messages API 格式（`image_url` → `image.source.base64`）；新增 `_call_anthropic_multimodal` 方法（120 行）；新增 `test_anthropic_multimodal.py`（4 用例）；提供 `docs/ANTHROPIC_SETUP.md` 配置指南和 `scripts/verify_anthropic_support.py` 验证脚本。
+
 ## v3.35.0 (2026-09-10) — 三阶段工程优化
 
 - **输入安全**：飞书图片下载增加 SSRF 防护、大小/MIME/重定向校验，并统一走写入守卫与原子写。

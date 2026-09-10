@@ -1,7 +1,6 @@
 """测试 Anthropic 多模态 API 支持。"""
 
 import pytest
-from pathlib import Path
 from unittest.mock import patch
 
 from iris.llm.provider import EnvironmentConfiguredLLMProvider, LLMProviderError

@@ -12,7 +12,7 @@
 import sys
 import time
 from pathlib import Path
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any
 import argparse
 
 # 添加项目根目录到 Python 路径
@@ -51,7 +51,7 @@ class ModelTester:
         }
 
         try:
-            print(f"  测试中... ", end="", flush=True)
+            print("  测试中... ", end="", flush=True)
 
             start_time = time.time()
 
