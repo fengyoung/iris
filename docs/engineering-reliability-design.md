@@ -1,6 +1,6 @@
 # Iris 工程可靠性设计
 
-> 版本：Iris 3.28.1 · 日期：2026-08-26（v3.28.1 增补 2026-08-30）· 状态：已实现
+> 版本：Iris 3.35.0 · 日期：2026-08-26（v3.28.1 基线；v3.35.0 增补 2026-09-10）· 状态：已实现
 
 ## 1. 目标
 
@@ -39,7 +39,13 @@
 
 临时文件必须创建在目标文件同目录，保证 `os.replace` 不跨文件系统。原子发布解决文件撕裂，但不替代 RMW 锁，也不提供多文件事务回滚。
 
-### 2.3 向量索引 generation
+### 2.3 外部资源下载边界（v3.35.0）
+
+飞书文档正文中的图片 URL 是不可信输入。HTTP 图片下载仅允许不含用户信息的 HTTPS 默认端口地址；解析 DNS 后必须拒绝本机、私网、链路本地和保留 IP，并固定连接到已校验地址，同时以原域名进行 TLS SNI 校验，避免 DNS 重绑定。
+
+响应必须同时满足 2xx、`image/*` MIME 和最大 20 MiB 的 `Content-Length`/实际读取大小限制；不跟随重定向。通过校验的数据仍必须经 `validate_write_path()` 和 `safe_write_bytes()` 写入，不能绕开写入守卫或原子发布。
+
+### 2.4 向量索引 generation
 
 每个数据源的向量索引由 `vectors.npy`、`ids.json`、`meta.json` 组成。保存流程为：
 
@@ -54,14 +60,14 @@
 
 读取方先读取 `current.json`，再从指定 generation 加载三个文件。旧版平铺索引仍可读取，用于平滑迁移；新写入只使用 generation 格式。
 
-### 2.4 向量索引增量正确性（v3.28.1）
+### 2.5 向量索引增量正确性（v3.28.1）
 
 generation 机制保证「发布完整性」，但不保证「内容正确性」。v3.28.1 修复增量更新的两个语义洞：
 
 - **按 hash 判定重嵌**：chunk_id（`路径::序号`）不含内容指纹，仅凭 `exists(chunk_id)` 跳过会让编辑过的文档永远使用旧向量。`ids.json` 新增 `doc_hashes` 字段记录每个 chunk 入索引时的 `document_hash`，hash 变化即重嵌；旧索引无该字段时不触发重嵌（避免升级即全量重嵌），由一次 `--force-rebuild` 补齐。
 - **差集清理死向量**：增量更新按「本次全量语料 chunk_id 集合」的差集删除残留向量（已删除/归档文档）。因此 `build_vector_index` 的 `chunks` 参数是**全量语料语义**——调用方必须传入该数据源的完整 chunk 列表，传子集会把缺失部分当已删除清理。
 
-### 2.5 LLM 响应文本提取正确性（v3.28.1）
+### 2.6 LLM 响应文本提取正确性（v3.28.1）
 
 `_extract_chat_completions_text`（`llm/provider.py`）原在 `content` 为空时**静默回退返回 `reasoning_content`**（思考过程）——思考模型（deepseek-v4-flash）max_tokens 耗尽（finish_reason=length）时 content 为空而 reasoning 非空，思考文本被当最终输出返回。下游感知「成功」而把思考写入产物（实测某期双周报 Stage 4b 质量审查 13k 思考字符直接写入归档文件），比显式失败危害更大。
 
@@ -100,6 +106,12 @@ finally:
 
 禁止依赖对象析构或垃圾回收关闭连接。WAL 改善读写并发，但不消除连接和事务的生命周期责任。
 
+### 4.1 PID 注册互斥与文件权限（v3.35.0）
+
+`ProcessRegistry` 使用与 PID 文件独立的 `.pid.lock` 串行化「检查旧 PID → 判活 → 写入新 PID」这一完整临界区；PID 文件以 0600 创建并 `fsync` 后发布。注销时仅在文件内容仍等于当前 PID 时删除，防止旧实例误删后来者的注册文件。
+
+`FileLock` 锁文件也以 0600 创建，成功获得锁后先截断、再写入当前 PID，避免历史残留诊断信息混入。锁文件本身仍必须保留，不能作为临时文件清理。
+
 ## 5. 配置与项目根
 
 写入守卫的规范字段为 `safety.enforce_write_guard`。旧字段 `deny_write_outside_allowed_paths` 继续兼容；两者都缺失时默认启用。关闭守卫只跳过路径限制，写入仍采用原子发布。
@@ -117,6 +129,8 @@ finally:
 - 支持 Python 3.11、3.12、3.13；最低版本为 3.11。
 - CI、Makefile 和 pre-commit 的 Ruff 范围统一为 `src scripts tests`。
 - 开发依赖通过 `constraints.txt` 约束；安全审计使用 `pip-audit`。
+- CI 在构建 wheel 后生成 SPDX 2.3 SBOM 并作为 artifact 归档；AST 扫描阻断 `eval`、`exec`、`pickle` 与 `subprocess(..., shell=True)`。
+- 覆盖率门禁先合并 unit 与 integration 结果，再判定全局阈值与 `core`、配置、飞书转换、任务面板等关键模块下限。
 - 提交前至少执行 `make lint`、`pytest` 和 `git diff --check`。
 
 ## 7. 边界

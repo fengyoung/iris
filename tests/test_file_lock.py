@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from iris.core.locks import FileLock, FileLockError
+from iris.core.locks import FileLock, FileLockError, ProcessRegistry
 
 
 class TestFileLockBasic:
@@ -146,3 +146,19 @@ class TestFileLockDataIntegrity:
         with FileLock(nested):
             pass
         assert nested.parent.exists()
+
+
+class TestProcessRegistry:
+    def test_register_rejects_live_pid_and_cleans_stale_pid(self, tmp_path, monkeypatch):
+        first = ProcessRegistry("worker", tmp_path)
+        second = ProcessRegistry("worker", tmp_path)
+        assert first.register() is True
+        try:
+            assert second.register() is False
+        finally:
+            first.unregister()
+        # 写入一个确认不存在的 PID，验证残留文件可被安全覆盖。
+        (tmp_path / "worker.pid").write_text("999999999")
+        monkeypatch.setattr(second, "_is_alive", lambda _pid: False)
+        assert second.register() is True
+        second.unregister()

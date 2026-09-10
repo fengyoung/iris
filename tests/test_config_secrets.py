@@ -41,14 +41,14 @@ class TestGetSecret:
 class TestSetSecret:
     def test_success(self):
         """成功的密钥写入。"""
-        with patch("subprocess.run") as mock_run:
+        with patch("iris.config.secrets._set_secret_native", return_value=False), patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             set_secret("DEEPSEEK_API_KEY", "new-key")
             mock_run.assert_called_once()
 
     def test_failure_raises(self):
         """写入失败抛出 KeychainError。"""
-        with patch("subprocess.run") as mock_run:
+        with patch("iris.config.secrets._set_secret_native", return_value=False), patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="权限不足")
             with pytest.raises(KeychainError, match="写入 Keychain 失败"):
                 set_secret("DEEPSEEK_API_KEY", "val")
@@ -56,7 +56,7 @@ class TestSetSecret:
     def test_timeout_raises(self):
         """subprocess.TimeoutExpired 抛出 KeychainError。"""
         import subprocess
-        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 10)):
+        with patch("iris.config.secrets._set_secret_native", return_value=False), patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 10)):
             with pytest.raises(KeychainError, match="Keychain 操作超时"):
                 set_secret("ANY_KEY", "val")
 

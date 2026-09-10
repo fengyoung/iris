@@ -26,6 +26,77 @@ class TestGuessImageExt:
         assert result in (".png", ".PNG", ".png")
 
 
+class TestRemoteImageSafety:
+    def test_only_https_public_hosts_allowed(self, monkeypatch):
+        from iris.feishu.doc_convert import _validate_remote_image_url
+
+        monkeypatch.setattr(
+            "iris.feishu.doc_convert.socket.getaddrinfo",
+            lambda *args, **kwargs: [(None, None, None, None, ("93.184.216.34", 443))],
+        )
+        _validate_remote_image_url("https://example.com/image.png")
+
+    def test_rejects_http_and_private_address(self, monkeypatch):
+        import pytest
+        from urllib.error import URLError
+        from iris.feishu.doc_convert import _validate_remote_image_url
+
+        with pytest.raises(URLError):
+            _validate_remote_image_url("http://example.com/image.png")
+        monkeypatch.setattr(
+            "iris.feishu.doc_convert.socket.getaddrinfo",
+            lambda *args, **kwargs: [(None, None, None, None, ("127.0.0.1", 443))],
+        )
+        with pytest.raises(URLError):
+            _validate_remote_image_url("https://example.com/image.png")
+
+    def test_download_uses_limited_atomic_writer(self, config_bundle, tmp_path, monkeypatch):
+        from unittest.mock import MagicMock
+        from iris.feishu.doc_convert import FeishuDocConverter
+
+        converter = FeishuDocConverter.__new__(FeishuDocConverter)
+        converter._bundle = config_bundle
+        target = config_bundle.root / "data" / "download.png"
+        response = MagicMock(status=200)
+        response.getheader.side_effect = lambda name: {
+            "Content-Type": "image/png", "Content-Length": "4",
+        }.get(name)
+        response.read.return_value = b"\x89PNG"
+        conn = MagicMock()
+        conn.getresponse.return_value = response
+        monkeypatch.setattr("iris.feishu.doc_convert._PinnedHTTPSConnection", lambda *args, **kwargs: conn)
+        monkeypatch.setattr(
+            "iris.feishu.doc_convert.socket.getaddrinfo",
+            lambda *args, **kwargs: [(None, None, None, None, ("93.184.216.34", 443))],
+        )
+        converter._download_image_to("https://example.com/image.png", str(target))
+        assert target.read_bytes() == b"\x89PNG"
+        conn.request.assert_called_once_with(
+            "GET", "/image.png", headers={"Host": "example.com", "User-Agent": "Iris/3.2"}
+        )
+        conn.close.assert_called_once()
+
+    def test_download_rejects_missing_content_type(self, config_bundle, monkeypatch):
+        import pytest
+        from unittest.mock import MagicMock
+        from iris.feishu.doc_convert import FeishuDocConverter
+
+        converter = FeishuDocConverter.__new__(FeishuDocConverter)
+        converter._bundle = config_bundle
+        response = MagicMock(status=200)
+        response.getheader.return_value = None
+        conn = MagicMock()
+        conn.getresponse.return_value = response
+        monkeypatch.setattr("iris.feishu.doc_convert._PinnedHTTPSConnection", lambda *args, **kwargs: conn)
+        monkeypatch.setattr(
+            "iris.feishu.doc_convert.socket.getaddrinfo",
+            lambda *args, **kwargs: [(None, None, None, None, ("93.184.216.34", 443))],
+        )
+        with pytest.raises(OSError, match="不是图片"):
+            converter._download_image_to("https://example.com/image.png", str(config_bundle.root / "data" / "x.png"))
+        conn.close.assert_called_once()
+
+
 class TestInsertAfterTitle:
     """_insert_after_title: 在标题后插入元信息块。"""
 

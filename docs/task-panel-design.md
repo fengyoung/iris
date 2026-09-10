@@ -1,6 +1,6 @@
 # iris task-panel — 任务面板 方案设计 v1.0
 
-**日期**：2026-08-16 · **最后校验**：2026-08-26 · **状态**：已实现（v3.27.0）· **当前验证版本**：产品 3.28.1 / 协议 3.21
+**日期**：2026-08-16 · **最后校验**：2026-09-10 · **状态**：已实现（v3.27.0；v3.35.0 安全增补）· **当前验证版本**：产品 3.35.0 / 协议 3.22
 
 ---
 
@@ -70,8 +70,10 @@ running ──正常退出（with __exit__）──▶ success   ─┐
 - **current/**：原子写（mkstemp + os.replace）；**history**：flock 串行追加 + 锁内幂等守卫（current 已删 / history 已含 task_id 则跳过）+ 250 条截断重写留 200
 - **stale 兜底时机**：每次 /api/state 请求顺带执行（面板 2s 轮询即节拍，无独立定时线程）
 
-### 容错红线
+### 容错与数据最小化红线
 TaskReporter 所有磁盘操作失败**静默**（logging.warning）——埋点绝不能破坏 daily-start 等业务命令；`IRIS_TASK_PANEL_DISABLED=1` 全局禁用（测试隔离/逃生通道）。
+
+任务默认只记录固定任务名，不再从 `sys.argv` 自动拼接完整命令。显式命令摘要最多 240 字符，并脱敏 token、密钥、密码、授权头和 prompt 参数；因此面板历史不应被用来保存业务正文或调试凭证。
 
 ---
 
@@ -112,7 +114,7 @@ TaskReporter 所有磁盘操作失败**静默**（logging.warning）——埋点
 | toast | interrupted_now 命中时黄条提示 |
 
 - **轮询**：2s setInterval + visibilitychange 隐藏暂停/恢复立即刷新（省电）
-- **安全**：动态文本全部 textContent（防 XSS）；no-store 缓存头
+- **安全**：动态文本全部 textContent（防 XSS）；响应设置 `Cache-Control: no-store`、`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`
 - **主题**：深色 #0f1115 底 + 语义色（绿/红/黄/青/蓝/紫），呼应 meeting-live-assistant 面板
 
 ---

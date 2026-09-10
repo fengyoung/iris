@@ -13,8 +13,9 @@
 ## 安全与供应链
 
 - [ ] `pip-audit` 成功连接漏洞源且无未豁免高危漏洞
+- [ ] `python scripts/security_scan.py` 通过（无 eval/exec、pickle、shell=True 回归）
 - [ ] 审查依赖升级、许可证与变更日志
-- [ ] 生成并归档 SBOM（CycloneDX 或 SPDX）
+- [ ] `python scripts/generate_sbom.py --output dist/iris.spdx.json` 生成并归档 SPDX 2.3 SBOM
 - [ ] 检查 Git 历史和本次 diff 不含凭证、个人数据或业务正文
 - [ ] 核验所有日志/异常输出不含 key、token、Authorization、会议或聊天正文
 

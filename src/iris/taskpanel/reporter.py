@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -31,6 +31,21 @@ logger = logging.getLogger(__name__)
 
 # 全局禁用开关（测试隔离/用户逃生通道）：IRIS_TASK_PANEL_DISABLED=1 时全部 no-op
 _DISABLED = os.environ.get("IRIS_TASK_PANEL_DISABLED", "") == "1"
+_SENSITIVE_ARG_RE = re.compile(
+    r"(?i)(--?(?:api[-_]?key|token|secret|password|authorization|prompt))"
+    r"(?:=|\s+)([^\s]+)"
+)
+
+
+def _safe_command_summary(command: str, name: str) -> str:
+    """生成不包含凭证和正文的任务摘要。
+
+    默认只记录任务名；显式传入的 command 仅保留短摘要并脱敏敏感参数。
+    """
+    if not command or command == name:
+        return name
+    redacted = _SENSITIVE_ARG_RE.sub(r"\1=[REDACTED]", command)
+    return redacted[:240]
 
 
 def generate_task_id(name: str) -> str:
@@ -61,7 +76,8 @@ class TaskReporter:
         :param data_root: 数据根目录，默认 <项目根>/data
         """
         self._name = name
-        self._command = command or " ".join(sys.argv[1:]) or name
+        # 不再默认记录完整 sys.argv：其中可能包含 prompt、路径或 token。
+        self._command = _safe_command_summary(command, name)
         self._agent_id = agent_id or os.environ.get("IRIS_AGENT_ID", "default")
         self._task_id = task_id or generate_task_id(name)
         try:

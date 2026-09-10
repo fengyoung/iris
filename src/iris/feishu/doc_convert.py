@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import ipaddress
+import http.client
 import logging
 import re
+import socket
+import ssl
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.error import URLError
-from urllib.request import Request, urlopen
+from urllib.parse import urlparse
 
 from iris.config.loader import ConfigBundle
 from iris.feishu.client import FeishuClient, FeishuClientError
@@ -18,13 +22,60 @@ from iris.feishu._shared import (
     resolve_pic_dir, resolve_source_sub_dir, resolve_dedup_path, load_dedup_index, save_dedup_index,
     upsert_dedup_item, sanitize_title, extract_date, now_iso,
 )
-from iris.core.exceptions import IrisRuntimeError
-from iris.core.write_guard import safe_write_text
+from iris.core.exceptions import IrisError, IrisRuntimeError
+from iris.core.write_guard import safe_write_bytes, safe_write_text, validate_write_path
 
 # ── 常量 ────────────────────────────────────────────────────
 
 _IMAGE_PATTERN = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 from iris.utils.constants import IMAGE_EXTENSIONS_WITH_SVG as _PIC_EXTENSIONS
+
+_MAX_REMOTE_IMAGE_BYTES = 20 * 1024 * 1024
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """连接到已校验 IP，同时使用原始域名完成 TLS SNI 校验。"""
+
+    def __init__(self, address: str, port: int, server_hostname: str, timeout: int) -> None:
+        super().__init__(address, port=port, timeout=timeout, context=ssl.create_default_context())
+        self._server_hostname = server_hostname
+
+    def connect(self) -> None:
+        self.sock = socket.create_connection((self.host, self.port), self.timeout)
+        if self._tunnel_host:
+            self._tunnel()
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=self._server_hostname)
+
+
+def _validate_remote_image_url(raw_url: str) -> tuple[str, int, str]:
+    """校验远程图片地址，阻断 SSRF 目标。
+
+    文档正文可能来自外部协作者，不能把其中的 URL 当作可信配置。
+    仅允许 HTTPS 公网主机，并对 DNS 解析出的每个地址执行私网检查。
+    """
+    parsed = urlparse(raw_url)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise URLError("图片 URL 仅允许不带用户信息的 HTTPS 地址")
+    try:
+        port = parsed.port or 443
+    except ValueError as exc:
+        raise URLError("图片 URL 端口非法") from exc
+    if port != 443:
+        raise URLError("图片 URL 仅允许 HTTPS 默认端口")
+    host = parsed.hostname.rstrip(".").lower()
+    if host in {"localhost", "localhost.localdomain"}:
+        raise URLError("禁止访问本机地址")
+    try:
+        addresses = [info[4][0] for info in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)]
+    except OSError as exc:
+        raise URLError(f"图片主机解析失败: {host}") from exc
+    if not addresses:
+        raise URLError("图片主机没有可用地址")
+    for address in addresses:
+        ip = ipaddress.ip_address(address)
+        if not ip.is_global:
+            raise URLError("禁止访问内网或保留地址")
+    return host, port, addresses[0]
 
 
 class FeishuDocConvertError(IrisRuntimeError):
@@ -134,13 +185,13 @@ class FeishuDocConverter:
                 "route": route or "",
             }
             content = inject_frontmatter(content, _fm_fields)
-        except Exception:
-            pass  # frontmatter 注入失败不应阻塞文档转换
+        except (TypeError, ValueError, KeyError) as exc:
+            logger.warning("frontmatter 注入失败，保留原正文: %s", exc)
 
         try:
             safe_write_text(output_path, content, self._bundle,
                             allow_existing_outside=True)
-        except OSError as e:
+        except (IrisError, OSError) as e:
             return {"status": "error", "url": url, "token": token, "error": f"写入失败: {e}"}
 
         # 8. 更新排重
@@ -251,12 +302,34 @@ class FeishuDocConverter:
 
     def _download_image_to(self, ref: str, save_path: str) -> None:
         """下载图片（HTTP URL 或飞书 file_token）。"""
-        if ref.startswith("http"):
-            req = Request(ref, headers={"User-Agent": "Iris/3.2"})
-            with urlopen(req, timeout=30) as resp:
-                data = resp.read()
-            Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-            Path(save_path).write_bytes(data)
+        validate_write_path(Path(save_path), self._bundle)
+        if ref.startswith(("http://", "https://")):
+            host, port, address = _validate_remote_image_url(ref)
+            parsed = urlparse(ref)
+            selector = parsed.path or "/"
+            if parsed.query:
+                selector += "?" + parsed.query
+            conn = _PinnedHTTPSConnection(address, port, host, timeout=30)
+            try:
+                conn.request("GET", selector, headers={"Host": host, "User-Agent": "Iris/3.2"})
+                resp = conn.getresponse()
+                if resp.status < 200 or resp.status >= 300:
+                    raise OSError(f"图片下载 HTTP 状态异常: {resp.status}")
+                content_length = resp.getheader("Content-Length")
+                try:
+                    if content_length and int(content_length) > _MAX_REMOTE_IMAGE_BYTES:
+                        raise OSError("远程图片超过大小限制")
+                except ValueError as exc:
+                    raise OSError("远程图片 Content-Length 非法") from exc
+                content_type = (resp.getheader("Content-Type") or "").split(";", 1)[0].strip().lower()
+                if not content_type.startswith("image/"):
+                    raise OSError(f"远程资源不是图片: {content_type}")
+                data = resp.read(_MAX_REMOTE_IMAGE_BYTES + 1)
+                if len(data) > _MAX_REMOTE_IMAGE_BYTES:
+                    raise OSError("远程图片超过大小限制")
+            finally:
+                conn.close()
+            safe_write_bytes(Path(save_path), data, self._bundle)
         else:
             self._client.download_image(ref, save_path)
 

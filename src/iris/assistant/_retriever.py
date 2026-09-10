@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import List
+from typing import List, Optional
 
 from iris.retrieval import EnhancedRetriever, RetrievalHit
 
@@ -23,6 +23,7 @@ class RetrieverAdapter:
     """
 
     def __init__(self, bundle):
+        self._retriever: Optional[EnhancedRetriever] = None
         try:
             self._retriever = EnhancedRetriever(bundle)
         except Exception as e:

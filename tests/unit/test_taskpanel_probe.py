@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from types import SimpleNamespace
+from unittest.mock import patch
 
 
 from iris.taskpanel.probe import (
@@ -42,7 +44,13 @@ class TestPidAlive:
         assert not is_pid_alive(_dead_pid())
 
     def test_process_command_contains_python(self):
-        assert "python" in process_command(os.getpid())
+        # ``ps`` 是宿主系统边界：沙箱或受限容器可能禁止它，即使当前 PID
+        # 存活。本例验证命令输出的规范化，不依赖执行环境权限。
+        with patch(
+            "iris.taskpanel.probe.subprocess.run",
+            return_value=SimpleNamespace(stdout="  python -m iris  \n"),
+        ):
+            assert process_command(os.getpid()) == "python -m iris"
 
 
 # ── TestProbeTask ─────────────────────────────────────────

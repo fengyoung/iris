@@ -14,6 +14,12 @@ networkx==3.6.1         # graph
 httpx==0.28.1           # async
 beautifulsoup4==4.14.3  # weekly
 
+# 转写 / ASR 可选依赖（未安装对应 extra 时不会进入环境）
+openai-whisper==20250625
+funasr==1.4.1
+onnxruntime==1.19.2
+sounddevice==0.5.5
+
 # 开发与质量工具
 ruff==0.15.4
 mypy==1.14.1
