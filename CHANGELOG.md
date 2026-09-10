@@ -1,3 +1,14 @@
+## v3.34.3 (2026-09-09)
+
+**LLM 多协议支持 — Anthropic 多模态 API 集成**（1 文件 / +120 行核心实现；测试 +170 行；文档 +2）。LLMService 扩展支持 Anthropic Messages API，包括纯文本和多模态（文本+图片）能力，与现有 OpenAI 兼容模型共享统一接口和降级链。
+
+- **协议扩展**：`generate_multimodal` 新增 Anthropic 分支，根据 provider 类型自动分发到对应协议实现（OpenAI 兼容 / Anthropic）。新增 `_call_anthropic_multimodal` 方法（120 行），实现 Anthropic 多模态 API 调用与格式转换。
+- **格式转换**：自动将 OpenAI 格式的 `content_parts` 转换为 Anthropic 格式（`image_url` → `image.source.base64`），解析 data URI 提取 `media_type` 和 `base64_data`，对不支持的图片格式（HTTP URL）和格式错误的 data URI 抛出明确错误。
+- **完整测试**：新增 `test_anthropic_multimodal.py`（4 个测试用例，覆盖格式转换验证、纯文本处理、错误处理）；全量测试 42 项全部通过（LLMService 19 + Provider fallback 19 + Anthropic 4）。
+- **配置与文档**：新增 `docs/ANTHROPIC_SETUP.md`（配置指南，环境变量/llm.json/使用示例/FAQ）和 `docs/ANTHROPIC_IMPLEMENTATION.md`（实现细节总结）；提供 `scripts/verify_anthropic_support.py` 验证脚本。
+- **功能支持**：✅ Anthropic Messages API（纯文本）、✅ 多模态 API（base64 图片）、✅ 混合降级链、✅ Token 统计、✅ 响应缓存、✅ 熔断器；⚠️ 图片仅支持 base64 data URI（Anthropic API 限制）。
+- 验证：pytest 3,321 passed（+4 新增 Anthropic 测试）；Ruff E/F/W 检查通过（E501 未启用）；模块导入验证通过。协议版本 3.22（不变）；app 配置版本 3.7（不变）；产品版本 3.34.2→**3.34.3**。
+
 ## v3.34.2 (2026-09-09)
 
 **P1/P2 优化 — 复杂度重构 + 异常处理文档化**（5 文件 / +150 -200；文档 +2）。代码审查发现 3 个高复杂度函数（19/19/17）和异常处理边界不明确，按优化计划完成复杂度重构与文档完善。

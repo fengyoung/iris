@@ -1,0 +1,130 @@
+# zz_tokenhub 双协议配置说明
+
+## 📋 配置概述
+
+`zz_tokenhub` 通道同时支持两种 LLM 协议，通过不同的 Base URL 访问：
+
+| 协议 | Base URL | 用途 |
+|------|----------|------|
+| **OpenAI 兼容** | `https://tokenhub.zhuanspirit.com/codex/v1` | DeepSeek、Qwen、GPT 等模型 |
+| **Anthropic** | `https://tokenhub.zhuanspirit.com/anthropic` | Claude 系列模型 |
+
+## ✅ 当前配置状态
+
+### BASE_MODEL (5 个模型)
+
+| 模型ID | 协议 | Base URL | 状态 |
+|--------|------|----------|:----:|
+| `claude-sonnet-5-zz` ⭐ | Anthropic | `/anthropic` | ✅ |
+| `deepseek-v4-flash-zz` | OpenAI | `/codex/v1` | ✅ |
+| `deepseek-v4-pro-zz` | OpenAI | `/codex/v1` | ✅ |
+| `deepseek-v4-flash` | OpenAI | 官方 DeepSeek | ✅ |
+| `deepseek-v4-pro` | OpenAI | 官方 DeepSeek | ✅ |
+
+### ADV_MODEL (9 个模型)
+
+| 模型ID | 协议 | Base URL | 状态 |
+|--------|------|----------|:----:|
+| `claude-fable-5-zz` ⭐ | Anthropic | `/anthropic` | ✅ |
+| `qwen3.8-max-zz` | OpenAI | `/codex/v1` | ✅ |
+| `gpt-5.6-sol-zz` | OpenAI | `/codex/v1` | ✅ |
+| `deepseek-v4-flash-vision-exp-zz` | OpenAI | `/codex/v1` | ✅ |
+| `qwen3.7-plus-zz` | OpenAI | `/codex/v1` | ✅ |
+| `qwen3.6-plus-zz` | OpenAI | `/codex/v1` | ✅ |
+| `deepseek-v4-flash-vision-exp` | OpenAI | 官方 DeepSeek | ✅ |
+| `qwen3.8-flash-bl` | OpenAI | 百炼 | ✅ |
+| `qwen3.7-plus-bl` | OpenAI | 百炼 | ✅ |
+
+⭐ = 默认模型
+
+## 🔧 环境变量配置
+
+只需要配置 `zz_tokenhub` 的 API Key，Base URL 已在模型配置中指定：
+
+```bash
+# .env 文件
+
+# zz_tokenhub API Key (必需)
+IRIS_ZZ_TOKENHUB_API_KEY=your_api_key_here
+
+# 以下可选（已在模型配置中指定）
+# IRIS_ZZ_TOKENHUB_BASE_URL=https://tokenhub.zhuanspirit.com/codex/v1
+# IRIS_ZZ_TOKENHUB_PROVIDER=openai
+
+# DeepSeek 官方（可选）
+IRIS_DEEPSEEK_BASE_URL=https://api.deepseek.com
+IRIS_DEEPSEEK_API_KEY=your_deepseek_key
+
+# 百炼（可选）
+IRIS_BAILIAN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+IRIS_BAILIAN_API_KEY=your_bailian_key
+```
+
+## 📊 配置详情
+
+### Claude 模型（Anthropic 协议）
+
+```json
+{
+  "channel": "zz_tokenhub",
+  "provider": "anthropic",
+  "api_base_url": "https://tokenhub.zhuanspirit.com/anthropic",
+  "model": "claude-sonnet-5" // 或 "claude-fable-5"
+}
+```
+
+### 其他模型（OpenAI 兼容协议）
+
+```json
+{
+  "channel": "zz_tokenhub",
+  "provider": "openai",
+  "api_base_url": "https://tokenhub.zhuanspirit.com/codex/v1",
+  "model": "deepseek-v4-flash" // 或其他 OpenAI 兼容模型
+}
+```
+
+## 🎯 工作原理
+
+1. **配置解析**：`config/loader.py` 的 `resolve_channels()` 函数处理模型配置
+2. **字段优先级**：模型配置中的 `api_base_url` 和 `provider` 会覆盖通道默认值
+3. **协议分发**：`provider.py` 的 `_dispatch_provider_call()` 根据 `provider` 字段分发到对应协议实现
+4. **自动降级**：失败时按 `priority` 降序尝试其他模型
+
+## ✨ 优势
+
+1. **灵活配置**：同一通道支持多种协议
+2. **透明切换**：上层代码无感知，自动路由到正确的协议
+3. **统一认证**：只需一个 API Key（`IRIS_ZZ_TOKENHUB_API_KEY`）
+4. **智能降级**：Claude 失败可降级到 DeepSeek/Qwen 等模型
+
+## 🧪 验证配置
+
+运行验证脚本：
+
+```bash
+python << 'EOF'
+import json
+from pathlib import Path
+
+config = json.loads(Path("config/llm.json").read_text())
+
+print("验证 zz_tokenhub 配置：\n")
+for role, cfg in config["models"].items():
+    for mid, mcfg in cfg["models"].items():
+        if mcfg.get("channel") == "zz_tokenhub":
+            provider = mcfg.get("provider")
+            url = mcfg.get("api_base_url")
+            print(f"✅ {mid:<30} {provider:<10} {url}")
+EOF
+```
+
+## 📝 配置文件位置
+
+- **模型配置**: `config/llm.json`
+- **环境变量**: `.env`（gitignored）
+- **示例配置**: `.env.example`
+
+## 🔄 更新日期
+
+2026-09-09 - 初始配置完成

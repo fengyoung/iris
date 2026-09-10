@@ -408,16 +408,24 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         def _try_multimodal(api_base: str, api_key: str, model_name: str, cfg: Dict[str, Any]) -> Tuple[str, int, int]:
             """多模态 API 调用闭包，捕获 content_parts。"""
             provider_name = str(cfg["provider"]).lower()
-            if provider_name not in self.OPENAI_COMPATIBLE_PROVIDERS:
-                raise LLMProviderError(f"多模态暂不支持 provider: {provider_name}")
             timeout = cfg.get("timeout_seconds", 60)
             effective_retries = max_retries if max_retries is not None else cfg.get("max_retries", 0)
             effective_max_tokens = max_tokens if max_tokens is not None else cfg.get("max_tokens")
-            return self._call_openai_compatible_multimodal(
-                api_base, api_key, model_name, content_parts,
-                temperature=temperature, timeout=timeout,
-                max_retries=effective_retries, max_tokens=effective_max_tokens,
-            )
+
+            if provider_name in self.OPENAI_COMPATIBLE_PROVIDERS:
+                return self._call_openai_compatible_multimodal(
+                    api_base, api_key, model_name, content_parts,
+                    temperature=temperature, timeout=timeout,
+                    max_retries=effective_retries, max_tokens=effective_max_tokens,
+                )
+            elif provider_name == "anthropic":
+                return self._call_anthropic_multimodal(
+                    api_base, api_key, model_name, content_parts,
+                    temperature=temperature, timeout=timeout,
+                    max_retries=effective_retries, max_tokens=effective_max_tokens,
+                )
+            else:
+                raise LLMProviderError(f"多模态暂不支持 provider: {provider_name}")
 
         text, _role, _provider, _model, _api_base, pt, ct = self._fallback_loop(
             decision, _try_multimodal,
@@ -521,7 +529,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
     def _call_anthropic(self, api_base_url: str, api_key: str, model: str, prompt: str,
                         max_tokens: Optional[int] = None,
                         max_retries: int = 0) -> Tuple[str, int, int]:
-        endpoint = _join_url(api_base_url, "/messages")
+        endpoint = _join_url(api_base_url, "/v1/messages")
         payload = {
             "model": model,
             "max_tokens": max_tokens or 4096,
@@ -536,12 +544,94 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
             endpoint,
             payload,
             headers={
-                "x-api-key": api_key,
+                "Authorization": f"Bearer {api_key}",
                 "anthropic-version": "2023-06-01",
             },
             max_retries=max_retries,
         )
         # Anthropic API 用 input_tokens / output_tokens
+        usage = data.get("usage", {})
+        pt = int(usage.get("input_tokens", 0))
+        ct = int(usage.get("output_tokens", 0))
+        return _extract_anthropic_text(data), pt, ct
+
+    def _call_anthropic_multimodal(
+        self,
+        api_base_url: str,
+        api_key: str,
+        model: str,
+        content_parts: list[dict],
+        *,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        timeout: int = 60,
+        max_retries: int = 0,
+    ) -> Tuple[str, int, int]:
+        """调用 Anthropic 多模态 API。
+
+        将 OpenAI 格式的 content_parts 转换为 Anthropic 格式：
+        - OpenAI: {type: "text", text: "..."} / {type: "image_url", image_url: {url: "data:..."}}
+        - Anthropic: {type: "text", text: "..."} / {type: "image", source: {type: "base64", media_type: "...", data: "..."}}
+        """
+        endpoint = _join_url(api_base_url, "/v1/messages")
+
+        # 转换 content_parts 格式
+        anthropic_content = []
+        for part in content_parts:
+            if part.get("type") == "text":
+                anthropic_content.append({"type": "text", "text": part.get("text", "")})
+            elif part.get("type") == "image_url":
+                # OpenAI 格式：image_url.url 可能是 data URI 或 URL
+                image_url = part.get("image_url", {}).get("url", "")
+                if image_url.startswith("data:"):
+                    # 解析 data URI: data:image/jpeg;base64,<data>
+                    try:
+                        header, base64_data = image_url.split(",", 1)
+                        media_type = header.split(";")[0].split(":")[1]  # 提取 image/jpeg
+                        anthropic_content.append({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": base64_data,
+                            }
+                        })
+                    except (ValueError, IndexError) as exc:
+                        raise LLMProviderError(f"无法解析图片 data URI: {exc}")
+                else:
+                    # Anthropic 也支持 URL 类型，但需要不同的格式
+                    raise LLMProviderError("Anthropic API 当前仅支持 base64 编码的图片")
+            elif part.get("type") == "image":
+                # 如果已经是 Anthropic 格式，直接使用
+                anthropic_content.append(part)
+            else:
+                logger.warning("跳过未知的 content part 类型: %s", part.get("type"))
+
+        payload = {
+            "model": model,
+            "max_tokens": max_tokens or 4096,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": anthropic_content,
+                }
+            ],
+        }
+
+        if temperature is not None:
+            payload["temperature"] = temperature
+
+        data = self._post_json(
+            endpoint,
+            payload,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "anthropic-version": "2023-06-01",
+            },
+            timeout=timeout,
+            max_retries=max_retries,
+        )
+
         usage = data.get("usage", {})
         pt = int(usage.get("input_tokens", 0))
         ct = int(usage.get("output_tokens", 0))
