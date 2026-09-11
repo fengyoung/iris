@@ -1,10 +1,17 @@
-# Iris 3.36.0
+# Iris 3.37.0
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 最新动态
 
-**v3.36.0 (2026-09-10)** - Anthropic 多模态集成 + 三阶段工程优化：
+**v3.37.0 (2026-09-11)** - 模型矩阵升级（Claude 双默认）+ 路由规则扩充：
+- ✅ `base_model` 默认切换为 `claude-sonnet-5-zz`、`adv_model` 默认切换为 `claude-fable-5-zz`，两角色均走 zz_tokenhub Anthropic 兼容接口
+- ✅ 模型矩阵由 4 个扩充至 11 个（base 2→4、adv 2→7），新增 Qwen 3.8 / 3.7 / 3.6 系列与 GPT-5.6 Sol 兜底，降级链逐级可退
+- ✅ 全矩阵统一 `multimodal: true`，纯文本模型退役，图文混合输入不再受角色能力限制
+- ✅ 路由规则由 8 条扩充至 12 条：新增周报提取走增强模型，ASR 校正/误识别/热词三类任务固定走基础模型
+- ✅ 历史纪要翻新脚本 `refresh_meeting_minutes.py` 模型由 `deepseek-v4-pro` 换为 `deepseek-flash-zz`
+
+**上一版 v3.36.0 (2026-09-10)** - Anthropic 多模态集成 + 三阶段工程优化：
 - ✅ LLMService 扩展支持 Anthropic Messages API（纯文本 + base64 图片多模态），与 OpenAI 兼容模型共享统一接口和降级链
 - ✅ 飞书远程图片下载增加 HTTPS/公网 IP 固定连接、MIME 与 20 MiB 大小校验，防止 SSRF
 - ✅ Keychain 原生写入不再将密钥放入子进程参数；任务面板默认不记录完整命令参数
@@ -91,12 +98,16 @@ SOURCE/                     LLM-WIKI/
 
 ## 模型配置
 
-| 角色 | 默认模型 | 提供商 | 能力 | 降级链 |
-|------|---------|--------|------|--------|
-| `base_model` | deepseek-v4-flash | DeepSeek | 纯文本 | → deepseek-v4-pro |
-| `adv_model` | deepseek-v4-flash-vision-exp | DeepSeek | 文本 + 图片 | → qwen3.8-max → qwen3.7-flash-2026-07-15 → qwen3.7-flash → qwen3.7-plus-2026-05-26 |
+| 角色 | 默认模型 | 协议 | 能力 | 降级链（按优先级） |
+|------|---------|------|------|--------|
+| `base_model` | `claude-sonnet-5-zz` | Anthropic | 文本 + 图片 | → qwen3.8-flash-zz → deepseek-flash-zz → deepseek-flash |
+| `adv_model` | `claude-fable-5-zz` | Anthropic | 文本 + 图片 | → qwen3.8-max-zz → qwen3.7-plus-zz → qwen3.6-plus-zz → qwen3.8-flash-bl → qwen3.7-plus-bl → gpt-5.6-sol-zz |
 
-路由规则（8 条）：用户显式指定 → 多模态输入 → Prompt 生成 → 复杂分析 → Wiki 重建 → 问答 → 文本兜底。
+模型 ID 后缀标识所属通道：`-zz` = `zz_tokenhub` 中转（Anthropic 兼容接口 `/anthropic`、OpenAI 兼容接口 `/codex/v1`）、`-bl` = 百炼官方直连、无后缀 = DeepSeek 官方直连。全部模型均支持多模态输入。
+
+路由规则（12 条）：用户显式指定模型 → 多模态输入 → 周报提取 → Prompt 生成 → 复杂分析 → Wiki 重建 → 问答 → ASR 校正/误识别/热词 → 文本兜底。
+
+模板见 `config/llm.json.example`；本机生效配置为 `config/llm.json`（gitignored），停用模型归档于 `config/llm.models-archive.json` 备查。
 
 ## 技术栈
 
@@ -107,7 +118,7 @@ SOURCE/                     LLM-WIKI/
 - macOS Keychain（可选密钥存储）
 - PyMuPDF / python-docx（PDF/DOCX 处理）
 - ffmpeg（视频抽帧/抽音轨，视频处理必需）+ openai-whisper（音轨转写，可选）
-- 3,326 个测试用例（pytest 全量），覆盖率约 68%；Ruff、严格 mypy、AST 安全扫描与 SPDX SBOM 门禁通过
+- 3,330 个测试用例（pytest 全量），覆盖率约 68%；Ruff、严格 mypy、AST 安全扫描与 SPDX SBOM 门禁通过
 
 ## 开发环境
 
@@ -163,9 +174,9 @@ iris3/
 │       └── asr/         #   ASR 提示词子系统（术语提取/热词/Prompt优化/版本管理）
 ├── scripts/            # CLI 入口 + 委托脚本
 ├── templates/          # Prompt / Wiki 模板
-├── tests/              # 3,326 用例
-│   ├── unit/           #   纯逻辑单元测试（1,580 用例）
-│   └── integration/    #   集成测试（245 用例）
+├── tests/              # 3,330 用例
+│   ├── unit/           #   纯逻辑单元测试（2,228 用例）
+│   └── integration/    #   集成测试（1,102 用例）
 ├── config/             # *.json gitignored，*.example 版本控制
 ├── .github/workflows/  # CI 流水线（Python 3.11-3.13 矩阵）
 ├── Makefile            # 常用开发命令
@@ -179,6 +190,7 @@ iris3/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.37.0** | 2026-09-11 | 模型矩阵升级：`base_model` 默认 → `claude-sonnet-5-zz`、`adv_model` 默认 → `claude-fable-5-zz`（均走 zz_tokenhub Anthropic 兼容接口）；规模 4 → 11 个模型（base 2→4、adv 2→7），新增 Qwen 3.8 / 3.7 / 3.6 系列与 GPT-5.6 Sol 末位兜底，全矩阵统一多模态；路由规则 8 → 12 条（新增周报提取走 adv、ASR 校正/误识别/热词走 base）。协议版本 3.22（不变） |
 | **v3.36.0** | 2026-09-10 | Anthropic 多模态集成 + 三阶段工程优化合并发布：`generate_multimodal` 新增 Anthropic 分支（OpenAI `image_url` → Anthropic `image.source.base64` 格式转换），endpoint 修正 `/v1/messages`；飞书图片下载 SSRF 防护、Keychain 原生写入、PID/锁并发加固；CI 增加 AST 安全扫描、SPDX SBOM 与关键模块覆盖率门禁。全量 3,330 通过，协议版本 3.22、app 数据版本 3.7 均不变。 |
 | **v3.35.0** | 2026-09-10 | 三阶段工程优化：飞书远程图片下载 HTTPS/公网 IP 固定连接 + MIME/20 MiB 校验防 SSRF；Keychain 原生写入避免密钥进入子进程参数；ProcessRegistry 加锁修复 PID 竞态、锁文件权限收紧；开启 mypy `check_untyped_defs`，CI 增加安全扫描与 SBOM。全量 3,326 通过，协议版本 3.22（不变） |
 | **v3.34.3** | 2026-09-09 | Anthropic 多模态 API 集成：新增 `_call_anthropic_multimodal`（120 行）与格式转换，共享统一降级链/Token 统计/缓存/熔断器；新增 4 用例与配置指南。全量 3,321 通过，协议版本 3.22（不变） |

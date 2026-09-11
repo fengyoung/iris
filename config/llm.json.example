@@ -10,74 +10,126 @@
   "models": {
     "base_model": {
       "enabled": true,
-      "default_model_id": "deepseek-v4-flash-zz",
+      "default_model_id": "claude-sonnet-5-zz",
       "models": {
-        "deepseek-v4-flash-zz": {
+        "claude-sonnet-5-zz": {
           "channel": "zz_tokenhub",
-          "model": "deepseek-v4-flash",
-          "display_name": "DeepSeek V4 Flash (zz_tokenhub)",
-          "multimodal": false,
-          "max_context_tokens": 1000000,
-          "max_tokens": 8192,
-          "temperature": 0.2,
-          "top_p": 1.0,
-          "timeout_seconds": 60,
-          "max_retries": 2,
-          "priority": 10,
-          "cost_level": "low",
-          "reasoning_level": "standard",
-          "supported_inputs": [
-            "text"
-          ],
-          "use_cases": [
-            "qa",
-            "summary",
-            "analysis_basic"
-          ],
-          "notes": "默认纯文本主力模型(zz_tokenhub 中转)"
-        },
-        "deepseek-v4-flash": {
-          "channel": "deepseek",
-          "model": "deepseek-v4-flash",
-          "display_name": "DeepSeek V4 Flash (官方)",
-          "multimodal": false,
-          "max_context_tokens": 1000000,
-          "max_tokens": 8192,
-          "temperature": 0.2,
-          "top_p": 1.0,
-          "timeout_seconds": 60,
-          "max_retries": 2,
-          "priority": 5,
-          "cost_level": "low",
-          "reasoning_level": "standard",
-          "supported_inputs": [
-            "text"
-          ],
-          "use_cases": [
-            "qa",
-            "summary",
-            "analysis_basic"
-          ],
-          "notes": "官方直连,base_model 降级链 fallback"
-        }
-      }
-    },
-    "adv_model": {
-      "enabled": true,
-      "default_model_id": "qwen3.8-max-zz",
-      "models": {
-        "qwen3.8-max-zz": {
-          "channel": "zz_tokenhub",
-          "model": "qwen3.8-max",
-          "display_name": "Qwen 3.8 Max (zz_tokenhub)",
+          "model": "claude-sonnet-5",
+          "display_name": "Claude Sonnet 5 (zz_tokenhub)",
           "multimodal": true,
           "max_context_tokens": 200000,
           "max_tokens": 8192,
           "temperature": 0.2,
           "top_p": 1.0,
-          "timeout_seconds": 300,
-          "max_retries": 3,
-          "priority": 70,
+          "timeout_seconds": 120,
+          "max_retries": 2,
+          "priority": 110,
+          "cost_level": "medium",
+          "reasoning_level": "advanced",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "summary",
+            "analysis_basic"
+          ],
+          "notes": "Claude Sonnet 5 (zz_tokenhub Anthropic 兼容接口)"
+        },
+        "qwen3.8-flash-zz": {
+          "channel": "zz_tokenhub",
+          "model": "qwen3.8-flash",
+          "display_name": "Qwen 3.8 Flash (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 131072,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 90,
+          "max_retries": 2,
+          "priority": 105,
+          "cost_level": "low",
+          "reasoning_level": "standard",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "summary",
+            "analysis_basic"
+          ],
+          "notes": "Qwen 3.8 Flash 多模态模型 (zz_tokenhub 中转), base_model 降级备选"
+        },
+        "deepseek-flash-zz": {
+          "channel": "zz_tokenhub",
+          "model": "deepseek-flash",
+          "display_name": "DeepSeek Flash (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 1000000,
+          "max_tokens": 16384,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 60,
+          "max_retries": 2,
+          "priority": 100,
+          "cost_level": "low",
+          "reasoning_level": "standard",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "summary",
+            "analysis_basic"
+          ],
+          "notes": "默认主力模型(zz_tokenhub 中转), 支持多模态"
+        },
+        "deepseek-flash": {
+          "channel": "deepseek",
+          "model": "deepseek-flash",
+          "display_name": "DeepSeek Flash (官方)",
+          "multimodal": true,
+          "max_context_tokens": 1000000,
+          "max_tokens": 200000,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 120,
+          "max_retries": 2,
+          "priority": 95,
+          "cost_level": "low",
+          "reasoning_level": "standard",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "summary",
+            "analysis_basic"
+          ],
+          "notes": "官方直连多模态版本, base_model 降级备选"
+        }
+      }
+    },
+    "adv_model": {
+      "enabled": true,
+      "default_model_id": "claude-fable-5-zz",
+      "models": {
+        "claude-fable-5-zz": {
+          "channel": "zz_tokenhub",
+          "model": "claude-fable-5",
+          "display_name": "Claude Fable 5 (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 200000,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 180,
+          "max_retries": 2,
+          "priority": 120,
           "cost_level": "high",
           "reasoning_level": "advanced",
           "supported_inputs": [
@@ -92,20 +144,132 @@
             "image_understanding",
             "conflict_resolution"
           ],
-          "notes": "旗舰模型,adv_model 新默认(zz_tokenhub 中转)"
+          "notes": "Claude Fable 5 多模态旗舰 (zz_tokenhub Anthropic 兼容接口)"
         },
-        "deepseek-v4-flash-vision-exp": {
-          "channel": "deepseek",
-          "model": "deepseek-v4-flash-vision-exp",
-          "display_name": "DeepSeek V4 Flash Vision (Exp)",
+        "gpt-5.6-sol-zz": {
+          "channel": "zz_tokenhub",
+          "model": "gpt-5.6-sol",
+          "display_name": "GPT-5.6 Sol (zz_tokenhub)",
           "multimodal": true,
-          "max_context_tokens": 1000000,
+          "max_context_tokens": 200000,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 300,
+          "max_retries": 3,
+          "priority": 35,
+          "cost_level": "high",
+          "reasoning_level": "advanced",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "wiki_extract_multimodal",
+            "wiki_rebuild",
+            "analysis_complex",
+            "image_understanding",
+            "conflict_resolution"
+          ],
+          "notes": "高能力但实测不稳定(连接常读超时/单次 56s+)，降为 adv 末位兜底，勿作默认"
+        },
+        "qwen3.8-max-zz": {
+          "channel": "zz_tokenhub",
+          "model": "qwen3.8-max",
+          "display_name": "Qwen 3.8 Max (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 200000,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 300,
+          "max_retries": 3,
+          "priority": 110,
+          "cost_level": "high",
+          "reasoning_level": "advanced",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "wiki_extract_multimodal",
+            "wiki_rebuild",
+            "analysis_complex",
+            "image_understanding",
+            "conflict_resolution"
+          ],
+          "notes": "旗舰模型, adv_model 默认(zz_tokenhub 中转)；2026-09-06 实测连接/TTFT 稳定"
+        },
+        "qwen3.7-plus-zz": {
+          "channel": "zz_tokenhub",
+          "model": "qwen3.7-plus",
+          "display_name": "Qwen 3.7 Plus (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 131072,
           "max_tokens": 8192,
           "temperature": 0.2,
           "top_p": 1.0,
           "timeout_seconds": 120,
           "max_retries": 2,
-          "priority": 60,
+          "priority": 75,
+          "cost_level": "medium",
+          "reasoning_level": "standard",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "wiki_extract_multimodal",
+            "wiki_rebuild",
+            "analysis_complex",
+            "image_understanding",
+            "conflict_resolution"
+          ],
+          "notes": "adv_model 降级备选 5(zz_tokenhub 中转)"
+        },
+        "qwen3.6-plus-zz": {
+          "channel": "zz_tokenhub",
+          "model": "qwen3.6-plus",
+          "display_name": "Qwen 3.6 Plus (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 131072,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 120,
+          "max_retries": 2,
+          "priority": 70,
+          "cost_level": "medium",
+          "reasoning_level": "standard",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "wiki_extract_multimodal",
+            "wiki_rebuild",
+            "analysis_complex",
+            "image_understanding",
+            "conflict_resolution"
+          ],
+          "notes": "adv_model 降级备选 6(zz_tokenhub 中转)"
+        },
+        "qwen3.8-flash-bl": {
+          "channel": "bailian",
+          "model": "qwen3.8-flash",
+          "display_name": "Qwen 3.8 Flash (百炼)",
+          "multimodal": true,
+          "max_context_tokens": 131072,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 90,
+          "max_retries": 2,
+          "priority": 55,
           "cost_level": "low",
           "reasoning_level": "standard",
           "supported_inputs": [
@@ -120,7 +284,35 @@
             "image_understanding",
             "conflict_resolution"
           ],
-          "notes": "实验性视觉模型,adv_model 降级链 fallback(官方直连)"
+          "notes": "adv_model 降级备选 9(百炼官方直连)"
+        },
+        "qwen3.7-plus-bl": {
+          "channel": "bailian",
+          "model": "qwen3.7-plus",
+          "display_name": "Qwen 3.7 Plus (百炼)",
+          "multimodal": true,
+          "max_context_tokens": 131072,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 120,
+          "max_retries": 2,
+          "priority": 50,
+          "cost_level": "low",
+          "reasoning_level": "standard",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "wiki_extract_multimodal",
+            "wiki_rebuild",
+            "analysis_complex",
+            "image_understanding",
+            "conflict_resolution"
+          ],
+          "notes": "adv_model 降级备选 10(百炼官方直连)"
         }
       }
     }
@@ -159,6 +351,16 @@
         "route_to": "adv_model",
         "fallback_to": "base_model",
         "description": "图文混合输入走增强模型"
+      },
+      {
+        "name": "weekly_report_extract_go_adv",
+        "priority": 6,
+        "match": {
+          "use_case": "weekly_report_extraction"
+        },
+        "route_to": "adv_model",
+        "fallback_to": "base_model",
+        "enabled": true
       },
       {
         "name": "prompt_gen_go_base",
@@ -204,6 +406,39 @@
         "route_to": "base_model",
         "fallback_to": "adv_model",
         "description": "默认问答路由到 base_model"
+      },
+      {
+        "name": "asr_correction_go_base",
+        "enabled": true,
+        "priority": 50,
+        "match": {
+          "task_type": "asr_correction"
+        },
+        "route_to": "base_model",
+        "fallback_to": "adv_model",
+        "description": "ASR 实时校正走基础模型"
+      },
+      {
+        "name": "asr_misreading_go_base",
+        "enabled": true,
+        "priority": 51,
+        "match": {
+          "task_type": "asr_misreading"
+        },
+        "route_to": "base_model",
+        "fallback_to": "adv_model",
+        "description": "ASR 误识别批量生成走基础模型"
+      },
+      {
+        "name": "asr_hotword_go_base",
+        "enabled": true,
+        "priority": 52,
+        "match": {
+          "task_type": "asr_hotword"
+        },
+        "route_to": "base_model",
+        "fallback_to": "adv_model",
+        "description": "ASR 热词提取走基础模型"
       },
       {
         "name": "default_text_tasks_go_base",

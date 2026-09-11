@@ -1,3 +1,18 @@
+## v3.37.0 (2026-09-11) — 模型矩阵升级（Claude 双默认）+ 路由规则扩充
+
+`config/llm.json.example` 追平本机演进后的模型矩阵：base/adv 双默认切换为 Claude，模型规模 4 → 11，全矩阵统一多模态；路由规则 8 → 12 条。
+
+- **base_model 默认切换**：`deepseek-v4-flash-zz` → `claude-sonnet-5-zz`（Claude Sonnet 5，`provider: anthropic`，走 zz_tokenhub `/anthropic` 接口）；降级链由 2 级补全为 4 级：`claude-sonnet-5-zz`(110) → `qwen3.8-flash-zz`(105) → `deepseek-flash-zz`(100) → `deepseek-flash`(95)。
+- **adv_model 默认切换**：`qwen3.8-max-zz` → `claude-fable-5-zz`（Claude Fable 5，同为 Anthropic 协议）；降级链由 2 级扩至 7 级：`claude-fable-5-zz`(120) → `qwen3.8-max-zz`(110) → `qwen3.7-plus-zz`(75) → `qwen3.6-plus-zz`(70) → `qwen3.8-flash-bl`(55) → `qwen3.7-plus-bl`(50) → `gpt-5.6-sol-zz`(35)。
+- **模型矩阵全量多模态**：新增 9 个模型块（base 3 + adv 6）、移除 3 个旧块（`deepseek-v4-flash-zz` / `deepseek-v4-flash` / `deepseek-v4-flash-vision-exp`），`deepseek-v4-flash` → `deepseek-flash` 为迁移；模型命名统一去掉 `v4` 版本段，全部模型 `multimodal: true`，纯文本模型退役。
+- **兜底模型定位**：`gpt-5.6-sol-zz` 虽为高能力模型，因实测连接易读超时（单次 56s+），以 `priority: 35` 直接置于 adv 末位兜底，并在 notes 标注「勿作默认」。
+- **路由规则 8 → 12 条**：新增 `weekly_report_extract_go_adv`(p6，`use_case: weekly_report_extraction` 走增强模型)，以及 ASR 三类 `asr_correction_go_base`(p50) / `asr_misreading_go_base`(p51) / `asr_hotword_go_base`(p52)，把实时校正、误识别批量生成、热词提取固定到基础模型，避免占用增强模型配额。
+- **脚本模型更新**：`scripts/refresh_meeting_minutes.py` 历史纪要翻新模型 `deepseek-v4-pro` → `deepseek-flash-zz`，限流注释同步去掉模型名。
+- **文档同步**：README 模型配置表与版本历史、`CLAUDE.md` 版本体系与技术栈、`docs/ZZ_TOKENHUB_CONFIG.md` 模型清单（含优先级与降级链说明）全部对齐新矩阵。
+- **停用模型归档**：4 个已停用模型块（base：`qwen3.7-max-zz`；adv：`gpt-5.6-luna-zz` / `glm5.3-zz` / `glm5.3-flash-zz`）移入 `config/llm.models-archive.json` 备查复用。
+- 验证：pytest 3,330 passed；Ruff 全部通过。
+- **版本层**：产品版本 `3.36.0` → `3.37.0`；协议版本 `3.22` 不变（CLI 命令集未变）；app 数据版本 `3.7` 与 llm 配置版本 `3.6` 不变（Schema 未变）。
+
 ## v3.36.0 (2026-09-10) — Anthropic 多模态集成 + 三阶段工程优化
 
 合并 v3.34.3（Anthropic 多模态 API）与 v3.35.0（SSRF 防护 + Keychain 原生写入 + CI 安全门禁）。

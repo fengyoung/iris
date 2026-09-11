@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """历史语音转写纪要翻新脚本。
 
-使用 deepseek-v4-pro 模型，以最新管线重新提取全部历史转录文件的会议纪要，
+使用 deepseek-flash-zz 模型，以最新管线重新提取全部历史转录文件的会议纪要，
 替换 SOURCE 中已有的旧版纪要（旧版备份为 .bak）。
 
 用法:
@@ -30,9 +30,9 @@ from iris.config.loader import load_config_bundle
 from iris.app.transcribe_meeting.pipeline import TranscribeMeetingPipeline
 
 # ── 常量 ──────────────────────────────────────────────────────────
-MODEL_NAME = "deepseek-v4-pro"
+MODEL_NAME = "deepseek-flash-zz"
 STATE_FILE = PROJECT_ROOT / "temp" / "refresh_meeting_state.jsonl"
-DELAY_SECONDS = 2  # pro 模型限流间隔
+DELAY_SECONDS = 2  # 模型限流间隔
 MAX_CONSECUTIVE_FAILURES = 3
 
 

@@ -11,31 +11,28 @@
 
 ## ✅ 当前配置状态
 
-### BASE_MODEL (5 个模型)
+### BASE_MODEL (4 个模型)
 
-| 模型ID | 协议 | Base URL | 状态 |
-|--------|------|----------|:----:|
-| `claude-sonnet-5-zz` ⭐ | Anthropic | `/anthropic` | ✅ |
-| `deepseek-v4-flash-zz` | OpenAI | `/codex/v1` | ✅ |
-| `deepseek-v4-pro-zz` | OpenAI | `/codex/v1` | ✅ |
-| `deepseek-v4-flash` | OpenAI | 官方 DeepSeek | ✅ |
-| `deepseek-v4-pro` | OpenAI | 官方 DeepSeek | ✅ |
+| 模型ID | 协议 | Base URL | 优先级 | 状态 |
+|--------|------|----------|:---:|:----:|
+| `claude-sonnet-5-zz` ⭐ | Anthropic | `/anthropic` | 110 | ✅ |
+| `qwen3.8-flash-zz` | OpenAI | `/codex/v1` | 105 | ✅ |
+| `deepseek-flash-zz` | OpenAI | `/codex/v1` | 100 | ✅ |
+| `deepseek-flash` | OpenAI | 官方 DeepSeek | 95 | ✅ |
 
-### ADV_MODEL (9 个模型)
+### ADV_MODEL (7 个模型)
 
-| 模型ID | 协议 | Base URL | 状态 |
-|--------|------|----------|:----:|
-| `claude-fable-5-zz` ⭐ | Anthropic | `/anthropic` | ✅ |
-| `qwen3.8-max-zz` | OpenAI | `/codex/v1` | ✅ |
-| `gpt-5.6-sol-zz` | OpenAI | `/codex/v1` | ✅ |
-| `deepseek-v4-flash-vision-exp-zz` | OpenAI | `/codex/v1` | ✅ |
-| `qwen3.7-plus-zz` | OpenAI | `/codex/v1` | ✅ |
-| `qwen3.6-plus-zz` | OpenAI | `/codex/v1` | ✅ |
-| `deepseek-v4-flash-vision-exp` | OpenAI | 官方 DeepSeek | ✅ |
-| `qwen3.8-flash-bl` | OpenAI | 百炼 | ✅ |
-| `qwen3.7-plus-bl` | OpenAI | 百炼 | ✅ |
+| 模型ID | 协议 | Base URL | 优先级 | 状态 |
+|--------|------|----------|:---:|:----:|
+| `claude-fable-5-zz` ⭐ | Anthropic | `/anthropic` | 120 | ✅ |
+| `qwen3.8-max-zz` | OpenAI | `/codex/v1` | 110 | ✅ |
+| `qwen3.7-plus-zz` | OpenAI | `/codex/v1` | 75 | ✅ |
+| `qwen3.6-plus-zz` | OpenAI | `/codex/v1` | 70 | ✅ |
+| `qwen3.8-flash-bl` | OpenAI | 百炼 | 55 | ✅ |
+| `qwen3.7-plus-bl` | OpenAI | 百炼 | 50 | ✅ |
+| `gpt-5.6-sol-zz` | OpenAI | `/codex/v1` | 35 | ⚠️ 末位兜底 |
 
-⭐ = 默认模型
+⭐ = 默认模型 · 优先级降序即降级链顺序 · ⚠️ `gpt-5.6-sol-zz` 高能力但实测连接易超时，仅作末位兜底，勿设为默认
 
 ## 🔧 环境变量配置
 
@@ -80,7 +77,7 @@ IRIS_BAILIAN_API_KEY=your_bailian_key
   "channel": "zz_tokenhub",
   "provider": "openai",
   "api_base_url": "https://tokenhub.zhuanspirit.com/codex/v1",
-  "model": "deepseek-v4-flash" // 或其他 OpenAI 兼容模型
+  "model": "deepseek-flash" // 或其他 OpenAI 兼容模型
 }
 ```
 
@@ -127,4 +124,5 @@ EOF
 
 ## 🔄 更新日期
 
+2026-09-11 - 模型矩阵同步至 base 4 / adv 7，全矩阵多模态；新增优先级列与降级链说明
 2026-09-09 - 初始配置完成

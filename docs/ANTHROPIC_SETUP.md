@@ -239,16 +239,16 @@ Anthropic 模型可以与 OpenAI 兼容模型混合使用，通过 `priority` �
   "models": {
     "adv_model": {
       "models": {
-        "claude-sonnet-4": {"priority": 110},          // 首选
-        "qwen3.8-max-zz": {"priority": 100},           // 降级备选 1
-        "deepseek-v4-flash-vision-exp": {"priority": 95} // 降级备选 2
+        "claude-fable-5-zz": {"priority": 120},  // 首选（Anthropic 协议）
+        "qwen3.8-max-zz": {"priority": 110},     // 降级备选 1（OpenAI 兼容）
+        "qwen3.7-plus-zz": {"priority": 75}      // 降级备选 2（OpenAI 兼容）
       }
     }
   }
 }
 ```
 
-当 Claude Sonnet 4 失败时，会自动尝试 Qwen 3.8 Max，依次类推。
+当 Claude Fable 5 失败时，会自动尝试 Qwen 3.8 Max，依次按 `priority` 降序类推。
 
 ## 常见问题
 
