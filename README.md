@@ -1,19 +1,20 @@
-# Iris 3.37.2
+# Iris 3.37.3
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 最新动态
 
-**v3.37.2 (2026-09-11)** - ASR-corrector 启动信息增强：
+**v3.37.3 (2026-09-11)** - 修复模型 max_tokens 被调用方硬编码静默覆盖：
+- ✅ 移除 `complex_input` Stage 2（图片 / PDF / 视频）硬编码的 `max_tokens=4096`
+- ✅ 移除 `feishu/image_analyzer` 硬编码的 `max_tokens=300`
+- ✅ 新增 4 个防回归测试，锁定「不向 `generate_multimodal` 显式传 `max_tokens`」
+- ✅ 修复后 `llm.json` 中配置的输出上限在这些链路上真正生效
+
+**上一版 v3.37.2 (2026-09-11)** - ASR-corrector 启动信息增强：
 - ✅ 启动时显示 LLM 模型配置信息（模型名、temperature、max_tokens、timeout）
 - ✅ 明确展示「强制指定，跳过路由」状态，便于用户确认实际使用模型
 
-**上一版 v3.37.1 (2026-09-11)** - ASR-corrector 强制使用 deepseek-flash 模型：
-- ✅ `AsrCorrector._invoke_llm` 新增 `force_model="deepseek-flash"`，跳过路由规则，直连 DeepSeek 官方 flash 模型
-- ✅ `temperature` / `max_tokens` 从硬编码提取为实例属性，便于调整和测试注入
-- ✅ 仅影响 ASR 校正路径，其他模块仍正常走路由规则和降级链
-
-**项目规模**：~42,000 行代码 / 185 文件 / 27 模块 / 3,330 测试用例 / 68% 覆盖率
+**项目规模**：~42,000 行代码 / 185 文件 / 27 模块 / 3,350 测试用例 / 68% 覆盖率
 
 详见 [CHANGELOG.md](CHANGELOG.md)、[本轮工程优化记录](docs/optimization-three-phase-20260910.md) 和 [优化报告](optimization_report_20260909.md)。
 
@@ -113,7 +114,7 @@ SOURCE/                     LLM-WIKI/
 - macOS Keychain（可选密钥存储）
 - PyMuPDF / python-docx（PDF/DOCX 处理）
 - ffmpeg（视频抽帧/抽音轨，视频处理必需）+ openai-whisper（音轨转写，可选）
-- 3,330 个测试用例（pytest 全量），覆盖率约 68%；Ruff、严格 mypy、AST 安全扫描与 SPDX SBOM 门禁通过
+- 3,350 个测试用例（pytest 全量），覆盖率约 68%；Ruff、严格 mypy、AST 安全扫描与 SPDX SBOM 门禁通过
 
 ## 开发环境
 
@@ -169,7 +170,7 @@ iris3/
 │       └── asr/         #   ASR 提示词子系统（术语提取/热词/Prompt优化/版本管理）
 ├── scripts/            # CLI 入口 + 委托脚本
 ├── templates/          # Prompt / Wiki 模板
-├── tests/              # 3,330 用例
+├── tests/              # 3,350 用例
 │   ├── unit/           #   纯逻辑单元测试（2,228 用例）
 │   └── integration/    #   集成测试（1,102 用例）
 ├── config/             # *.json gitignored，*.example 版本控制
@@ -185,6 +186,9 @@ iris3/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.37.3** | 2026-09-11 | 修复模型 `max_tokens` 被调用方硬编码静默覆盖：`complex_input` Stage 2（图片/PDF/视频）的 `max_tokens=4096` 与 `feishu/image_analyzer` 的 `max_tokens=300` 会覆盖 `llm.json` 中的模型配置，导致输出被钉死且不报错（`claude-fable-5` 11 次多模态调用中 10 次输出恰为 4096）；移除四处硬编码并新增 4 个防回归测试，配置输出上限恢复生效。全量 3,071 通过，协议版本 3.22（不变） |
+| **v3.37.2** | 2026-09-11 | ASR-corrector 启动信息增强：`_print_startup_banner` 新增 LLM 模型配置展示行（模型名 / temperature / max_tokens / timeout），明确「强制指定，跳过路由」状态。协议版本 3.22（不变） |
+| **v3.37.1** | 2026-09-11 | ASR-corrector 强制指定模型：`_invoke_llm` 新增 `force_model="deepseek-flash"` 跳过路由直连官方模型；`temperature` / `max_tokens` 由硬编码提取为实例属性。协议版本 3.22（不变） |
 | **v3.37.0** | 2026-09-11 | 模型矩阵升级：`base_model` 默认 → `claude-sonnet-5-zz`、`adv_model` 默认 → `claude-fable-5-zz`（均走 zz_tokenhub Anthropic 兼容接口）；规模 4 → 11 个模型（base 2→4、adv 2→7），新增 Qwen 3.8 / 3.7 / 3.6 系列与 GPT-5.6 Sol 末位兜底，全矩阵统一多模态；路由规则 8 → 12 条（新增周报提取走 adv、ASR 校正/误识别/热词走 base）。协议版本 3.22（不变） |
 | **v3.36.0** | 2026-09-10 | Anthropic 多模态集成 + 三阶段工程优化合并发布：`generate_multimodal` 新增 Anthropic 分支（OpenAI `image_url` → Anthropic `image.source.base64` 格式转换），endpoint 修正 `/v1/messages`；飞书图片下载 SSRF 防护、Keychain 原生写入、PID/锁并发加固；CI 增加 AST 安全扫描、SPDX SBOM 与关键模块覆盖率门禁。全量 3,330 通过，协议版本 3.22、app 数据版本 3.7 均不变。 |
 | **v3.35.0** | 2026-09-10 | 三阶段工程优化：飞书远程图片下载 HTTPS/公网 IP 固定连接 + MIME/20 MiB 校验防 SSRF；Keychain 原生写入避免密钥进入子进程参数；ProcessRegistry 加锁修复 PID 竞态、锁文件权限收紧；开启 mypy `check_untyped_defs`，CI 增加安全扫描与 SBOM。全量 3,326 通过，协议版本 3.22（不变） |

@@ -679,3 +679,98 @@ def test_stage2_video_llm_error_fallback(config_bundle):
         text, model = pipeline._stage2_video("分析视频", _video_detection())
     assert "[Stage2 失败]" in text
     assert model is None
+
+
+# ── 回归：Stage 2 不得硬编码 max_tokens ──────────────────────────────
+#
+# 背景：Stage 2（图片/PDF/视频）曾各自显式传 max_tokens=4096。
+# service.generate_multimodal 的取值逻辑是「显式传参优先于模型配置」：
+#     effective = max_tokens if max_tokens is not None else cfg.get("max_tokens")
+# 因此 llm.json 中为各 adv 模型配置的 max_tokens 被静默忽略，输出被钉死在
+# 4096 且不抛异常（claude-fable-5 曾连续 10 次调用输出恰好等于 4096）。
+# 以下测试锁定「不传 max_tokens」，防止上限再次被写死。
+
+
+def _assert_no_max_tokens_override(mock_svc):
+    """断言 generate_multimodal 未被显式传入 max_tokens。"""
+    kwargs = mock_svc.generate_multimodal.call_args.kwargs
+    assert "max_tokens" not in kwargs, (
+        "Stage 2 不得硬编码 max_tokens（会静默覆盖 llm.json 中的模型配置），"
+        f"实得 max_tokens={kwargs.get('max_tokens')}"
+    )
+
+
+def test_stage2_images_does_not_override_max_tokens(config_bundle):
+    """图片路径：输出上限交由模型配置决定。"""
+    pipeline, mock_svc = _make_pipeline_with_mocks(config_bundle)
+    mock_svc.generate_multimodal.return_value = "图片分析结果"
+    mock_svc.get_provider.return_value.get_active_model_config.return_value = {
+        "model": "claude-fable-5"}
+
+    detection = ComplexityResult(
+        is_complex=True,
+        file_type="image",
+        file_paths=["/tmp/test.png"],
+        reason="图片输入",
+        encoded_images=[
+            EncodedImage(path="/tmp/test.png", mime_type="image/png",
+                         data_url="data:image/png;base64,imgdata"),
+        ],
+    )
+    pipeline._stage2_images("分析图片", detection)
+    _assert_no_max_tokens_override(mock_svc)
+
+
+def test_stage2_pdf_does_not_override_max_tokens(config_bundle):
+    """PDF 路径：输出上限交由模型配置决定。"""
+    pipeline, mock_svc = _make_pipeline_with_mocks(config_bundle)
+    mock_svc.generate_multimodal.return_value = "PDF 分析结果"
+    mock_svc.get_provider.return_value.get_active_model_config.return_value = {
+        "model": "claude-fable-5"}
+
+    fake_pdf_content = MagicMock()
+    fake_pdf_content.total_pages = 1
+    fake_pdf_content.rendered_pages = 1
+    fake_pdf_content.text = "PDF text"
+    fake_pdf_content.error = None
+    fake_pdf_content.page_images = [
+        EncodedImage(path="/tmp/test.pdf#page=1", mime_type="image/png",
+                     data_url="data:image/png;base64,page1"),
+    ]
+
+    detection = ComplexityResult(
+        is_complex=True,
+        file_type="pdf",
+        file_paths=["/tmp/test.pdf"],
+        reason="PDF 输入",
+        encoded_images=[],
+    )
+
+    with patch("iris.complex_input.pdf_adapter.PdfAdapter") as MockAdapter:
+        MockAdapter.return_value.process.return_value = fake_pdf_content
+        pipeline._stage2_pdf("分析 PDF", detection)
+
+    _assert_no_max_tokens_override(mock_svc)
+
+
+def test_stage2_video_does_not_override_max_tokens(config_bundle):
+    """视频路径：输出上限交由模型配置决定。"""
+    pipeline, mock_svc = _make_pipeline_with_mocks(config_bundle)
+    mock_svc.generate_multimodal.return_value = "视频分析结果"
+    mock_svc.get_provider.return_value.get_active_model_config.return_value = {
+        "model": "claude-fable-5"}
+
+    content = VideoContent(
+        path="/tmp/clip.mp4",
+        transcript="转写文本",
+        frames=[EncodedImage(path="/tmp/f0.jpg", mime_type="image/jpeg",
+                             data_url="data:image/jpeg;base64,a")],
+        duration_sec=12.0,
+        frame_count=1,
+        has_audio=True,
+    )
+    with patch("iris.complex_input.video_adapter.VideoAdapter") as MockAdapter:
+        MockAdapter.return_value.process.return_value = content
+        pipeline._stage2_video("分析视频", _video_detection())
+
+    _assert_no_max_tokens_override(mock_svc)

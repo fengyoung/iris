@@ -287,7 +287,9 @@ class ComplexInputPipeline:
                     "task_type": "image_understanding",
                     "complexity": "complex",
                 },
-                max_tokens=4096,
+                # 勿在此硬编码 max_tokens：显式传参会静默覆盖 llm.json 中
+                # 各模型的 max_tokens 配置，导致输出被固定上限截断且不报错。
+                # 输出上限统一由模型配置决定。
             )
             model_info = self._llm.get_provider().get_active_model_config("adv_model")
             return text.strip(), model_info.get("model", "adv_model")
@@ -369,7 +371,9 @@ class ComplexInputPipeline:
                     "task_type": "image_understanding",
                     "complexity": "complex",
                 },
-                max_tokens=4096,
+                # 勿在此硬编码 max_tokens：显式传参会静默覆盖 llm.json 中
+                # 各模型的 max_tokens 配置，导致输出被固定上限截断且不报错。
+                # 输出上限统一由模型配置决定。
             )
             model_info = self._llm.get_provider().get_active_model_config("adv_model")
             return text.strip(), model_info.get("model", "adv_model")
@@ -506,7 +510,9 @@ class ComplexInputPipeline:
                     "task_type": "image_understanding",
                     "complexity": "complex",
                 },
-                max_tokens=4096,
+                # 勿在此硬编码 max_tokens：显式传参会静默覆盖 llm.json 中
+                # 各模型的 max_tokens 配置，导致输出被固定上限截断且不报错。
+                # 输出上限统一由模型配置决定。
             )
             model_info = self._llm.get_provider().get_active_model_config("adv_model")
             return text.strip(), model_info.get("model", "adv_model")

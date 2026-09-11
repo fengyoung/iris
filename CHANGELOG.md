@@ -1,3 +1,14 @@
+## v3.37.3 (2026-09-11) — 修复模型 max_tokens 被调用方硬编码静默覆盖
+
+修复 `complex_input` 与 `feishu/image_analyzer` 两处调用方硬编码 `max_tokens`、导致 `llm.json` 中模型配置被静默覆盖的问题。
+
+- **根因**：`service.generate_multimodal` 的取值逻辑为「显式传参优先于模型配置」（`max_tokens if max_tokens is not None else cfg.get("max_tokens")`），而 Stage 2 的图片 / PDF / 视频三个入口均硬编码 `max_tokens=4096`、`feishu/image_analyzer._call_llm` 硬编码 `max_tokens=300`，使各模型在 `llm.json` 中配置的输出上限完全失效。
+- **症状**：截断静默发生——API 不报错、`finish_reason=length` 亦不抛异常，仅表现为输出内容缺失。用量库中 `claude-fable-5` 的多模态调用 11 次有 10 次输出恰好等于 4096（中位数即天花板），构成该缺陷的特征指纹。
+- **修复**：移除 `complex_input/pipeline.py` 三处、`feishu/image_analyzer.py` 一处硬编码，输出上限统一交由模型配置决定；两处均补充防回归注释，说明「显式传参会静默覆盖配置」。
+- **防回归**：新增 4 个测试（`tests/integration/test_complex_input_pipeline.py` 3 个 + `tests/unit/test_image_analyzer.py` 1 个），锁定 `generate_multimodal` 不被显式传入 `max_tokens`；4 个测试均已在修复前代码上验证会失败、修复后通过。
+- **影响范围**：图片 / PDF / 视频三阶段流水线与飞书消息图片分析；修复后 `llm.json` 的 `max_tokens` 在这些链路上真正生效。
+- 验证：全量 3,071 通过（本地；另有 11 个 `assistant` 测试文件因 pydantic 环境问题未能收集）；ruff、mypy 通过；协议版本 3.22（不变）；产品版本 3.37.2→**3.37.3**。
+
 ## v3.37.2 (2026-09-11) — ASR-corrector 启动信息增强
 
 ASR 实时校正引擎启动时增加 LLM 模型配置信息展示，便于用户确认实际使用的模型和参数。

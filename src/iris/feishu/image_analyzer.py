@@ -166,7 +166,8 @@ class MessageImageAnalyzer:
                 "complexity": "complex",
             },
             temperature=0.2,
-            max_tokens=300,
+            # 勿在此硬编码 max_tokens：显式传参会静默覆盖 llm.json 中
+            # 该模型的 max_tokens 配置。输出上限统一由模型配置决定。
         )
         return (text or "").strip()
 

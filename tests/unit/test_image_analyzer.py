@@ -190,3 +190,29 @@ def test_content_for_prompt_fallback():
 
     img.image_description = "一张数据看板"
     assert img.content_for_prompt() == "（图片：一张数据看板）"
+
+
+# ── 回归：不得硬编码 max_tokens ────────────────────────────────────
+#
+# 背景：_call_llm 曾显式传 max_tokens=300。service.generate_multimodal 的取值
+# 逻辑是「显式传参优先于模型配置」：
+#     effective = max_tokens if max_tokens is not None else cfg.get("max_tokens")
+# 因此 llm.json 中该模型的 max_tokens 被静默忽略。与 complex_input/pipeline.py
+# 的 4096 属同类问题，一并锁定。
+
+
+def test_call_llm_does_not_override_max_tokens(tmp_path):
+    """输出上限交由模型配置决定，不在此硬编码。"""
+    llm = Mock()
+    llm.generate_multimodal.return_value = "一张数据看板"
+    analyzer = MessageImageAnalyzer(
+        Mock(), llm, cache_dir=tmp_path, enabled=True, max_per_run=10
+    )
+
+    analyzer._call_llm("data:image/png;base64,xxx")
+
+    kwargs = llm.generate_multimodal.call_args.kwargs
+    assert "max_tokens" not in kwargs, (
+        "_call_llm 不得硬编码 max_tokens（会静默覆盖 llm.json 中的模型配置），"
+        f"实得 max_tokens={kwargs.get('max_tokens')}"
+    )
