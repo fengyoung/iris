@@ -224,6 +224,11 @@ class AsrCorrector:
         self._provider = None
         self._llm_service = None
 
+        # LLM 调用参数（ASR 场景专用配置）
+        self._force_model = "deepseek-flash"  # 强制使用 deepseek 官方 flash 模型
+        self._llm_max_tokens = 512  # ASR 校正输出长度上限
+        self._llm_temperature = 0.1  # 低温度保证确定性输出
+
     def set_provider(self, provider) -> None:
         """设置 LLM Provider（由 CLI 层注入）。"""
         self._provider = provider
@@ -355,9 +360,10 @@ class AsrCorrector:
             result = self._llm_service.generate(
                 prompt=full_prompt,
                 route_context=route_context,
-                temperature=0.1,
-                max_tokens=512,
+                temperature=self._llm_temperature,
+                max_tokens=self._llm_max_tokens,
                 max_retries=0,  # 实时场景不重试，超时直接降级词典结果
+                force_model=self._force_model,  # 强制使用 deepseek-flash，跳过路由规则
                 extra_body=extra_body,
                 _deadline=deadline,
             )
@@ -367,8 +373,8 @@ class AsrCorrector:
         from iris.llm import LLMRequest
         response = self._provider.generate(
             LLMRequest(prompt=full_prompt, route_context=route_context, extra_body=extra_body),
-            temperature=0.1,
-            max_tokens=512,
+            temperature=self._llm_temperature,
+            max_tokens=self._llm_max_tokens,
             max_retries=0,
             _deadline=deadline,
         )

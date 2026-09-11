@@ -1,3 +1,13 @@
+## v3.37.1 (2026-09-11) — ASR-corrector 强制使用 deepseek-flash 模型
+
+ASR 实时校正引擎模型调用策略优化：跳过路由规则，强制使用 DeepSeek 官方 deepseek-flash 模型，提升实时场景响应速度和稳定性。
+
+- **模型强制指定**：`AsrCorrector._invoke_llm` 新增 `force_model="deepseek-flash"` 参数，跳过 `asr_correction_go_base` 路由规则，直接调用 deepseek 官方 flash 模型（channel=deepseek），不再走 `claude-sonnet-5-zz` 优先的降级链。
+- **参数显式化**：将硬编码的 `temperature=0.1` 和 `max_tokens=512` 提取为实例属性 `_llm_temperature` / `_llm_max_tokens`，便于后续调整和测试注入。
+- **影响范围**：仅影响 ASR-corrector 的 LLM 校正路径；其他模块（wiki/qa/analysis 等）仍正常走路由规则和降级链；`force_model` 无降级保护，失败直接降级为纯词典替换结果。
+- **技术背景**：实时校正场景对延迟敏感（默认 8000ms 总超时），deepseek-flash 官方直连比 zz_tokenhub 中转的 claude 模型响应更稳定；使用 `force_model` 避免路由规则变更影响 ASR 专用模型选择。
+- 验证：修改仅涉及 `corrector.py` 一个文件（+10 -4 行），逻辑等价但模型调用路径明确化；协议版本 3.22（不变）；产品版本 3.37.0→**3.37.1**。
+
 ## v3.37.0 (2026-09-11) — 模型矩阵升级（Claude 双默认）+ 路由规则扩充
 
 `config/llm.json.example` 追平本机演进后的模型矩阵：base/adv 双默认切换为 Claude，模型规模 4 → 11，全矩阵统一多模态；路由规则 8 → 12 条。

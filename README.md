@@ -1,22 +1,20 @@
-# Iris 3.37.0
+# Iris 3.37.1
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 最新动态
 
-**v3.37.0 (2026-09-11)** - 模型矩阵升级（Claude 双默认）+ 路由规则扩充：
+**v3.37.1 (2026-09-11)** - ASR-corrector 强制使用 deepseek-flash 模型：
+- ✅ `AsrCorrector._invoke_llm` 新增 `force_model="deepseek-flash"`，跳过路由规则，直连 DeepSeek 官方 flash 模型
+- ✅ `temperature` / `max_tokens` 从硬编码提取为实例属性，便于调整和测试注入
+- ✅ 仅影响 ASR 校正路径，其他模块仍正常走路由规则和降级链
+
+**上一版 v3.37.0 (2026-09-11)** - 模型矩阵升级（Claude 双默认）+ 路由规则扩充：
 - ✅ `base_model` 默认切换为 `claude-sonnet-5-zz`、`adv_model` 默认切换为 `claude-fable-5-zz`，两角色均走 zz_tokenhub Anthropic 兼容接口
 - ✅ 模型矩阵由 4 个扩充至 11 个（base 2→4、adv 2→7），新增 Qwen 3.8 / 3.7 / 3.6 系列与 GPT-5.6 Sol 兜底，降级链逐级可退
 - ✅ 全矩阵统一 `multimodal: true`，纯文本模型退役，图文混合输入不再受角色能力限制
 - ✅ 路由规则由 8 条扩充至 12 条：新增周报提取走增强模型，ASR 校正/误识别/热词三类任务固定走基础模型
 - ✅ 历史纪要翻新脚本 `refresh_meeting_minutes.py` 模型由 `deepseek-v4-pro` 换为 `deepseek-flash-zz`
-
-**上一版 v3.36.0 (2026-09-10)** - Anthropic 多模态集成 + 三阶段工程优化：
-- ✅ LLMService 扩展支持 Anthropic Messages API（纯文本 + base64 图片多模态），与 OpenAI 兼容模型共享统一接口和降级链
-- ✅ 飞书远程图片下载增加 HTTPS/公网 IP 固定连接、MIME 与 20 MiB 大小校验，防止 SSRF
-- ✅ Keychain 原生写入不再将密钥放入子进程参数；任务面板默认不记录完整命令参数
-- ✅ PID 注册、锁文件权限和写入守卫进一步加固，CI 增加安全扫描、SPDX SBOM 与关键模块覆盖率门禁
-- ✅ 测试隔离可选 ASR/系统命令边界，分层覆盖率在合并后统一判定
 
 **项目规模**：~42,000 行代码 / 185 文件 / 27 模块 / 3,330 测试用例 / 68% 覆盖率
 
