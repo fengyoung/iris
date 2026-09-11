@@ -485,6 +485,9 @@ class AsrCorrector:
             else:
                 llm_status = "未初始化"
             _log(f"[Iris] LLM Prompt: {prompt_status} | Provider: {llm_status}")
+            _log(f"[Iris] LLM 模型: {self._force_model} (强制指定，跳过路由) "
+                 f"| temperature={self._llm_temperature} max_tokens={self._llm_max_tokens} "
+                 f"timeout={self._llm_timeout_ms}ms")
         expire_min = self._context_expire_seconds // 60
         _log(f"[Iris] 近期上下文窗口: {self._context_window_size} 句, 过期 {expire_min} 分钟")
         self._start_hotkey_monitor()

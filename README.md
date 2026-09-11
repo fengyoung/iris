@@ -1,20 +1,17 @@
-# Iris 3.37.1
+# Iris 3.37.2
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 最新动态
 
-**v3.37.1 (2026-09-11)** - ASR-corrector 强制使用 deepseek-flash 模型：
+**v3.37.2 (2026-09-11)** - ASR-corrector 启动信息增强：
+- ✅ 启动时显示 LLM 模型配置信息（模型名、temperature、max_tokens、timeout）
+- ✅ 明确展示「强制指定，跳过路由」状态，便于用户确认实际使用模型
+
+**上一版 v3.37.1 (2026-09-11)** - ASR-corrector 强制使用 deepseek-flash 模型：
 - ✅ `AsrCorrector._invoke_llm` 新增 `force_model="deepseek-flash"`，跳过路由规则，直连 DeepSeek 官方 flash 模型
 - ✅ `temperature` / `max_tokens` 从硬编码提取为实例属性，便于调整和测试注入
 - ✅ 仅影响 ASR 校正路径，其他模块仍正常走路由规则和降级链
-
-**上一版 v3.37.0 (2026-09-11)** - 模型矩阵升级（Claude 双默认）+ 路由规则扩充：
-- ✅ `base_model` 默认切换为 `claude-sonnet-5-zz`、`adv_model` 默认切换为 `claude-fable-5-zz`，两角色均走 zz_tokenhub Anthropic 兼容接口
-- ✅ 模型矩阵由 4 个扩充至 11 个（base 2→4、adv 2→7），新增 Qwen 3.8 / 3.7 / 3.6 系列与 GPT-5.6 Sol 兜底，降级链逐级可退
-- ✅ 全矩阵统一 `multimodal: true`，纯文本模型退役，图文混合输入不再受角色能力限制
-- ✅ 路由规则由 8 条扩充至 12 条：新增周报提取走增强模型，ASR 校正/误识别/热词三类任务固定走基础模型
-- ✅ 历史纪要翻新脚本 `refresh_meeting_minutes.py` 模型由 `deepseek-v4-pro` 换为 `deepseek-flash-zz`
 
 **项目规模**：~42,000 行代码 / 185 文件 / 27 模块 / 3,330 测试用例 / 68% 覆盖率
 
