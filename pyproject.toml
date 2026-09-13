@@ -45,6 +45,11 @@ dev = [
     # 明确要求使用真实 AC 自动机（非 mock），CI 只装 .[dev] 时 44 项测试失败。
     # 该包为纯编译扩展、有预编译 wheel、无系统依赖，纳入 dev 成本极低。
     "pyahocorasick>=2.0",
+    # pytest-asyncio：tests/test_async_http.py 使用 @pytest.mark.asyncio + async def。
+    # 本地环境恰好装了该插件故未暴露，CI 的 .[dev] 缺它 → async 测试报
+    # 「async def functions are not natively supported」并伴随 asyncio marker 未注册警告
+    # （已用 pytest -p no:asyncio 精确复现）。
+    "pytest-asyncio>=0.24",
 ]
 graph = ["networkx>=3.0"]
 async = ["httpx>=0.27"]
