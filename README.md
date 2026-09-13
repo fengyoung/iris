@@ -1,21 +1,22 @@
-# Iris 3.37.3
+# Iris 3.37.4
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 最新动态
 
-**v3.37.3 (2026-09-11)** - 修复模型 max_tokens 被调用方硬编码静默覆盖：
+**v3.37.4 (2026-09-13)** - CI 门禁恢复：Python 3.11 兼容、依赖补全与测试收口：
+- ✅ 修复 Python 3.11 兼容缺陷：`assistant/models.py` 改用 `typing_extensions.TypedDict`（pydantic 在 <3.12 上拒收 `typing.TypedDict`，`MeetingState` 构建即抛错）
+- ✅ 运行依赖补全：显式声明 `requests` / `typing_extensions` / `setuptools`（此前缺失或仅靠传递引入）
+- ✅ `llm.json.example` 追平模型矩阵（base 4→8、adv 7→10），补 Anthropic 协议内联覆盖
+- ✅ 消除 `llm/benchmark.py` 4 处 mypy 类型错误；`setuptools` 下界提到 83（`PYSEC-2026-3447`）
+- ✅ 测试依赖收口：`[dev]` 补入 `networkx` / `pyahocorasick` / `pytest-asyncio`；音频测试改为注入桩模块
+- ✅ CI 四个 job 全绿（Python 3.11 / 3.12 / 3.13 + macOS smoke）——此前自 v3.36.0 起持续失败
+
+**上一版 v3.37.3 (2026-09-11)** - 修复模型 max_tokens 被调用方硬编码静默覆盖：
 - ✅ 移除 `complex_input` Stage 2（图片 / PDF / 视频）硬编码的 `max_tokens=4096`
 - ✅ 移除 `feishu/image_analyzer` 硬编码的 `max_tokens=300`
 - ✅ 新增 4 个防回归测试，锁定「不向 `generate_multimodal` 显式传 `max_tokens`」
 - ✅ 修复后 `llm.json` 中配置的输出上限在这些链路上真正生效
-- ✅ Python 3.11 兼容修复：`assistant/models.py` 改用 `typing_extensions.TypedDict`（pydantic 在 <3.12 上拒收 `typing.TypedDict`）
-- ✅ CI 依赖补全：显式声明 `requests` / `typing_extensions` / `setuptools`（此前仅靠传递引入，缺失导致 `macos-smoke` 与 `Build package` 失败）
-- ✅ `llm.json.example` 追平模型矩阵（base 4→8、adv 7→10），补 Anthropic 协议内联覆盖
-
-**上一版 v3.37.2 (2026-09-11)** - ASR-corrector 启动信息增强：
-- ✅ 启动时显示 LLM 模型配置信息（模型名、temperature、max_tokens、timeout）
-- ✅ 明确展示「强制指定，跳过路由」状态，便于用户确认实际使用模型
 
 **项目规模**：~42,000 行代码 / 185 文件 / 27 模块 / 3,334 测试用例 / 68% 覆盖率
 
@@ -189,7 +190,8 @@ iris3/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
-| **v3.37.3** | 2026-09-11 | 修复模型 `max_tokens` 被调用方硬编码静默覆盖：`complex_input` Stage 2（图片/PDF/视频）的 `max_tokens=4096` 与 `feishu/image_analyzer` 的 `max_tokens=300` 会覆盖 `llm.json` 中的模型配置，导致输出被钉死且不报错（`claude-fable-5` 11 次多模态调用中 10 次输出恰为 4096）；移除四处硬编码并新增 4 个防回归测试，配置输出上限恢复生效。全量 3,071 通过，协议版本 3.22（不变） |
+| **v3.37.4** | 2026-09-13 | **CI 门禁恢复**：修复 CI 自 v3.36.0 起持续失败的四类根因——① Python 3.11 兼容（`assistant/models.py` 改用 `typing_extensions.TypedDict`，pydantic 在 <3.12 拒收 `typing.TypedDict`，`MeetingState` 构建即抛 `PydanticUserError`）；② 运行依赖补全（`requests` / `typing_extensions` / `setuptools`）；③ `llm/benchmark.py` 4 处 mypy 类型错误；④ 测试依赖收口（`[dev]` 补入 `networkx` / `pyahocorasick` / `pytest-asyncio`，音频测试改注入桩模块）。另修 `setuptools` 下界 64→83（`PYSEC-2026-3447`），`llm.json.example` 追平模型矩阵并补 Anthropic 协议内联覆盖。CI 四 job 全绿（3.11/3.12/3.13 + macOS smoke）。协议版本 3.22（不变） |
+| **v3.37.3** | 2026-09-11 | 修复模型 `max_tokens` 被调用方硬编码静默覆盖：`complex_input` Stage 2（图片/PDF/视频）的 `max_tokens=4096` 与 `feishu/image_analyzer` 的 `max_tokens=300` 会覆盖 `llm.json` 中的模型配置，导致输出被钉死且不报错（`claude-fable-5` 11 次多模态调用中 10 次输出恰为 4096）；移除四处硬编码并新增 4 个防回归测试，配置输出上限恢复生效。协议版本 3.22（不变） |
 | **v3.37.2** | 2026-09-11 | ASR-corrector 启动信息增强：`_print_startup_banner` 新增 LLM 模型配置展示行（模型名 / temperature / max_tokens / timeout），明确「强制指定，跳过路由」状态。协议版本 3.22（不变） |
 | **v3.37.1** | 2026-09-11 | ASR-corrector 强制指定模型：`_invoke_llm` 新增 `force_model="deepseek-flash"` 跳过路由直连官方模型；`temperature` / `max_tokens` 由硬编码提取为实例属性。协议版本 3.22（不变） |
 | **v3.37.0** | 2026-09-11 | 模型矩阵升级：`base_model` 默认 → `claude-sonnet-5-zz`、`adv_model` 默认 → `claude-fable-5-zz`（均走 zz_tokenhub Anthropic 兼容接口）；规模 4 → 11 个模型（base 2→4、adv 2→7），新增 Qwen 3.8 / 3.7 / 3.6 系列与 GPT-5.6 Sol 末位兜底，全矩阵统一多模态；路由规则 8 → 12 条（新增周报提取走 adv、ASR 校正/误识别/热词走 base）。协议版本 3.22（不变） |

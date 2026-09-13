@@ -1,3 +1,24 @@
+## v3.37.4 (2026-09-13) — CI 门禁恢复：Python 3.11 兼容、依赖补全与测试收口
+
+CI 自 v3.36.0（2026-09-10）起每次推送均失败，四个 job 各有不同根因。本次逐层定位并全部修复，CI 恢复全绿（Python 3.11 / 3.12 / 3.13 + macOS smoke）。
+
+- **Python 3.11 兼容**：`assistant/models.py` 的 `TopicRecord` / `SpeakerRecord` 改用 `typing_extensions.TypedDict`。pydantic 在 `Python < 3.12` 上拒收 `typing.TypedDict`（`_SUPPORTS_TYPEDDICT = sys.version_info >= (3, 12)`），而二者被用作 `MeetingState` 的字段类型（`topics: List[TopicRecord]`），导致 3.11 下模型构建直接抛 `PydanticUserError`。项目声明 `requires-python = ">=3.11"`、CI 矩阵含 3.11，属真实缺陷。已用「强制 `_SUPPORTS_TYPEDDICT = False`」在 3.13 上模拟 3.11 并验证模型可正常构建。
+- **运行依赖补全**：`pyproject.toml` 显式声明此前仅靠传递引入或完全缺失的依赖——
+  - `requests`：`llm/benchmark`、`trello`、`feishu` 直接 import，缺失导致 `macos-smoke` 的 `iris --help` 报 `ModuleNotFoundError`。
+  - `typing_extensions`：上述 TypedDict 的来源。
+  - `setuptools`（`[dev]`）：CI 的 `pip wheel . --no-build-isolation` 需当前环境已装构建后端；Python 3.12+ 不再随解释器预装，缺失导致 `BackendUnavailable`。
+- **示例配置同步**：`config/llm.json.example` 追平模型矩阵（base 4→8、adv 7→10），并为 Anthropic 协议模型补上内联 `provider` / `api_base_url`。`resolve_channels` 按通道单值解析且 `setdefault` 不覆盖，纯通道引用无法表达同一通道下的两种协议端点——此前照抄示例的用户会把 Claude 模型发往 openai 协议端点。域名使用占位符，脱敏断言校验通过。
+- **mypy 严格 stub 兼容**：`llm/benchmark.py` 消除 4 处类型错误——`_sse_events` 对 `iter_lines` 结果显式归一化（`decode_unicode=True` 运行期返回 `str`，但 requests 的类型标注固定为 `bytes`，严格 stub 下 `startswith("data:")` 报 `arg-type`），两处 `requests.post(json=...)` 的 payload 标注为 `Dict[str, Any]`（字面量推断的 `dict[str, object]` 无法匹配 `JsonType` 形参）。归一化后 str / bytes 两种输入解析结果一致，已做功能验证。
+- **依赖漏洞**：`setuptools` 下界由 64 提到 **83**——79.0.1 命中 `PYSEC-2026-3447`，被 `pip-audit` 门禁拦截。
+- **测试依赖收口**：`[dev]` extras 补入四项此前仅存在于本地环境、未声明的依赖——
+  - `networkx`：CI 只装 `.[dev]`（不含 `graph` extra）时走纯 Python 回退分支，而 `tests/unit/test_graph_engine.py` 断言的是 networkx 分支语义，`test_zero_indegree_node_is_orphan` 因此失败。
+  - `pyahocorasick`：assistant 校正引擎的 Aho-Corasick 自动机虽在源码中延迟导入、`asr` extra 中声明，但 `tests/unit/test_meeting_assistant_corrector.py` 等明确要求使用**真实**自动机（非 mock），缺失时 `test_meeting_assistant_{corrector 17, live 22, e2e 5}` 共 44 项失败。该包为纯编译扩展、有预编译 wheel、无系统依赖。
+  - `pytest-asyncio`：`tests/test_async_http.py` 使用 `@pytest.mark.asyncio` + `async def`，缺失时报「async def functions are not natively supported」，且 `asyncio` marker 未注册（`markers` 仅注册了 `unit` / `integration`）。已用 `pytest -p no:asyncio` 精确复现。
+  - `sounddevice` **未纳入**：该依赖属可选（源码 `_audio.py` 为函数内延迟导入，剪贴板模式不需要），改为让 `test_meeting_assistant_audio.py` 主动向 `sys.modules` 注入桩模块，使测试无须真实包即可运行，避免在 CI 引入 PortAudio 系统依赖。已用「屏蔽真实模块」的方式验证两种环境均通过。
+- **排查方法**：不再逐轮 CI 试探，而是用 `PYTHONPATH` 注入会抛 `ImportError` 的假模块，在本地复现 CI 的 `.[dev]` 最小环境，一次性取得完整失败面再统一修复；另核对了全部 pytest 插件与 marker 使用，确认无其他未声明依赖（`pytest-benchmark` 虽本地存在但测试未使用）。
+- **已知问题（本次未裁决）**：`_GraphEngine.orphans()` 的两条实现分支语义不一致——networkx 分支只报「图内且零入链」的节点，纯 Python 回退分支报「`all_node_ids` 中无入链」的节点（含完全无边、不在图中的节点）。两处现有测试亦相互矛盾（`test_graph_engine.py` 期望空图返回 `[]`，`test_graph_engine_fallback.py` 期望返回全部节点）。`WikiGraph.find_orphans()` 传入的是全部页面 id，按「零入链即孤立」的字面语义**回退分支更接近意图**（networkx 分支会漏掉无边页面，而那恰是最该被发现的孤立页）；`neighbors()` 的边方向语义（LLM 单向 / wikilink 双向）亦受同一分支差异影响。本次仅把 CI 拉回 networkx 分支以恢复门禁，**语义统一待专项裁决**。
+- 验证：CI 四个 job 全绿（Python 3.11 / 3.12 / 3.13 + macOS smoke），涵盖 ruff、安全静态扫描、pip-audit、mypy、单元测试、集成测试与覆盖率门禁；本地全量 **3,334 通过**。协议版本 3.22（不变）；产品版本 3.37.3→**3.37.4**。
+
 ## v3.37.3 (2026-09-11) — 修复模型 max_tokens 被调用方硬编码静默覆盖
 
 修复 `complex_input` 与 `feishu/image_analyzer` 两处调用方硬编码 `max_tokens`、导致 `llm.json` 中模型配置被静默覆盖的问题。
@@ -7,17 +28,9 @@
 - **修复**：移除 `complex_input/pipeline.py` 三处、`feishu/image_analyzer.py` 一处硬编码，输出上限统一交由模型配置决定；两处均补充防回归注释，说明「显式传参会静默覆盖配置」。
 - **防回归**：新增 4 个测试（`tests/integration/test_complex_input_pipeline.py` 3 个 + `tests/unit/test_image_analyzer.py` 1 个），锁定 `generate_multimodal` 不被显式传入 `max_tokens`；4 个测试均已在修复前代码上验证会失败、修复后通过。
 - **影响范围**：图片 / PDF / 视频三阶段流水线与飞书消息图片分析；修复后 `llm.json` 的 `max_tokens` 在这些链路上真正生效。
-- **附带修复 ①（Python 3.11 兼容）**：`assistant/models.py` 的 `TopicRecord` / `SpeakerRecord` 改用 `typing_extensions.TypedDict`。pydantic 在 `Python < 3.12` 上拒收 `typing.TypedDict`（`_SUPPORTS_TYPEDDICT = sys.version_info >= (3, 12)`），而这两个 TypedDict 被用作 `MeetingState` 的字段类型（`topics: List[TopicRecord]`），导致 3.11 下模型构建直接抛 `PydanticUserError`。项目声明 `requires-python = ">=3.11"`、CI 矩阵含 3.11，故属真实缺陷。
-- **附带修复 ②（CI 依赖缺失）**：`pyproject.toml` 显式声明三项此前仅靠传递引入的依赖——`requests`（`llm/benchmark`、`trello`、`feishu` 直接 import，缺失导致 `macos-smoke` 的 `iris --help` 报 `ModuleNotFoundError`）、`typing_extensions`（上述 TypedDict 来源）、`setuptools`（`[dev]` extras，CI 的 `pip wheel . --no-build-isolation` 需当前环境已装构建后端，Python 3.12+ 不再随解释器预装，缺失导致 `BackendUnavailable`）。
-- **附带修复 ③（示例配置同步）**：`config/llm.json.example` 追平模型矩阵（base 4→8、adv 7→10），并为 Anthropic 协议模型补上内联 `provider` / `api_base_url` 覆盖——`resolve_channels` 按通道单值解析且 `setdefault` 不覆盖，纯通道引用无法表达同一通道下的两种协议端点，此前照抄示例的用户会把 Claude 模型发往 openai 协议端点。域名使用占位符，脱敏校验通过。
-- **附带修复 ④（mypy 严格 stub 兼容）**：`llm/benchmark.py` 消除 4 处类型错误——`_sse_events` 对 `iter_lines` 结果显式归一化（`decode_unicode=True` 运行期返回 `str`，但 requests 标注固定为 `bytes`，严格 stub 下 `startswith("data:")` 报 `arg-type`），两处 `requests.post(json=...)` 的 payload 标注为 `Dict[str, Any]`（字面量推断的 `dict[str, object]` 无法匹配 `JsonType` 形参）。归一化后两种输入形态解析结果一致，已做功能验证。
-- **附带修复 ⑤（依赖漏洞与 CI 路径覆盖）**：`setuptools` 下界由 64 提到 **83**（79.0.1 存在 `PYSEC-2026-3447`，pip-audit 门禁拦截）；`[dev]` extras 纳入 `networkx`——CI 只装 `.[dev]`，此前走纯 Python 回退分支，而 `tests/unit/test_graph_engine.py` 断言的是 networkx 分支语义，导致 `test_zero_indegree_node_is_orphan` 失败。
-- **附带修复 ⑥（测试依赖收口）**：`[dev]` extras 补入三项此前仅存在于本地环境、未声明的测试依赖——
-  - `pyahocorasick`：assistant 校正引擎的 Aho-Corasick 自动机虽在源码中延迟导入、`asr` extra 中声明，但 `tests/unit/test_meeting_assistant_corrector.py` 等明确要求使用**真实**自动机（非 mock），CI 只装 `.[dev]` 时 `test_meeting_assistant_{corrector 17, live 22, e2e 5}` 共 44 项失败。该包为纯编译扩展、有预编译 wheel、无系统依赖。已用「PYTHONPATH 注入抛 ImportError 的假模块屏蔽全部非 dev optional 包」的方式本地复现 CI 最小环境并验证修复。
-  - `pytest-asyncio`：`tests/test_async_http.py` 使用 `@pytest.mark.asyncio` + `async def`；CI 缺该插件时报「async def functions are not natively supported」，且 `asyncio` marker 未注册（仅 `unit`/`integration` 已注册）。已用 `pytest -p no:asyncio` 精确复现。
-  - 排查方式说明：本次不再逐轮 CI 试探，而是先本地复现 CI 的最小依赖环境，一次性取得完整失败面再统一修复；另核对了全部 pytest 插件与 marker 使用，确认无其他未声明依赖（`pytest-benchmark` 虽本地存在但测试未使用）。
-- **已知问题（本次未裁决）**：`_GraphEngine.orphans()` 的两条实现分支语义不一致——networkx 分支只报「图内且零入链」的节点，纯 Python 回退分支报「`all_node_ids` 中无入链」的节点（含完全无边、不在图中的节点）。两处现有测试亦相互矛盾（`test_graph_engine.py` 期望空图返回 `[]`，`test_graph_engine_fallback.py` 期望返回全部节点）。`WikiGraph.find_orphans()` 传入的是全部页面 id，按「零入链即孤立」的字面语义**回退分支更接近意图**（networkx 分支会漏掉无边页面，而那恰是最该被发现的孤立页）；但 `neighbors()` 的边方向语义（LLM 单向 / wikilink 双向）亦受同一分支差异影响。本次仅把 CI 拉回 networkx 分支以恢复门禁，**语义统一待专项裁决**。
-- 验证：Python 3.13 全量 **3,334 通过**；ruff 全量与安全静态扫描通过；mypy `src/iris` 全包（185 文件）通过；`llm.json` 与 `llm.json.example` 均通过 Pydantic 校验。协议版本 3.22（不变）；产品版本 3.37.2→**3.37.3**。
+- 验证：移除 `complex_input/pipeline.py` 三处与 `feishu/image_analyzer.py` 一处硬编码；新增 4 个防回归测试，均已验证在修复前代码上失败、修复后通过。协议版本 3.22（不变）；产品版本 3.37.2→**3.37.3**。
+
+> 注：本版修复过程中暴露的 CI 门禁问题（Python 3.11 兼容、依赖补全、测试收口等）独立记为 [v3.37.4](#v3374-2026-09-13--ci-门禁恢复python-311-兼容依赖补全与测试收口)。
 
 ## v3.37.2 (2026-09-11) — ASR-corrector 启动信息增强
 
