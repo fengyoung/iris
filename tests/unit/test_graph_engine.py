@@ -149,17 +149,20 @@ class TestOrphans:
         engine.build([_make_edge("A", "B", source_type="llm")])
         all_ids = {"A", "B", "C"}
         result = engine.orphans(all_ids)
-        # A 在图中且入度为 0，应为孤立
+        # A 零入链，应为孤立
         assert "A" in result
         # B 有来自 A 的入链，不是孤立
         assert "B" not in result
+        # C 完全无边（不在图内），按「零入链即孤立」同样计入——
+        # WikiGraph.find_orphans() 传的是全部页面 id，无边页面最该被发现
+        assert "C" in result
 
-    def test_empty_graph_returns_empty(self):
-        # orphans 仅检测"已在图中但零入度"的节点；空图无任何节点，结果为空
+    def test_empty_graph_all_nodes_orphan(self):
+        """空图没有任何入链，传入的全部节点均为孤立。"""
         engine = _GraphEngine()
         engine.build([])
         result = engine.orphans({"A", "B"})
-        assert result == []
+        assert result == ["A", "B"]
 
     def test_result_sorted(self):
         engine = _GraphEngine()
@@ -264,3 +267,53 @@ class TestDegreeStats:
         ])
         result = engine.degree_stats({"A", "B", "C", "D"})
         assert result["max_degree_node"] == "A"
+
+
+# ── orphans() 跨实现路径一致性 ──────────────────────────────────────
+#
+# orphans() 曾有语义分歧：networkx 分支额外要求「节点在图内」，纯 Python
+# 回退分支不要求——同一份代码在装 / 不装 networkx 时结果不同（CI 无 networkx
+# 时走回退分支，与主测试文件的期望冲突而失败）。
+# 现已统一为「all_node_ids 中零入链者，含完全无边的节点」。以下锁定两路径等价，
+# 并覆盖 LLM 单向边与 wikilink 双向边的混合场景。
+
+
+@pytest.fixture
+def force_fallback(monkeypatch):
+    """强制走纯 Python 回退路径（build 依据模块级 _HAS_NETWORKX 分派）。"""
+    import iris.wiki._graph_engine as ge
+
+    monkeypatch.setattr(ge, "_HAS_NETWORKX", False)
+
+
+class TestOrphansPathParity:
+    """同一图在两条实现路径下，orphans() 必须给出相同结果。"""
+
+    @staticmethod
+    def _build(engine):
+        # LLM 单向 A→B；wikilink 双向 B↔C
+        engine.build([
+            _make_edge("A", "B", source_type="llm"),
+            _make_edge("B", "C", source_type="wikilink"),
+        ])
+
+    def test_networkx_path(self):
+        engine = _GraphEngine()
+        self._build(engine)
+        # 入链端点 = {B（A→B）, C（B→C）}；A 零入链、D 完全无边 → 均为孤立
+        assert engine.orphans({"A", "B", "C", "D"}) == ["A", "D"]
+
+    def test_fallback_path(self, force_fallback):
+        engine = _GraphEngine()
+        self._build(engine)
+        assert engine.orphans({"A", "B", "C", "D"}) == ["A", "D"]
+
+    def test_empty_graph_networkx_path(self):
+        engine = _GraphEngine()
+        engine.build([])
+        assert engine.orphans({"A", "B"}) == ["A", "B"]
+
+    def test_empty_graph_fallback_path(self, force_fallback):
+        engine = _GraphEngine()
+        engine.build([])
+        assert engine.orphans({"A", "B"}) == ["A", "B"]

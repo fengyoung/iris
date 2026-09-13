@@ -57,6 +57,11 @@ class _GraphEngine:
         self._nx: Any = None  # networkx.DiGraph (if available)
         self._adjacency: Dict[str, List[str]] = {}
         self._out_edges: Dict[str, List[GraphEdge]] = {}
+        # 有向入链端点集合，仅供 orphans() 使用。
+        # 单独维护而非从 _adjacency 推导：后者是「出边 + wikilink 反向」的
+        # 邻接视图（供 neighbors/bridges/degree_stats 使用），直接取 value 全集
+        # 会把 LLM 单向边的两端都算作"被引用"。
+        self._in_links: Set[str] = set()
 
     def build(self, edges: List[GraphEdge]) -> None:
         """从边列表构建图结构。"""
@@ -76,12 +81,17 @@ class _GraphEngine:
         else:
             self._adjacency.clear()
             self._out_edges.clear()
+            self._in_links.clear()
             for edge in edges:
                 self._adjacency.setdefault(edge.source, []).append(edge.target)
                 self._adjacency.setdefault(edge.target, []).append(edge.source)
                 self._out_edges.setdefault(edge.source, []).append(edge)
+                # 入链端点：与 networkx 分支的 in_degree 语义对齐——
+                # target 恒为入链端点；wikilink 双向，故 source 也是
+                self._in_links.add(edge.target)
                 if edge.source_type == "wikilink":
                     self._out_edges.setdefault(edge.target, []).append(edge)
+                    self._in_links.add(edge.source)
 
     def neighbors(self, node_id: str, hops: int = 1) -> Set[str]:
         """获取指定节点 hops 跳内的邻居。"""
@@ -155,15 +165,20 @@ class _GraphEngine:
             return None
 
     def orphans(self, all_node_ids: Set[str]) -> List[str]:
-        """查找零入链的孤立节点。"""
+        """查找零入链的孤立节点。
+
+        语义：「`all_node_ids` 中没有任何入链的节点」，**含完全无边、不在图内的
+        节点**。`WikiGraph.find_orphans()` 传入的是全部 Wiki 页面 id，无边页面
+        恰恰是最该被发现的孤立页，故必须计入。
+
+        两条实现分支（networkx / 纯 Python）结果现已一致；此前 networkx 分支
+        额外要求节点在图中（`n in in_degrees`），会漏掉无边页面，与回退分支
+        不一致（同一份代码在装/不装 networkx 时给出不同结果）。
+        """
         if self._nx is not None:
             in_degrees = dict(self._nx.in_degree())
-            return sorted([n for n in all_node_ids if n in in_degrees and in_degrees[n] == 0])
-        else:
-            referenced: Set[str] = set()
-            for targets in self._adjacency.values():
-                referenced.update(targets)
-            return sorted([n for n in all_node_ids if n not in referenced])
+            return sorted([n for n in all_node_ids if in_degrees.get(n, 0) == 0])
+        return sorted([n for n in all_node_ids if n not in self._in_links])
 
     def bridges(self, nodes: Dict[str, Any], min_degree: int = 3) -> List[Dict[str, Any]]:
         """查找桥接节点。"""

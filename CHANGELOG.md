@@ -1,3 +1,13 @@
+## v3.37.5 (2026-09-13) — 统一 orphans() 双路径语义
+
+裁决并解决 v3.37.4 记录的已知问题：`_GraphEngine.orphans()` 在 networkx 与纯 Python 回退两条分支下语义不一致，导致同一份代码在装 / 不装 networkx 时给出不同结果。
+
+- **语义裁决**：统一为「`all_node_ids` 中没有任何入链的节点」，**含完全无边、不在图内的节点**。依据是调用方 `WikiGraph.find_orphans()` 传入的是全部 Wiki 页面 id——无边页面恰恰是最该被发现的孤立页；networkx 分支原先额外要求「节点在图内」，会漏掉它们。
+- **实现**：networkx 分支由 `n in in_degrees and in_degrees[n] == 0` 改为 `in_degrees.get(n, 0) == 0`；回退分支改由新增的 `_in_links` 集合判定入链端点（`target` 恒计入；wikilink 双向，故 `source` 亦计入）。**未改动 `_adjacency`**——它同时服务 `neighbors` / `bridges` / `degree_stats`，直接改会连带波及这三者；`_in_links` 专供 `orphans`，切口最小。
+- **行为变化**：`graph-query --op orphans` 现在会额外报出「完全无边」的页面（此前被静默漏掉）。该命令为只读诊断，无下游副作用。
+- **防回归**：新增 `TestOrphansPathParity`（4 项，覆盖 LLM 单向 / wikilink 双向 / 空图在两条路径下的等价性）；修正 `test_empty_graph_returns_empty`——它编码的是旧语义，已更名为 `test_empty_graph_all_nodes_orphan` 并更新期望。全部已在修复前代码上验证会失败。
+- 验证：两条路径在 5 个场景（LLM 单向 / wikilink 双向 / 混合 / 空图 / 全链 wikilink）结果完全一致；全量 **3,338 通过**；ruff 通过。协议版本 3.22（不变）；产品版本 3.37.4→**3.37.5**。
+
 ## v3.37.4 (2026-09-13) — CI 门禁恢复：Python 3.11 兼容、依赖补全与测试收口
 
 CI 自 v3.36.0（2026-09-10）起每次推送均失败，四个 job 各有不同根因。本次逐层定位并全部修复，CI 恢复全绿（Python 3.11 / 3.12 / 3.13 + macOS smoke）。
@@ -16,7 +26,7 @@ CI 自 v3.36.0（2026-09-10）起每次推送均失败，四个 job 各有不同
   - `pytest-asyncio`：`tests/test_async_http.py` 使用 `@pytest.mark.asyncio` + `async def`，缺失时报「async def functions are not natively supported」，且 `asyncio` marker 未注册（`markers` 仅注册了 `unit` / `integration`）。已用 `pytest -p no:asyncio` 精确复现。
   - `sounddevice` **未纳入**：该依赖属可选（源码 `_audio.py` 为函数内延迟导入，剪贴板模式不需要），改为让 `test_meeting_assistant_audio.py` 主动向 `sys.modules` 注入桩模块，使测试无须真实包即可运行，避免在 CI 引入 PortAudio 系统依赖。已用「屏蔽真实模块」的方式验证两种环境均通过。
 - **排查方法**：不再逐轮 CI 试探，而是用 `PYTHONPATH` 注入会抛 `ImportError` 的假模块，在本地复现 CI 的 `.[dev]` 最小环境，一次性取得完整失败面再统一修复；另核对了全部 pytest 插件与 marker 使用，确认无其他未声明依赖（`pytest-benchmark` 虽本地存在但测试未使用）。
-- **已知问题（本次未裁决）**：`_GraphEngine.orphans()` 的两条实现分支语义不一致——networkx 分支只报「图内且零入链」的节点，纯 Python 回退分支报「`all_node_ids` 中无入链」的节点（含完全无边、不在图中的节点）。两处现有测试亦相互矛盾（`test_graph_engine.py` 期望空图返回 `[]`，`test_graph_engine_fallback.py` 期望返回全部节点）。`WikiGraph.find_orphans()` 传入的是全部页面 id，按「零入链即孤立」的字面语义**回退分支更接近意图**（networkx 分支会漏掉无边页面，而那恰是最该被发现的孤立页）；`neighbors()` 的边方向语义（LLM 单向 / wikilink 双向）亦受同一分支差异影响。本次仅把 CI 拉回 networkx 分支以恢复门禁，**语义统一待专项裁决**。
+- **已知问题**：`_GraphEngine.orphans()` 的两条实现分支语义不一致（networkx 分支要求节点在图内，回退分支不要求），已在 [v3.37.5](#v3375-2026-09-13--统一-orphans-双路径语义) 裁决并统一。
 - 验证：CI 四个 job 全绿（Python 3.11 / 3.12 / 3.13 + macOS smoke），涵盖 ruff、安全静态扫描、pip-audit、mypy、单元测试、集成测试与覆盖率门禁；本地全量 **3,334 通过**。协议版本 3.22（不变）；产品版本 3.37.3→**3.37.4**。
 
 ## v3.37.3 (2026-09-11) — 修复模型 max_tokens 被调用方硬编码静默覆盖
