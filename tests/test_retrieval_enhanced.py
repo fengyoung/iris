@@ -228,3 +228,53 @@ def test_apply_rank_order_fills_missing():
     remaining_ids = {r.chunk_id for r in ranked[1:]}
     assert len(remaining_ids) == 2
     assert "c2" not in remaining_ids    # 不重复选 c2
+
+
+# ── _boost_hits_for_answerability：boost 是微调而非全序重排 ──────────────
+
+
+def _boost_hit(chunk_id: str, score: float, preview: str) -> RetrievalHit:
+    return RetrievalHit(
+        chunk_id=chunk_id, score=score, title="",
+        relative_path=f"{chunk_id}.md", section_path=[],
+        content_preview=preview, line_start=0, line_end=10,
+        chunk_type="section", explanation="",
+    )
+
+
+def test_boost_does_not_outrank_much_higher_bm25():
+    """关键词加分只是微调：低相关块命中「术语/定义」后仍不得越过远高相关的块。
+
+    回归背景：_chunk_to_hit 曾把 score 硬编码为 0.0，导致本函数在 0 分基线上
+    做加法并重排，BM25 相关性序被完全抹掉（实测退化为按 relative_path 字母序）。
+    修复后 hit.score 为真实 BM25 分，本测试锁定该性质。
+    """
+    from iris.retrieval.planner import QueryPlanner
+    from iris.retrieval.enhanced import EnhancedRetriever
+
+    query_plan = QueryPlanner().build("X 的定义是什么")
+    hits = [
+        _boost_hit("high", 17.0, "正文内容"),
+        _boost_hit("low", 3.0, "本页给出该术语的定义与含义"),
+    ]
+    boosted = EnhancedRetriever._boost_hits_for_answerability(
+        EnhancedRetriever, hits, query_plan=query_plan
+    )
+    assert [h.chunk_id for h in boosted] == ["high", "low"]
+    assert boosted[1].score > 3.0  # 加分确实生效，只是不足以翻盘
+
+
+def test_boost_can_reorder_near_ties():
+    """分数接近时，关键词加分可以改变次序（保留 boost 的设计意图）。"""
+    from iris.retrieval.planner import QueryPlanner
+    from iris.retrieval.enhanced import EnhancedRetriever
+
+    query_plan = QueryPlanner().build("X 的定义是什么")
+    hits = [
+        _boost_hit("plain", 10.0, "正文内容"),
+        _boost_hit("keyword", 9.0, "本页给出该术语的定义与含义"),
+    ]
+    boosted = EnhancedRetriever._boost_hits_for_answerability(
+        EnhancedRetriever, hits, query_plan=query_plan
+    )
+    assert [h.chunk_id for h in boosted] == ["keyword", "plain"]

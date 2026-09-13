@@ -30,6 +30,14 @@ TYPE_NAMES = get_display_name_map()
 PAGE_DIRS = get_dir_map()
 PAGE_PREFIXES = get_prefix_map()
 
+# 证据条数上限：_format_evidence 与 _build_source_fingerprint 必须消费同一份列表，
+# 否则指纹记录的来源会与实际引用不一致。
+_EVIDENCE_LIMIT = 8
+# 人物页专属：额外取该人最近几份周报，每份 1 个正文代表块。
+# 人名在周报正文中出现 0 次，词法检索召回不到正文，只能按文件名约定定向取。
+_PERSON_WEEKLY_DOCS = 4
+_PERSON_WEEKLY_CHUNKS = 1
+
 
 @dataclass(frozen=True)
 class WikiPageDraft:
@@ -81,8 +89,9 @@ class WikiGenerator:
         output_path = self._wiki_root / subdir / f"{prefix}{slug}.md"
 
         # 检索相关证据
-        result = self._retriever.search(query, top_k=top_k)
-        evidence_text = self._format_evidence(result.hits)
+        evidence_hits = self._collect_evidence(query=query, title=title,
+                                               page_type=page_type, top_k=top_k)
+        evidence_text = self._format_evidence(evidence_hits)
 
         # 查找相关页面
         related = self._compute_related_pages(title, query, exclude_slug=slug) if self._wiki_searcher else "暂无"
@@ -91,7 +100,8 @@ class WikiGenerator:
         markdown = self._generate_markdown(page_type=page_type, title=title, query=query,
                                            evidence=evidence_text, related=related)
         # 注入源文档指纹：记录本次引用的源文档 hash，供过时判定精准触发
-        markdown = inject_source_fingerprint(markdown, self._build_source_fingerprint(result.hits))
+        markdown = inject_source_fingerprint(markdown,
+                                             self._build_source_fingerprint(evidence_hits))
 
         draft = WikiPageDraft(page_type=page_type, title=title, slug=slug,
                               output_path=str(output_path), markdown=markdown)
@@ -151,11 +161,32 @@ class WikiGenerator:
         if page_type not in PAGE_DIRS:
             raise ValueError(f"不支持的页面类型: {page_type}")
 
+    def _collect_evidence(self, *, query: str, title: str, page_type: str,
+                          top_k: int) -> List[Any]:
+        """组装页面证据（已按 _EVIDENCE_LIMIT 截断）。
+
+        人物页额外接一条「本人周报通道」：人名在其周报正文中出现 0 次，词法检索
+        只召回得到 frontmatter/邮件信息这类含人名但无内容的前言块，导致「周报
+        时间线」永远拿不到正文（且同分兜底会先取到最旧的那批）。这里按文件名
+        `-{姓名}.md` 定向定位，取最近几份的代表块并优先占证据槽。
+
+        通道无匹配时静默降级（返回空），不影响主检索。
+        """
+        hits = list(self._retriever.search(query, top_k=top_k).hits)
+        if page_type == "person":
+            hits = self._retriever.latest_documents(
+                f"-{title}.md",
+                doc_limit=_PERSON_WEEKLY_DOCS,
+                chunks_per_doc=_PERSON_WEEKLY_CHUNKS,
+            ) + hits
+        return hits[:_EVIDENCE_LIMIT]
+
     def _format_evidence(self, hits) -> str:
+        # 上游 _collect_evidence 已裁到 _EVIDENCE_LIMIT，此处的 [:8] 只是安全上限
         if not hits:
             return "无相关证据"
         lines = []
-        for i, hit in enumerate(hits[:8], 1):
+        for i, hit in enumerate(hits[:_EVIDENCE_LIMIT], 1):
             lines.append(f"{i}. 来源：{hit.relative_path}")
             lines.append(f"   标题：{hit.title}")
             lines.append(f"   内容：{hit.content_preview[:300]}")
@@ -165,8 +196,9 @@ class WikiGenerator:
     def _build_source_fingerprint(self, hits) -> Dict[str, str]:
         """从检索命中构建源文档指纹（relative_path → 文档 hash 前 12 位）。
 
-        取证据上限与 _format_evidence 一致（前 8 条）。hash 索引缺失时
-        返回空 dict，页面照常生成（仅退化为按天数判定过时）。
+        与 _format_evidence 消费同一份 `_collect_evidence` 列表（同上限
+        _EVIDENCE_LIMIT），保证指纹记录的来源与实际引用一致。
+        hash 索引缺失时返回空 dict，页面照常生成（仅退化为按天数判定过时）。
         """
         if not hits:
             return {}
@@ -176,7 +208,7 @@ class WikiGenerator:
         except Exception:
             return {}
         fingerprint: Dict[str, str] = {}
-        for hit in hits[:8]:
+        for hit in hits[:_EVIDENCE_LIMIT]:
             rel_path = hit.relative_path
             if rel_path in fingerprint:
                 continue
@@ -755,8 +787,9 @@ sources:
         """增量更新单个页面（已有内容和路径，避免重复扫描文件）。"""
         last_updated = self._parse_frontmatter_field(existing_content, "updated")
 
-        result = self._retriever.search(title, top_k=top_k)
-        evidence_text = self._format_evidence(result.hits)
+        evidence_hits = self._collect_evidence(query=title, title=title,
+                                               page_type=page_type, top_k=top_k)
+        evidence_text = self._format_evidence(evidence_hits)
 
         slug = _slugify_title(title)
         related = self._compute_related_pages(title, title, exclude_slug=slug) if self._wiki_searcher else "暂无"
@@ -775,7 +808,7 @@ sources:
             new_content = validated
 
         # 刷新源文档指纹（LLM 可能丢弃或保留旧指纹，统一以本次检索为准）
-        new_content = inject_source_fingerprint(new_content, self._build_source_fingerprint(result.hits))
+        new_content = inject_source_fingerprint(new_content, self._build_source_fingerprint(evidence_hits))
 
         if new_content.strip() == existing_content.strip():
             return {"status": "no_changes", "title": title, "path": str(path)}

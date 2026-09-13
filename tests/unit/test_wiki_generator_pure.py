@@ -246,3 +246,86 @@ title: test
         result = WikiGenerator.check_reference_quality(content)
         assert result["quality"] == "no_refs"
 
+
+
+# ── _collect_evidence：人物页「本人周报通道」 ────────────────────────
+
+
+class _StubRetriever:
+    """记录调用的桩检索器。"""
+
+    def __init__(self, main_hits, weekly_hits=None):
+        self._main_hits = main_hits
+        self._weekly_hits = weekly_hits if weekly_hits is not None else []
+        self.latest_calls = []
+
+    def search(self, query, *, top_k=10, **kwargs):
+        return MagicMock(hits=list(self._main_hits))
+
+    def latest_documents(self, path_suffix, *, doc_limit=4, chunks_per_doc=1):
+        self.latest_calls.append((path_suffix, doc_limit, chunks_per_doc))
+        return list(self._weekly_hits)
+
+
+def _hit(chunk_id: str, path: str) -> MagicMock:
+    hit = MagicMock()
+    hit.chunk_id = chunk_id
+    hit.relative_path = path
+    hit.title = chunk_id
+    hit.content_preview = f"内容 {chunk_id}"
+    return hit
+
+
+def _make_generator(main_hits, weekly_hits=None):
+    gen = object.__new__(WikiGenerator)     # 只需 _retriever
+    gen._retriever = _StubRetriever(main_hits, weekly_hits)
+    return gen
+
+
+class TestCollectEvidence:
+    def test_person_weekly_hits_are_reserved(self):
+        """周报正文优先占槽：不被高分主通道结果挤掉。"""
+        main = [_hit(f"main{i}", f"docs/main{i}.md") for i in range(8)]
+        weekly = [_hit(f"wk{i}", f"07-成员周报/2026{i}-周报-w3{i}-卞凯.md") for i in range(4)]
+        gen = _make_generator(main, weekly)
+
+        hits = gen._collect_evidence(query="卞凯", title="卞凯",
+                                     page_type="person", top_k=8)
+
+        ids = [h.chunk_id for h in hits]
+        assert all(f"wk{i}" in ids for i in range(4)), "周报块必须全部保留"
+        assert ids[:4] == ["wk0", "wk1", "wk2", "wk3"], "周报块应占据最前面的槽位"
+
+    def test_non_person_does_not_use_weekly_channel(self):
+        """project/domain 页零行为变化：不调 latest_documents。"""
+        main = [_hit(f"m{i}", f"docs/m{i}.md") for i in range(8)]
+        retriever = _StubRetriever(main, [_hit("wk0", "07-成员周报/x-周报-w37-卞凯.md")])
+        gen = object.__new__(WikiGenerator)
+        gen._retriever = retriever
+
+        hits = gen._collect_evidence(query="视频稽查", title="视频稽查与在线审核项目",
+                                     page_type="project", top_k=8)
+
+        assert retriever.latest_calls == []
+        assert [h.chunk_id for h in hits] == [f"m{i}" for i in range(8)]
+
+    def test_result_capped_at_evidence_limit(self):
+        from iris.wiki.generator import _EVIDENCE_LIMIT
+        main = [_hit(f"m{i}", f"docs/m{i}.md") for i in range(20)]
+        weekly = [_hit(f"wk{i}", f"07-成员周报/x{i}-周报-w37-卞凯.md") for i in range(4)]
+        hits = _make_generator(main, weekly)._collect_evidence(
+            query="卞凯", title="卞凯", page_type="person", top_k=20)
+        assert len(hits) == _EVIDENCE_LIMIT
+
+    def test_person_channel_suffix_uses_title(self):
+        """通道按 `-{页面标题}.md` 定位，避免「陈鹏」误配「陈鹏飞」。"""
+        gen = _make_generator([], [])
+        gen._collect_evidence(query="陈鹏", title="陈鹏", page_type="person", top_k=5)
+        assert gen._retriever.latest_calls == [("-陈鹏.md", 4, 1)]
+
+    def test_empty_weekly_channel_degrades_silently(self):
+        """通道无匹配（改名/归档）时只用主检索，不抛异常。"""
+        main = [_hit("m0", "docs/m0.md")]
+        hits = _make_generator(main, [])._collect_evidence(
+            query="卞凯", title="卞凯", page_type="person", top_k=5)
+        assert [h.chunk_id for h in hits] == ["m0"]

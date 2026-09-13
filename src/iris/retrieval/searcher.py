@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import math
+import re
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
 
 from iris.config.loader import ConfigBundle
 from iris.ingest.chunker import ChunkRecord
@@ -21,6 +23,9 @@ logger = logging.getLogger(__name__)
 _BM25_K1 = 1.5
 _BM25_B = 0.75
 _BM25_OOV_DF = 0  # 未登录词文档频率（0 = 不假设任何文档含该词）
+
+# 文档日期前缀：锚定在文件名开头，避免命中 `202609` 这类 6 位月份目录名。
+_DOC_DATE_PREFIX_RE = re.compile(r"^(\d{8})[-_]")
 
 
 @dataclass(frozen=True)
@@ -85,7 +90,7 @@ class LocalRetriever:
         self._ensure_loaded()
 
         query_tokens = tokenize(query)
-        scored: List[Tuple[RetrievalHit, float, str]] = []
+        scored: List[Tuple[RetrievalHit, float, str, int]] = []
 
         for chunk in self._chunks:
             score, matched = _score_chunk(query, query_tokens, chunk,
@@ -98,11 +103,49 @@ class LocalRetriever:
             if score <= 0:
                 continue
             explanation = f"BM25 score={score:.2f}"
-            scored.append((_chunk_to_hit(chunk, matched, explanation), score, chunk.relative_path))
+            scored.append((_chunk_to_hit(chunk, matched, explanation, score=score),
+                           score, chunk.relative_path, chunk.line_start))
 
-        scored.sort(key=lambda item: (-item[1], item[2]))
+        # 同分兜底按文档日期降序：查询词是人名/术语时，同一批文档常完全并列
+        # （如某人的各份周报得分相同），若按路径升序会稳定返回最旧的一份。
+        scored.sort(key=lambda item: (-item[1], -_doc_date_ord(item[2]), item[2], item[3]))
         hits = [item[0] for item in scored[:top_k]]
         return RetrievalResult(total_hits=len(scored), hits=hits)
+
+    def latest_documents(self, path_suffix: str, *, doc_limit: int = 4,
+                         chunks_per_doc: int = 1) -> List[RetrievalHit]:
+        """按路径后缀定位文档，取日期最新的 doc_limit 份，每份挑代表块。
+
+        与 search() 的差别：search() 是词法召回，而人名在其周报正文中出现 0 次，
+        任何排序策略都召回不到正文（只召回得到 frontmatter/邮件信息这类含人名的
+        前言块）。此方法改用文档身份（文件名约定）定位，再按内容量选代表块。
+
+        Args:
+            path_suffix: 文档相对路径后缀，如 ``-卞凯.md``（`-` 前缀避免
+                「陈鹏」误配「陈鹏飞」）
+            doc_limit: 取最新的若干份文档
+            chunks_per_doc: 每份文档取几个代表块
+
+        Returns:
+            RetrievalHit 列表（文档按日期降序、同日期按路径升序）；无匹配返回 []。
+        """
+        self._ensure_loaded()
+
+        by_doc: Dict[str, List[ChunkRecord]] = defaultdict(list)
+        for chunk in self._chunks:
+            if chunk.relative_path.endswith(path_suffix):
+                by_doc[chunk.relative_path].append(chunk)
+        if not by_doc:
+            return []
+
+        ranked_docs = sorted(by_doc, key=lambda path: (-_doc_date_ord(path), path))[:doc_limit]
+        hits: List[RetrievalHit] = []
+        for path in ranked_docs:
+            date_ord = _doc_date_ord(path)
+            for chunk in _pick_representative_chunks(by_doc[path],
+                                                     chunks_per_doc=chunks_per_doc):
+                hits.append(_chunk_to_hit(chunk, [], f"文档日期={date_ord or '未知'}"))
+        return hits
 
     def _ensure_loaded(self) -> None:
         if self._loaded:
@@ -361,8 +404,55 @@ def _score_chunk(query: str, query_tokens: List[str], chunk: ChunkRecord,
     return total_score, all_matched[:6]
 
 
-def _chunk_to_hit(chunk: ChunkRecord, matched_terms: List[str], explanation: str) -> RetrievalHit:
-    return RetrievalHit(chunk_id=chunk.chunk_id, score=0.0, title=chunk.title,
+@functools.lru_cache(maxsize=16384)
+def _doc_date_ord(relative_path: str) -> int:
+    """从 relative_path 的文件名前缀 YYYYMMDD 派生可排序日期；无法解析 → 0。
+
+    用于检索同分时的兜底排序：`-date` 作降序键时，0 最小 → 无日期文档稳定排在
+    所有有日期文档之后，不会因缺日期反而插队；同分组内仍按路径确定性排序。
+
+    缓存键是路径字符串（本库约 1.7k 个不同路径），避免每次查询重复正则。
+    """
+    name = relative_path.rsplit("/", 1)[-1]
+    match = _DOC_DATE_PREFIX_RE.match(name)
+    if not match:
+        return 0
+    text = match.group(1)
+    month, day = int(text[4:6]), int(text[6:8])
+    if not (1 <= month <= 12 and 1 <= day <= 31):
+        return 0
+    return int(text)
+
+
+def _is_frontmatter_chunk(text: str) -> bool:
+    """chunk 文本是否为 YAML frontmatter 元数据块。
+
+    与 evaluation/_source_locator.py 的 skip_frontmatter 判断一致。不用
+    core.frontmatter 的 FRONTMATTER_RE：它要求闭合 `---` 后有换行，而 chunk
+    的 content 被 strip 过，会静默判否。
+    """
+    return (text or "").lstrip().startswith("---")
+
+
+def _pick_representative_chunks(chunks: Iterable[ChunkRecord], *,
+                                chunks_per_doc: int) -> List[ChunkRecord]:
+    """从一份文档的 chunks 中挑代表块：优先正文（剔除 frontmatter），取最长者。
+
+    周报这类文档里，人名词只出现在 frontmatter/邮件信息等前言块中，正文块与
+    查询词零词面重叠，因此不能按检索分选块，只能按"内容量"选。全部为前言块时
+    放宽回退（对齐 _source_locator 的放宽兜底）。
+    """
+    items = list(chunks)
+    body = [c for c in items if not _is_frontmatter_chunk(c.content)]
+    pool = body or items
+    return sorted(pool, key=lambda c: (-c.token_count, c.line_start))[:chunks_per_doc]
+
+
+def _chunk_to_hit(chunk: ChunkRecord, matched_terms: List[str], explanation: str,
+                  *, score: float = 0.0) -> RetrievalHit:
+    """构造检索命中。score 需由调用方传入真实 BM25 分：下游（QA 证据块排序、
+    RRF 融合的 bm25_bonus）都读 hit.score，缺失会退化为按 bonus 常量或路径字母序。"""
+    return RetrievalHit(chunk_id=chunk.chunk_id, score=score, title=chunk.title,
                         relative_path=chunk.relative_path, section_path=chunk.section_path,
                         content_preview=chunk.content_preview, line_start=chunk.line_start,
                         line_end=chunk.line_end, chunk_type=chunk.chunk_type,
