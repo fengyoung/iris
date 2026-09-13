@@ -1,10 +1,12 @@
 """音频采集单元测试：read/start/stop 生命周期 / 设备检测容错。
 
-sounddevice 依赖通过 patch 完全 mock，仅测试 AudioCapture 内部逻辑。
+sounddevice 依赖通过注入桩模块完全 mock，仅测试 AudioCapture 内部逻辑。
 """
 
 from __future__ import annotations
 
+import sys
+import types
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -18,15 +20,22 @@ class TestAudioCapture:
 
     @pytest.fixture(autouse=True)
     def _mock_sounddevice(self):
-        """Mock sounddevice 模块以防止硬件访问。"""
-        with patch("sounddevice.InputStream", autospec=True) as mock_stream_cls, \
-             patch("sounddevice.query_devices") as mock_query:
-            mock_stream = MagicMock()
-            mock_stream_cls.return_value = mock_stream
-            mock_query.return_value = [
-                {"name": "Test Mic", "max_input_channels": 2,
-                 "default_samplerate": 16000},
-            ]
+        """注入 sounddevice 桩模块并 mock，防止硬件访问。
+
+        sounddevice 属可选依赖——源码 `_audio.py` 为函数内延迟导入（剪贴板
+        模式不需要），CI 环境不安装该包。此处主动注入桩模块而非依赖真实包
+        （原先 patch("sounddevice.xxx") 会强制 import 真实模块，CI 因此报
+        ModuleNotFoundError），既保留测试覆盖，又不在 CI 引入 PortAudio 依赖。
+        """
+        stub = types.ModuleType("sounddevice")
+        mock_stream_cls = MagicMock()
+        mock_stream_cls.return_value = MagicMock()
+        stub.InputStream = mock_stream_cls  # type: ignore[attr-defined]
+        stub.query_devices = MagicMock(return_value=[  # type: ignore[attr-defined]
+            {"name": "Test Mic", "max_input_channels": 2,
+             "default_samplerate": 16000},
+        ])
+        with patch.dict(sys.modules, {"sounddevice": stub}):
             yield
 
     def test_read_returns_none_when_empty(self):
