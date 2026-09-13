@@ -24,7 +24,7 @@ import json
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 import requests  # type: ignore[import-untyped]
 
@@ -80,17 +80,21 @@ class BenchResult:
 # ── 底层 HTTP / SSE ───────────────────────────────────────
 
 
-def _sse_events(resp: requests.Response):
+def _sse_events(resp: requests.Response) -> Iterator[str]:
     """把 OpenAI 兼容 SSE 流逐事件 yield。"""
     buf = ""
     for raw in resp.iter_lines(decode_unicode=True):
         if raw is None:
             continue
-        if raw.startswith("data:"):
-            buf += raw[5:].strip()
+        # iter_lines(decode_unicode=True) 运行期返回 str，但 requests 的类型标注
+        # 固定为 bytes；此处显式归一化，兼顾类型检查与实际行为（CI 严格 stub 下
+        # 直接 startswith("data:") 会报 arg-type）。
+        line = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
+        if line.startswith("data:"):
+            buf += line[5:].strip()
             yield buf
             buf = ""
-        elif raw == "" and buf:
+        elif line == "" and buf:
             yield buf
             buf = ""
     if buf:
@@ -103,7 +107,9 @@ def _openai_chat_stream(
 ) -> Dict[str, Any]:
     """流式调用并记录时间/字符/usage。时间基于 time.monotonic。"""
     url = api_base.rstrip("/") + "/chat/completions"
-    payload = {
+    # 标注为 Dict[str, Any]：字面量推断出的 dict[str, object] 无法匹配严格 stub
+    # 的 JsonType 形参（CI 报 arg-type）
+    payload: Dict[str, Any] = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": max_tokens,
@@ -159,8 +165,9 @@ def _openai_chat_stream(
 def _openai_chat_nonstream(api_base: str, api_key: str, model: str, prompt: str,
                            max_tokens: int, timeout_read: int = 300) -> Tuple[int, int]:
     url = api_base.rstrip("/") + "/chat/completions"
-    payload = {"model": model, "messages": [{"role": "user", "content": prompt}],
-               "max_tokens": max_tokens, "temperature": 0.1, "stream": False}
+    payload: Dict[str, Any] = {
+        "model": model, "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": max_tokens, "temperature": 0.1, "stream": False}
     resp = requests.post(url, json=payload,
                          headers={"Authorization": f"Bearer {api_key}"},
                          timeout=(8, timeout_read))

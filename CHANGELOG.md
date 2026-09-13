@@ -10,7 +10,8 @@
 - **附带修复 ①（Python 3.11 兼容）**：`assistant/models.py` 的 `TopicRecord` / `SpeakerRecord` 改用 `typing_extensions.TypedDict`。pydantic 在 `Python < 3.12` 上拒收 `typing.TypedDict`（`_SUPPORTS_TYPEDDICT = sys.version_info >= (3, 12)`），而这两个 TypedDict 被用作 `MeetingState` 的字段类型（`topics: List[TopicRecord]`），导致 3.11 下模型构建直接抛 `PydanticUserError`。项目声明 `requires-python = ">=3.11"`、CI 矩阵含 3.11，故属真实缺陷。
 - **附带修复 ②（CI 依赖缺失）**：`pyproject.toml` 显式声明三项此前仅靠传递引入的依赖——`requests`（`llm/benchmark`、`trello`、`feishu` 直接 import，缺失导致 `macos-smoke` 的 `iris --help` 报 `ModuleNotFoundError`）、`typing_extensions`（上述 TypedDict 来源）、`setuptools`（`[dev]` extras，CI 的 `pip wheel . --no-build-isolation` 需当前环境已装构建后端，Python 3.12+ 不再随解释器预装，缺失导致 `BackendUnavailable`）。
 - **附带修复 ③（示例配置同步）**：`config/llm.json.example` 追平模型矩阵（base 4→8、adv 7→10），并为 Anthropic 协议模型补上内联 `provider` / `api_base_url` 覆盖——`resolve_channels` 按通道单值解析且 `setdefault` 不覆盖，纯通道引用无法表达同一通道下的两种协议端点，此前照抄示例的用户会把 Claude 模型发往 openai 协议端点。域名使用占位符，脱敏校验通过。
-- 验证：Python 3.13 全量 **3,334 通过**；ruff 全量与安全静态扫描通过；mypy 通过；`llm.json` 与 `llm.json.example` 均通过 Pydantic 校验。协议版本 3.22（不变）；产品版本 3.37.2→**3.37.3**。
+- **附带修复 ④（mypy 严格 stub 兼容）**：`llm/benchmark.py` 消除 4 处类型错误——`_sse_events` 对 `iter_lines` 结果显式归一化（`decode_unicode=True` 运行期返回 `str`，但 requests 标注固定为 `bytes`，严格 stub 下 `startswith("data:")` 报 `arg-type`），两处 `requests.post(json=...)` 的 payload 标注为 `Dict[str, Any]`（字面量推断的 `dict[str, object]` 无法匹配 `JsonType` 形参）。归一化后两种输入形态解析结果一致，已做功能验证。
+- 验证：Python 3.13 全量 **3,334 通过**；ruff 全量与安全静态扫描通过；mypy `src/iris` 全包（185 文件）通过；`llm.json` 与 `llm.json.example` 均通过 Pydantic 校验。协议版本 3.22（不变）；产品版本 3.37.2→**3.37.3**。
 
 ## v3.37.2 (2026-09-11) — ASR-corrector 启动信息增强
 
