@@ -9,12 +9,15 @@
 - ✅ 移除 `feishu/image_analyzer` 硬编码的 `max_tokens=300`
 - ✅ 新增 4 个防回归测试，锁定「不向 `generate_multimodal` 显式传 `max_tokens`」
 - ✅ 修复后 `llm.json` 中配置的输出上限在这些链路上真正生效
+- ✅ Python 3.11 兼容修复：`assistant/models.py` 改用 `typing_extensions.TypedDict`（pydantic 在 <3.12 上拒收 `typing.TypedDict`）
+- ✅ CI 依赖补全：显式声明 `requests` / `typing_extensions` / `setuptools`（此前仅靠传递引入，缺失导致 `macos-smoke` 与 `Build package` 失败）
+- ✅ `llm.json.example` 追平模型矩阵（base 4→8、adv 7→10），补 Anthropic 协议内联覆盖
 
 **上一版 v3.37.2 (2026-09-11)** - ASR-corrector 启动信息增强：
 - ✅ 启动时显示 LLM 模型配置信息（模型名、temperature、max_tokens、timeout）
 - ✅ 明确展示「强制指定，跳过路由」状态，便于用户确认实际使用模型
 
-**项目规模**：~42,000 行代码 / 185 文件 / 27 模块 / 3,350 测试用例 / 68% 覆盖率
+**项目规模**：~42,000 行代码 / 185 文件 / 27 模块 / 3,334 测试用例 / 68% 覆盖率
 
 详见 [CHANGELOG.md](CHANGELOG.md)、[本轮工程优化记录](docs/optimization-three-phase-20260910.md) 和 [优化报告](optimization_report_20260909.md)。
 
@@ -114,7 +117,7 @@ SOURCE/                     LLM-WIKI/
 - macOS Keychain（可选密钥存储）
 - PyMuPDF / python-docx（PDF/DOCX 处理）
 - ffmpeg（视频抽帧/抽音轨，视频处理必需）+ openai-whisper（音轨转写，可选）
-- 3,350 个测试用例（pytest 全量），覆盖率约 68%；Ruff、严格 mypy、AST 安全扫描与 SPDX SBOM 门禁通过
+- 3,334 个测试用例（pytest 全量），覆盖率约 68%；Ruff、严格 mypy、AST 安全扫描与 SPDX SBOM 门禁通过
 
 ## 开发环境
 
@@ -170,7 +173,7 @@ iris3/
 │       └── asr/         #   ASR 提示词子系统（术语提取/热词/Prompt优化/版本管理）
 ├── scripts/            # CLI 入口 + 委托脚本
 ├── templates/          # Prompt / Wiki 模板
-├── tests/              # 3,350 用例
+├── tests/              # 3,334 用例
 │   ├── unit/           #   纯逻辑单元测试（2,228 用例）
 │   └── integration/    #   集成测试（1,102 用例）
 ├── config/             # *.json gitignored，*.example 版本控制

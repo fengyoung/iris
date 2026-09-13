@@ -5,7 +5,9 @@ from __future__ import annotations
 import time
 from datetime import datetime
 from difflib import SequenceMatcher
-from typing import Any, ClassVar, Dict, List, Optional, TypedDict
+from typing import Any, ClassVar, Dict, List, Optional
+
+from typing_extensions import TypedDict
 
 from pydantic import BaseModel, Field, PrivateAttr, field_validator
 

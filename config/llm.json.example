@@ -21,7 +21,7 @@
           "max_tokens": 8192,
           "temperature": 0.2,
           "top_p": 1.0,
-          "timeout_seconds": 120,
+          "timeout_seconds": 180,
           "max_retries": 2,
           "priority": 110,
           "cost_level": "medium",
@@ -35,7 +35,9 @@
             "summary",
             "analysis_basic"
           ],
-          "notes": "Claude Sonnet 5 (zz_tokenhub Anthropic 兼容接口)"
+          "notes": "base_model 主模型（zz_tokenhub Anthropic 兼容接口）；历史 in_max 387K",
+          "provider": "anthropic",
+          "api_base_url": "https://your-tokenhub.example.com/anthropic"
         },
         "qwen3.8-flash-zz": {
           "channel": "zz_tokenhub",
@@ -46,7 +48,7 @@
           "max_tokens": 8192,
           "temperature": 0.2,
           "top_p": 1.0,
-          "timeout_seconds": 90,
+          "timeout_seconds": 300,
           "max_retries": 2,
           "priority": 105,
           "cost_level": "low",
@@ -60,7 +62,7 @@
             "summary",
             "analysis_basic"
           ],
-          "notes": "Qwen 3.8 Flash 多模态模型 (zz_tokenhub 中转), base_model 降级备选"
+          "notes": "base_model 降级备选 2；openai 协议路径延迟偏高"
         },
         "deepseek-flash-zz": {
           "channel": "zz_tokenhub",
@@ -68,14 +70,14 @@
           "display_name": "DeepSeek Flash (zz_tokenhub)",
           "multimodal": true,
           "max_context_tokens": 1000000,
-          "max_tokens": 16384,
+          "max_tokens": 32768,
           "temperature": 0.2,
           "top_p": 1.0,
-          "timeout_seconds": 60,
+          "timeout_seconds": 300,
           "max_retries": 2,
           "priority": 100,
           "cost_level": "low",
-          "reasoning_level": "standard",
+          "reasoning_level": "advanced",
           "supported_inputs": [
             "text",
             "image"
@@ -85,7 +87,7 @@
             "summary",
             "analysis_basic"
           ],
-          "notes": "默认主力模型(zz_tokenhub 中转), 支持多模态"
+          "notes": "推理型：温度链吃额度，实测 16384 不出正文，32768 可用"
         },
         "deepseek-flash": {
           "channel": "deepseek",
@@ -93,12 +95,62 @@
           "display_name": "DeepSeek Flash (官方)",
           "multimodal": true,
           "max_context_tokens": 1000000,
-          "max_tokens": 200000,
+          "max_tokens": 65536,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 300,
+          "max_retries": 2,
+          "priority": 95,
+          "cost_level": "low",
+          "reasoning_level": "advanced",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "summary",
+            "analysis_basic"
+          ],
+          "notes": "官方直连；新模型（旧名 deepseek-v4-flash 已下架）；实测 65536 才出正文"
+        },
+        "glm-5.3-flash-zz": {
+          "channel": "zz_tokenhub",
+          "model": "glm-5.3-flash",
+          "display_name": "GLM 5.3 Flash (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 131072,
+          "max_tokens": 8192,
           "temperature": 0.2,
           "top_p": 1.0,
           "timeout_seconds": 120,
           "max_retries": 2,
-          "priority": 95,
+          "priority": 90,
+          "cost_level": "low",
+          "reasoning_level": "advanced",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "summary",
+            "analysis_basic"
+          ],
+          "notes": "实测文本 1.9s / 图像 3.3s；额度过小(64)会陷入推理链"
+        },
+        "gpt-5.6-terra-zz": {
+          "channel": "zz_tokenhub",
+          "model": "gpt-5.6-terra",
+          "display_name": "GPT-5.6 Terra (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 200000,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 300,
+          "max_retries": 2,
+          "priority": 85,
           "cost_level": "low",
           "reasoning_level": "standard",
           "supported_inputs": [
@@ -110,14 +162,167 @@
             "summary",
             "analysis_basic"
           ],
-          "notes": "官方直连多模态版本, base_model 降级备选"
+          "notes": "延迟波动大（实测 4.7s~100.1s，冷启动），timeout 需 300s"
+        },
+        "gpt-5.6-luna-zz": {
+          "channel": "zz_tokenhub",
+          "model": "gpt-5.6-luna",
+          "display_name": "GPT-5.6 Luna (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 200000,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 600,
+          "max_retries": 2,
+          "priority": 80,
+          "cost_level": "low",
+          "reasoning_level": "standard",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "summary",
+            "analysis_basic"
+          ],
+          "notes": "实测延迟可达 213.6s（两字回答），timeout 需 600s"
+        },
+        "qwen3.8-flash": {
+          "channel": "bailian",
+          "model": "qwen3.8-flash",
+          "display_name": "Qwen 3.8 Flash (百炼)",
+          "multimodal": true,
+          "max_context_tokens": 131072,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 120,
+          "max_retries": 2,
+          "priority": 75,
+          "cost_level": "low",
+          "reasoning_level": "standard",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "summary",
+            "analysis_basic"
+          ],
+          "notes": "百炼直连，实测同族 qwen3.8-max 文本 1.6s / 图像 4.4s"
         }
       }
     },
     "adv_model": {
       "enabled": true,
-      "default_model_id": "claude-fable-5-zz",
+      "default_model_id": "claude-opus-5-zz",
       "models": {
+        "claude-opus-5-zz": {
+          "channel": "zz_tokenhub",
+          "model": "claude-opus-5",
+          "display_name": "Claude Opus 5 (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 200000,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 120,
+          "max_retries": 2,
+          "priority": 200,
+          "cost_level": "medium",
+          "reasoning_level": "advanced",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "summary",
+            "analysis_basic"
+          ],
+          "notes": "实测全场最快（文本 2.1s / 图像 12.0s），adv 首选",
+          "provider": "anthropic",
+          "api_base_url": "https://your-tokenhub.example.com/anthropic"
+        },
+        "qwen3.8-max-zz": {
+          "channel": "zz_tokenhub",
+          "model": "qwen3.8-max",
+          "display_name": "Qwen 3.8 Max (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 200000,
+          "max_tokens": 24576,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 300,
+          "max_retries": 2,
+          "priority": 195,
+          "cost_level": "low",
+          "reasoning_level": "advanced",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "analysis_complex",
+            "image_understanding",
+            "wiki_rebuild"
+          ],
+          "notes": "历史输出 p95=12878 / max=14604，max_tokens 需 ≥24576"
+        },
+        "qwen3.7-plus-zz": {
+          "channel": "zz_tokenhub",
+          "model": "qwen3.7-plus",
+          "display_name": "Qwen 3.7 Plus (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 131072,
+          "max_tokens": 12288,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 300,
+          "max_retries": 2,
+          "priority": 190,
+          "cost_level": "low",
+          "reasoning_level": "advanced",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "analysis_complex",
+            "image_understanding"
+          ],
+          "notes": "跨通道合并样本历史输出 max=6615"
+        },
+        "qwen3.6-plus-zz": {
+          "channel": "zz_tokenhub",
+          "model": "qwen3.6-plus",
+          "display_name": "Qwen 3.6 Plus (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 131072,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 300,
+          "max_retries": 2,
+          "priority": 185,
+          "cost_level": "low",
+          "reasoning_level": "standard",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "analysis_complex",
+            "image_understanding"
+          ],
+          "notes": "样本少（历史 2 次），按同族保守取值"
+        },
         "claude-fable-5-zz": {
           "channel": "zz_tokenhub",
           "model": "claude-fable-5",
@@ -129,8 +334,8 @@
           "top_p": 1.0,
           "timeout_seconds": 180,
           "max_retries": 2,
-          "priority": 120,
-          "cost_level": "high",
+          "priority": 180,
+          "cost_level": "medium",
           "reasoning_level": "advanced",
           "supported_inputs": [
             "text",
@@ -138,13 +343,63 @@
           ],
           "use_cases": [
             "qa",
-            "wiki_extract_multimodal",
-            "wiki_rebuild",
             "analysis_complex",
-            "image_understanding",
-            "conflict_resolution"
+            "image_understanding"
           ],
-          "notes": "Claude Fable 5 多模态旗舰 (zz_tokenhub Anthropic 兼容接口)"
+          "notes": "历史 10/11 次输出恰好 4096：曾被 complex_input 硬编码上限截断（已修复）",
+          "provider": "anthropic",
+          "api_base_url": "https://your-tokenhub.example.com/anthropic"
+        },
+        "claude-fable-5-1-zz": {
+          "channel": "zz_tokenhub",
+          "model": "claude-fable-5-1",
+          "display_name": "Claude Fable 5.1 (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 200000,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 180,
+          "max_retries": 2,
+          "priority": 175,
+          "cost_level": "medium",
+          "reasoning_level": "advanced",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "analysis_complex",
+            "image_understanding"
+          ],
+          "notes": "实测文本 4.5s / 图像 20.9s；首轮曾超时 300s（偶发）",
+          "provider": "anthropic",
+          "api_base_url": "https://your-tokenhub.example.com/anthropic"
+        },
+        "glm-5.3-zz": {
+          "channel": "zz_tokenhub",
+          "model": "glm-5.3",
+          "display_name": "GLM 5.3 (zz_tokenhub)",
+          "multimodal": false,
+          "max_context_tokens": 131072,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 120,
+          "max_retries": 2,
+          "priority": 170,
+          "cost_level": "low",
+          "reasoning_level": "standard",
+          "supported_inputs": [
+            "text"
+          ],
+          "use_cases": [
+            "qa",
+            "summary",
+            "analysis_basic"
+          ],
+          "notes": "【不支持图片】实测 HTTP 400 code 1210（content.type 仅允许 text）"
         },
         "gpt-5.6-sol-zz": {
           "channel": "zz_tokenhub",
@@ -155,38 +410,61 @@
           "max_tokens": 8192,
           "temperature": 0.2,
           "top_p": 1.0,
-          "timeout_seconds": 300,
-          "max_retries": 3,
-          "priority": 35,
-          "cost_level": "high",
-          "reasoning_level": "advanced",
+          "timeout_seconds": 600,
+          "max_retries": 2,
+          "priority": 165,
+          "cost_level": "low",
+          "reasoning_level": "standard",
           "supported_inputs": [
             "text",
             "image"
           ],
           "use_cases": [
             "qa",
-            "wiki_extract_multimodal",
-            "wiki_rebuild",
             "analysis_complex",
             "image_understanding",
             "conflict_resolution"
           ],
-          "notes": "高能力但实测不稳定(连接常读超时/单次 56s+)，降为 adv 末位兜底，勿作默认"
+          "notes": "TTFT 极高：5 token 回答耗时 49s；评审类任务实测 80.7s"
         },
-        "qwen3.8-max-zz": {
+        "gpt-6-astra-zz": {
           "channel": "zz_tokenhub",
-          "model": "qwen3.8-max",
-          "display_name": "Qwen 3.8 Max (zz_tokenhub)",
+          "model": "gpt-6-astra",
+          "display_name": "GPT-6 Astra (zz_tokenhub)",
           "multimodal": true,
           "max_context_tokens": 200000,
           "max_tokens": 8192,
           "temperature": 0.2,
           "top_p": 1.0,
           "timeout_seconds": 300,
-          "max_retries": 3,
-          "priority": 110,
-          "cost_level": "high",
+          "max_retries": 2,
+          "priority": 160,
+          "cost_level": "low",
+          "reasoning_level": "standard",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "analysis_complex",
+            "image_understanding"
+          ],
+          "notes": "实测文本 71.5s / 图像 52.9s，慢但可用"
+        },
+        "qwen3.8-max": {
+          "channel": "bailian",
+          "model": "qwen3.8-max",
+          "display_name": "Qwen 3.8 Max (百炼)",
+          "multimodal": true,
+          "max_context_tokens": 131072,
+          "max_tokens": 20480,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 120,
+          "max_retries": 2,
+          "priority": 155,
+          "cost_level": "low",
           "reasoning_level": "advanced",
           "supported_inputs": [
             "text",
@@ -194,125 +472,11 @@
           ],
           "use_cases": [
             "qa",
-            "wiki_extract_multimodal",
-            "wiki_rebuild",
             "analysis_complex",
             "image_understanding",
             "conflict_resolution"
           ],
-          "notes": "旗舰模型, adv_model 默认(zz_tokenhub 中转)；2026-09-06 实测连接/TTFT 稳定"
-        },
-        "qwen3.7-plus-zz": {
-          "channel": "zz_tokenhub",
-          "model": "qwen3.7-plus",
-          "display_name": "Qwen 3.7 Plus (zz_tokenhub)",
-          "multimodal": true,
-          "max_context_tokens": 131072,
-          "max_tokens": 8192,
-          "temperature": 0.2,
-          "top_p": 1.0,
-          "timeout_seconds": 120,
-          "max_retries": 2,
-          "priority": 75,
-          "cost_level": "medium",
-          "reasoning_level": "standard",
-          "supported_inputs": [
-            "text",
-            "image"
-          ],
-          "use_cases": [
-            "qa",
-            "wiki_extract_multimodal",
-            "wiki_rebuild",
-            "analysis_complex",
-            "image_understanding",
-            "conflict_resolution"
-          ],
-          "notes": "adv_model 降级备选 5(zz_tokenhub 中转)"
-        },
-        "qwen3.6-plus-zz": {
-          "channel": "zz_tokenhub",
-          "model": "qwen3.6-plus",
-          "display_name": "Qwen 3.6 Plus (zz_tokenhub)",
-          "multimodal": true,
-          "max_context_tokens": 131072,
-          "max_tokens": 8192,
-          "temperature": 0.2,
-          "top_p": 1.0,
-          "timeout_seconds": 120,
-          "max_retries": 2,
-          "priority": 70,
-          "cost_level": "medium",
-          "reasoning_level": "standard",
-          "supported_inputs": [
-            "text",
-            "image"
-          ],
-          "use_cases": [
-            "qa",
-            "wiki_extract_multimodal",
-            "wiki_rebuild",
-            "analysis_complex",
-            "image_understanding",
-            "conflict_resolution"
-          ],
-          "notes": "adv_model 降级备选 6(zz_tokenhub 中转)"
-        },
-        "qwen3.8-flash-bl": {
-          "channel": "bailian",
-          "model": "qwen3.8-flash",
-          "display_name": "Qwen 3.8 Flash (百炼)",
-          "multimodal": true,
-          "max_context_tokens": 131072,
-          "max_tokens": 8192,
-          "temperature": 0.2,
-          "top_p": 1.0,
-          "timeout_seconds": 90,
-          "max_retries": 2,
-          "priority": 55,
-          "cost_level": "low",
-          "reasoning_level": "standard",
-          "supported_inputs": [
-            "text",
-            "image"
-          ],
-          "use_cases": [
-            "qa",
-            "wiki_extract_multimodal",
-            "wiki_rebuild",
-            "analysis_complex",
-            "image_understanding",
-            "conflict_resolution"
-          ],
-          "notes": "adv_model 降级备选 9(百炼官方直连)"
-        },
-        "qwen3.7-plus-bl": {
-          "channel": "bailian",
-          "model": "qwen3.7-plus",
-          "display_name": "Qwen 3.7 Plus (百炼)",
-          "multimodal": true,
-          "max_context_tokens": 131072,
-          "max_tokens": 8192,
-          "temperature": 0.2,
-          "top_p": 1.0,
-          "timeout_seconds": 120,
-          "max_retries": 2,
-          "priority": 50,
-          "cost_level": "low",
-          "reasoning_level": "standard",
-          "supported_inputs": [
-            "text",
-            "image"
-          ],
-          "use_cases": [
-            "qa",
-            "wiki_extract_multimodal",
-            "wiki_rebuild",
-            "analysis_complex",
-            "image_understanding",
-            "conflict_resolution"
-          ],
-          "notes": "adv_model 降级备选 10(百炼官方直连)"
+          "notes": "百炼直连，实测文本 1.6s / 图像 4.4s；历史 p95=10820 / max=12023"
         }
       }
     }

@@ -7,7 +7,10 @@
 - **修复**：移除 `complex_input/pipeline.py` 三处、`feishu/image_analyzer.py` 一处硬编码，输出上限统一交由模型配置决定；两处均补充防回归注释，说明「显式传参会静默覆盖配置」。
 - **防回归**：新增 4 个测试（`tests/integration/test_complex_input_pipeline.py` 3 个 + `tests/unit/test_image_analyzer.py` 1 个），锁定 `generate_multimodal` 不被显式传入 `max_tokens`；4 个测试均已在修复前代码上验证会失败、修复后通过。
 - **影响范围**：图片 / PDF / 视频三阶段流水线与飞书消息图片分析；修复后 `llm.json` 的 `max_tokens` 在这些链路上真正生效。
-- 验证：全量 3,071 通过（本地；另有 11 个 `assistant` 测试文件因 pydantic 环境问题未能收集）；ruff、mypy 通过；协议版本 3.22（不变）；产品版本 3.37.2→**3.37.3**。
+- **附带修复 ①（Python 3.11 兼容）**：`assistant/models.py` 的 `TopicRecord` / `SpeakerRecord` 改用 `typing_extensions.TypedDict`。pydantic 在 `Python < 3.12` 上拒收 `typing.TypedDict`（`_SUPPORTS_TYPEDDICT = sys.version_info >= (3, 12)`），而这两个 TypedDict 被用作 `MeetingState` 的字段类型（`topics: List[TopicRecord]`），导致 3.11 下模型构建直接抛 `PydanticUserError`。项目声明 `requires-python = ">=3.11"`、CI 矩阵含 3.11，故属真实缺陷。
+- **附带修复 ②（CI 依赖缺失）**：`pyproject.toml` 显式声明三项此前仅靠传递引入的依赖——`requests`（`llm/benchmark`、`trello`、`feishu` 直接 import，缺失导致 `macos-smoke` 的 `iris --help` 报 `ModuleNotFoundError`）、`typing_extensions`（上述 TypedDict 来源）、`setuptools`（`[dev]` extras，CI 的 `pip wheel . --no-build-isolation` 需当前环境已装构建后端，Python 3.12+ 不再随解释器预装，缺失导致 `BackendUnavailable`）。
+- **附带修复 ③（示例配置同步）**：`config/llm.json.example` 追平模型矩阵（base 4→8、adv 7→10），并为 Anthropic 协议模型补上内联 `provider` / `api_base_url` 覆盖——`resolve_channels` 按通道单值解析且 `setdefault` 不覆盖，纯通道引用无法表达同一通道下的两种协议端点，此前照抄示例的用户会把 Claude 模型发往 openai 协议端点。域名使用占位符，脱敏校验通过。
+- 验证：Python 3.13 全量 **3,334 通过**；ruff 全量与安全静态扫描通过；mypy 通过；`llm.json` 与 `llm.json.example` 均通过 Pydantic 校验。协议版本 3.22（不变）；产品版本 3.37.2→**3.37.3**。
 
 ## v3.37.2 (2026-09-11) — ASR-corrector 启动信息增强
 
