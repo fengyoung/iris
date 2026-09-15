@@ -18,10 +18,10 @@ jobs:
       fail-fast: false
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
@@ -52,7 +52,7 @@ jobs:
         run: python scripts/generate_sbom.py --output dist/iris.spdx.json
 
       - name: Upload SBOM
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: iris-sbom-${{ matrix.python-version }}
           path: dist/iris.spdx.json
@@ -75,17 +75,19 @@ jobs:
         run: python scripts/check_coverage_thresholds.py coverage.json
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
-          file: ./coverage.xml
+          # v5 起 `file` 已被删除、改名 `files`（v4 → v7 唯一失效的入参），
+          # 沿用旧名会被静默忽略——上传拿不到报告却不报错，覆盖率从此断供。
+          files: ./coverage.xml
           fail_ci_if_error: false
         continue-on-error: true
 
   macos-smoke:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
