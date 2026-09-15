@@ -37,6 +37,7 @@ COMMANDS = [
     "watch",
     "workspace",
     "undercover-game",
+    "undercover-game-web",
     # ── 委托命令 ──
     "trello", "extract-weekly-reports", "extract-travel-invoice",
     "sync-memory", "feishu-doc-convert", "chat-digest",
@@ -234,6 +235,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="undercover-game 轮次上限（0=按人数自动推导）")
     parser.add_argument("--order-mode", choices=["rotate", "fixed"], default="rotate",
                         help="undercover-game 发言起点模式 rotate=每轮顺延 / fixed=整局固定")
+    # undercover-game-web
+    parser.add_argument("--port", type=int, default=7862,
+                        help="undercover-game-web 监听端口（默认 7862）")
+    parser.add_argument("--host", default="127.0.0.1",
+                        help="undercover-game-web 监听地址（默认 127.0.0.1）")
     return parser
 
 

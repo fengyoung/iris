@@ -128,6 +128,26 @@ def handle_undercover_game(args, bundle, logger) -> int:
     return 0
 
 
+def handle_undercover_game_web(args, bundle, logger) -> int:
+    """启动谁是卧底 Web 界面服务。"""
+    from iris.games.web_server import UndercoverWebServer
+
+    port: int = getattr(args, "port", 7862)
+    host: str = getattr(args, "host", "127.0.0.1")
+
+    server = UndercoverWebServer(bundle, host=host, port=port)
+    logger.log("undercover_game_web", {"host": host, "port": port, "action": "start"})
+    print(f"谁是卧底 Web 界面已启动：http://{host}:{port}")
+    print("按 Ctrl+C 停止服务")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        server.shutdown()
+        logger.log("undercover_game_web", {"action": "stop"})
+    return 0
+
+
 GAMES_HANDLERS: Dict[str, object] = {
     "undercover-game": handle_undercover_game,
+    "undercover-game-web": handle_undercover_game_web,
 }

@@ -25,12 +25,13 @@ from __future__ import annotations
 import logging
 import random
 import re
+import threading
 import time
 from collections import Counter
 from concurrent.futures import as_completed
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from iris.config.loader import ConfigBundle
 from iris.core.exceptions import IrisRuntimeError
@@ -713,6 +714,8 @@ class UndercoverGame:
         max_rounds: int = 0,
         max_players: int = 0,
         spy_count: Optional[int] = None,
+        on_event: Optional[Callable[[str, dict], None]] = None,
+        advance_event: Optional[threading.Event] = None,
     ):
         """初始化游戏。
 
@@ -729,6 +732,10 @@ class UndercoverGame:
             max_rounds: 轮次上限；0 表示按玩家人数自动推导
             max_players: 参与人数上限；0 表示不截断（按配置优先级取前 N 个，实验控成本用）
             spy_count: 可选，显式指定卧底人数；None 时按人数阈值自动判定
+            on_event: 可选事件回调 ``(event_type, payload)``；None 时为无操作。
+                      回调在游戏线程内同步调用，实现应非阻塞（如 ``queue.Queue.put_nowait``）。
+            advance_event: 可选手动步进锁。非 None 时，每轮结束后游戏阻塞等待该 Event
+                           被 set（最长 300 秒超时后自动继续），以支持 Web UI 单轮控制。
         """
         if order_mode not in _ORDER_MODES:
             raise UndercoverGameError(
@@ -802,6 +809,19 @@ class UndercoverGame:
         self._image_a_data_url = _encode_image_data_url(self._image_a_path)
         self._image_b_data_url = _encode_image_data_url(self._image_b_path)
 
+        self._on_event = on_event
+        self._advance_event = advance_event
+
+    # ── 事件系统 ────────────────────────────────────────────────
+
+    def _emit(self, event_type: str, payload: dict) -> None:
+        """向外部观察者推送游戏事件。回调失败不中断游戏主流程。"""
+        if self._on_event is not None:
+            try:
+                self._on_event(event_type, payload)
+            except Exception:  # noqa: BLE001
+                pass
+
     # ── 公开 API ────────────────────────────────────────────────
 
     def run(self) -> GameResult:
@@ -823,6 +843,23 @@ class UndercoverGame:
         max_rounds = self._max_rounds or max(len(self._players) * 2, 4)
         result.max_rounds = max_rounds
 
+        self._emit("game_start", {
+            "players": [
+                {
+                    "key": p.key, "role": p.role, "model_id": p.model_id,
+                    "is_spy": p.is_spy, "display_name": p.display_name,
+                }
+                for p in self._players.values()
+            ],
+            "spy_keys": spy_keys,
+            "spy_count": len(spy_keys),
+            "image_civilian": self._image_a_path,
+            "image_spy": self._image_b_path,
+            "seed": self._seed,
+            "order_mode": self._order_mode,
+            "max_rounds": max_rounds,
+        })
+
         round_no = 0
         while round_no < max_rounds:
             round_no += 1
@@ -830,6 +867,13 @@ class UndercoverGame:
             alive_players = [p for p in self._players.values() if p.alive]
 
             record = RoundRecord(round_no=round_no)
+
+            speaking_order = self._round_order({p.key for p in alive_players}, round_no)
+            self._emit("round_start", {
+                "round_no": round_no,
+                "speaking_order": speaking_order,
+                "alive": [p.key for p in alive_players],
+            })
 
             speeches = self._run_describe_phase(
                 alive_players, result.rounds, round_no, result.errors,
@@ -858,9 +902,29 @@ class UndercoverGame:
             if eliminated:
                 self._players[eliminated].alive = False
                 record.eliminated_was_spy = self._players[eliminated].is_spy
+                self._emit("elimination", {
+                    "round_no": round_no,
+                    "eliminated": eliminated,
+                    "was_spy": record.eliminated_was_spy,
+                    "tally": dict(tally),
+                })
 
             record.elapsed_sec = time.monotonic() - started_at
             result.rounds.append(record)
+
+            self._emit("round_end", {
+                "round_no": round_no,
+                "elapsed_sec": record.elapsed_sec,
+                "silent": record.silent,
+                "malformed": record.malformed,
+                "eliminated": eliminated,
+                "tally": dict(tally),
+            })
+
+            # 手动步进：等待外部 advance_event 后才继续下一轮（超时兜底防止窗口关闭后卡死）
+            if self._advance_event is not None:
+                self._advance_event.wait(timeout=300)
+                self._advance_event.clear()
 
             survivors = [p for p in self._players.values() if p.alive]
             result.final_survivors = [p.key for p in survivors]
@@ -871,9 +935,21 @@ class UndercoverGame:
             # 故这一判定对既有单卧底对局是严格兼容的推广。
             if spy_alive == 0:
                 result.winner = "civilians"
+                self._emit("game_end", {
+                    "winner": "civilians",
+                    "final_survivors": result.final_survivors,
+                    "spy_keys": spy_keys,
+                    "total_rounds": round_no,
+                })
                 return result
             if spy_alive >= civ_alive:
                 result.winner = "spy"
+                self._emit("game_end", {
+                    "winner": "spy",
+                    "final_survivors": result.final_survivors,
+                    "spy_keys": spy_keys,
+                    "total_rounds": round_no,
+                })
                 return result
 
         # 达到轮次上限仍未分出胜负：全员弃权导致无人被淘汰。
@@ -881,6 +957,12 @@ class UndercoverGame:
         logger.warning("对局达到轮次上限 %d 仍未分出胜负，记为 stalemate", max_rounds)
         result.winner = "stalemate"
         result.errors.append(f"stalemate: 达到轮次上限 {max_rounds} 仍无人被淘汰")
+        self._emit("game_end", {
+            "winner": "stalemate",
+            "final_survivors": result.final_survivors,
+            "spy_keys": spy_keys,
+            "total_rounds": round_no,
+        })
         return result
 
     # ── 发言顺序 ────────────────────────────────────────────────
@@ -1012,13 +1094,38 @@ class UndercoverGame:
         except LLMProviderError as exc:
             logger.warning("玩家 %s 描述阶段调用失败: %s", player.key, exc)
             errors.append(f"round={round_no} phase=describe player={player.key} error={exc}")
-            return SpeechRecord(
+            speech = SpeechRecord(
                 key=player.key,
                 order_index=index,
                 description=_DESCRIBE_FAILED_PLACEHOLDER,
                 status="api_error",
             )
-        return _parse_speech(text, player.key, index)
+            self._emit("player_speech", {
+                "round_no": round_no,
+                "key": player.key,
+                "public": {"description": speech.description, "response": speech.response, "status": speech.status},
+                "private": {},
+            })
+            return speech
+        speech = _parse_speech(text, player.key, index)
+        self._emit("player_speech", {
+            "round_no": round_no,
+            "key": player.key,
+            "public": {
+                "description": speech.description,
+                "response": speech.response,
+                "status": speech.status,
+            },
+            "private": {
+                "observation_list": speech.observation_list,
+                "public_elements": speech.public_elements,
+                "withheld_elements": speech.withheld_elements,
+                "self_identity": speech.self_identity,
+                "self_confidence": speech.self_confidence,
+                "self_reason": speech.self_reason,
+            },
+        })
+        return speech
 
     # ── 投票阶段 ────────────────────────────────────────────────
 
@@ -1164,6 +1271,14 @@ class UndercoverGame:
         )
         votes = {pid: target_reason[0] for pid, target_reason in raw.items() if target_reason[0]}
         reasons = {pid: target_reason[1] for pid, target_reason in raw.items()}
+        # 逐票 emit（仅首投 / 重投中第一次调用 _collect_votes 时有实际观察价值）
+        for pid, (target, reason) in raw.items():
+            self._emit("vote_cast", {
+                "round_no": round_no,
+                "key": pid,
+                "target": target,
+                "reason": reason,
+            })
         return votes, reasons
 
     # ── 计票 ────────────────────────────────────────────────────

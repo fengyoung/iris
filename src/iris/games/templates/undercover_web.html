@@ -1,0 +1,997 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>谁是卧底 — 多模型对抗游戏</title>
+<style>
+/* ── 设计令牌 ── */
+:root {
+  --bg:          oklch(97% 0.004 250);
+  --bg-raised:   oklch(100% 0 0);
+  --border:      oklch(88% 0.008 250);
+  --muted:       oklch(62% 0.012 250);
+  --body:        oklch(22% 0.012 250);
+  --accent-h:    220;
+  --accent:      oklch(48% 0.18 var(--accent-h));
+  --accent-soft: oklch(93% 0.06 var(--accent-h));
+  --danger:      oklch(48% 0.18 25);
+  --success:     oklch(48% 0.15 150);
+  --warning:     oklch(58% 0.17 80);
+  --radius-sm:   6px;
+  --radius:      10px;
+  --radius-lg:   16px;
+  --shadow:      0 1px 3px oklch(0% 0 0 / .08), 0 4px 12px oklch(0% 0 0 / .06);
+  --space-1:     4px; --space-2: 8px; --space-3: 12px;
+  --space-4:     16px; --space-5: 24px; --space-6: 32px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:          oklch(16% 0.008 250);
+    --bg-raised:   oklch(21% 0.01 250);
+    --border:      oklch(32% 0.01 250);
+    --muted:       oklch(58% 0.012 250);
+    --body:        oklch(92% 0.006 250);
+    --accent:      oklch(62% 0.16 var(--accent-h));
+    --accent-soft: oklch(28% 0.07 var(--accent-h));
+  }
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+  font-size: 14px; line-height: 1.6;
+  background: var(--bg); color: var(--body);
+}
+button {
+  font: inherit; cursor: pointer; border: none;
+  border-radius: var(--radius-sm); padding: var(--space-2) var(--space-4);
+  transition: opacity .15s, background .15s;
+}
+button:hover { opacity: .85; }
+button:disabled { opacity: .4; cursor: not-allowed; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn-primary { background: var(--accent); color: #fff; font-weight: 600; }
+.btn-ghost {
+  background: transparent; border: 1px solid var(--border); color: var(--body);
+}
+.btn-danger { background: var(--danger); color: #fff; }
+select, input[type="text"], input[type="number"] {
+  font: inherit; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: var(--space-2) var(--space-3);
+  background: var(--bg-raised); color: var(--body);
+  transition: border-color .15s;
+}
+select:focus, input:focus { outline: none; border-color: var(--accent); }
+label { display: block; font-weight: 500; margin-bottom: var(--space-1); color: var(--body); }
+.card {
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: var(--space-5); box-shadow: var(--shadow);
+}
+.tag {
+  display: inline-block; font-size: 11px; font-weight: 600;
+  padding: 2px 7px; border-radius: 20px;
+}
+
+/* ── 视图切换 ── */
+.view { display: none; }
+.view.active { display: block; }
+
+/* ── 顶部导航 ── */
+#app-nav {
+  position: sticky; top: 0; z-index: 100;
+  background: var(--bg-raised); border-bottom: 1px solid var(--border);
+  padding: var(--space-3) var(--space-5);
+  display: flex; align-items: center; gap: var(--space-4);
+}
+#app-nav .brand { font-weight: 700; font-size: 15px; margin-right: auto; }
+#app-nav button { padding: var(--space-1) var(--space-3); font-size: 13px; }
+
+/* ── 设置视图 ── */
+#view-setup { max-width: 820px; margin: 0 auto; padding: var(--space-5); }
+#view-setup h1 { font-size: 22px; font-weight: 700; margin-bottom: var(--space-5); }
+.setup-section { margin-bottom: var(--space-5); }
+.setup-section h2 { font-size: 15px; font-weight: 600; margin-bottom: var(--space-3); }
+.player-row {
+  display: grid; grid-template-columns: 1fr 1fr auto; gap: var(--space-2);
+  align-items: center; margin-bottom: var(--space-2);
+}
+.player-row select { width: 100%; }
+.upload-zone {
+  border: 2px dashed var(--border); border-radius: var(--radius);
+  padding: var(--space-5); text-align: center; cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.upload-zone:hover, .upload-zone.drag { border-color: var(--accent); background: var(--accent-soft); }
+.upload-zone img { max-width: 200px; max-height: 160px; border-radius: var(--radius-sm); margin-top: var(--space-3); }
+.upload-pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
+.settings-row { display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: flex-end; }
+.settings-row > div { flex: 1; min-width: 140px; }
+.err-msg { color: var(--danger); font-size: 13px; margin-top: var(--space-2); min-height: 20px; }
+
+/* ── 观战视图 ── */
+#view-game { display: flex; flex-direction: column; height: calc(100vh - 49px); }
+#game-topbar {
+  background: var(--bg-raised); border-bottom: 1px solid var(--border);
+  padding: var(--space-2) var(--space-5);
+  display: flex; align-items: center; gap: var(--space-3); flex-shrink: 0;
+}
+#game-topbar .round-label { font-weight: 700; font-size: 15px; }
+#game-topbar .phase-label {
+  font-size: 12px; background: var(--accent-soft);
+  color: var(--accent); padding: 2px 10px; border-radius: 20px; font-weight: 600;
+}
+#game-topbar .spacer { flex: 1; }
+#player-strip {
+  display: flex; gap: var(--space-3); padding: var(--space-3) var(--space-5);
+  background: var(--bg); border-bottom: 1px solid var(--border);
+  overflow-x: auto; flex-shrink: 0;
+}
+.player-chip {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius); border: 2px solid transparent;
+  white-space: nowrap; font-size: 13px;
+}
+.player-chip.dead { opacity: .45; text-decoration: line-through; }
+.player-chip .dot {
+  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+}
+#timeline {
+  flex: 1; overflow-y: auto; padding: var(--space-4) var(--space-5);
+  display: flex; flex-direction: column; gap: var(--space-3);
+}
+
+/* 时间线卡片 */
+.event-card {
+  border-radius: var(--radius); padding: var(--space-3) var(--space-4);
+  background: var(--bg-raised); border: 1px solid var(--border);
+  animation: slideIn .25s ease;
+}
+@keyframes slideIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; } }
+.event-card .card-header {
+  display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2);
+  font-size: 12px; font-weight: 600;
+}
+.event-card.thinking-card { border-left: 4px solid; font-style: italic; }
+.event-card.thinking-card .private-note {
+  font-size: 11px; opacity: .6; margin-top: var(--space-1);
+}
+.event-card.speech-card { border-left: 4px solid; }
+.event-card.vote-card { border-left: 3px solid; }
+.event-card.judge-card {
+  background: oklch(95% 0.002 250); border-left: 4px solid var(--border);
+  color: oklch(28% 0.01 250);
+}
+@media (prefers-color-scheme: dark) {
+  .event-card.judge-card { background: oklch(20% 0.005 250); color: oklch(85% 0.006 250); }
+}
+.event-card.banner-card {
+  text-align: center; font-size: 18px; font-weight: 700; padding: var(--space-5);
+}
+.collapsible-obs { cursor: pointer; }
+.collapsible-obs summary { list-style: none; }
+.collapsible-obs summary::before { content: "▶ "; font-size: 10px; }
+details[open] summary::before { content: "▼ "; font-size: 10px; }
+.obs-list { margin-top: var(--space-2); padding-left: var(--space-4); font-size: 12px; opacity: .85; }
+.identity-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; border-radius: 20px; padding: 1px 8px; margin-top: var(--space-1);
+}
+
+/* ── 历史视图 ── */
+#view-history { max-width: 900px; margin: 0 auto; padding: var(--space-5); }
+#view-history h1 { font-size: 22px; font-weight: 700; margin-bottom: var(--space-4); }
+.history-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--space-4);
+}
+.history-card {
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: var(--space-4); cursor: pointer;
+  transition: box-shadow .15s, border-color .15s;
+}
+.history-card:hover { box-shadow: var(--shadow); border-color: var(--accent); }
+.history-card .hc-date { font-size: 12px; color: var(--muted); margin-bottom: var(--space-1); }
+.history-card .hc-winner { font-weight: 700; font-size: 15px; margin-bottom: var(--space-2); }
+.history-card .hc-meta { font-size: 12px; color: var(--muted); }
+
+/* ── 复盘视图 ── */
+#view-replay { max-width: 900px; margin: 0 auto; padding: var(--space-5); }
+#view-replay h1 { font-size: 20px; font-weight: 700; margin-bottom: var(--space-4); }
+.replay-header {
+  display: flex; gap: var(--space-5); align-items: flex-start;
+  margin-bottom: var(--space-5); flex-wrap: wrap;
+}
+.replay-header img { max-width: 180px; border-radius: var(--radius); border: 1px solid var(--border); }
+.replay-header .img-label { font-size: 11px; color: var(--muted); margin-bottom: var(--space-1); }
+.summary-box {
+  background: var(--accent-soft); border: 1px solid var(--accent);
+  border-radius: var(--radius); padding: var(--space-4);
+  margin-bottom: var(--space-4); line-height: 1.7;
+}
+.round-accordion {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  margin-bottom: var(--space-2); overflow: hidden;
+}
+.round-accordion summary {
+  padding: var(--space-3) var(--space-4); font-weight: 600;
+  cursor: pointer; list-style: none; background: var(--bg-raised);
+  display: flex; align-items: center; gap: var(--space-2);
+}
+.round-accordion summary::-webkit-details-marker { display: none; }
+.round-accordion[open] summary { border-bottom: 1px solid var(--border); }
+.round-accordion .round-body { padding: var(--space-3) var(--space-4); display: flex; flex-direction: column; gap: var(--space-2); }
+.replay-controls { display: flex; gap: var(--space-3); margin-bottom: var(--space-4); align-items: center; flex-wrap: wrap; }
+
+/* ── 加载遮罩 ── */
+#loading-overlay {
+  display: none; position: fixed; inset: 0; background: oklch(0% 0 0 / .45);
+  z-index: 200; align-items: center; justify-content: center; flex-direction: column; gap: var(--space-4);
+}
+#loading-overlay.active { display: flex; }
+.spinner {
+  width: 40px; height: 40px; border: 3px solid oklch(100% 0 0 / .3);
+  border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div id="loading-overlay"><div class="spinner"></div><span style="color:#fff;font-weight:600">处理中…</span></div>
+
+<nav id="app-nav">
+  <span class="brand">🕵️ 谁是卧底</span>
+  <button class="btn-ghost" onclick="showView('setup')">新游戏</button>
+  <button class="btn-ghost" onclick="showView('history'); loadHistory()">历史对战</button>
+</nav>
+
+<!-- ── 设置视图 ── -->
+<div id="view-setup" class="view active">
+  <h1>游戏设置</h1>
+
+  <!-- 参与模型 -->
+  <div class="setup-section card">
+    <h2>参与模型</h2>
+    <div id="player-list"></div>
+    <button class="btn-ghost" style="margin-top:8px" onclick="addPlayerRow()">＋ 添加玩家</button>
+    <p class="err-msg" id="err-players"></p>
+  </div>
+
+  <!-- 图片上传 -->
+  <div class="setup-section card">
+    <h2>游戏图片</h2>
+    <div class="upload-pair">
+      <div>
+        <label>平民图片（图片 A）</label>
+        <div class="upload-zone" id="zone-a" onclick="document.getElementById('file-a').click()"
+             ondragover="ev.preventDefault();this.classList.add('drag')"
+             ondragleave="this.classList.remove('drag')"
+             ondrop="handleDrop(event,'a')">
+          <div id="preview-a"><span style="color:var(--muted)">点击或拖拽上传图片</span></div>
+        </div>
+        <input type="file" id="file-a" accept="image/*" style="display:none" onchange="handleFileSelect(this,'a')">
+      </div>
+      <div>
+        <label>卧底图片（图片 B）</label>
+        <div class="upload-zone" id="zone-b" onclick="document.getElementById('file-b').click()"
+             ondragover="ev.preventDefault();this.classList.add('drag')"
+             ondragleave="this.classList.remove('drag')"
+             ondrop="handleDrop(event,'b')">
+          <div id="preview-b"><span style="color:var(--muted)">点击或拖拽上传图片</span></div>
+        </div>
+        <input type="file" id="file-b" accept="image/*" style="display:none" onchange="handleFileSelect(this,'b')">
+      </div>
+    </div>
+    <p class="err-msg" id="err-images"></p>
+  </div>
+
+  <!-- 游戏参数 -->
+  <div class="setup-section card">
+    <h2>游戏参数</h2>
+    <div class="settings-row">
+      <div>
+        <label>卧底数量</label>
+        <input type="number" id="spy-count" value="1" min="1" max="4" style="width:80px">
+      </div>
+      <div>
+        <label>发言顺序</label>
+        <select id="order-mode">
+          <option value="rotate">每轮轮转</option>
+          <option value="fixed">固定顺序</option>
+        </select>
+      </div>
+      <div>
+        <label>随机种子（空=随机）</label>
+        <input type="number" id="seed" placeholder="留空随机" style="width:130px">
+      </div>
+      <div>
+        <label>运行模式</label>
+        <div style="display:flex;gap:12px;align-items:center;padding-top:6px">
+          <label style="font-weight:400;display:flex;align-items:center;gap:4px;margin:0">
+            <input type="radio" name="run-mode" value="auto" checked> 自动
+          </label>
+          <label style="font-weight:400;display:flex;align-items:center;gap:4px;margin:0">
+            <input type="radio" name="run-mode" value="manual"> 手动步进
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 裁判模型 -->
+  <div class="setup-section card">
+    <h2>裁判模型（总结用）</h2>
+    <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+      <div style="flex:1;min-width:140px">
+        <label>角色</label>
+        <select id="judge-role" onchange="refreshJudgeModels()">
+          <option value="base_model">base_model</option>
+          <option value="adv_model">adv_model</option>
+        </select>
+      </div>
+      <div style="flex:2;min-width:180px">
+        <label>模型</label>
+        <select id="judge-model"></select>
+      </div>
+    </div>
+    <p class="err-msg" id="err-judge"></p>
+  </div>
+
+  <div style="display:flex;gap:12px;align-items:center">
+    <button class="btn-primary" style="padding:10px 32px;font-size:15px" onclick="startGame()">开始游戏</button>
+    <span class="err-msg" id="err-start" style="margin:0"></span>
+  </div>
+</div>
+
+<!-- ── 观战视图 ── -->
+<div id="view-game" class="view">
+  <div id="game-topbar">
+    <span class="round-label" id="topbar-round">准备中</span>
+    <span class="phase-label" id="topbar-phase">—</span>
+    <span class="spacer"></span>
+    <button class="btn-primary" id="btn-advance" style="display:none" onclick="advanceGame()">下一轮 →</button>
+    <button class="btn-danger btn-ghost" id="btn-abort" onclick="abortGame()">终止</button>
+  </div>
+  <div id="player-strip"></div>
+  <div id="timeline"></div>
+</div>
+
+<!-- ── 历史视图 ── -->
+<div id="view-history" class="view">
+  <h1>历史对战</h1>
+  <div class="history-grid" id="history-grid">
+    <p style="color:var(--muted)">加载中…</p>
+  </div>
+</div>
+
+<!-- ── 复盘视图 ── -->
+<div id="view-replay" class="view">
+  <button class="btn-ghost" style="margin-bottom:16px" onclick="showView('history');loadHistory()">← 返回列表</button>
+  <h1 id="replay-title">复盘</h1>
+  <div id="replay-body"></div>
+</div>
+
+<script>
+// ────────────────────────────────────────────────────────────────
+// 全局状态
+// ────────────────────────────────────────────────────────────────
+let _models = { base_model: [], adv_model: [] };
+let _tokenA = null, _tokenB = null;
+let _gameId = null, _es = null;
+let _players = [];          // [{key, role, model_id, is_spy, alive}]
+let _showPrivate = true;    // 观战时始终显示
+let _manualMode = false;
+let _replayShowPrivate = false;
+
+// ────────────────────────────────────────────────────────────────
+// 视图切换
+// ────────────────────────────────────────────────────────────────
+function showView(name) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-' + name).classList.add('active');
+}
+
+// ────────────────────────────────────────────────────────────────
+// 颜色系统
+// ────────────────────────────────────────────────────────────────
+function playerColors(index, total) {
+  const h = Math.round((index / total) * 360);
+  return {
+    main:  `hsl(${h}, 58%, 42%)`,
+    muted: `hsl(${h}, 35%, 92%)`,
+    text:  `hsl(${h}, 50%, 28%)`,
+    dot:   `hsl(${h}, 58%, 52%)`,
+  };
+}
+
+function getPlayerColor(key) {
+  const idx = _players.findIndex(p => p.key === key);
+  if (idx < 0) return { main: 'var(--border)', muted: 'var(--bg)', text: 'var(--body)', dot: 'var(--muted)' };
+  return playerColors(idx, _players.length);
+}
+
+// ────────────────────────────────────────────────────────────────
+// 初始化 — 加载模型列表
+// ────────────────────────────────────────────────────────────────
+async function init() {
+  try {
+    const res = await fetch('/api/models');
+    _models = await res.json();
+    addPlayerRow();
+    addPlayerRow();
+    addPlayerRow();
+    refreshJudgeModels();
+  } catch (e) {
+    console.error('加载模型列表失败', e);
+  }
+}
+
+// ────────────────────────────────────────────────────────────────
+// 玩家行管理
+// ────────────────────────────────────────────────────────────────
+function playerRowHtml(rowId) {
+  const roles = ['base_model', 'adv_model'];
+  const roleOpts = roles.map(r => `<option value="${r}">${r}</option>`).join('');
+  return `<div class="player-row" id="${rowId}">
+    <select onchange="onPlayerRoleChange(this)">${roleOpts}</select>
+    <select></select>
+    <button class="btn-ghost" style="padding:6px 10px" onclick="removePlayerRow('${rowId}')">✕</button>
+  </div>`;
+}
+
+let _rowCounter = 0;
+function addPlayerRow() {
+  const id = 'pr' + (++_rowCounter);
+  document.getElementById('player-list').insertAdjacentHTML('beforeend', playerRowHtml(id));
+  const row = document.getElementById(id);
+  const roleSelect = row.querySelector('select:first-child');
+  populateModelSelect(row.querySelector('select:nth-child(2)'), roleSelect.value);
+  roleSelect.addEventListener('change', () => {
+    populateModelSelect(row.querySelector('select:nth-child(2)'), roleSelect.value);
+    syncJudgeExclusion();
+  });
+  row.querySelector('select:nth-child(2)').addEventListener('change', syncJudgeExclusion);
+  syncJudgeExclusion();
+}
+
+function removePlayerRow(id) {
+  document.getElementById(id)?.remove();
+  syncJudgeExclusion();
+}
+
+function onPlayerRoleChange(sel) {
+  const row = sel.closest('.player-row');
+  populateModelSelect(row.querySelector('select:nth-child(2)'), sel.value);
+  syncJudgeExclusion();
+}
+
+function populateModelSelect(sel, role) {
+  const models = _models[role] || [];
+  sel.innerHTML = models.map(m => `<option value="${m.model_id}">${m.display_name || m.model_id}</option>`).join('');
+}
+
+function getPlayers() {
+  const rows = document.querySelectorAll('.player-row');
+  const result = [];
+  rows.forEach(row => {
+    const role = row.querySelector('select:nth-child(1)').value;
+    const model_id = row.querySelector('select:nth-child(2)').value;
+    if (role && model_id) result.push({ role, model_id });
+  });
+  return result;
+}
+
+// ────────────────────────────────────────────────────────────────
+// 裁判模型同步排除
+// ────────────────────────────────────────────────────────────────
+function refreshJudgeModels() {
+  const role = document.getElementById('judge-role').value;
+  const sel = document.getElementById('judge-model');
+  const models = _models[role] || [];
+  const playerKeys = new Set(getPlayers().map(p => `${p.role}/${p.model_id}`));
+  sel.innerHTML = models
+    .filter(m => !playerKeys.has(`${role}/${m.model_id}`))
+    .map(m => `<option value="${m.model_id}">${m.display_name || m.model_id}</option>`)
+    .join('');
+}
+
+function syncJudgeExclusion() {
+  refreshJudgeModels();
+  // 若当前裁判被选为玩家则清空选择
+  const judgeRole = document.getElementById('judge-role').value;
+  const judgeModel = document.getElementById('judge-model').value;
+  const playerKeys = new Set(getPlayers().map(p => `${p.role}/${p.model_id}`));
+  if (judgeModel && playerKeys.has(`${judgeRole}/${judgeModel}`)) {
+    document.getElementById('judge-model').value = '';
+    document.getElementById('err-judge').textContent = '裁判模型已被选为玩家，请重新选择';
+  } else {
+    document.getElementById('err-judge').textContent = '';
+  }
+}
+
+// ────────────────────────────────────────────────────────────────
+// 图片上传
+// ────────────────────────────────────────────────────────────────
+async function uploadFile(file, side) {
+  const fd = new FormData();
+  fd.append('file', file, file.name);
+  const res = await fetch('/api/upload', { method: 'POST', body: fd });
+  const data = await res.json();
+  if (data.token) {
+    if (side === 'a') _tokenA = data.token;
+    else _tokenB = data.token;
+    const previewEl = document.getElementById('preview-' + side);
+    previewEl.innerHTML = `<img src="/uploads/${data.token}" alt="preview">`;
+  }
+}
+
+function handleFileSelect(input, side) {
+  if (input.files[0]) uploadFile(input.files[0], side);
+}
+
+function handleDrop(ev, side) {
+  ev.preventDefault();
+  document.getElementById('zone-' + side).classList.remove('drag');
+  const file = ev.dataTransfer.files[0];
+  if (file) uploadFile(file, side);
+}
+
+// ────────────────────────────────────────────────────────────────
+// 开始游戏
+// ────────────────────────────────────────────────────────────────
+async function startGame() {
+  document.getElementById('err-players').textContent = '';
+  document.getElementById('err-images').textContent = '';
+  document.getElementById('err-start').textContent = '';
+
+  const players = getPlayers();
+  if (players.length < 3) {
+    document.getElementById('err-players').textContent = '至少需要 3 个玩家';
+    return;
+  }
+
+  // 检查重复
+  const seen = new Set();
+  for (const p of players) {
+    const k = `${p.role}/${p.model_id}`;
+    if (seen.has(k)) { document.getElementById('err-players').textContent = `重复玩家: ${k}`; return; }
+    seen.add(k);
+  }
+
+  if (!_tokenA || !_tokenB) {
+    document.getElementById('err-images').textContent = '请上传平民图片和卧底图片';
+    return;
+  }
+
+  const judgeRole = document.getElementById('judge-role').value;
+  const judgeModel = document.getElementById('judge-model').value;
+  if (judgeModel && seen.has(`${judgeRole}/${judgeModel}`)) {
+    document.getElementById('err-judge').textContent = '裁判模型不能与玩家重复';
+    return;
+  }
+
+  const spyCount = parseInt(document.getElementById('spy-count').value) || 1;
+  const orderMode = document.getElementById('order-mode').value;
+  const seedVal = document.getElementById('seed').value.trim();
+  const autoAdvance = document.querySelector('input[name="run-mode"]:checked').value === 'auto';
+  _manualMode = !autoAdvance;
+
+  setLoading(true);
+  try {
+    const res = await fetch('/api/game/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        players,
+        summary_model: judgeModel ? { role: judgeRole, model_id: judgeModel } : {},
+        image_civilian: _tokenA,
+        image_spy: _tokenB,
+        spy_count: spyCount,
+        order_mode: orderMode,
+        seed: seedVal ? parseInt(seedVal) : null,
+        auto_advance: autoAdvance,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) { document.getElementById('err-start').textContent = data.error || '启动失败'; setLoading(false); return; }
+    _gameId = data.game_id;
+    initGameView();
+    connectSSE();
+    showView('game');
+  } catch (e) {
+    document.getElementById('err-start').textContent = '网络错误: ' + e.message;
+  }
+  setLoading(false);
+}
+
+// ────────────────────────────────────────────────────────────────
+// 观战视图初始化
+// ────────────────────────────────────────────────────────────────
+function initGameView() {
+  _players = [];
+  document.getElementById('timeline').innerHTML = '';
+  document.getElementById('player-strip').innerHTML = '';
+  document.getElementById('topbar-round').textContent = '准备中';
+  document.getElementById('topbar-phase').textContent = '等待开始';
+  document.getElementById('btn-advance').style.display = _manualMode ? 'inline-flex' : 'none';
+  document.getElementById('btn-advance').disabled = true;
+}
+
+// ────────────────────────────────────────────────────────────────
+// SSE 连接
+// ────────────────────────────────────────────────────────────────
+function connectSSE() {
+  if (_es) { _es.close(); _es = null; }
+  _es = new EventSource(`/api/game/${_gameId}/events`);
+  _es.onmessage = e => {
+    try { handleEvent(JSON.parse(e.data)); } catch (err) { console.error(err); }
+  };
+  _es.onerror = () => { appendJudge('连接中断，游戏可能已结束。'); };
+}
+
+// ────────────────────────────────────────────────────────────────
+// 事件处理
+// ────────────────────────────────────────────────────────────────
+function handleEvent(msg) {
+  const type = msg.type, payload = msg.payload || {};
+  switch (type) {
+    case 'game_start':   onGameStart(payload); break;
+    case 'round_start':  onRoundStart(payload); break;
+    case 'player_speech': onPlayerSpeech(payload); break;
+    case 'vote_cast':    onVoteCast(payload); break;
+    case 'elimination':  onElimination(payload); break;
+    case 'round_end':    onRoundEnd(payload); break;
+    case 'game_end':     onGameEnd(payload); break;
+    case 'stream_end':   if (_es) { _es.close(); _es = null; } break;
+    case 'error':        appendJudge('⚠️ 错误: ' + (payload.message || '')); break;
+  }
+}
+
+function onGameStart(p) {
+  _players = p.players.map(pl => ({ ...pl, alive: true }));
+  renderPlayerStrip();
+  appendJudge(`游戏开始！共 ${_players.length} 名玩家，${p.spy_count} 名卧底。种子：${p.seed ?? '随机'}`);
+  document.getElementById('topbar-round').textContent = '第 0 轮';
+}
+
+function onRoundStart(p) {
+  document.getElementById('topbar-round').textContent = `第 ${p.round_no} 轮`;
+  document.getElementById('topbar-phase').textContent = '描述阶段';
+  appendJudge(`── 第 ${p.round_no} 轮开始，发言顺序：${p.speaking_order.join(' → ')} ──`);
+}
+
+function onPlayerSpeech(p) {
+  document.getElementById('topbar-phase').textContent = '描述阶段';
+  const c = getPlayerColor(p.key);
+  const priv = p.private || {};
+
+  // 思考卡（私有）
+  if (priv.observation_list || priv.self_identity) {
+    const obsList = (priv.observation_list || []).map(o => `<li>${esc(o)}</li>`).join('');
+    const idBadge = identityBadge(priv.self_identity, priv.self_confidence);
+    appendCard(`
+      <div class="event-card thinking-card" style="border-left-color:${c.main};background:${c.muted}">
+        <div class="card-header" style="color:${c.text}">
+          🔒 ${esc(p.key)} <span style="opacity:.6">· 私有思考</span>
+          <span class="private-note" style="margin-left:auto">仅观战者可见</span>
+        </div>
+        ${obsList ? `<details class="collapsible-obs"><summary style="color:${c.text};font-size:12px">观察清单 (${priv.observation_list.length} 条)</summary><ul class="obs-list">${obsList}</ul></details>` : ''}
+        <div style="margin-top:6px;font-size:12px;color:${c.text}">
+          ${idBadge}
+          ${priv.self_reason ? `<span style="opacity:.75;margin-left:8px">${esc(priv.self_reason)}</span>` : ''}
+        </div>
+      </div>`);
+  }
+
+  // 描述卡（公开）
+  const pub = p.public || {};
+  const statusTag = pub.status === 'api_error' ? `<span class="tag" style="background:oklch(92% .05 25);color:var(--danger)">API 错误</span>` :
+                    pub.status === 'malformed' ? `<span class="tag" style="background:oklch(93% .05 80);color:var(--warning)">格式异常</span>` : '';
+  appendCard(`
+    <div class="event-card speech-card" style="border-left-color:${c.main}">
+      <div class="card-header" style="color:${c.main}">
+        ${esc(p.key)} · 描述 ${statusTag}
+      </div>
+      <p>${esc(pub.description || '')}</p>
+      ${pub.response ? `<p style="margin-top:4px;opacity:.75;font-size:13px">回应：${esc(pub.response)}</p>` : ''}
+    </div>`);
+}
+
+function onVoteCast(p) {
+  document.getElementById('topbar-phase').textContent = '投票阶段';
+  const c = getPlayerColor(p.key);
+  appendCard(`
+    <div class="event-card vote-card" style="border-left-color:${c.main}40">
+      <div class="card-header" style="color:${c.main};opacity:.85">
+        ${esc(p.key)} → ${p.target ? esc(p.target) : '弃权'}
+      </div>
+      <p style="font-size:12px;opacity:.75">${esc(p.reason || '')}</p>
+    </div>`);
+}
+
+function onElimination(p) {
+  const deadPlayer = _players.find(pl => pl.key === p.eliminated);
+  if (deadPlayer) deadPlayer.alive = false;
+  renderPlayerStrip();
+  const icon = p.was_spy ? '🎯 卧底落网' : '💔 平民遭殃';
+  appendCard(`
+    <div class="event-card judge-card">
+      <strong>${icon}</strong> ${esc(p.eliminated)} 被淘汰${p.was_spy ? '（卧底！）' : '（平民）'}
+    </div>`);
+}
+
+function onRoundEnd(p) {
+  if (_manualMode) {
+    document.getElementById('btn-advance').disabled = false;
+    appendJudge('本轮结束，点击"下一轮"继续。');
+  }
+}
+
+function onGameEnd(p) {
+  const winnerMap = { civilians: '🎉 平民获胜', spy: '🕵️ 卧底获胜', stalemate: '🤝 平局' };
+  const colors = { civilians: 'var(--success)', spy: 'var(--danger)', stalemate: 'var(--muted)' };
+  appendCard(`
+    <div class="event-card banner-card" style="color:${colors[p.winner] || 'var(--body)'}">
+      ${winnerMap[p.winner] || p.winner} — 共 ${p.total_rounds} 轮
+      <div style="font-size:13px;margin-top:8px;font-weight:400;color:var(--muted)">
+        卧底：${(p.spy_keys || []).join(', ')}
+      </div>
+    </div>`);
+  document.getElementById('topbar-phase').textContent = '已结束';
+  document.getElementById('btn-advance').style.display = 'none';
+  document.getElementById('btn-abort').textContent = '关闭';
+  if (_es) { _es.close(); _es = null; }
+}
+
+// ────────────────────────────────────────────────────────────────
+// 手动步进 & 终止
+// ────────────────────────────────────────────────────────────────
+async function advanceGame() {
+  document.getElementById('btn-advance').disabled = true;
+  await fetch(`/api/game/${_gameId}/advance`, { method: 'POST' });
+}
+
+async function abortGame() {
+  if (_gameId) await fetch(`/api/game/${_gameId}/abort`, { method: 'POST' });
+  if (_es) { _es.close(); _es = null; }
+  showView('setup');
+}
+
+// ────────────────────────────────────────────────────────────────
+// 渲染玩家条
+// ────────────────────────────────────────────────────────────────
+function renderPlayerStrip() {
+  const strip = document.getElementById('player-strip');
+  strip.innerHTML = _players.map((p, i) => {
+    const c = playerColors(i, _players.length);
+    return `<div class="player-chip${p.alive ? '' : ' dead'}" style="border-color:${c.main};background:${c.muted}">
+      <div class="dot" style="background:${c.dot}"></div>
+      <span style="color:${c.text}">${esc(p.model_id || p.key)}</span>
+      ${!p.alive ? '<span style="opacity:.5">☠</span>' : ''}
+    </div>`;
+  }).join('');
+}
+
+// ────────────────────────────────────────────────────────────────
+// 历史对战
+// ────────────────────────────────────────────────────────────────
+async function loadHistory() {
+  const grid = document.getElementById('history-grid');
+  grid.innerHTML = '<p style="color:var(--muted)">加载中…</p>';
+  try {
+    const res = await fetch('/api/history');
+    const items = await res.json();
+    if (!items.length) { grid.innerHTML = '<p style="color:var(--muted)">暂无历史对战</p>'; return; }
+    grid.innerHTML = items.map(g => {
+      const wMap = { civilians: '🎉 平民胜', spy: '🕵️ 卧底胜', stalemate: '🤝 平局' };
+      const wColor = { civilians: 'var(--success)', spy: 'var(--danger)', stalemate: 'var(--muted)' };
+      const dt = g.created_at ? g.created_at.replace('T', ' ').slice(0, 16) : '—';
+      return `<div class="history-card" onclick="loadReplay('${esc(g.id)}')">
+        <div class="hc-date">${dt}</div>
+        <div class="hc-winner" style="color:${wColor[g.winner] || 'inherit'}">${wMap[g.winner] || g.winner}</div>
+        <div class="hc-meta">${g.player_count} 名玩家 · ${g.total_rounds} 轮 · 卧底 ${g.spy_count} 名
+          ${g.summary_ready ? '<span class="tag" style="background:var(--accent-soft);color:var(--accent);margin-left:6px">有总结</span>' : ''}
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    grid.innerHTML = `<p style="color:var(--danger)">加载失败: ${e.message}</p>`;
+  }
+}
+
+// ────────────────────────────────────────────────────────────────
+// 复盘详情
+// ────────────────────────────────────────────────────────────────
+async function loadReplay(gameId) {
+  setLoading(true);
+  try {
+    const res = await fetch(`/api/history/${gameId}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '加载失败');
+    renderReplay(data);
+    showView('replay');
+  } catch (e) {
+    alert('加载复盘失败: ' + e.message);
+  }
+  setLoading(false);
+}
+
+function renderReplay(data) {
+  const setup = data.setup || {}, result = data.result || {};
+  const players = setup.players || [];
+  const spyKeys = new Set(setup.spy_keys || []);
+
+  document.getElementById('replay-title').textContent =
+    `复盘 — ${(data.created_at || '').slice(0, 16)}`;
+
+  const totalPlayers = players.length;
+  const wMap = { civilians: '🎉 平民获胜', spy: '🕵️ 卧底获胜', stalemate: '🤝 平局' };
+  const wColor = { civilians: 'var(--success)', spy: 'var(--danger)', stalemate: 'var(--muted)' };
+
+  const body = document.getElementById('replay-body');
+  body.innerHTML = '';
+
+  // 控制栏
+  const ctrlDiv = document.createElement('div');
+  ctrlDiv.className = 'replay-controls';
+  ctrlDiv.innerHTML = `
+    <button class="btn-ghost" onclick="toggleReplayPrivate(this)">👁 ${_replayShowPrivate ? '隐藏' : '显示'}私有思考</button>
+    <a href="/api/history/${esc(data.id)}" download="replay-${esc(data.id)}.json" class="btn-ghost" style="text-decoration:none;padding:6px 14px;border:1px solid var(--border);border-radius:6px">⬇ 导出 JSON</a>
+    <span style="color:var(--muted);font-size:13px">共 ${result.total_rounds || 0} 轮 · ${totalPlayers} 名玩家</span>`;
+  body.appendChild(ctrlDiv);
+
+  // 图片与结果
+  const hdr = document.createElement('div');
+  hdr.className = 'replay-header';
+  hdr.innerHTML = `
+    <div>
+      <div class="img-label">平民图片</div>
+      <img src="/api/history/${esc(data.id)}/image/civilian" alt="平民图" onerror="this.style.display='none'">
+    </div>
+    <div>
+      <div class="img-label">卧底图片</div>
+      <img src="/api/history/${esc(data.id)}/image/spy" alt="卧底图" onerror="this.style.display='none'">
+    </div>
+    <div style="flex:1">
+      <div style="font-size:22px;font-weight:700;color:${wColor[result.winner]||'inherit'};margin-bottom:8px">
+        ${wMap[result.winner] || result.winner}
+      </div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:4px">卧底：${[...spyKeys].map(k=>esc(k)).join(', ') || '—'}</div>
+      <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px">
+        ${players.map((p,i) => {
+          const c = playerColors(i, totalPlayers);
+          const isSpy = spyKeys.has(p.key);
+          return `<span style="padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600;background:${c.muted};color:${c.text}">
+            ${esc(p.model_id||p.key)} ${isSpy ? '🕵️' : '👤'}
+          </span>`;
+        }).join('')}
+      </div>
+    </div>`;
+  body.appendChild(hdr);
+
+  // 总结
+  if (data.summary_ready && data.summary_text) {
+    const sumBox = document.createElement('div');
+    sumBox.className = 'summary-box';
+    sumBox.innerHTML = `<strong>裁判总结</strong><br><br>${esc(data.summary_text).replace(/\n/g, '<br>')}`;
+    body.appendChild(sumBox);
+  } else if (!data.summary_ready) {
+    const pending = document.createElement('div');
+    pending.className = 'summary-box';
+    pending.style.opacity = '.6';
+    pending.textContent = '裁判总结生成中，请稍后刷新查看…';
+    body.appendChild(pending);
+  }
+
+  // 轮次折叠
+  (data.rounds || []).forEach(r => {
+    const det = document.createElement('details');
+    det.className = 'round-accordion';
+    const elim = r.eliminated ? `⚠️ 淘汰 ${r.eliminated}${r.eliminated_was_spy ? '（卧底）' : '（平民）'}` : '';
+    det.innerHTML = `<summary>第 ${r.round_no} 轮 ${elim ? `<span style="color:var(--warning);font-size:12px;margin-left:8px">${elim}</span>` : ''}</summary>
+      <div class="round-body" id="round-body-${r.round_no}"></div>`;
+    body.appendChild(det);
+    det.addEventListener('toggle', () => {
+      if (det.open) renderRoundBody(r, players, spyKeys, `round-body-${r.round_no}`);
+    });
+  });
+}
+
+function renderRoundBody(r, players, spyKeys, containerId) {
+  const el = document.getElementById(containerId);
+  if (el.dataset.rendered) return;
+  el.dataset.rendered = '1';
+  const speeches = r.speeches || [];
+  speeches.forEach(s => {
+    const idx = players.findIndex(p => p.key === s.key);
+    const c = idx >= 0 ? playerColors(idx, players.length) : { main: 'var(--border)', muted: 'var(--bg)', text: 'var(--body)' };
+    // 思考（可选显示）
+    if (_replayShowPrivate && (s.observation_list?.length || s.self_identity)) {
+      const obsList = (s.observation_list || []).map(o => `<li>${esc(o)}</li>`).join('');
+      const idBadge = identityBadge(s.self_identity, s.self_confidence);
+      el.insertAdjacentHTML('beforeend', `
+        <div class="event-card thinking-card" style="border-left-color:${c.main};background:${c.muted}">
+          <div class="card-header" style="color:${c.text}">🔒 ${esc(s.key)} · 思考</div>
+          ${obsList ? `<details class="collapsible-obs"><summary style="font-size:12px">观察清单</summary><ul class="obs-list">${obsList}</ul></details>` : ''}
+          <div style="font-size:12px;margin-top:4px">${idBadge}${s.self_reason ? `<span style="opacity:.7;margin-left:8px">${esc(s.self_reason)}</span>` : ''}</div>
+        </div>`);
+    }
+    // 描述
+    el.insertAdjacentHTML('beforeend', `
+      <div class="event-card speech-card" style="border-left-color:${c.main}">
+        <div class="card-header" style="color:${c.main}">${esc(s.key)} · 描述</div>
+        <p>${esc(s.description || '')}</p>
+        ${s.response ? `<p style="margin-top:4px;opacity:.75;font-size:13px">回应：${esc(s.response)}</p>` : ''}
+      </div>`);
+  });
+  // 投票
+  const votes = r.votes || {}, reasons = r.vote_reasons || {};
+  Object.entries(votes).forEach(([voter, target]) => {
+    const idx = players.findIndex(p => p.key === voter);
+    const c = idx >= 0 ? playerColors(idx, players.length) : { main: 'var(--muted)' };
+    el.insertAdjacentHTML('beforeend', `
+      <div class="event-card vote-card" style="border-left-color:${c.main}40">
+        <div class="card-header" style="color:${c.main}">${esc(voter)} → ${esc(target)}</div>
+        <p style="font-size:12px;opacity:.75">${esc(reasons[voter] || '')}</p>
+      </div>`);
+  });
+}
+
+function toggleReplayPrivate(btn) {
+  _replayShowPrivate = !_replayShowPrivate;
+  btn.textContent = `👁 ${_replayShowPrivate ? '隐藏' : '显示'}私有思考`;
+  // 重新渲染已展开的轮次
+  document.querySelectorAll('.round-accordion[open] .round-body').forEach(el => {
+    el.dataset.rendered = '';
+    el.innerHTML = '';
+  });
+  // re-trigger rendered rounds
+  document.querySelectorAll('.round-accordion[open]').forEach(det => {
+    const rno = parseInt(det.querySelector('summary').textContent.match(/\d+/)[0]);
+    const replayData = window._currentReplayData;
+    if (replayData) {
+      const r = (replayData.rounds || []).find(x => x.round_no === rno);
+      if (r) renderRoundBody(r, replayData.setup?.players || [], new Set(replayData.setup?.spy_keys || []), `round-body-${rno}`);
+    }
+  });
+}
+
+// ────────────────────────────────────────────────────────────────
+// 工具函数
+// ────────────────────────────────────────────────────────────────
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function appendJudge(text) {
+  appendCard(`<div class="event-card judge-card">${esc(text)}</div>`);
+}
+
+function appendCard(html) {
+  const tl = document.getElementById('timeline');
+  tl.insertAdjacentHTML('beforeend', html);
+  tl.lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+
+function identityBadge(identity, confidence) {
+  const colors = { civilian: 'var(--success)', spy: 'var(--danger)', uncertain: 'var(--muted)' };
+  const labels = { civilian: '判断：平民', spy: '判断：卧底', uncertain: '判断：不确定' };
+  const col = colors[identity] || 'var(--muted)';
+  const lbl = labels[identity] || identity || '';
+  const conf = confidence != null ? ` (${confidence}%)` : '';
+  return `<span class="identity-badge" style="background:${col}20;color:${col}">${esc(lbl)}${conf}</span>`;
+}
+
+function setLoading(on) {
+  document.getElementById('loading-overlay').classList.toggle('active', on);
+}
+
+// ────────────────────────────────────────────────────────────────
+// 启动
+// ────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
