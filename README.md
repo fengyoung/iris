@@ -1,10 +1,18 @@
-# Iris 3.38.2
+# Iris 3.39.0
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 最新动态
 
-**v3.38.2 (2026-09-15)** - CI workflow action 升级至 v7：消除 Node.js 20 废弃告警：
+**v3.39.0 (2026-09-15)** - 谁是卧底 Web 界面：游戏实时观战与复盘存储：
+- ✅ 新增 `iris undercover-game-web`：stdlib `ThreadingHTTPServer` 本地服务（默认 `127.0.0.1:7862`），零新增依赖（[界面说明](docs/undercover-web-ui.md)）
+- ✅ 实时观战：SSE 事件流分层展示思考卡（私有档案，🔒 标注）/ 描述卡 / 投票卡 / 裁判陈述，玩家色按 HSL 色相均匀分配
+- ✅ 手动步进模式：每轮结束等待确认再进入下一轮；裁判模型前后端双重校验不得与参与玩家重复
+- ✅ 对局持久化：每局落盘 `data/games/<game_id>/`（图片副本 + `replay.json` 全量记录 + 后台生成 `summary.md`）
+- ✅ 事件系统对 `UndercoverGame` 改动最小：新增 `on_event` / `advance_event` 可选参数，默认 None 无操作，原有 CLI 向后兼容
+- ✅ 全量 **3,484 通过**；协议版本 3.23→**3.24**（CLI 命令集 69→70）
+
+**上一版 v3.38.2 (2026-09-15)** - CI workflow action 升级至 v7：消除 Node.js 20 废弃告警：
 - ✅ `actions/checkout` v4→v7、`actions/setup-python` v5→v7、`actions/upload-artifact` v4→v7——三者入参均无变化
 - ✅ `codecov/codecov-action` v4→v7，**`file` 改名 `files`**（v5 起删除旧名）——旧名不报错、只被静默忽略，表现为「CI 全绿但覆盖率不再上传」
 - ✅ 先读各 `v*.0.0` 发布说明再逐个比对目标 tag 的 `action.yml`，最后才改；批量替换版本号会踩空 codecov 这处
@@ -33,7 +41,7 @@
 - ✅ `WikiGenerator._collect_evidence()` 周报通道优先占槽；新增 21 项防回归测试
 - ✅ 已知限制：`is_wiki_stale()` 只看已在指纹里的文档，新增周报仍需 `wiki-update --title` 手动推进
 
-**项目规模**：~44,000 行代码 / 188 文件 / 28 模块 / 3,484 测试用例 / 69% 覆盖率
+**项目规模**：~45,000 行代码 / 190 文件 / 28 模块 / 3,484 测试用例 / 69% 覆盖率
 
 详见 [CHANGELOG.md](CHANGELOG.md)、[本轮工程优化记录](docs/optimization-three-phase-20260910.md) 和 [优化报告](optimization_report_20260909.md)。
 
