@@ -250,3 +250,56 @@ class TestLLMServiceAsync:
 
             result = asyncio.run(run())
             assert result.text == "async result"
+
+
+class TestLLMServiceExactModelCalls:
+    """测试 generate_as / generate_multimodal_as（精确模型调用）。"""
+
+    def test_generate_as_calls_provider(self):
+        """generate_as 应调用 provider.generate_as 并返回 GenerationResult。"""
+        from iris.core.llm_types import LLMResponse
+        mock_response = LLMResponse(
+            text="exact result", selected_role="base_model", provider="deepseek",
+            model="deepseek-flash", api_base_url="https://api.com",
+            matched_rule="exact_model", prompt_tokens=10, completion_tokens=5,
+        )
+        with patch("iris.llm.service.EnvironmentConfiguredLLMProvider") as mock_prov:
+            mock_prov.return_value.generate_as.return_value = mock_response
+            svc = LLMService(MagicMock())
+            result = svc.generate_as("base_model", "deepseek-flash", "test prompt")
+
+            assert isinstance(result, GenerationResult)
+            assert result.text == "exact result"
+            assert result.selected_role == "base_model"
+            assert result.model == "deepseek-flash"
+            mock_prov.return_value.generate_as.assert_called_once()
+
+    def test_generate_as_propagates_error(self):
+        """generate_as 调用失败时应传播 LLMProviderError。"""
+        from iris.llm import LLMProviderError
+        with patch("iris.llm.service.EnvironmentConfiguredLLMProvider") as mock_prov:
+            mock_prov.return_value.generate_as.side_effect = LLMProviderError("model not found")
+            svc = LLMService(MagicMock())
+            with pytest.raises(LLMProviderError):
+                svc.generate_as("base_model", "unknown", "prompt")
+
+    def test_generate_multimodal_as_returns_text(self):
+        """generate_multimodal_as 应调用 provider 并返回文本。"""
+        with patch("iris.llm.service.EnvironmentConfiguredLLMProvider") as mock_prov:
+            mock_prov.return_value.generate_multimodal_as.return_value = "multimodal result"
+            svc = LLMService(MagicMock())
+            result = svc.generate_multimodal_as(
+                "adv_model", "claude-opus-5-zz",
+                [{"type": "text", "text": "describe"}],
+            )
+            assert result == "multimodal result"
+            mock_prov.return_value.generate_multimodal_as.assert_called_once()
+
+    def test_generate_multimodal_as_propagates_error(self):
+        """generate_multimodal_as 失败时传播异常。"""
+        from iris.llm import LLMProviderError
+        with patch("iris.llm.service.EnvironmentConfiguredLLMProvider") as mock_prov:
+            mock_prov.return_value.generate_multimodal_as.side_effect = LLMProviderError("not multimodal")
+            svc = LLMService(MagicMock())
+            with pytest.raises(LLMProviderError):
+                svc.generate_multimodal_as("base_model", "text-only-model", [{"type": "text", "text": "x"}])

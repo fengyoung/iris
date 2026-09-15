@@ -1,10 +1,24 @@
-# Iris 3.37.5
+# Iris 3.38.0
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 最新动态
 
-**v3.37.5 (2026-09-13)** - 统一 `orphans()` 双路径语义：
+**v3.38.0 (2026-09-15)** - 多模型对抗游戏「谁是卧底」：新增 `games` 模块与 LLM 精确模型调用：
+- ✅ 新增 `iris undercover-game`：把 `llm.json` 全部可用模型当玩家，随机抽 1–2 名卧底看图片 B，其余平民看图片 A（[方案设计](docs/undercover-game-design.md)）
+- ✅ **玩家不知道自己是谁**：卧底与平民拿到的 prompt 逐字相同，只能从他人公开发言推断自己是否少数派（与常见实现的关键差异）
+- ✅ 顺序描述（每轮起点顺延、后发言者可参考前面所有人）+ 并行投票；私有面（观察清单/身份自评）只进复盘档案，永不进他人 prompt
+- ✅ 防「装死」：调用失败与格式不合规用不同占位符，后者留在比对块内——否则拒绝输出即可免疫投票
+- ✅ LLM 层新增 `generate_as()` / `generate_multimodal_as()` 按 `(role, model_id)` 精确定名调用（既有 `force_model` 按 `model` 字段字符串匹配，同名复用时会误中），失败不降级
+- ✅ 新增 122 项测试；全量 **3,484 通过**；协议版本 3.22→3.23（CLI 命令集 68→69）
+
+**上一版 v3.37.6 (2026-09-13)** - 修复人物页「周报时间线」断档：
+- ✅ 三层根因：`_chunk_to_hit` 未传递 BM25 分（下游在 0 分基线上排序，相关性序被抹掉）→ `search()` 同分兜底按路径升序致人名查询永远取**最旧** N 份 → 人名在周报正文出现 0 次，词法检索物理上召回不到
+- ✅ 新增 `_doc_date_ord()` 同分日期降序兜底 + `LocalRetriever.latest_documents()` 按文档身份定向取最新若干份代表块（仅 `page_type == "person"` 生效）
+- ✅ `WikiGenerator._collect_evidence()` 周报通道优先占槽；新增 21 项防回归测试
+- ✅ 已知限制：`is_wiki_stale()` 只看已在指纹里的文档，新增周报仍需 `wiki-update --title` 手动推进
+
+**上一版 v3.37.5 (2026-09-13)** - 统一 `orphans()` 双路径语义：
 - ✅ `_GraphEngine.orphans()` 的 networkx 与纯 Python 回退分支语义统一为「`all_node_ids` 中零入链者，含完全无边的节点」
 - ✅ 修复「同一份代码在装 / 不装 networkx 时结果不同」——networkx 分支此前会漏掉无边页面（而那恰是最该被发现的孤立页）
 - ✅ 回退分支改用新增的 `_in_links` 入链集合，不影响 `neighbors` / `bridges` / `degree_stats`
@@ -13,18 +27,10 @@
 **上一版 v3.37.4 (2026-09-13)** - CI 门禁恢复：Python 3.11 兼容、依赖补全与测试收口：
 - ✅ 修复 Python 3.11 兼容缺陷：`assistant/models.py` 改用 `typing_extensions.TypedDict`（pydantic 在 <3.12 上拒收 `typing.TypedDict`，`MeetingState` 构建即抛错）
 - ✅ 运行依赖补全：显式声明 `requests` / `typing_extensions` / `setuptools`（此前缺失或仅靠传递引入）
-- ✅ `llm.json.example` 追平模型矩阵（base 4→8、adv 7→10），补 Anthropic 协议内联覆盖
 - ✅ 消除 `llm/benchmark.py` 4 处 mypy 类型错误；`setuptools` 下界提到 83（`PYSEC-2026-3447`）
-- ✅ 测试依赖收口：`[dev]` 补入 `networkx` / `pyahocorasick` / `pytest-asyncio`；音频测试改为注入桩模块
 - ✅ CI 四个 job 全绿（Python 3.11 / 3.12 / 3.13 + macOS smoke）——此前自 v3.36.0 起持续失败
 
-**上一版 v3.37.3 (2026-09-11)** - 修复模型 max_tokens 被调用方硬编码静默覆盖：
-- ✅ 移除 `complex_input` Stage 2（图片 / PDF / 视频）硬编码的 `max_tokens=4096`
-- ✅ 移除 `feishu/image_analyzer` 硬编码的 `max_tokens=300`
-- ✅ 新增 4 个防回归测试，锁定「不向 `generate_multimodal` 显式传 `max_tokens`」
-- ✅ 修复后 `llm.json` 中配置的输出上限在这些链路上真正生效
-
-**项目规模**：~42,000 行代码 / 185 文件 / 27 模块 / 3,338 测试用例 / 68% 覆盖率
+**项目规模**：~44,000 行代码 / 188 文件 / 28 模块 / 3,484 测试用例 / 69% 覆盖率
 
 详见 [CHANGELOG.md](CHANGELOG.md)、[本轮工程优化记录](docs/optimization-three-phase-20260910.md) 和 [优化报告](optimization_report_20260909.md)。
 
@@ -84,6 +90,7 @@ python scripts/run_cli.py daily-start
 | ASR 校正 | `asr-corrector`, `asr-audit`, `asr-report` | vocotype 实时语音转写纠错润色（[使用指南](docs/asr-corrector-usage.md)） |
 | 会议助理 | `meeting-live-assistant` | 实时 AI 会议参谋：本地麦克风转写（FunASR）+ 逐段提炼要点/风险/决策/建议提问 + 话题追踪 + 说话人区分 + 洞察推送 + 热键 + 按话题过程文档（[使用指南](docs/meeting-live-assistant-usage.md) · [方案设计](docs/meeting-live-assistant-design.md)） |
 | 任务面板 | `task-panel` | Web 只读展示 iris 任务状态与进程：常驻守护 + 任务埋点 + 探测兜底（[使用指南](docs/task-panel-usage.md) · [方案设计](docs/task-panel-design.md)） |
+| 多模型对抗 | `undercover-game --image-a A --image-b B` | 「谁是卧底」：全部可用模型当玩家，玩家不知自己身份，顺序描述 + 并行投票（[方案设计](docs/undercover-game-design.md)） |
 
 工程可靠性与运维约定见 [可靠性设计](docs/engineering-reliability-design.md) 和 [可靠性使用指南](docs/engineering-reliability-usage.md)。
 
@@ -124,7 +131,7 @@ SOURCE/                     LLM-WIKI/
 - macOS Keychain（可选密钥存储）
 - PyMuPDF / python-docx（PDF/DOCX 处理）
 - ffmpeg（视频抽帧/抽音轨，视频处理必需）+ openai-whisper（音轨转写，可选）
-- 3,338 个测试用例（pytest 全量），覆盖率约 68%；Ruff、严格 mypy、AST 安全扫描与 SPDX SBOM 门禁通过
+- 3,484 个测试用例（pytest 全量），覆盖率约 69%；Ruff、严格 mypy、AST 安全扫描与 SPDX SBOM 门禁通过
 
 ## 开发环境
 
@@ -159,8 +166,8 @@ cp config/*.json.example config/  # 然后编辑各 .json 填入实际值
 
 ```
 iris3/
-├── src/iris/           # 27 模块
-│   ├── app/cli/        # CLI 入口 + 68 个公开命令
+├── src/iris/           # 28 模块
+│   ├── app/cli/        # CLI 入口 + 69 个公开命令
 │   ├── analysis/       # 分析服务（报告/思维导图/双周报）
 │   ├── complex_input/  # 多模态三阶段（图片/PDF/DOCX/VIDEO）
 │   ├── config/         # 配置加载 + Pydantic 校验
@@ -168,6 +175,7 @@ iris3/
 │   ├── evaluation/     # Wiki 深度评估
 │   ├── feed/           # 信息汇聚管道（飞书→话题→简报）
 │   ├── feishu/         # 飞书文档转换 + 聊天提炼
+│   ├── games/          # 多模型对抗游戏（谁是卧底）
 │   ├── ingest/         # 文档扫描 + 切块
 │   ├── llm/            # Provider/路由/LLMService/用量统计
 │   ├── memory/         # 记忆系统（6 子模块）
@@ -180,9 +188,10 @@ iris3/
 │       └── asr/         #   ASR 提示词子系统（术语提取/热词/Prompt优化/版本管理）
 ├── scripts/            # CLI 入口 + 委托脚本
 ├── templates/          # Prompt / Wiki 模板
-├── tests/              # 3,338 用例
-│   ├── unit/           #   纯逻辑单元测试（2,228 用例）
-│   └── integration/    #   集成测试（1,102 用例）
+├── tests/              # 3,484 用例
+│   ├── unit/           #   纯逻辑单元测试（2,012 用例）
+│   ├── integration/    #   集成测试（248 用例）
+│   └── （顶层）        #   按模块组织的端到端/回归测试（1,224 用例）
 ├── config/             # *.json gitignored，*.example 版本控制
 ├── .github/workflows/  # CI 流水线（Python 3.11-3.13 矩阵）
 ├── Makefile            # 常用开发命令
@@ -196,6 +205,8 @@ iris3/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.38.0** | 2026-09-15 | **多模型对抗游戏「谁是卧底」**：新增 `games` 模块与 `iris undercover-game` 命令，把 `llm.json` 全部可用模型当玩家。关键设计是**玩家不知道自己是谁**——卧底与平民 prompt 逐字相同，只能从他人发言推断自己是否少数派。每轮顺序描述（起点顺延，后发言者可参考本轮前面全部公开发言）+ 并行投票；私有面（观察清单/身份自评）只进复盘档案、永不进他人 prompt（否则卧底要么自曝、要么必须对身份说谎，与「不可编造」硬约束冲突）。防「装死」：调用失败与格式不合规用不同占位符，后者留在比对块内，否则拒绝输出即可免疫投票。配套为 LLM 层新增 `generate_as()` / `generate_multimodal_as()`，按 `(role, model_id)` 精确定名调用——既有 `force_model` 按 `model` 字段字符串匹配，同名复用时会误中，且降级会把玩家悄悄换成别的模型；精确调用失败不降级直接抛错。新增 122 项测试，全量 3,484 通过。**协议版本 3.22→3.23（CLI 命令集 68→69）** |
+| **v3.37.6** | 2026-09-13 | **修复人物页「周报时间线」断档**：174 个人物页仅 27 页引用过成员周报、2026-09 周报在人物页 0 引用。三层根因——① `_chunk_to_hit` 把 `score` 硬编码为 0.0（真实分只写在 `explanation` 字符串里），下游 `_boost_hits_for_answerability` 在 0 分基线上做加法并重排，把 BM25 相关性序**完全抹掉**、退化为按路径字母序；② `search()` 排序键 `(-score, relative_path)` 在同分时按路径升序兜底，而人名查询下同一人各份周报 BM25 分完全并列、周报路径字典序即时间升序 → `top_k` 永远取**最旧**的 N 份；③ 人名在周报**正文中出现 0 次**，词法检索在任何排序策略下都召回不到正文。修复：新增 `_doc_date_ord()`（解析文件名前缀日期，含月日校验）使同分按日期降序兜底且无日期者不插队；新增 `LocalRetriever.latest_documents()` 按文档身份定向取最新若干份的代表块（剔 frontmatter、取最长正文块），仅 `page_type == "person"` 生效；`WikiGenerator._collect_evidence()` 周报通道优先占证据槽。新增 21 项防回归测试。**已知限制**：`is_wiki_stale()` 只检查已在 `source_fingerprint` 里的文档，新增周报永不在指纹里，daily-start 路径仍会判「指纹新鲜」而跳过人物页，需 `wiki-update --title <姓名>` 生效。协议版本 3.22（不变） |
 | **v3.37.5** | 2026-09-13 | **统一 `orphans()` 双路径语义**：`_GraphEngine.orphans()` 的 networkx 与纯 Python 回退分支此前语义不一致（networkx 分支额外要求「节点在图内」），同一份代码在装 / 不装 networkx 时结果不同。现统一为「`all_node_ids` 中零入链者，含完全无边的节点」——调用方 `WikiGraph.find_orphans()` 传的是全部页面 id，无边页面恰是最该被发现的孤立页。回退分支改用新增的 `_in_links` 集合判定，未触碰同时服务 `neighbors` / `bridges` / `degree_stats` 的 `_adjacency`。新增 `TestOrphansPathParity` 跨路径守卫 4 项。全量 3,338 通过，协议版本 3.22（不变） |
 | **v3.37.4** | 2026-09-13 | **CI 门禁恢复**：修复 CI 自 v3.36.0 起持续失败的四类根因——① Python 3.11 兼容（`assistant/models.py` 改用 `typing_extensions.TypedDict`，pydantic 在 <3.12 拒收 `typing.TypedDict`，`MeetingState` 构建即抛 `PydanticUserError`）；② 运行依赖补全（`requests` / `typing_extensions` / `setuptools`）；③ `llm/benchmark.py` 4 处 mypy 类型错误；④ 测试依赖收口（`[dev]` 补入 `networkx` / `pyahocorasick` / `pytest-asyncio`，音频测试改注入桩模块）。另修 `setuptools` 下界 64→83（`PYSEC-2026-3447`），`llm.json.example` 追平模型矩阵并补 Anthropic 协议内联覆盖。CI 四 job 全绿（3.11/3.12/3.13 + macOS smoke）。协议版本 3.22（不变） |
 | **v3.37.3** | 2026-09-11 | 修复模型 `max_tokens` 被调用方硬编码静默覆盖：`complex_input` Stage 2（图片/PDF/视频）的 `max_tokens=4096` 与 `feishu/image_analyzer` 的 `max_tokens=300` 会覆盖 `llm.json` 中的模型配置，导致输出被钉死且不报错（`claude-fable-5` 11 次多模态调用中 10 次输出恰为 4096）；移除四处硬编码并新增 4 个防回归测试，配置输出上限恢复生效。协议版本 3.22（不变） |

@@ -258,6 +258,70 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
             prompt_tokens=pt, completion_tokens=ct,
         )
 
+    def generate_as(
+        self,
+        role: str,
+        model_id: str,
+        request_data: LLMRequest,
+        *,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        max_retries: Optional[int] = None,
+        _deadline: Optional[float] = None,
+    ) -> LLMResponse:
+        """精确调用指定 (role, model_id) 的模型，跳过路由/降级链/名称匹配。
+
+        与 force_model 的区别：force_model 依赖 ModelManager.find_model_by_name()
+        按 model 字段做字符串匹配，当多个 model_id 复用同一 model 字段时存在歧义
+        （如 base_model 下 deepseek-flash-zz 与 deepseek-flash 的 model 字段都是
+        "deepseek-flash"）。本方法按 (role, model_id) 精确查找，不存在歧义，
+        适用于需要点名调用具体模型的场景（如多模型对抗游戏）。
+
+        调用失败不做降级，直接抛出 LLMProviderError。
+        """
+        try:
+            model_cfg = self._model_manager.get_model_config(role, model_id)
+        except ModelManagerError as exc:
+            raise LLMProviderError(str(exc)) from exc
+        api_base = model_cfg["api_base_url"]
+        api_key = model_cfg.get("api_key", "")
+        if not api_key:
+            raise LLMProviderError(f"llm.json 中 {role}.{model_id}.api_key 为空")
+        model_name = model_cfg["model"]
+        provider_name = str(model_cfg["provider"]).lower()
+        if max_tokens is None:
+            max_tokens = model_cfg.get("max_tokens")
+
+        model_key = f"{role}/{model_id}"
+        if self._circuit_breaker.is_open(model_key):
+            raise LLMProviderError(f"熔断器开路: {model_key}")
+
+        try:
+            text, pt, ct = self._dispatch_provider_call(
+                api_base, api_key, model_name, request_data.prompt, provider_name, model_cfg,
+                temperature=temperature, max_tokens=max_tokens, max_retries=max_retries,
+                extra_body=request_data.extra_body,
+                deadline=_deadline,
+            )
+        except LLMProviderError:
+            self._circuit_breaker.record_failure(model_key)
+            raise
+        self._circuit_breaker.record_success(model_key)
+
+        source = (request_data.route_context.get("source") if request_data.route_context else None) or _os.environ.get("IRIS_CALL_SOURCE", "cli")
+        self._tracker.record(
+            model=model_name, provider=provider_name,
+            route_role=role, matched_rule="exact_model",
+            prompt_tokens=pt, completion_tokens=ct,
+            source=str(source),
+        )
+        return LLMResponse(
+            text=text, selected_role=role, provider=provider_name,
+            model=model_name, api_base_url=api_base,
+            matched_rule="exact_model",
+            prompt_tokens=pt, completion_tokens=ct,
+        )
+
     def _build_fallback_chain(
         self, decision: RoutingDecision
     ) -> List[tuple]:
@@ -436,6 +500,74 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         self._tracker.record(
             model=_model, provider=_provider,
             route_role=_role, matched_rule=decision.matched_rule,
+            prompt_tokens=pt, completion_tokens=ct,
+            is_multimodal=True,
+            source=str(m_source),
+        )
+        return text
+
+    def generate_multimodal_as(
+        self,
+        role: str,
+        model_id: str,
+        content_parts: list[dict],
+        route_context: Dict[str, Any],
+        *,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        max_retries: Optional[int] = None,
+    ) -> str:
+        """精确调用指定 (role, model_id) 的多模态模型，跳过路由/降级链。
+
+        与 generate_as 同理：需要点名调用具体模型时使用（如多模型对抗游戏，
+        每个玩家必须是它自己，不能被路由静默替换成别的模型）。
+        调用失败不做降级，直接抛出 LLMProviderError。
+        """
+        try:
+            model_cfg = self._model_manager.get_model_config(role, model_id)
+        except ModelManagerError as exc:
+            raise LLMProviderError(str(exc)) from exc
+        if not model_cfg.get("multimodal", False):
+            raise LLMProviderError(f"模型 {role}/{model_id} 不支持多模态")
+
+        api_base = model_cfg["api_base_url"]
+        api_key = model_cfg.get("api_key", "")
+        if not api_key:
+            raise LLMProviderError(f"llm.json 中 {role}.{model_id}.api_key 为空")
+        model_name = model_cfg["model"]
+        provider_name = str(model_cfg["provider"]).lower()
+        timeout = model_cfg.get("timeout_seconds", 60)
+        effective_retries = max_retries if max_retries is not None else model_cfg.get("max_retries", 0)
+        effective_max_tokens = max_tokens if max_tokens is not None else model_cfg.get("max_tokens")
+
+        model_key = f"{role}/{model_id}"
+        if self._circuit_breaker.is_open(model_key):
+            raise LLMProviderError(f"熔断器开路: {model_key}")
+
+        try:
+            if provider_name in self.OPENAI_COMPATIBLE_PROVIDERS:
+                text, pt, ct = self._call_openai_compatible_multimodal(
+                    api_base, api_key, model_name, content_parts,
+                    temperature=temperature, timeout=timeout,
+                    max_retries=effective_retries, max_tokens=effective_max_tokens,
+                )
+            elif provider_name == "anthropic":
+                text, pt, ct = self._call_anthropic_multimodal(
+                    api_base, api_key, model_name, content_parts,
+                    temperature=temperature, timeout=timeout,
+                    max_retries=effective_retries, max_tokens=effective_max_tokens,
+                )
+            else:
+                raise LLMProviderError(f"多模态暂不支持 provider: {provider_name}")
+        except LLMProviderError:
+            self._circuit_breaker.record_failure(model_key)
+            raise
+        self._circuit_breaker.record_success(model_key)
+
+        m_source = (route_context.get("source") if route_context else None) or _os.environ.get("IRIS_CALL_SOURCE", "cli")
+        self._tracker.record(
+            model=model_name, provider=provider_name,
+            route_role=role, matched_rule="exact_model",
             prompt_tokens=pt, completion_tokens=ct,
             is_multimodal=True,
             source=str(m_source),

@@ -205,6 +205,92 @@ class LLMService:
             logger.error("LLM 多模态生成失败: %s", exc)
             raise
 
+    # ── 精确模型调用（跳过路由/降级链） ──────────────────────────
+
+    def generate_as(
+        self,
+        role: str,
+        model_id: str,
+        prompt: str,
+        route_context: Optional[Dict[str, Any]] = None,
+        *,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        max_retries: Optional[int] = None,
+        extra_body: Optional[Dict[str, Any]] = None,
+    ) -> GenerationResult:
+        """精确调用指定 (role, model_id) 的模型，跳过路由/降级链。
+
+        与 generate(force_model=...) 的区别：force_model 按 model 字段做
+        字符串匹配，当多个 model_id 复用同一 model 字段时存在歧义。
+        本方法按 (role, model_id) 精确定位，适用于需要点名调用具体模型的
+        场景（如多模型对抗游戏）。调用失败不降级，直接抛出异常。
+
+        Args:
+            role: 模型角色（base_model / adv_model）
+            model_id: 模型配置 ID（如 "deepseek-flash-zz"）
+            prompt: 输入提示词
+            route_context: 路由上下文（仅用于用量统计标注，不影响实际路由）
+            temperature/max_tokens/max_retries: 同 generate()
+            extra_body: 透传给 LLM API 的额外参数
+
+        Returns:
+            GenerationResult
+        """
+        ctx = route_context or {"input_type": "text", "task_type": "qa"}
+        ctx.setdefault("source", self._source)
+        request = LLMRequest(prompt=prompt, route_context=ctx, extra_body=extra_body)
+        try:
+            response = self._provider.generate_as(
+                role, model_id, request,
+                temperature=temperature, max_tokens=max_tokens, max_retries=max_retries,
+            )
+        except LLMProviderError as exc:
+            logger.error("LLM 精确调用失败 (%s/%s): %s", role, model_id, exc)
+            raise
+        return GenerationResult(
+            text=response.text,
+            selected_role=response.selected_role or "",
+            provider=response.provider or "",
+            model=response.model or "",
+            api_base_url=response.api_base_url or "",
+            matched_rule=response.matched_rule or "",
+            prompt_tokens=response.prompt_tokens,
+            completion_tokens=response.completion_tokens,
+        )
+
+    def generate_multimodal_as(
+        self,
+        role: str,
+        model_id: str,
+        content_parts: List[Dict[str, Any]],
+        route_context: Optional[Dict[str, Any]] = None,
+        *,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        max_retries: Optional[int] = None,
+    ) -> str:
+        """精确调用指定 (role, model_id) 的多模态模型，跳过路由/降级链。
+
+        Args 与 generate_multimodal() 相同，额外要求 role/model_id 精确定位。
+
+        Returns:
+            生成文本
+        """
+        ctx = route_context or {
+            "input_type": "multimodal",
+            "task_type": "image_understanding",
+        }
+        ctx.setdefault("source", self._source)
+        try:
+            return self._provider.generate_multimodal_as(
+                role, model_id, content_parts, ctx,
+                temperature=temperature, max_tokens=max_tokens, max_retries=max_retries,
+            )
+        except LLMProviderError as exc:
+            logger.error("LLM 多模态精确调用失败 (%s/%s): %s", role, model_id, exc)
+            raise
+
     # ── 异步文本生成 ───────────────────────────────────────────────
 
     async def generate_async(

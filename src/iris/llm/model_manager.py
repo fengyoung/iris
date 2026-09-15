@@ -145,6 +145,36 @@ class ModelManager:
         )
         return sorted_models
 
+    def get_model_config(self, role: str, model_id: str) -> Dict[str, Any]:
+        """按 (role, model_id) 精确获取模型完整配置（含 api_key）。
+
+        与 find_model_by_name() 不同：后者按 model 字段做字符串匹配，
+        当同一 model 字段被多个 model_id 复用时（如 base_model 下
+        deepseek-flash-zz 与 deepseek-flash 的 model 字段都是
+        "deepseek-flash"）会误中字典顺序中排在前面的那个。
+        本方法按精确的 (role, model_id) 二元键查找，不存在歧义。
+
+        Returns:
+            包含 api_key 的完整配置（附 _model_id 字段）。
+
+        Raises:
+            ModelManagerError: role 或 model_id 不存在。
+        """
+        role_container = self._models.get(role)
+        if not role_container:
+            raise ModelManagerError(f"未知角色: {role}")
+
+        models = role_container.get("models", {})
+        if model_id not in models:
+            raise ModelManagerError(f"角色 {role} 下未找到模型: {model_id}")
+
+        cfg = models[model_id]
+        result = dict(cfg, _model_id=model_id)
+        from pydantic import SecretStr as _SecretStr
+        if "api_key" in result and isinstance(result["api_key"], _SecretStr):
+            result["api_key"] = result["api_key"].get_secret_value()
+        return result
+
     def get_active_model_info(self, role: str) -> Dict[str, Any]:
         """获取指定角色当前活跃模型的摘要信息。
 

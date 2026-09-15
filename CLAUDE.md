@@ -1,4 +1,4 @@
-# Iris 3.37.6 — 项目执行说明
+# Iris 3.38.0 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 逐版变更记录与版本历史统一归档于 [CHANGELOG.md](CHANGELOG.md)；本文件只承载现行架构 / 配置 / 约定。
@@ -7,11 +7,11 @@
 
 ## 项目概览
 
-**当前规模**：~42,000 行 / 185 个源码文件 / 27 模块 · CLI 68 命令 · 测试 3,388（pytest 全量）· 覆盖率约 68%（`fail_under` 65）· Ruff、严格 mypy、AST 安全扫描与 SPDX SBOM 门禁通过（动态/平台专属模块设显式兼容边界）· 10 个项目级 Skill · Wiki 238 页 · 知识图谱节点 238 / 关系边 2,724（wikilink 1,115 + LLM 1,609）· 数据源 900+ 文档 / 6,771 Chunk（text-embedding-v3 / 1,024 维）
+**当前规模**：~44,000 行 / 188 个源码文件 / 28 模块 · CLI 69 命令 · 测试 3,484（pytest 全量）· 覆盖率约 69%（`fail_under` 65）· Ruff、严格 mypy、AST 安全扫描与 SPDX SBOM 门禁通过（动态/平台专属模块设显式兼容边界）· 10 个项目级 Skill · Wiki 238 页 · 知识图谱节点 238 / 关系边 2,724（wikilink 1,115 + LLM 1,609）· 数据源 900+ 文档 / 6,771 Chunk（text-embedding-v3 / 1,024 维）
 
-本版本修复人物页「周报时间线」断档：174 个人物页仅 27 页引用过成员周报、2026-09 周报在人物页 0 引用。三层根因——`_chunk_to_hit` 未传递 BM25 分（使下游排序在 0 分基线上做加法、BM25 相关性序被抹掉）；`search()` 同分兜底按 `relative_path` 升序 → 人名查询下该人各份周报完全并列 → 永远取**最旧**的 N 份；人名在周报**正文中出现 0 次**，词法检索物理上召回不到正文，故新增 `LocalRetriever.latest_documents()` 按文档身份（文件名后缀）定向取最新若干份的代表块，仅对 `page_type == "person"` 生效。
+本版本新增多模型对抗游戏「谁是卧底」（`iris undercover-game`）：把 `llm.json` 全部可用模型当玩家，随机抽 1–2 名卧底看图片 B、其余平民看图片 A。关键设计是**玩家不知道自己是谁**——卧底与平民拿到的 prompt 逐字相同，只能从他人公开发言推断自己是否少数派。每轮顺序描述（起点逐轮顺延，后发言者可参考本轮前面全部公开内容）+ 并行投票；单轮产出分公私两面，私有面（观察清单/身份自评）只进复盘档案、永不进他人 prompt。配套为 LLM 层新增 `LLMService.generate_as()` / `generate_multimodal_as()`，按 `(role, model_id)` 精确定名调用（既有 `force_model` 按 `model` 字段做字符串匹配，同名复用时会误中；精确调用失败不降级直抛错误）。
 
-**近期新增能力**：人物页「周报时间线」修复（`_doc_date_ord` 同分日期降序兜底 + `latest_documents()` 文档定向取块 + `WikiGenerator._collect_evidence()` 周报通道优先占槽；21 项防回归测试，v3.37.6）· `orphans()` 双路径语义统一（新增 `_in_links` 入链集合 + `TestOrphansPathParity` 跨路径守卫，v3.37.5）· CI 门禁恢复（Python 3.11 兼容 + 依赖补全 + 测试收口；`setuptools` 下界 64→83 修 `PYSEC-2026-3447`；`llm.json.example` 追平模型矩阵并补 Anthropic 协议内联覆盖，v3.37.4）· 模型 max_tokens 硬编码修复（移除 `complex_input` Stage 2 的 `4096` 与 `feishu/image_analyzer` 的 `300`，配置输出上限恢复生效；附 4 个防回归测试，v3.37.3）· ASR-corrector 启动信息增强（`_print_startup_banner` 新增模型配置展示行，明确「强制指定，跳过路由」状态，v3.37.2）· ASR-corrector 强制指定模型（`_invoke_llm` 新增 `force_model="deepseek-flash"`，跳过 `asr_correction_go_base` 路由规则直连官方模型；`temperature`/`max_tokens` 提取为实例属性，v3.37.1）· 模型矩阵升级（`base_model` 默认 `claude-sonnet-5-zz` / `adv_model` 默认 `claude-fable-5-zz`，新增 Qwen 3.8/3.7/3.6 降级链与 GPT-5.6 Sol 兜底，全矩阵多模态，v3.37.0）· 路由规则扩充（周报提取走 adv，ASR 校正/误识别/热词走 base，v3.37.0）· Anthropic 多模态 API 集成（generate_multimodal 新增 Anthropic 分支，OpenAI→Anthropic 格式自动转换，v3.36.0）· 三阶段工程优化（SSRF 防护 + Keychain 原生写入 + CI 安全/供应链门禁，v3.35.0）· P1/P2 优化（复杂度重构 + 异常处理文档化，v3.34.2）· 知识图谱 LLM 关系提取修复（智能实体过滤 + max_tokens 8000，v3.34.1）· 三阶段质量优化（F401/C901 门禁、`IrisError` 统一异常体系、mypy 基线、corrector/live 模块拆分）· 工程可靠性治理（SQLite 生命周期、稳定 inode 文件锁、统一原子写、向量索引 generation 发布、跨进程 LLM 缓存治理）· 任务面板 `taskpanel/`（Web 只读 + TaskReporter 埋点 + 探测兜底 + 常驻守护）· 实时会议助理 `assistant/`（逐段提炼要点/风险/决策点 + 实时提示提问 + 过程文档）· YAML frontmatter 标准化注入（`core/frontmatter.py`）+ 批量补全（`frontmatter_batch.py`，正则+LLM+备份恢复）· wikilink 自动注入引擎（零 LLM 成本）· LLM 用量追踪（SQLite WAL + embedding 纳入）· LLM 响应缓存 + embedding 向量缓存（LRU+TTL）· LLM 熔断器（threshold=5 / reset 60s）· 记忆自动更新引擎（双通道）· 多 Agent 并发安全（FileLock + SQLite WAL + Agent 隔离）· ASR 实时校正引擎（Aho-Corasick + LLM 编辑助手 + 反馈反向优化）· CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit · constraints.txt 可复现构建 · sync-memory 双向化（CC↔Iris 记忆互通 + 前向备注噪音治理，daily-start 自动双向，见 `scripts/sync_memory.py`）· `llm-bench`（LLM 通道/模型 连接速度 TTFT + 吞吐基准，字符口径规避中继 usage 虚高，引擎 `llm/benchmark.py`）· 双周报成稿 w35 定稿（总结段「总览 + 每判断点短段」反骨架、关键进展每方向 2-4 条价值门槛、`strategic_insights` 抽取纳入会议纪要、`--as-of` 历史周期复现）· Trello 客户端网络加固（urllib 网络失败指数重试 → curl 兜底传输 + DNS 负缓存 + `create_list` 参数顺序修复）
+**近期新增能力**：多模型对抗游戏 `games/`（「谁是卧底」：玩家不知自身身份 + 顺序描述/并行投票 + 公私两面分层 + 防装死占位符区分 + `stalemate` 诚实记账；配套 `ModelManager.get_model_config()` 与 `generate_as()` / `generate_multimodal_as()` 精确模型调用，122 项测试，v3.38.0）· 人物页「周报时间线」修复（`_doc_date_ord` 同分日期降序兜底 + `latest_documents()` 文档定向取块 + `WikiGenerator._collect_evidence()` 周报通道优先占槽；21 项防回归测试，v3.37.6）· `orphans()` 双路径语义统一（新增 `_in_links` 入链集合 + `TestOrphansPathParity` 跨路径守卫，v3.37.5）· CI 门禁恢复（Python 3.11 兼容 + 依赖补全 + 测试收口；`setuptools` 下界 64→83 修 `PYSEC-2026-3447`；`llm.json.example` 追平模型矩阵并补 Anthropic 协议内联覆盖，v3.37.4）· 模型 max_tokens 硬编码修复（移除 `complex_input` Stage 2 的 `4096` 与 `feishu/image_analyzer` 的 `300`，配置输出上限恢复生效；附 4 个防回归测试，v3.37.3）· ASR-corrector 启动信息增强（`_print_startup_banner` 新增模型配置展示行，明确「强制指定，跳过路由」状态，v3.37.2）· ASR-corrector 强制指定模型（`_invoke_llm` 新增 `force_model="deepseek-flash"`，跳过 `asr_correction_go_base` 路由规则直连官方模型；`temperature`/`max_tokens` 提取为实例属性，v3.37.1）· 模型矩阵升级（`base_model` 默认 `claude-sonnet-5-zz` / `adv_model` 默认 `claude-fable-5-zz`，新增 Qwen 3.8/3.7/3.6 降级链与 GPT-5.6 Sol 兜底，全矩阵多模态，v3.37.0）· 路由规则扩充（周报提取走 adv，ASR 校正/误识别/热词走 base，v3.37.0）· Anthropic 多模态 API 集成（generate_multimodal 新增 Anthropic 分支，OpenAI→Anthropic 格式自动转换，v3.36.0）· 三阶段工程优化（SSRF 防护 + Keychain 原生写入 + CI 安全/供应链门禁，v3.35.0）· P1/P2 优化（复杂度重构 + 异常处理文档化，v3.34.2）· 知识图谱 LLM 关系提取修复（智能实体过滤 + max_tokens 8000，v3.34.1）· 三阶段质量优化（F401/C901 门禁、`IrisError` 统一异常体系、mypy 基线、corrector/live 模块拆分）· 工程可靠性治理（SQLite 生命周期、稳定 inode 文件锁、统一原子写、向量索引 generation 发布、跨进程 LLM 缓存治理）· 任务面板 `taskpanel/`（Web 只读 + TaskReporter 埋点 + 探测兜底 + 常驻守护）· 实时会议助理 `assistant/`（逐段提炼要点/风险/决策点 + 实时提示提问 + 过程文档）· YAML frontmatter 标准化注入（`core/frontmatter.py`）+ 批量补全（`frontmatter_batch.py`，正则+LLM+备份恢复）· wikilink 自动注入引擎（零 LLM 成本）· LLM 用量追踪（SQLite WAL + embedding 纳入）· LLM 响应缓存 + embedding 向量缓存（LRU+TTL）· LLM 熔断器（threshold=5 / reset 60s）· 记忆自动更新引擎（双通道）· 多 Agent 并发安全（FileLock + SQLite WAL + Agent 隔离）· ASR 实时校正引擎（Aho-Corasick + LLM 编辑助手 + 反馈反向优化）· CI/CD（Makefile / pre-commit / GitHub Actions）+ pip-audit · constraints.txt 可复现构建 · sync-memory 双向化（CC↔Iris 记忆互通 + 前向备注噪音治理，daily-start 自动双向，见 `scripts/sync_memory.py`）· `llm-bench`（LLM 通道/模型 连接速度 TTFT + 吞吐基准，字符口径规避中继 usage 虚高，引擎 `llm/benchmark.py`）· 双周报成稿 w35 定稿（总结段「总览 + 每判断点短段」反骨架、关键进展每方向 2-4 条价值门槛、`strategic_insights` 抽取纳入会议纪要、`--as-of` 历史周期复现）· Trello 客户端网络加固（urllib 网络失败指数重试 → curl 兜底传输 + DNS 负缓存 + `create_list` 参数顺序修复）
 
 **关键路径**：
 
@@ -94,8 +94,8 @@ PDF=PyMuPDF 提取文字 + 逐页渲染；DOCX=python-docx 段落+表格文字�
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.37.5 | 软件发布版本 |
-| **协议版本** | `src/iris/__init__.py` | 3.22 | CLI 命令集 / agent-spec 格式 |
+| **产品版本** | `pyproject.toml` | 3.38.0 | 软件发布版本 |
+| **协议版本** | `src/iris/__init__.py` | 3.23 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | app 3.7（其余独立演进） | 配置文件 Schema |
 
 > 只有真正发生变化的层才递增版本号。
@@ -124,7 +124,7 @@ Python 3.11+ · LLM API 双协议（OpenAI 兼容 / Anthropic Messages，经 zz_
 
 ```
 iris3/
-├── src/iris/          # 27 模块（见下）
+├── src/iris/          # 28 模块（见下）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
 ├── tests/             # 3,338 用例（pytest 全量，conftest 自动打标记）
@@ -136,7 +136,7 @@ iris3/
 └── Makefile · pyproject.toml · README · CLAUDE · CHANGELOG.md
 ```
 
-**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计/`benchmark.py` 连接吞吐基准）· `core`（类型/锁/写保护/存储/Agent 适配/共享线程池/`exceptions.py` 统一异常基类）· `memory`（记忆 6 子模块：含 `session_miner.py`）· `qa`（检索问答+图谱注入+`memory_updater.py` 双通道记忆提取）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF+BM25缓存）· `wiki`（Wiki 体系 + backlink/graph + ASR 校正引擎，最大模块；`wiki/asr/` 含 corrector/_hotkey/_trie/_diff/_clipboard_io/_text_detector/coverage/feedback/prompt_optimizer 等 14 子模块）· `feed`（飞书聊天记录→话题检测→简报生成，11 文件 / 9 命令）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估 + 引用解析）· `complex_input`（多模态三阶段）· `output`（格式化+DOCX）· `assistant`（实时 AI 会议参谋：本地 ASR+校正+检索+批量分析+话题/说话人+洞察推送+面板/文档，14 文件；`live.py` 编排 + `_audio_capture.py` 合并缓冲 + `_batch_processor.py` 批处理纯逻辑）· `app/cli`（68 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（paths.py / shared.py）· `trello`（看板）· `taskpanel`（任务埋点 + Web 只读展示 + 常驻守护，7 文件）。
+**src/iris 模块**：`config`（加载+Pydantic 校验）· `llm`（Provider/路由/LLMService/用量统计/`benchmark.py` 连接吞吐基准）· `core`（类型/锁/写保护/存储/Agent 适配/共享线程池/`exceptions.py` 统一异常基类）· `memory`（记忆 6 子模块：含 `session_miner.py`）· `qa`（检索问答+图谱注入+`memory_updater.py` 双通道记忆提取）· `ingest`（扫描/切块）· `retrieval`（BM25+向量+RRF+BM25缓存）· `wiki`（Wiki 体系 + backlink/graph + ASR 校正引擎，最大模块；`wiki/asr/` 含 corrector/_hotkey/_trie/_diff/_clipboard_io/_text_detector/coverage/feedback/prompt_optimizer 等 14 子模块）· `feed`（飞书聊天记录→话题检测→简报生成，11 文件 / 9 命令）· `analysis`（报告/思维导图）· `evaluation`（Wiki 深度评估 + 引用解析）· `complex_input`（多模态三阶段）· `output`（格式化+DOCX）· `assistant`（实时 AI 会议参谋：本地 ASR+校正+检索+批量分析+话题/说话人+洞察推送+面板/文档，14 文件；`live.py` 编排 + `_audio_capture.py` 合并缓冲 + `_batch_processor.py` 批处理纯逻辑）· `games`（多模型对抗游戏「谁是卧底」：`undercover.py` 编排 + 顺序描述/并行投票 + 精确模型调用，1 命令）· `app/cli`（69 命令）· `app/transcribe_meeting`（会议转录）· `feishu`（文档/聊天提炼）· `utils`（paths.py / shared.py）· `trello`（看板）· `taskpanel`（任务埋点 + Web 只读展示 + 常驻守护，7 文件）。
 
 ---
 

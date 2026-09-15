@@ -191,7 +191,10 @@ class TestFallbackLoop:
 
     def test_model_without_api_key_skipped(self, tmp_path):
         """没有 api_key 的模型被跳过。"""
-        models_no_key = dict(self.MODELS)
+        # deepcopy：dict(self.MODELS) 只拷贝顶层，嵌套的 models 字典仍是共享引用，
+        # 会污染类级 self.MODELS，导致后续测试（顺序敏感）读到被清空的 api_key。
+        import copy
+        models_no_key = copy.deepcopy(self.MODELS)
         models_no_key["base_model"]["models"]["base-1"]["api_key"] = ""
         # 确保 base-2 有 key
         models_no_key["base_model"]["models"]["base-2"]["api_key"] = "sk-ok"
@@ -242,6 +245,65 @@ class TestFallbackLoop:
                 max_retries=3,
             )
             assert text == "ok"
+
+    def test_generate_as_calls_exact_model(self, tmp_path):
+        """generate_as 应精确调用 (role, model_id)，不走路由/降级链。"""
+        provider = self._make_provider(tmp_path)
+
+        with patch.object(provider, '_call_openai_compatible', return_value=("exact-ok", 3, 4)) as mock_call:
+            response = provider.generate_as(
+                "base_model", "base-2",
+                LLMRequest(prompt="hi", route_context={"task_type": "qa"}),
+            )
+            assert response.text == "exact-ok"
+            assert response.model == "base-2"
+            assert response.matched_rule == "exact_model"
+            # 确认调用的是 base-2 而非默认的 base-1（default_model_id）
+            called_model_name = mock_call.call_args[0][2]
+            assert called_model_name == "base-2"
+
+    def test_generate_as_missing_model_raises(self, tmp_path):
+        """generate_as 指定不存在的 model_id 应抛出 LLMProviderError。"""
+        provider = self._make_provider(tmp_path)
+        with pytest.raises(LLMProviderError):
+            provider.generate_as(
+                "base_model", "no-such-model",
+                LLMRequest(prompt="hi", route_context={"task_type": "qa"}),
+            )
+
+    def test_generate_as_no_fallback_on_failure(self, tmp_path):
+        """generate_as 调用失败时不应降级到其他模型，直接抛错。"""
+        provider = self._make_provider(tmp_path)
+        with patch.object(provider, '_call_openai_compatible', side_effect=LLMProviderError("boom")):
+            with pytest.raises(LLMProviderError, match="boom"):
+                provider.generate_as(
+                    "base_model", "base-1",
+                    LLMRequest(prompt="hi", route_context={"task_type": "qa"}),
+                )
+
+    def test_generate_multimodal_as_calls_exact_model(self, tmp_path):
+        """generate_multimodal_as 应精确调用指定模型的多模态接口。"""
+        provider = self._make_provider(tmp_path)
+
+        with patch.object(provider, '_call_openai_compatible_multimodal', return_value=("desc", 5, 6)) as mock_call:
+            text = provider.generate_multimodal_as(
+                "adv_model", "adv-1",
+                [{"type": "text", "text": "describe"}],
+                {"task_type": "undercover_describe"},
+            )
+            assert text == "desc"
+            mock_call.assert_called_once()
+
+    def test_generate_multimodal_as_rejects_non_multimodal_model(self, tmp_path):
+        """generate_multimodal_as 对不支持多模态的模型应直接拒绝。"""
+        provider = self._make_provider(tmp_path)
+        # base-1/base-2 在测试夹具中 multimodal=False
+        with pytest.raises(LLMProviderError, match="不支持多模态"):
+            provider.generate_multimodal_as(
+                "base_model", "base-1",
+                [{"type": "text", "text": "x"}],
+                {"task_type": "qa"},
+            )
 
 
 # ── ModelManager.find_model_by_name ──────────────────────────────────
@@ -402,3 +464,96 @@ class TestExtractChatCompletionsText:
         }
         with pytest.raises(LLMProviderError, match="未找到可用文本输出"):
             _extract_chat_completions_text(payload)
+
+
+# ── ModelManager.get_model_config 测试（精确查询，避免歧义）──
+
+class TestModelManagerGetModelConfig:
+    """测试 ModelManager.get_model_config 精确按 (role, model_id) 查找。"""
+
+    def _make_manager(self, models_dict):
+        from pathlib import Path
+        import tempfile
+        from iris.llm.model_manager import ModelManager
+        with tempfile.TemporaryDirectory() as d:
+            return ModelManager(models_dict, Path(d))
+
+    def test_get_model_config_exact_match(self):
+        """正常查找应返回完整配置含 api_key。"""
+        models_dict = {
+            "base_model": {
+                "enabled": True,
+                "default_model_id": "test-model",
+                "models": {
+                    "test-model": {
+                        "provider": "openai", "model": "test",
+                        "api_base_url": "http://localhost", "api_key": "secret123",
+                    }
+                }
+            }
+        }
+        mgr = self._make_manager(models_dict)
+        cfg = mgr.get_model_config("base_model", "test-model")
+        assert cfg["model"] == "test"
+        assert cfg["api_key"] == "secret123"
+        assert cfg["_model_id"] == "test-model"
+
+    def test_get_model_config_no_name_collision(self):
+        """两个 model_id 的 model 字段相同时，get_model_config 能精确区分。
+
+        回归动机：find_model_by_name 按 model 字段字符串匹配，当两个
+        model_id 复用同一 model 字段时（如 llm.json 中 deepseek-flash-zz
+        与 deepseek-flash 的 model 字段都是 "deepseek-flash"）会产生歧义。
+        get_model_config 按 (role, model_id) 精确定位，消除歧义。
+        """
+        models_dict = {
+            "base_model": {
+                "enabled": True,
+                "default_model_id": "id-a",
+                "models": {
+                    "id-a": {
+                        "provider": "openai", "model": "shared-name",
+                        "api_base_url": "http://a", "api_key": "key-a",
+                    },
+                    "id-b": {
+                        "provider": "openai", "model": "shared-name",
+                        "api_base_url": "http://b", "api_key": "key-b",
+                    },
+                }
+            }
+        }
+        mgr = self._make_manager(models_dict)
+
+        cfg_a = mgr.get_model_config("base_model", "id-a")
+        assert cfg_a["api_base_url"] == "http://a"
+        assert cfg_a["api_key"] == "key-a"
+
+        cfg_b = mgr.get_model_config("base_model", "id-b")
+        assert cfg_b["api_base_url"] == "http://b"
+        assert cfg_b["api_key"] == "key-b"
+
+    def test_get_model_config_unknown_role_raises(self):
+        """role 不存在时抛出 ModelManagerError。"""
+        from iris.llm.model_manager import ModelManagerError
+        mgr = self._make_manager({})
+        with pytest.raises(ModelManagerError, match="未知角色"):
+            mgr.get_model_config("unknown_role", "any-id")
+
+    def test_get_model_config_unknown_model_id_raises(self):
+        """model_id 不存在时抛出 ModelManagerError。"""
+        from iris.llm.model_manager import ModelManagerError
+        models_dict = {
+            "base_model": {
+                "enabled": True,
+                "default_model_id": "existing",
+                "models": {
+                    "existing": {
+                        "provider": "openai", "model": "m",
+                        "api_base_url": "http://x", "api_key": "k",
+                    }
+                }
+            }
+        }
+        mgr = self._make_manager(models_dict)
+        with pytest.raises(ModelManagerError, match="未找到模型"):
+            mgr.get_model_config("base_model", "nonexistent")

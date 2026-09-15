@@ -102,6 +102,10 @@ from iris.app.cli._handlers._bench import (
     BENCH_HANDLERS,
     handle_llm_bench,
 )
+from iris.app.cli._handlers._games import (
+    GAMES_HANDLERS,
+    handle_undercover_game,
+)
 
 # 聚合所有命令处理器（向后兼容：_cli_main.py 直接 import COMMAND_HANDLERS）
 COMMAND_HANDLERS = {}
@@ -113,3 +117,4 @@ COMMAND_HANDLERS.update(FEED_HANDLERS)
 COMMAND_HANDLERS.update(FRONTMATTER_HANDLERS)
 COMMAND_HANDLERS.update(ASSISTANT_HANDLERS)
 COMMAND_HANDLERS.update(BENCH_HANDLERS)
+COMMAND_HANDLERS.update(GAMES_HANDLERS)

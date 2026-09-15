@@ -36,6 +36,7 @@ COMMANDS = [
     "reminders",
     "watch",
     "workspace",
+    "undercover-game",
     # ── 委托命令 ──
     "trello", "extract-weekly-reports", "extract-travel-invoice",
     "sync-memory", "feishu-doc-convert", "chat-digest",
@@ -221,6 +222,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-tokens", type=int, default=3000, help="llm-bench 散文输出上限")
     parser.add_argument("--phase1-only", action="store_true", help="llm-bench 只测连接/TTFT")
     parser.add_argument("--phase2-only", action="store_true", help="llm-bench 只测吞吐（跳过连接阶段，TTFT 列为空）")
+    # undercover-game
+    parser.add_argument("--image-a", default="", help="undercover-game 图片 A 路径（平民看到的图）")
+    parser.add_argument("--image-b", default="", help="undercover-game 图片 B 路径（卧底看到的图）")
+    parser.add_argument("--game-models", default="", help="undercover-game 参与模型，role/model_id 逗号分隔（默认使用全部模型）")
+    parser.add_argument("--max-players", type=int, default=0,
+                        help="undercover-game 最多参与人数（0=全部；按优先级截断，实验控成本用）")
+    parser.add_argument("--seed", type=int, default=0,
+                        help="undercover-game 随机种子（0=随机；固定后可复现卧底与发言顺序）")
+    parser.add_argument("--max-rounds", type=int, default=0,
+                        help="undercover-game 轮次上限（0=按人数自动推导）")
+    parser.add_argument("--order-mode", choices=["rotate", "fixed"], default="rotate",
+                        help="undercover-game 发言起点模式 rotate=每轮顺延 / fixed=整局固定")
     return parser
 
 
