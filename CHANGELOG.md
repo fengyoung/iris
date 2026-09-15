@@ -1,3 +1,15 @@
+## v3.38.2 (2026-09-15) — CI workflow action 升级至 v7：消除 Node.js 20 废弃告警
+
+GitHub 持续告警 `Node.js 20 is deprecated`——`ci.yml` 里的 action 被强制跑在 Node 24 上。本次把 workflow 用到的四个 action 全部升到当前最新 major。仅改 CI，无产品/协议/数据变更。
+
+- **`actions/checkout@v4` → `v7`**（2 处，test 与 macos-smoke）：无入参变化。v5 换 node24 运行时；v6 改为把凭证持久化到独立文件；v7 禁止 fork PR 在 `pull_request_target` / `workflow_run` 下被检出。本 workflow 用 `pull_request` 触发且仅声明 `contents: read`，三项均不受影响。
+- **`actions/setup-python@v5` → `v7`**（2 处）：无入参变化。v7 删除了 `pip-install` 入参（我们未使用）；已核对我们用到的 `python-version` / `cache` / `cache-dependency-path` 在 v7 的 `action.yml` 中均存在。
+- **`actions/upload-artifact@v4` → `v7`**：无入参变化。v7 新增 `archive: false` 直传单文件（该模式下 `name` 会被忽略），我们未启用；`name` / `path` 照常生效，SBOM 产物 `iris-sbom-<py>` 正常上传。
+- **`codecov/codecov-action@v4` → `v7`（唯一有入参失效的一处）**：v5 起 `file` 已被删除、改名为 `files`。**旧参数名不会报错，只会被静默忽略**——表现是「CI 照样通过、覆盖率却不再上传」，没有任何失败信号，是一个不会自己暴露的洞。已改为 `files` 并把该差异写进 workflow 注释。`fail_ci_if_error` 在 v7 仍存在，保留。
+- **方法**：不逐轮试探，而是先取各 action 的 `v*.0.0` 发布说明读破坏性变更，再逐个拉取目标 tag 的 `action.yml` 比对入参定义，最后才改。这正是「批量替换版本号」会踩空的地方。
+- **未做**：未升 `download-artifact`（本 workflow 未使用）；未为 action 固定提交 SHA——仓库既有约定用 major 标签，保持一致。
+- 验证：`yaml.safe_load` 解析通过；四个 action 入参逐一对照其 v7 `action.yml`；无 `@v1`–`@v6` 残留。PR #1 的真实 CI 运行 **四个 job 全绿**（macos-smoke 14s / Python 3.11 2m39s / 3.12 2m41s / 3.13 2m34s），且**告警数由 1 条降为 0 条**（上一 run 的 Node 20 告警消失）。协议版本 3.23（不变）；产品版本 3.38.1→**3.38.2**；数据版本不变。
+
 ## v3.38.1 (2026-09-15) — 依赖下界收紧：requests / pytest / soupsieve
 
 v3.38.0 发布时按 `RELEASE_CHECKLIST` 执行 pip-audit，顺带核查了「声明的版本边界是否允许已知漏洞版本」，发现三处下界过松。本版只改依赖契约与版本号，无功能变更。

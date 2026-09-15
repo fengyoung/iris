@@ -1,10 +1,17 @@
-# Iris 3.38.1
+# Iris 3.38.2
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 最新动态
 
-**v3.38.1 (2026-09-15)** - 依赖下界收紧：requests / pytest / soupsieve：
+**v3.38.2 (2026-09-15)** - CI workflow action 升级至 v7：消除 Node.js 20 废弃告警：
+- ✅ `actions/checkout` v4→v7、`actions/setup-python` v5→v7、`actions/upload-artifact` v4→v7——三者入参均无变化
+- ✅ `codecov/codecov-action` v4→v7，**`file` 改名 `files`**（v5 起删除旧名）——旧名不报错、只被静默忽略，表现为「CI 全绿但覆盖率不再上传」
+- ✅ 先读各 `v*.0.0` 发布说明再逐个比对目标 tag 的 `action.yml`，最后才改；批量替换版本号会踩空 codecov 这处
+- ✅ PR #1 真实 CI 验证：四 job 全绿，**告警数 1 → 0**（Node 20 告警消失）
+- ✅ 仅改 CI，无产品/协议/数据变更；协议版本 3.23（不变）
+
+**上一版 v3.38.1 (2026-09-15)** - 依赖下界收紧：requests / pytest / soupsieve：
 - ✅ `requests>=2.31` → `>=2.33`（2.32.5 命中 PYSEC-2026-2275）
 - ✅ `pytest>=7.0` → `>=9.0.3`（9.0.2 命中 PYSEC-2026-1845）
 - ✅ `weekly` extra 补 `soupsieve>=2.8.4`——bs4 对它的下界（`>=1.6.1`）过松，抬 bs4 挡不住；2.8.3 有两项 High 通告（选择器 ReDoS / 内存放大）
@@ -25,12 +32,6 @@
 - ✅ 新增 `_doc_date_ord()` 同分日期降序兜底 + `LocalRetriever.latest_documents()` 按文档身份定向取最新若干份代表块（仅 `page_type == "person"` 生效）
 - ✅ `WikiGenerator._collect_evidence()` 周报通道优先占槽；新增 21 项防回归测试
 - ✅ 已知限制：`is_wiki_stale()` 只看已在指纹里的文档，新增周报仍需 `wiki-update --title` 手动推进
-
-**上一版 v3.37.5 (2026-09-13)** - 统一 `orphans()` 双路径语义：
-- ✅ `_GraphEngine.orphans()` 的 networkx 与纯 Python 回退分支语义统一为「`all_node_ids` 中零入链者，含完全无边的节点」
-- ✅ 修复「同一份代码在装 / 不装 networkx 时结果不同」——networkx 分支此前会漏掉无边页面（而那恰是最该被发现的孤立页）
-- ✅ 回退分支改用新增的 `_in_links` 入链集合，不影响 `neighbors` / `bridges` / `degree_stats`
-- ✅ 新增 `TestOrphansPathParity` 跨路径一致性守卫（4 项），全部已验证在修复前代码上失败
 
 **项目规模**：~44,000 行代码 / 188 文件 / 28 模块 / 3,484 测试用例 / 69% 覆盖率
 
@@ -207,6 +208,7 @@ iris3/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.38.2** | 2026-09-15 | **CI workflow action 升级至 v7**：GitHub 持续告警 `Node.js 20 is deprecated`（action 被强制跑在 Node 24 上），本次把 `ci.yml` 用到的四个 action 全部升到最新 major——`actions/checkout` v4→v7（2 处）、`actions/setup-python` v5→v7（2 处）、`actions/upload-artifact` v4→v7、`codecov/codecov-action` v4→v7。前三者入参无变化（`setup-python` v7 删的是我们没用到的 `pip-install`）；**只有 codecov 这处会坏**——v5 起 `file` 已删除、改名 `files`，而旧名**不报错、只被静默忽略**，表现为「CI 全绿但覆盖率不再上传」，是个不会自己暴露的洞，已一并改正并写进注释。方法上先取各 `v*.0.0` 发布说明读破坏性变更、再逐个拉目标 tag 的 `action.yml` 比对入参，最后才改。PR #1 真实 CI 验证四 job 全绿（macos-smoke 14s / 3.11 2m39s / 3.12 2m41s / 3.13 2m34s），**告警数由 1 条降为 0 条**。仅改 CI，无产品/协议/数据变更。协议版本 3.23（不变） |
 | **v3.38.1** | 2026-09-15 | **依赖下界收紧**：v3.38.0 发布时核查「声明的版本边界是否允许已知漏洞版本」，发现三处过松——① `requests>=2.31` 允许 2.32.5（`PYSEC-2026-2275`，`extract_zipped_paths()` 可预测临时文件名）→ `>=2.33`；② `pytest>=7.0` 允许 9.0.2（`PYSEC-2026-1845`，`/tmp/pytest-of-{user}` 可预测目录）→ `>=9.0.3`；③ `weekly` extra 补 `soupsieve>=2.8.4`——`soupsieve` 是 bs4 的解析引擎而 bs4 对它的下界（`>=1.6.1`）过松，**抬 bs4 挡不住**，2.8.3 命中两项 High 通告（选择器 ReDoS：300 字节即可挂起 3 秒以上；逗号列表内存放大：500 KB 输入约 244 MB 分配），是三处里唯一无法用抬直接依赖表达的。**刻意未收紧 `urllib3` / `idna`**：二者为 requests 传递依赖、我们未直接 import，为其声明下界等于向包元数据谎报「直接依赖」；全新解析实测已拿到 2.7.0 / 3.19（均已修复）。判据是「下界不撒谎」而非「实际是否被触发」，同 v3.37.3 对 setuptools 的处理。另修正审计方法：直接对共享环境跑 pip-audit 报出的 61 条混入了 conda / yt-dlp / 无关个人项目，不反映项目闭包。全量 3,484 通过。协议版本 3.23（不变） |
 | **v3.38.0** | 2026-09-15 | **多模型对抗游戏「谁是卧底」**：新增 `games` 模块与 `iris undercover-game` 命令，把 `llm.json` 全部可用模型当玩家。关键设计是**玩家不知道自己是谁**——卧底与平民 prompt 逐字相同，只能从他人发言推断自己是否少数派。每轮顺序描述（起点顺延，后发言者可参考本轮前面全部公开发言）+ 并行投票；私有面（观察清单/身份自评）只进复盘档案、永不进他人 prompt（否则卧底要么自曝、要么必须对身份说谎，与「不可编造」硬约束冲突）。防「装死」：调用失败与格式不合规用不同占位符，后者留在比对块内，否则拒绝输出即可免疫投票。配套为 LLM 层新增 `generate_as()` / `generate_multimodal_as()`，按 `(role, model_id)` 精确定名调用——既有 `force_model` 按 `model` 字段字符串匹配，同名复用时会误中，且降级会把玩家悄悄换成别的模型；精确调用失败不降级直接抛错。新增 122 项测试，全量 3,484 通过。**协议版本 3.22→3.23（CLI 命令集 68→69）** |
 | **v3.37.6** | 2026-09-13 | **修复人物页「周报时间线」断档**：174 个人物页仅 27 页引用过成员周报、2026-09 周报在人物页 0 引用。三层根因——① `_chunk_to_hit` 把 `score` 硬编码为 0.0（真实分只写在 `explanation` 字符串里），下游 `_boost_hits_for_answerability` 在 0 分基线上做加法并重排，把 BM25 相关性序**完全抹掉**、退化为按路径字母序；② `search()` 排序键 `(-score, relative_path)` 在同分时按路径升序兜底，而人名查询下同一人各份周报 BM25 分完全并列、周报路径字典序即时间升序 → `top_k` 永远取**最旧**的 N 份；③ 人名在周报**正文中出现 0 次**，词法检索在任何排序策略下都召回不到正文。修复：新增 `_doc_date_ord()`（解析文件名前缀日期，含月日校验）使同分按日期降序兜底且无日期者不插队；新增 `LocalRetriever.latest_documents()` 按文档身份定向取最新若干份的代表块（剔 frontmatter、取最长正文块），仅 `page_type == "person"` 生效；`WikiGenerator._collect_evidence()` 周报通道优先占证据槽。新增 21 项防回归测试。**已知限制**：`is_wiki_stale()` 只检查已在 `source_fingerprint` 里的文档，新增周报永不在指纹里，daily-start 路径仍会判「指纹新鲜」而跳过人物页，需 `wiki-update --title <姓名>` 生效。协议版本 3.22（不变） |
