@@ -955,7 +955,11 @@ class UndercoverGame:
             })
 
             # 手动步进：等待外部 advance_event 后才继续下一轮（超时兜底防止窗口关闭后卡死）
-            if self._advance_event is not None:
+            alive = [p for p in self._players.values() if p.alive]
+            remaining_spies = sum(p.is_spy for p in alive)
+            continuing = round_no < max_rounds and 0 < remaining_spies < len(alive) - remaining_spies
+            if self._advance_event is not None and continuing:
+                self._emit("round_waiting", {"round_no": round_no})
                 deadline = time.monotonic() + 300
                 while not self._advance_event.wait(timeout=0.2):
                     self._check_cancelled()

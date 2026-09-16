@@ -176,6 +176,7 @@ class ReplayStore:
             },
             "rounds": rounds_data,
             "summary_ready": False,
+            "summary_status": "pending" if summary_model_key.rstrip("/") not in ("", "base_model", "adv_model") and result.winner != "cancelled" else "skipped",
         }
         with FileLock(d / "replay.json"):
             atomic_write_json(d / "replay.json", payload)
@@ -205,6 +206,9 @@ class ReplayStore:
                     "spy_keys": setup.get("spy_keys", []),
                     "spy_count": setup.get("spy_count", 0),
                     "summary_ready": data.get("summary_ready", False),
+                    "summary_status": data.get("summary_status", "unknown"),
+                    "players": [p.get("key", "") for p in setup.get("players", [])],
+                    "seed": setup.get("seed"),
                 })
             except Exception as exc:  # noqa: BLE001 — 损坏对局不影响列表
                 logger.warning("加载复盘 %s 失败，已跳过: %s", d.name, exc)
@@ -275,6 +279,8 @@ class ReplayStore:
                 route_context={"task_type": "undercover_summary"},
             )
             summary_text = gen.text.strip()
+            if not summary_text:
+                raise ValueError("总结返回空内容")
 
             d = self.game_dir(game_id)
             atomic_write_text(d / "summary.md", summary_text)
@@ -284,11 +290,21 @@ class ReplayStore:
             with FileLock(replay):
                 payload = json.loads(replay.read_text(encoding="utf-8"))
                 payload["summary_ready"] = True
+                payload["summary_status"] = "ready"
                 atomic_write_json(replay, payload)
 
             logger.info("对局 %s 总结生成完成", game_id)
         except Exception as exc:  # noqa: BLE001 — 总结失败不影响复盘存档
             logger.warning("对局 %s 总结生成失败: %s", game_id, exc)
+            replay = self.game_dir(game_id) / "replay.json"
+            try:
+                with FileLock(replay):
+                    payload = json.loads(replay.read_text(encoding="utf-8"))
+                    payload["summary_status"] = "failed"
+                    payload["summary_error"] = str(exc)
+                    atomic_write_json(replay, payload)
+            except (OSError, ValueError):
+                logger.exception("无法保存总结失败状态 %s", game_id)
 
 
 # ── 总结 prompt ──────────────────────────────────────────────────

@@ -84,10 +84,41 @@ def test_sse_multiple_subscribers_and_resume(web):
     assert request(web, 'GET', '/api/game/test/events') == first
     resumed = request(web, 'GET', '/api/game/test/events', headers={'Last-Event-ID': '1'})
     assert b'game_start' not in resumed[1] and b'round_start' in resumed[1]
+    assert request(web, 'POST', '/api/game/test/advance', '')[0] == 409
+    session.phase = 'waiting'
     assert request(web, 'POST', '/api/game/test/advance', '')[0] == 200
     assert session.advance_event.is_set()
+    assert request(web, 'POST', '/api/game/test/advance', '')[0] == 409
     assert request(web, 'POST', '/api/game/test/abort', '')[0] == 200
     assert session.cancel_event.is_set()
+
+
+def test_game_status_and_finished_controls(web):
+    session = GameSession('status', auto_advance=False, phase='waiting', round_no=2)
+    web.state.games['status'] = session
+    status, body = request(web, 'GET', '/api/game/status')
+    data = json.loads(body)
+    assert status == 200 and data['phase'] == 'waiting' and data['round_no'] == 2
+    assert not data['auto_advance']
+    session.finished = True
+    session.replay_ready = True
+    assert request(web, 'POST', '/api/game/status/abort', '')[0] == 409
+    assert request(web, 'POST', '/api/game/status/advance', '')[0] == 409
+    assert json.loads(request(web, 'GET', '/api/game/status')[1])['replay_ready']
+
+
+def test_summary_failure_and_skipped_state(web):
+    store = web.state.replay_store
+    result = GameResult(image_civilian='a', image_spy='b', players=[], spy_keys=[])
+    store.save_result('skipped', result, [], 'civilian.png', 'spy.png')
+    assert store.load_game('skipped')['summary_status'] == 'skipped'
+    store.save_result('failed', result, [], 'civilian.png', 'spy.png', 'base_model/judge')
+    assert store.load_game('failed')['summary_status'] == 'pending'
+    llm = Mock()
+    llm.generate_as.side_effect = RuntimeError('timeout')
+    store._generate_summary('failed', llm, 'base_model', 'judge')
+    data = store.load_game('failed')
+    assert data['summary_status'] == 'failed' and not data['summary_ready']
 
 
 def test_start_validation_quota_and_saved_result(web):

@@ -110,7 +110,7 @@ label { display: block; font-weight: 500; margin-bottom: var(--space-1); color: 
 .err-msg { color: var(--danger); font-size: 13px; margin-top: var(--space-2); min-height: 20px; }
 
 /* ── 观战视图 ── */
-#view-game { display: flex; flex-direction: column; height: calc(100vh - 49px); }
+#view-game.active { display: flex; flex-direction: column; height: calc(100dvh - 65px); }
 #game-topbar {
   background: var(--bg-raised); border-bottom: 1px solid var(--border);
   padding: var(--space-2) var(--space-5);
@@ -141,6 +141,24 @@ label { display: block; font-weight: 500; margin-bottom: var(--space-1); color: 
   flex: 1; overflow-y: auto; padding: var(--space-4) var(--space-5);
   display: flex; flex-direction: column; gap: var(--space-3);
 }
+.timeline-tools { display:flex; gap:8px; align-items:center; padding:8px 20px; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+.event-card { overflow-wrap:anywhere; }
+.thinking-card { color:hsl(220, 20%, 22%); }
+.player-row > *, .upload-pair > * { min-width:0; }
+.upload-zone img { max-width:100%; }
+.history-card { text-align:left; color:var(--body); }
+:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+[hidden] { display:none !important; }
+@media (max-width:600px) {
+  .upload-pair { grid-template-columns:1fr; }
+  #game-topbar, #app-nav { flex-wrap:wrap; }
+  #view-setup,#view-history,#view-replay { padding:12px; }
+  .card { padding:16px; }
+  .player-row { grid-template-columns:100px minmax(0,1fr) auto; }
+  .event-card .card-header { flex-wrap:wrap; }
+  #timeline { padding:12px; }
+}
+@media (prefers-reduced-motion:reduce) { * { animation:none !important; scroll-behavior:auto !important; } }
 
 /* 时间线卡片 */
 .event-card {
@@ -244,11 +262,17 @@ details[open] summary::before { content: "▼ "; font-size: 10px; }
   <span class="brand">🕵️ 谁是卧底</span>
   <button class="btn-ghost" onclick="showView('setup')">新游戏</button>
   <button class="btn-ghost" onclick="showView('history'); loadHistory()">历史对战</button>
+  <button class="btn-ghost" id="resume-game" hidden onclick="resumeGame()">当前对局</button>
 </nav>
 
 <!-- ── 设置视图 ── -->
 <div id="view-setup" class="view active">
   <h1>游戏设置</h1>
+  <details class="setup-section card"><summary>规则与观战说明</summary>
+    <p>至少 3 位玩家，根据各自图片描述并投票淘汰嫌疑人。base_model 与 adv_model 是模型配置组，不代表玩家身份或固定能力；可用模型由本机配置决定。</p>
+    <p>裁判只生成赛后总结，可以不选。手动模式每轮结束后等待继续，等待超过 5 分钟会自动推进。</p>
+    <p>观战可查看模型私有思考，但模型之间不可见。复盘可隐藏思考；导出的 JSON 包含全部私有字段。种子仅固定游戏随机过程，不保证模型输出完全复现。</p>
+  </details>
 
   <!-- 参与模型 -->
   <div class="setup-section card">
@@ -265,7 +289,7 @@ details[open] summary::before { content: "▼ "; font-size: 10px; }
       <div>
         <label>平民图片（图片 A）</label>
         <div class="upload-zone" id="zone-a" onclick="document.getElementById('file-a').click()"
-             ondragover="ev.preventDefault();this.classList.add('drag')"
+             ondragover="event.preventDefault();this.classList.add('drag')"
              ondragleave="this.classList.remove('drag')"
              ondrop="handleDrop(event,'a')">
           <div id="preview-a"><span style="color:var(--muted)">点击或拖拽上传图片</span></div>
@@ -275,7 +299,7 @@ details[open] summary::before { content: "▼ "; font-size: 10px; }
       <div>
         <label>卧底图片（图片 B）</label>
         <div class="upload-zone" id="zone-b" onclick="document.getElementById('file-b').click()"
-             ondragover="ev.preventDefault();this.classList.add('drag')"
+             ondragover="event.preventDefault();this.classList.add('drag')"
              ondragleave="this.classList.remove('drag')"
              ondrop="handleDrop(event,'b')">
           <div id="preview-b"><span style="color:var(--muted)">点击或拖拽上传图片</span></div>
@@ -350,16 +374,31 @@ details[open] summary::before { content: "▼ "; font-size: 10px; }
     <span class="round-label" id="topbar-round">准备中</span>
     <span class="phase-label" id="topbar-phase">—</span>
     <span class="spacer"></span>
-    <button class="btn-primary" id="btn-advance" style="display:none" onclick="advanceGame()">下一轮 →</button>
+    <button class="btn-primary" id="btn-advance" style="display:none" onclick="advanceGame()">继续下一轮 →</button>
     <button class="btn-danger btn-ghost" id="btn-abort" onclick="abortGame()">终止</button>
   </div>
   <div id="player-strip"></div>
+  <div class="timeline-tools">
+    <label><input type="checkbox" id="public-only" onchange="filterTimeline()"> 只看公开信息</label>
+    <select id="event-filter" aria-label="事件类型" onchange="filterTimeline()"><option value="">全部事件</option><option value="speech-card">描述</option><option value="vote-card">投票</option><option value="judge-card">裁判</option></select>
+    <select id="player-filter" aria-label="玩家筛选" onchange="filterTimeline()"><option value="">全部玩家</option></select>
+    <label><input type="checkbox" id="follow-live" checked> 自动跟随</label>
+    <button class="btn-ghost" onclick="scrollLatest()">跳到最新</button>
+    <button class="btn-ghost" id="game-replay" hidden onclick="loadReplay(_gameId)">查看本局复盘</button>
+    <span id="connection-status" aria-live="polite"></span>
+  </div>
   <div id="timeline"></div>
 </div>
 
 <!-- ── 历史视图 ── -->
 <div id="view-history" class="view">
   <h1>历史对战</h1>
+  <div class="replay-controls">
+    <input id="history-query" type="text" placeholder="模型、对局 ID 或种子" aria-label="搜索历史对局" oninput="renderHistory()">
+    <input id="history-date" type="date" aria-label="对局日期" onchange="renderHistory()">
+    <select id="history-winner" aria-label="结果筛选" onchange="renderHistory()"><option value="">全部结果</option><option value="civilians">平民获胜</option><option value="spy">卧底获胜</option><option value="stalemate">平局</option><option value="cancelled">已取消</option></select>
+    <button class="btn-ghost" onclick="loadHistory()">刷新</button>
+  </div>
   <div class="history-grid" id="history-grid">
     <p style="color:var(--muted)">加载中…</p>
   </div>
@@ -383,11 +422,28 @@ let _players = [];          // [{key, role, model_id, is_spy, alive}]
 let _showPrivate = true;    // 观战时始终显示
 let _manualMode = false;
 let _replayShowPrivate = false;
+let _currentReplayData = null;
+let _gameFinished = false, _statusTimer = null, _summaryTimer = null;
+let _historyItems = [], _renderingPlayer = '';
+const _uploads = {a:0, b:0};
+const winnerNames = {civilians:'平民获胜', spy:'卧底获胜', stalemate:'平局', cancelled:'已取消（部分复盘）'};
+
+async function api(url, options = {}) {
+  const response = await fetch(url, {...options, signal:AbortSignal.timeout(30000)});
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || `请求失败 (${response.status})`);
+  return data;
+}
+
+function rememberGame(id) {
+  try { localStorage.setItem('undercover-game', id); } catch (_) { /* 存储不可用时仍可运行 */ }
+}
 
 // ────────────────────────────────────────────────────────────────
 // 视图切换
 // ────────────────────────────────────────────────────────────────
 function showView(name) {
+  clearTimeout(_summaryTimer);
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.getElementById('view-' + name).classList.add('active');
 }
@@ -416,15 +472,26 @@ function getPlayerColor(key) {
 // ────────────────────────────────────────────────────────────────
 async function init() {
   try {
-    const res = await fetch('/api/models');
-    _models = await res.json();
+    _models = await api('/api/models');
     addPlayerRow();
     addPlayerRow();
     addPlayerRow();
     refreshJudgeModels();
   } catch (e) {
-    console.error('加载模型列表失败', e);
+    document.getElementById('err-players').textContent = '模型加载失败：' + e.message;
   }
+  try { _gameId = localStorage.getItem('undercover-game'); } catch (_) { /* 可选存储 */ }
+  document.getElementById('resume-game').hidden = !_gameId;
+  document.querySelectorAll('.err-msg').forEach(el => el.setAttribute('role', 'status'));
+  document.querySelectorAll('.upload-zone').forEach(el => {
+    el.tabIndex = 0; el.setAttribute('role', 'button');
+    el.setAttribute('aria-label', el.id === 'zone-a' ? '上传平民图片' : '上传卧底图片');
+    el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); } };
+  });
+  document.querySelectorAll('label').forEach(label => {
+    const control = label.nextElementSibling;
+    if (control && control.id && ['INPUT','SELECT'].includes(control.tagName)) label.htmlFor = control.id;
+  });
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -442,11 +509,17 @@ function playerRowHtml(rowId) {
 
 let _rowCounter = 0;
 function addPlayerRow() {
+  if (document.querySelectorAll('.player-row').length >= 12) return;
   const id = 'pr' + (++_rowCounter);
   document.getElementById('player-list').insertAdjacentHTML('beforeend', playerRowHtml(id));
   const row = document.getElementById(id);
   const roleSelect = row.querySelector('select:first-child');
   populateModelSelect(row.querySelector('select:nth-child(2)'), roleSelect.value);
+  const used = new Set(getPlayers().slice(0,-1).map(p => p.model_id));
+  const available = [...row.querySelector('select:nth-child(2)').options].find(o => !used.has(o.value));
+  if (available) row.querySelector('select:nth-child(2)').value = available.value;
+  row.querySelector('button').setAttribute('aria-label', '移除玩家');
+  row.querySelectorAll('select').forEach((el, i) => el.setAttribute('aria-label', i ? '玩家模型' : '模型配置组'));
   roleSelect.addEventListener('change', () => {
     populateModelSelect(row.querySelector('select:nth-child(2)'), roleSelect.value);
     syncJudgeExclusion();
@@ -468,7 +541,7 @@ function onPlayerRoleChange(sel) {
 
 function populateModelSelect(sel, role) {
   const models = _models[role] || [];
-  sel.innerHTML = models.map(m => `<option value="${m.model_id}">${m.display_name || m.model_id}</option>`).join('');
+  sel.replaceChildren(...models.map(m => new Option(m.display_name || m.model_id, m.model_id)));
 }
 
 function getPlayers() {
@@ -488,15 +561,18 @@ function getPlayers() {
 function refreshJudgeModels() {
   const role = document.getElementById('judge-role').value;
   const sel = document.getElementById('judge-model');
+  const previous = sel.value;
   const models = _models[role] || [];
   const playerKeys = new Set(getPlayers().map(p => `${p.role}/${p.model_id}`));
-  sel.innerHTML = models
+  const available = models
     .filter(m => !playerKeys.has(`${role}/${m.model_id}`))
-    .map(m => `<option value="${m.model_id}">${m.display_name || m.model_id}</option>`)
-    .join('');
+    .map(m => new Option(m.display_name || m.model_id, m.model_id));
+  sel.replaceChildren(new Option('不生成总结', ''), ...available);
+  sel.value = available.some(o => o.value === previous) ? previous : '';
 }
 
 function syncJudgeExclusion() {
+  document.getElementById('spy-count').max = Math.max(1, Math.floor((getPlayers().length - 1) / 2));
   refreshJudgeModels();
   // 若当前裁判被选为玩家则清空选择
   const judgeRole = document.getElementById('judge-role').value;
@@ -514,20 +590,33 @@ function syncJudgeExclusion() {
 // 图片上传
 // ────────────────────────────────────────────────────────────────
 async function uploadFile(file, side) {
+  const version = ++_uploads[side];
+  if (side === 'a') _tokenA = null; else _tokenB = null;
+  document.getElementById('preview-' + side).textContent = '请选择有效图片';
+  if (!file || !file.type.startsWith('image/')) { document.getElementById('err-images').textContent = '请选择图片文件'; return; }
+  if (file.size > 20 * 1024 * 1024) { document.getElementById('err-images').textContent = '图片不能超过 20 MB'; return; }
+  document.getElementById('preview-' + side).textContent = '上传中…';
+  document.getElementById('err-images').textContent = '';
+  try {
   const fd = new FormData();
   fd.append('file', file, file.name);
   const res = await fetch('/api/upload', { method: 'POST', body: fd });
   const data = await res.json();
+  if (version !== _uploads[side]) return;
+  if (!res.ok) throw new Error(data.error || '上传失败');
   if (data.token) {
     if (side === 'a') _tokenA = data.token;
     else _tokenB = data.token;
     const previewEl = document.getElementById('preview-' + side);
     previewEl.innerHTML = `<img src="/uploads/${data.token}" alt="preview">`;
+    document.getElementById('err-images').textContent = '上传成功';
   }
+  } catch (e) { if (version === _uploads[side]) { document.getElementById('preview-' + side).textContent = '上传失败，点击重试'; document.getElementById('err-images').textContent = '上传失败：' + e.message; } }
 }
 
 function handleFileSelect(input, side) {
   if (input.files[0]) uploadFile(input.files[0], side);
+  input.value = '';
 }
 
 function handleDrop(ev, side) {
@@ -541,6 +630,12 @@ function handleDrop(ev, side) {
 // 开始游戏
 // ────────────────────────────────────────────────────────────────
 async function startGame() {
+  if (_gameId && !_gameFinished) {
+    try {
+      const current = await api(`/api/game/${_gameId}`);
+      if (!['finished','failed'].includes(current.status)) { document.getElementById('err-start').textContent = '当前对局仍在运行，请先通过“当前对局”结束或终止'; return; }
+    } catch (_) { /* 服务重启后旧会话不存在，可以开始新局 */ }
+  }
   document.getElementById('err-players').textContent = '';
   document.getElementById('err-images').textContent = '';
   document.getElementById('err-start').textContent = '';
@@ -571,9 +666,12 @@ async function startGame() {
     return;
   }
 
-  const spyCount = parseInt(document.getElementById('spy-count').value) || 1;
+  const spyCount = Number(document.getElementById('spy-count').value);
   const orderMode = document.getElementById('order-mode').value;
   const seedVal = document.getElementById('seed').value.trim();
+  if (!Number.isInteger(spyCount) || spyCount >= players.length / 2 || spyCount < 1 || (seedVal && !Number.isSafeInteger(Number(seedVal)))) {
+    document.getElementById('err-start').textContent = '请检查卧底人数和整数种子'; return;
+  }
   const autoAdvance = document.querySelector('input[name="run-mode"]:checked').value === 'auto';
   _manualMode = !autoAdvance;
 
@@ -596,6 +694,8 @@ async function startGame() {
     const data = await res.json();
     if (!res.ok) { document.getElementById('err-start').textContent = data.error || '启动失败'; setLoading(false); return; }
     _gameId = data.game_id;
+    rememberGame(_gameId);
+    document.getElementById('resume-game').hidden = false;
     initGameView();
     connectSSE();
     showView('game');
@@ -609,6 +709,11 @@ async function startGame() {
 // 观战视图初始化
 // ────────────────────────────────────────────────────────────────
 function initGameView() {
+  clearTimeout(_statusTimer);
+  _gameFinished = false;
+  document.getElementById('btn-abort').textContent = '终止';
+  document.getElementById('btn-abort').disabled = false;
+  document.getElementById('game-replay').hidden = true;
   _players = [];
   document.getElementById('timeline').innerHTML = '';
   document.getElementById('player-strip').innerHTML = '';
@@ -624,10 +729,12 @@ function initGameView() {
 function connectSSE() {
   if (_es) { _es.close(); _es = null; }
   _es = new EventSource(`/api/game/${_gameId}/events`);
+  document.getElementById('connection-status').textContent = '连接中…';
+  _es.onopen = () => { document.getElementById('connection-status').textContent = '已连接'; };
   _es.onmessage = e => {
     try { handleEvent(JSON.parse(e.data)); } catch (err) { console.error(err); }
   };
-  _es.onerror = () => { appendJudge('连接中断，游戏可能已结束。'); };
+  _es.onerror = () => { document.getElementById('connection-status').textContent = '连接中断，正在重连…'; pollGameStatus(); };
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -642,9 +749,10 @@ function handleEvent(msg) {
     case 'vote_cast':    onVoteCast(payload); break;
     case 'elimination':  onElimination(payload); break;
     case 'round_end':    onRoundEnd(payload); break;
+    case 'round_waiting': document.getElementById('btn-advance').disabled = false; document.getElementById('topbar-phase').textContent = '等待继续'; break;
     case 'game_end':     onGameEnd(payload); break;
-    case 'stream_end':   if (_es) { _es.close(); _es = null; } break;
-    case 'resync_required': if (_es) { _es.close(); _es = null; } appendJudge('事件已过期，请在历史对局中查看复盘'); break;
+    case 'stream_end':   if (_es) { _es.close(); _es = null; } pollGameStatus(); break;
+    case 'resync_required': if (_es) { _es.close(); _es = null; } appendJudge('实时记录已过期，完成保存后可查看完整复盘'); pollGameStatus(); break;
     case 'error':        appendJudge('⚠️ 错误: ' + (payload.message || '')); break;
   }
 }
@@ -652,17 +760,20 @@ function handleEvent(msg) {
 function onGameStart(p) {
   _players = p.players.map(pl => ({ ...pl, alive: true }));
   renderPlayerStrip();
+  document.getElementById('player-filter').replaceChildren(new Option('全部玩家',''), ..._players.map((pl,i) => new Option(`P${i+1} ${pl.model_id}`,pl.key)));
   appendJudge(`游戏开始！共 ${_players.length} 名玩家，${p.spy_count} 名卧底。种子：${p.seed ?? '随机'}`);
   document.getElementById('topbar-round').textContent = '第 0 轮';
 }
 
 function onRoundStart(p) {
+  document.getElementById('btn-advance').disabled = true;
   document.getElementById('topbar-round').textContent = `第 ${p.round_no} 轮`;
   document.getElementById('topbar-phase').textContent = '描述阶段';
   appendJudge(`── 第 ${p.round_no} 轮开始，发言顺序：${p.speaking_order.join(' → ')} ──`);
 }
 
 function onPlayerSpeech(p) {
+  _renderingPlayer = p.key;
   document.getElementById('topbar-phase').textContent = '描述阶段';
   const c = getPlayerColor(p.key);
   const priv = p.private || {};
@@ -697,18 +808,21 @@ function onPlayerSpeech(p) {
       <p>${esc(pub.description || '')}</p>
       ${pub.response ? `<p style="margin-top:4px;opacity:.75;font-size:13px">回应：${esc(pub.response)}</p>` : ''}
     </div>`);
+  _renderingPlayer = '';
 }
 
 function onVoteCast(p) {
+  _renderingPlayer = p.key;
   document.getElementById('topbar-phase').textContent = '投票阶段';
   const c = getPlayerColor(p.key);
   appendCard(`
-    <div class="event-card vote-card" style="border-left-color:${c.main}40">
+    <div class="event-card vote-card" style="border-left-color:${c.main}">
       <div class="card-header" style="color:${c.main};opacity:.85">
         ${esc(p.key)} → ${p.target ? esc(p.target) : '弃权'}
       </div>
       <p style="font-size:12px;opacity:.75">${esc(p.reason || '')}</p>
     </div>`);
+  _renderingPlayer = '';
 }
 
 function onElimination(p) {
@@ -723,26 +837,21 @@ function onElimination(p) {
 }
 
 function onRoundEnd(p) {
-  if (_manualMode) {
-    document.getElementById('btn-advance').disabled = false;
-    appendJudge('本轮结束，点击"下一轮"继续。');
-  }
+  appendJudge(`本轮结束，用时 ${Math.round(p.elapsed_sec || 0)} 秒`);
 }
 
 function onGameEnd(p) {
-  const winnerMap = { civilians: '🎉 平民获胜', spy: '🕵️ 卧底获胜', stalemate: '🤝 平局' };
   const colors = { civilians: 'var(--success)', spy: 'var(--danger)', stalemate: 'var(--muted)' };
   appendCard(`
     <div class="event-card banner-card" style="color:${colors[p.winner] || 'var(--body)'}">
-      ${winnerMap[p.winner] || p.winner} — 共 ${p.total_rounds} 轮
+      ${winnerNames[p.winner] || esc(p.winner)} — 共 ${p.total_rounds} 轮
       <div style="font-size:13px;margin-top:8px;font-weight:400;color:var(--muted)">
-        卧底：${(p.spy_keys || []).join(', ')}
+        卧底：${esc((p.spy_keys || []).join(', '))}
       </div>
     </div>`);
-  document.getElementById('topbar-phase').textContent = '已结束';
+  document.getElementById('topbar-phase').textContent = '正在保存复盘';
   document.getElementById('btn-advance').style.display = 'none';
-  document.getElementById('btn-abort').textContent = '关闭';
-  if (_es) { _es.close(); _es = null; }
+  document.getElementById('btn-abort').disabled = true;
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -750,13 +859,19 @@ function onGameEnd(p) {
 // ────────────────────────────────────────────────────────────────
 async function advanceGame() {
   document.getElementById('btn-advance').disabled = true;
-  await fetch(`/api/game/${_gameId}/advance`, { method: 'POST' });
+  try { await api(`/api/game/${_gameId}/advance`, {method:'POST'}); }
+  catch (e) { appendJudge(e.message); pollGameStatus(); }
 }
 
 async function abortGame() {
-  if (_gameId) await fetch(`/api/game/${_gameId}/abort`, { method: 'POST' });
-  if (_es) { _es.close(); _es = null; }
-  showView('setup');
+  if (_gameFinished) { showView('setup'); return; }
+  if (!confirm('终止当前对局并保存部分复盘？')) return;
+  document.getElementById('btn-abort').disabled = true;
+  try {
+    await api(`/api/game/${_gameId}/abort`, {method:'POST'});
+    document.getElementById('topbar-phase').textContent = '正在终止，等待模型返回';
+    pollGameStatus();
+  } catch (e) { appendJudge(e.message); document.getElementById('btn-abort').disabled = false; }
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -768,7 +883,7 @@ function renderPlayerStrip() {
     const c = playerColors(i, _players.length);
     return `<div class="player-chip${p.alive ? '' : ' dead'}" style="border-color:${c.main};background:${c.muted}">
       <div class="dot" style="background:${c.dot}"></div>
-      <span style="color:${c.text}">${esc(p.model_id || p.key)}</span>
+      <span style="color:${c.text}" title="${esc(p.key)}">P${i+1} ${esc(p.model_id || p.key)}</span>
       ${!p.alive ? '<span style="opacity:.5">☠</span>' : ''}
     </div>`;
   }).join('');
@@ -781,24 +896,32 @@ async function loadHistory() {
   const grid = document.getElementById('history-grid');
   grid.innerHTML = '<p style="color:var(--muted)">加载中…</p>';
   try {
-    const res = await fetch('/api/history');
-    const items = await res.json();
-    if (!items.length) { grid.innerHTML = '<p style="color:var(--muted)">暂无历史对战</p>'; return; }
+    _historyItems = await api('/api/history');
+    renderHistory();
+  } catch (e) { grid.textContent = '加载失败：' + e.message; }
+}
+
+function renderHistory() {
+    const query = document.getElementById('history-query').value.trim().toLowerCase();
+    const date = document.getElementById('history-date').value;
+    const winner = document.getElementById('history-winner').value;
+    const items = _historyItems.filter(g => (!winner || winner === g.winner) && (!date || g.created_at.startsWith(date)) && `${g.id} ${g.players} ${g.seed}`.toLowerCase().includes(query));
+    const grid = document.getElementById('history-grid');
+    if (!items.length) { grid.textContent = '暂无符合条件的对局'; return; }
     grid.innerHTML = items.map(g => {
       const wMap = { civilians: '🎉 平民胜', spy: '🕵️ 卧底胜', stalemate: '🤝 平局' };
       const wColor = { civilians: 'var(--success)', spy: 'var(--danger)', stalemate: 'var(--muted)' };
       const dt = g.created_at ? g.created_at.replace('T', ' ').slice(0, 16) : '—';
-      return `<div class="history-card" onclick="loadReplay('${esc(g.id)}')">
-        <div class="hc-date">${dt}</div>
-        <div class="hc-winner" style="color:${wColor[g.winner] || 'inherit'}">${wMap[g.winner] || g.winner}</div>
+      return `<button class="history-card" data-game-id="${esc(g.id)}">
+      <div class="hc-date">${esc(dt)}</div>
+        <div class="hc-winner" style="color:${wColor[g.winner] || 'inherit'}">${winnerNames[g.winner] || esc(g.winner)}</div>
         <div class="hc-meta">${g.player_count} 名玩家 · ${g.total_rounds} 轮 · 卧底 ${g.spy_count} 名
           ${g.summary_ready ? '<span class="tag" style="background:var(--accent-soft);color:var(--accent);margin-left:6px">有总结</span>' : ''}
         </div>
-      </div>`;
+        <div class="hc-meta">种子 ${esc(g.seed ?? '随机')} · ${esc((g.players || []).join(', '))}</div>
+      </button>`;
     }).join('');
-  } catch (e) {
-    grid.innerHTML = `<p style="color:var(--danger)">加载失败: ${e.message}</p>`;
-  }
+    grid.querySelectorAll('[data-game-id]').forEach(el => el.onclick = () => loadReplay(el.dataset.gameId));
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -810,8 +933,9 @@ async function loadReplay(gameId) {
     const res = await fetch(`/api/history/${gameId}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '加载失败');
-    renderReplay(data);
     showView('replay');
+    renderReplay(data);
+    pollSummary(data);
   } catch (e) {
     alert('加载复盘失败: ' + e.message);
   }
@@ -819,6 +943,7 @@ async function loadReplay(gameId) {
 }
 
 function renderReplay(data) {
+  _currentReplayData = data;
   const setup = data.setup || {}, result = data.result || {};
   const players = setup.players || [];
   const spyKeys = new Set(setup.spy_keys || []);
@@ -856,7 +981,7 @@ function renderReplay(data) {
     </div>
     <div style="flex:1">
       <div style="font-size:22px;font-weight:700;color:${wColor[result.winner]||'inherit'};margin-bottom:8px">
-        ${wMap[result.winner] || result.winner}
+        ${winnerNames[result.winner] || esc(result.winner)}
       </div>
       <div style="font-size:13px;color:var(--muted);margin-bottom:4px">卧底：${[...spyKeys].map(k=>esc(k)).join(', ') || '—'}</div>
       <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px">
@@ -872,6 +997,30 @@ function renderReplay(data) {
   body.appendChild(hdr);
 
   // 总结
+  const summaryRegion = document.createElement('div');
+  summaryRegion.id = 'replay-summary';
+  summaryRegion.setAttribute('aria-live', 'polite');
+  body.appendChild(summaryRegion);
+  updateSummary(data);
+
+  // 轮次折叠
+  (data.rounds || []).forEach(r => {
+    const det = document.createElement('details');
+    det.className = 'round-accordion';
+    det.dataset.roundNo = r.round_no;
+    const elim = r.eliminated ? `淘汰 ${r.eliminated}${r.eliminated_was_spy ? '（卧底）' : '（平民）'}` : '';
+    det.innerHTML = `<summary>第 ${r.round_no} 轮 <span>${esc(elim)}</span></summary><div class="round-body" id="round-body-${r.round_no}"></div>`;
+    body.appendChild(det);
+    det.addEventListener('toggle', () => {
+      if (det.open) renderRoundBody(r, players, spyKeys, `round-body-${r.round_no}`);
+    });
+  });
+}
+
+function updateSummary(data) {
+  const body = document.getElementById('replay-summary');
+  if (!body) return;
+  body.replaceChildren();
   if (data.summary_ready && data.summary_text) {
     const sumBox = document.createElement('div');
     sumBox.className = 'summary-box';
@@ -881,22 +1030,26 @@ function renderReplay(data) {
     const pending = document.createElement('div');
     pending.className = 'summary-box';
     pending.style.opacity = '.6';
-    pending.textContent = '裁判总结生成中，请稍后刷新查看…';
+    pending.textContent = {pending:'裁判总结生成中…', failed:'裁判总结生成失败', skipped:'本局未生成裁判总结'}[data.summary_status] || '暂无裁判总结';
     body.appendChild(pending);
   }
+}
 
-  // 轮次折叠
-  (data.rounds || []).forEach(r => {
-    const det = document.createElement('details');
-    det.className = 'round-accordion';
-    const elim = r.eliminated ? `⚠️ 淘汰 ${r.eliminated}${r.eliminated_was_spy ? '（卧底）' : '（平民）'}` : '';
-    det.innerHTML = `<summary>第 ${r.round_no} 轮 ${elim ? `<span style="color:var(--warning);font-size:12px;margin-left:8px">${elim}</span>` : ''}</summary>
-      <div class="round-body" id="round-body-${r.round_no}"></div>`;
-    body.appendChild(det);
-    det.addEventListener('toggle', () => {
-      if (det.open) renderRoundBody(r, players, spyKeys, `round-body-${r.round_no}`);
-    });
-  });
+function pollSummary(data) {
+  clearTimeout(_summaryTimer);
+  if (data.summary_status !== 'pending') return;
+  _summaryTimer = setTimeout(async () => {
+    if (!document.getElementById('view-replay').classList.contains('active') || _currentReplayData?.id !== data.id) return;
+    try {
+      const next = await api(`/api/history/${data.id}`);
+      if (_currentReplayData?.id !== data.id) return;
+      updateSummary(next); pollSummary(next);
+    } catch (e) {
+      const region = document.getElementById('replay-summary');
+      if (region) region.textContent = '总结状态更新失败，正在重试：' + e.message;
+      pollSummary(data);
+    }
+  }, 5000);
 }
 
 function renderRoundBody(r, players, spyKeys, containerId) {
@@ -932,7 +1085,7 @@ function renderRoundBody(r, players, spyKeys, containerId) {
     const idx = players.findIndex(p => p.key === voter);
     const c = idx >= 0 ? playerColors(idx, players.length) : { main: 'var(--muted)' };
     el.insertAdjacentHTML('beforeend', `
-      <div class="event-card vote-card" style="border-left-color:${c.main}40">
+      <div class="event-card vote-card" style="border-left-color:${c.main}">
         <div class="card-header" style="color:${c.main}">${esc(voter)} → ${esc(target)}</div>
         <p style="font-size:12px;opacity:.75">${esc(reasons[voter] || '')}</p>
       </div>`);
@@ -943,20 +1096,22 @@ function toggleReplayPrivate(btn) {
   _replayShowPrivate = !_replayShowPrivate;
   btn.textContent = `👁 ${_replayShowPrivate ? '隐藏' : '显示'}私有思考`;
   // 重新渲染已展开的轮次
-  document.querySelectorAll('.round-accordion[open] .round-body').forEach(el => {
+  document.querySelectorAll('.round-accordion .round-body').forEach(el => {
     el.dataset.rendered = '';
     el.innerHTML = '';
   });
   // re-trigger rendered rounds
   document.querySelectorAll('.round-accordion[open]').forEach(det => {
-    const rno = parseInt(det.querySelector('summary').textContent.match(/\d+/)[0]);
-    const replayData = window._currentReplayData;
+    const rno = Number(det.dataset.roundNo);
+    const replayData = _currentReplayData;
     if (replayData) {
       const r = (replayData.rounds || []).find(x => x.round_no === rno);
       if (r) renderRoundBody(r, replayData.setup?.players || [], new Set(replayData.setup?.spy_keys || []), `round-body-${rno}`);
     }
   });
 }
+
+function scrollLatest() { const tl = document.getElementById('timeline'); tl.scrollTo({top: tl.scrollHeight, behavior:'smooth'}); }
 
 // ────────────────────────────────────────────────────────────────
 // 工具函数
@@ -973,7 +1128,51 @@ function appendJudge(text) {
 function appendCard(html) {
   const tl = document.getElementById('timeline');
   tl.insertAdjacentHTML('beforeend', html);
-  tl.lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  tl.lastElementChild.dataset.player = _renderingPlayer;
+  filterTimeline();
+  if (document.getElementById('follow-live').checked && document.getElementById('view-game').classList.contains('active')) tl.scrollTop = tl.scrollHeight;
+}
+
+function filterTimeline() {
+  const publicOnly = document.getElementById('public-only').checked;
+  const kind = document.getElementById('event-filter').value;
+  const player = document.getElementById('player-filter').value;
+  document.querySelectorAll('#timeline .event-card').forEach(el => {
+    el.hidden = (publicOnly && el.classList.contains('thinking-card')) || (kind && !el.classList.contains(kind)) || (player && el.dataset.player !== player);
+  });
+}
+
+async function pollGameStatus() {
+  clearTimeout(_statusTimer);
+  const id = _gameId;
+  try {
+    const state = await api(`/api/game/${id}`);
+    if (id !== _gameId) return;
+    document.getElementById('game-replay').hidden = !state.replay_ready;
+    document.getElementById('btn-advance').disabled = state.phase !== 'waiting' || state.status !== 'running';
+    if (['finished','failed'].includes(state.status)) {
+      _gameFinished = true;
+      if (_es) { _es.close(); _es = null; }
+      document.getElementById('topbar-phase').textContent = state.error ? '运行失败' : '已结束';
+      document.getElementById('connection-status').textContent = state.error || (state.replay_ready ? '复盘已保存' : '无复盘');
+      document.getElementById('btn-abort').textContent = '关闭';
+      document.getElementById('btn-abort').disabled = false;
+      return;
+    }
+  } catch (e) {
+    if (id !== _gameId) return;
+    document.getElementById('connection-status').textContent = '状态查询失败：' + e.message;
+  }
+  _statusTimer = setTimeout(pollGameStatus, 3000);
+}
+
+async function resumeGame() {
+  if (!_gameId) return;
+  try {
+    const state = await api(`/api/game/${_gameId}`);
+    _manualMode = !state.auto_advance;
+    initGameView(); showView('game'); connectSSE();
+  } catch (e) { await loadReplay(_gameId); }
 }
 
 function identityBadge(identity, confidence) {
@@ -982,7 +1181,7 @@ function identityBadge(identity, confidence) {
   const col = colors[identity] || 'var(--muted)';
   const lbl = labels[identity] || identity || '';
   const conf = confidence != null ? ` (${confidence}%)` : '';
-  return `<span class="identity-badge" style="background:${col}20;color:${col}">${esc(lbl)}${conf}</span>`;
+  return `<span class="identity-badge" style="background:var(--bg-raised);color:${col}">${esc(lbl)}${conf}</span>`;
 }
 
 function setLoading(on) {
