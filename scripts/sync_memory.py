@@ -24,12 +24,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 
 # ── 常量 ────────────────────────────────────────────────────
-_METADATA_BLOCK_RE = re.compile(r"^metadata:\s*$", re.MULTILINE)
-_DESCRIPTION_RE = re.compile(r"^description:\s*(.+)$", re.MULTILINE)
-_TYPE_RE = re.compile(r"^type:\s*(\w+)$", re.MULTILINE)
-_NAME_RE = re.compile(r"^name:\s*(.+)$", re.MULTILINE)
-_SYNC_TO_IRIS_RE = re.compile(r"^sync_to_iris:\s*(true|false)$", re.MULTILINE)
-_IRIS_TARGET_RE = re.compile(r"^iris_target:\s*(\S+)$", re.MULTILINE)
+# frontmatter 定界：首行开分隔符 + 其后第一个「独立成行」的闭分隔符。
+# 不可退化为 text.split("---", 2)——字段值里的三连字符字面量（如在
+# description 里举例 YAML 分隔符）会被误当结束符，frontmatter 从该处
+# 截断、type 解析为空、该条记忆永远不同步，全程无报错（v3.39.2 修）。
+_FRONTMATTER_RE = re.compile(r"\A---[ \t]*\n(.*?)^---[ \t]*$", re.DOTALL | re.MULTILINE)
 _LIKE_RE = re.compile(r"(?:我喜欢|我偏好|我喜欢|我偏好)\s*(.+?)(?:[。；;]|$)")
 _DISLIKE_RE = re.compile(r"(?:我不喜欢|我不希望|我不要)\s*(.+?)(?:[。；;]|$)")
 _CORRECTION_RE = re.compile(
@@ -47,14 +46,23 @@ def _system_memory_dir(project_root: Path) -> Path:
 
 # ── Frontmatter 解析 ─────────────────────────────────────
 
+def _split_frontmatter(text: str) -> Tuple[Optional[str], str]:
+    """切分 frontmatter 与正文，返回 (frontmatter 文本, 正文)。
+
+    无合法 frontmatter 时首项为 None，空 frontmatter 时为空字符串，
+    调用方据此区分「没有 frontmatter」与「frontmatter 为空」。
+    """
+    m = _FRONTMATTER_RE.match(text)
+    if not m:
+        return None, text
+    return m.group(1), text[m.end():]
+
+
 def _parse_frontmatter(text: str) -> Dict[str, Any]:
     """解析 Markdown frontmatter，兼容嵌套 metadata 写法。"""
-    if not text.startswith("---"):
+    fm_text, _ = _split_frontmatter(text)
+    if fm_text is None:
         return {}
-    parts = text.split("---", 2)
-    if len(parts) < 3:
-        return {}
-    fm_text = parts[1]
 
     result: Dict[str, Any] = {}
 
@@ -97,11 +105,8 @@ def _extract_yaml_bool(text: str, key: str) -> Optional[bool]:
 
 
 def _extract_body(text: str) -> str:
-    """去除 frontmatter 后的正文。"""
-    if not text.startswith("---"):
-        return text
-    parts = text.split("---", 2)
-    return parts[2] if len(parts) >= 3 else text
+    """去除 frontmatter 后的正文（保留闭分隔符后的换行与正文内三连字符）。"""
+    return _split_frontmatter(text)[1]
 
 
 def _extract_why_and_how(body: str) -> str:

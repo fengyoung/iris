@@ -136,6 +136,63 @@ class TestExtractBody:
         assert sm._extract_body(text) == text
 
 
+class TestFrontmatterDelimiterHardening:
+    """定界只认「独立成行」的分隔符：字段值与正文里的三连字符不得截断 frontmatter。
+
+    回归自 2026-09-16：description 里写三连字符字面量（举例 YAML 分隔符）时，
+    旧的 text.split("---", 2) 会从该处截断 frontmatter，type 解析为空、
+    该条记忆永远不同步——无报错、退出码 0，属静默失效。
+    """
+
+    def test_field_value_with_delimiters_does_not_truncate(self):
+        text = (
+            "---\n"
+            "name: dashed\n"
+            "description: 曾误删 frontmatter 的 --- 分隔符，已修复\n"
+            "metadata:\n"
+            "  type: project\n"
+            "---\n"
+            "正文\n"
+        )
+        fm = sm._parse_frontmatter(text)
+        assert fm["type"] == "project"  # 修复前解析为空
+        assert fm["description"] == "曾误删 frontmatter 的 --- 分隔符，已修复"
+        # 分类链路的实际后果：修复前会因 type 为空而落入无 type 分支
+        assert sm._classify(fm, sm._extract_body(text)) is None
+
+    def test_leading_delimiter_with_trailing_spaces(self):
+        fm = sm._parse_frontmatter("---   \nname: x\n---   \nbody")
+        assert fm["name"] == "x"
+
+    def test_line_starting_with_dashes_is_not_a_delimiter(self):
+        fm = sm._parse_frontmatter("---\nname: x\n---xyz\ntype: project\n---\nbody")
+        assert fm["name"] == "x"
+        assert fm["type"] == "project"
+
+    def test_indented_dashes_treated_as_content(self):
+        fm = sm._parse_frontmatter(
+            "---\nname: x\nmetadata:\n  type: project\n  note: 缩进的 --- 是内容\n---\nbody"
+        )
+        assert fm["type"] == "project"
+
+    def test_body_delimiters_preserved(self):
+        body = sm._extract_body("---\nname: x\n---\n正文\n\n---\n\n更多\n")
+        assert "正文" in body and "更多" in body
+
+    def test_body_leading_newline_contract_kept(self):
+        assert sm._extract_body("---\nname: x\n---\n正文内容\n") == "\n正文内容\n"
+
+    def test_empty_frontmatter_parses_as_empty_fields(self):
+        fm = sm._parse_frontmatter("---\n---\nbody")
+        assert fm["name"] == "" and fm["type"] == ""
+
+    def test_split_frontmatter_distinguishes_none_from_empty(self):
+        absent, body = sm._split_frontmatter("纯正文")
+        assert absent is None and body == "纯正文"
+        empty, body = sm._split_frontmatter("---\n---\nbody")
+        assert empty == "" and body == "\nbody"
+
+
 # ── 分类规则 ────────────────────────────────────────────────
 
 class TestClassify:

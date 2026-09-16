@@ -1,10 +1,18 @@
-# Iris 3.39.1
+# Iris 3.39.2
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 最新动态
 
-**v3.39.1 (2026-09-15)** - SBOM 产品版本改读源码树：修一处无失败信号的错报：
+**v3.39.2 (2026-09-16)** - sync-memory frontmatter 定界加固：修一处静默截断：
+- ✅ CC 记忆文件的 frontmatter 里出现三连字符字面量时（如在 description 里举例 YAML 分隔符），旧的 `text.split("---", 2)` 会从该处截断——`type` 解析为空串、该条记忆**永远同步不到 Iris**，而同步照跑、退出码 0
+- ✅ 这个洞已真实发生两次：`wiki-lint-fix-bug.md` 首次踩坑留下 6 行残骸（截断尾部 + 补 `metadata: type:` 补在了字面层正文里），本次同步核验时同类写法再次复现
+- ✅ 新增 `_FRONTMATTER_RE` + `_split_frontmatter()`：闭分隔符须**独立成行**才算数，`_parse_frontmatter` / `_extract_body` 统一走它
+- ✅ 顺带修正两处更早的误判：`---xyz`（整行并非分隔符）与缩进 `  ---`（YAML 块标量内容）；清理 6 个死代码常量
+- ✅ 8 项防回归测试锁定的是「旧实现确实失败」的行为（反证：同一输入下旧逻辑 `type` 得空串、新实现得 `project`）
+- ✅ 全量 **3,502 通过**；协议版本 3.24（不变）
+
+**上一版 v3.39.1 (2026-09-15)** - SBOM 产品版本改读源码树：修一处无失败信号的错报：
 - ✅ 归档的 SBOM 曾把 iris 声明成 **3.27.0**（源码树是 3.39.0）——editable 安装的 `.dist-info` 冻结在上次重装那一刻，改源码/升版本/提交/推送都不刷新它
 - ✅ 危害在于**没有失败信号**：SBOM 照常生成、SPDX 结构合法、退出码 0，只有人工比对 `pyproject.toml` 才看得出
 - ✅ 新增 `read_product_version()`：iris 自身读 `pyproject.toml`，第三方依赖仍读已安装元数据（各取其可信来源）
@@ -224,6 +232,7 @@ iris3/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.39.2** | 2026-09-16 | **sync-memory frontmatter 定界加固**：修一处静默截断——CC 记忆文件的 frontmatter 里出现三连字符字面量时，`_parse_frontmatter` / `_extract_body` 的 `text.split("---", 2)` 会从该处截断 frontmatter，其后的 `type` 等字段跌出解析范围、`type` 解析为空串、`_classify` 判为「无 type」而跳过，**该条记忆永远同步不到 Iris，而同步照跑、退出码 0**。这个洞已真实发生两次：`wiki-lint-fix-bug.md` 首次踩坑留下 6 行残骸（截断尾部 + 有人试图补 `metadata: type:` 却补在了字面层的正文里），本次记忆同步核验时同类写法再次复现，靠比对 `_parse_frontmatter` 的实际返回值才发现。修法：新增 `_FRONTMATTER_RE`（`\A---[ \t]*\n(.*?)^---[ \t]*$`）与 `_split_frontmatter()`，闭分隔符须**独立成行**才算数，上述两个函数统一走它；无 frontmatter 返回 `None`、空 frontmatter 返回空串以区分二者。顺带修正 `---xyz`（整行并非分隔符）与缩进 `  ---`（YAML 块标量内容）两处更早的误判，并清理 6 个死代码常量。行为契约零变化（既有 90 项测试全通过：`_extract_body` 仍保留闭分隔符后的换行、正文三连字符原样保留）。8 项防回归测试锁定的是「旧实现确实失败」的行为——反证脚本以同一输入跑旧逻辑得空串、新实现得 `project`；只断言「新实现正确」在旧实现下也可能假通过。全量 3,502 通过。协议版本 3.24（不变） |
 | **v3.39.1** | 2026-09-15 | **SBOM 产品版本改读源码树**：按 `RELEASE_CHECKLIST` 补跑 v3.39.0 门禁时，发现归档的 SBOM 把 iris 声明成 **3.27.0**（源码树是 3.39.0）。根因是「用安装状态代替源码事实」——`generate_sbom.py` 用 `importlib.metadata` 取全部包版本，这对第三方依赖是对的（`.dist-info` 由 pip 写入，与落盘代码一致），但对 iris 自身是错的：本机 editable 安装的 `.dist-info` 冻结在**上次重装那一刻**，改源码/升版本/提交/推送都不刷新它（`pip show iris` 实测停在 3.27.0，即上次重装时的版本）。**危害在于没有失败信号**：SBOM 照常生成、SPDX 结构合法、退出码 0，而它是供应链审计与漏洞追踪的输入，声明错版本意味着后续按 SBOM 排查会对错版本的代码，只有人工比对 `pyproject.toml` 才看得出。修法：新增 `read_product_version()` 从 `pyproject.toml` 读 `project.version`，iris 自身走这条路、第三方仍走已安装元数据（各取其可信来源），用 tomllib 维持「只依赖标准库」承诺；读不到版本时打印原因并返回 1 且**不写出文件**——静默退回旧元数据等于保留原 bug，发布制品宁可不生成也不要生成一份说谎的。10 项测试的核心是 monkeypatch 让元数据谎报 3.27.0、断言 SBOM 仍写 pyproject 版本（刻意让两来源冲突，只断言「版本正确」在重装后会假通过）。顺带如实固定 SPDXID 的既有形态（`"-".join()` 逐**字符**拼接，`iris-9.8.7` → `i-r-i-s---9---8---7`），避免日后改动连带改 ID 格式使新旧 SBOM 无法按 ID 对比。未改 mypy 对该脚本的 4 处既有报错：HEAD 同样存在且门禁范围是 `mypy src/iris`，`scripts/` 从不在内。全量 3,494 通过。协议版本 3.24（不变） |
 | **v3.39.0** | 2026-09-15 | **谁是卧底 Web 界面**：为多模型对抗游戏补上 Web 观战与复盘存储。`iris undercover-game-web` 用 stdlib `ThreadingHTTPServer` 起本地服务（默认 `127.0.0.1:7862`，与 taskpanel 一致、零新增依赖）；SSE 事件流把思考卡（私有档案，🔒 标注）/ 描述卡 / 投票卡 / 裁判陈述分层呈现，玩家色按 HSL 色相均匀分配、淘汰状态实时同步；可选手动步进，每轮结束等确认再继续。裁判模型前后端双重校验不得与参与玩家重复。每局完成后落盘 `data/games/<game_id>/`（图片副本 + `replay.json` 全量记录含私有思考 + 后台生成 `summary.md`，含转折点分析与各模型表现点评）。对 `UndercoverGame` 的改动刻意压到最小——只新增 `on_event` / `advance_event` 两个可选参数并在 7 个关键节点推事件，默认 `None` 无操作，原有 CLI 路径不受影响。全量 3,484 通过。**协议版本 3.23→3.24（CLI 命令集 69→70）** |
 | **v3.38.2** | 2026-09-15 | **CI workflow action 升级至 v7**：GitHub 持续告警 `Node.js 20 is deprecated`（action 被强制跑在 Node 24 上），本次把 `ci.yml` 用到的四个 action 全部升到最新 major——`actions/checkout` v4→v7（2 处）、`actions/setup-python` v5→v7（2 处）、`actions/upload-artifact` v4→v7、`codecov/codecov-action` v4→v7。前三者入参无变化（`setup-python` v7 删的是我们没用到的 `pip-install`）；**只有 codecov 这处会坏**——v5 起 `file` 已删除、改名 `files`，而旧名**不报错、只被静默忽略**，表现为「CI 全绿但覆盖率不再上传」，是个不会自己暴露的洞，已一并改正并写进注释。方法上先取各 `v*.0.0` 发布说明读破坏性变更、再逐个拉目标 tag 的 `action.yml` 比对入参，最后才改。PR #1 真实 CI 验证四 job 全绿（macos-smoke 14s / 3.11 2m39s / 3.12 2m41s / 3.13 2m34s），**告警数由 1 条降为 0 条**。仅改 CI，无产品/协议/数据变更。协议版本 3.23（不变） |

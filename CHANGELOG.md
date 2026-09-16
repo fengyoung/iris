@@ -1,3 +1,16 @@
+## v3.39.2 (2026-09-16) — sync-memory frontmatter 定界加固：修一处静默截断
+
+本版只改 `scripts/sync_memory.py` 与其单元测试，无功能变更。修的是「无失败信号」家族里的又一处：**CC 记忆文件的 frontmatter 里出现三连字符字面量时，该条记忆永远同步不到 Iris，而同步照跑、退出码 0**。
+
+- **根因在定界方式**：`_parse_frontmatter` 与 `_extract_body` 用 `text.split("---", 2)` 切 frontmatter。字段值里一旦出现三连字符（典型是在 description 里举例 YAML 分隔符），它就被当成闭分隔符——frontmatter 从该处截断，其后的 `type` 等字段全部跌出解析范围，`type` 解析为空串，`_classify` 判为「无 type」而跳过同步。全程无报错、无日志。
+- **这个洞已真实发生两次**：`wiki-lint-fix-bug.md` 首次踩坑留下 6 行残骸（截断尾部 + 有人试图补 `metadata: type:` 却补在了字面层的正文里）；本次记忆同步核验时同类写法再次复现，是靠比对 `_parse_frontmatter` 的实际返回值才发现的——只跑 `sync-memory` 看输出看不出任何异常。
+- **修法**：新增 `_FRONTMATTER_RE`（`\A---[ \t]*\n(.*?)^---[ \t]*$`，DOTALL|MULTILINE）与 `_split_frontmatter()`，闭分隔符须**独立成行**才算数；`_parse_frontmatter` / `_extract_body` 统一走它。无 frontmatter 返回 `None`、空 frontmatter 返回空串，调用方据此区分二者（保持既有语义）。
+- **顺带修正两处更早的误判**：`---xyz` 这种以三连字符开头但整行不是分隔符的行，旧实现会误当结束符；缩进的 `  ---`（YAML 块标量里的内容）旧实现也可能误判。
+- **行为契约零变化**：既有 90 项测试全通过——`_extract_body` 仍保留闭分隔符后的换行，正文中的三连字符原样保留（`split(..., 2)` 本来也只切前两处）。
+- **8 项防回归测试锁定的是「旧实现确实失败」的行为**：另用反证脚本以同一输入跑旧逻辑，`type` 得空串（静默不同步），新实现得 `project`。只断言「新实现正确」不够——那种断言在旧实现下也可能假通过。
+- **顺带清理 6 个死代码常量**（`_METADATA_BLOCK_RE` / `_DESCRIPTION_RE` / `_TYPE_RE` / `_NAME_RE` / `_SYNC_TO_IRIS_RE` / `_IRIS_TARGET_RE`，各只在定义处出现；实际解析走 `_extract_yaml_str`）。
+- 验证：该文件 **98 通过**（90 原有 + 8 新增）；全量 **3,502 通过**；`ruff` / `mypy` 通过；端到端 `sync-memory` 扫描 56 文件、跳过 45、无变更（与改动前一致）。协议版本 3.24（不变）；产品版本 3.39.1→**3.39.2**；数据版本不变。
+
 ## v3.39.1 (2026-09-15) — SBOM 产品版本改读源码树：修一处无失败信号的错报
 
 按 `RELEASE_CHECKLIST` 补跑 v3.39.0 的发布门禁时，发现 `generate_sbom.py` 归档出的 SBOM 把 iris 声明成 **3.27.0**，而源码树是 3.39.0。本版只改该脚本与配套测试，无功能变更。
