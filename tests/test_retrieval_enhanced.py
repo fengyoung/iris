@@ -79,7 +79,7 @@ def test_rrf_fuse_pure_vector_hit_included():
     """纯向量命中（不在 lexical_hits 中）当 top_k 有余量时应被包含。"""
     hits = [make_hit("c1", 5.0)]
     vector_scores = {"c1": 0.9, "c2": 0.8}  # c2 是纯向量命中
-    result = _rrf_fuse(hits, vector_scores, top_k=2)
+    result = _rrf_fuse(hits, vector_scores, top_k=2, vector_hits={"c2": make_hit("c2", 0.0)})
     ids = [r.chunk_id for r in result]
     assert "c2" in ids
 

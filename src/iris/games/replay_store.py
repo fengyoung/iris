@@ -12,6 +12,8 @@ from __future__ import annotations
 import logging
 import shutil
 import threading
+import re
+import time
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -19,7 +21,8 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from iris.core.exceptions import IrisRuntimeError
-from iris.utils.shared import atomic_write_json, atomic_write_text
+from iris.utils.shared import atomic_write_json, atomic_write_text, atomic_write_bytes
+from iris.core.locks import FileLock
 
 logger = logging.getLogger(__name__)
 
@@ -45,11 +48,16 @@ class ReplayStore:
     def new_game_id(self) -> str:
         """生成格式为 YYYYMMDD-HHMMSS-<4hex> 的对局 ID。"""
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-        suffix = uuid4().hex[:4]
+        suffix = uuid4().hex
         return f"{ts}-{suffix}"
 
     def game_dir(self, game_id: str) -> Path:
-        return self._root / game_id
+        if not isinstance(game_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", game_id):
+            raise ReplayStoreError("非法对局 ID")
+        path = (self._root / game_id).resolve()
+        if not path.is_relative_to(self._root.resolve()):
+            raise ReplayStoreError("对局目录越界")
+        return path
 
     def ensure_game_dir(self, game_id: str) -> Path:
         d = self.game_dir(game_id)
@@ -59,16 +67,41 @@ class ReplayStore:
     # ── 图片上传暂存区 ───────────────────────────────────────────
 
     def save_upload(self, data: bytes, filename: str) -> str:
+        with FileLock(self._uploads / "uploads"):
+            return self._save_upload(data, filename)
+
+    def _save_upload(self, data: bytes, filename: str) -> str:
         """将上传图片写入暂存区，返回 token（暂存文件名去扩展名部分）。"""
-        suffix = Path(filename).suffix.lower() or ".bin"
+        from iris.games.image_validation import validate_image
+        suffix = Path(filename).suffix.lower()
+        allowed = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+        if suffix not in allowed or not data or len(data) > 20 * 1024 * 1024:
+            raise ValueError("仅允许不超过 20 MB 的常见图片")
+        validate_image(data, suffix)
+        self.cleanup_uploads()
+        if sum(p.stat().st_size for p in self._uploads.iterdir() if p.is_file()) + len(data) > 200 * 1024 * 1024:
+            raise ValueError("上传暂存区已满")
         token = uuid4().hex + suffix
-        (self._uploads / token).write_bytes(data)
+        atomic_write_bytes(self._uploads / token, data)
         return token
+
+    def cleanup_uploads(self) -> None:
+        """上传文件仅用于复制，过期一天后清理；对局图片独立保留。"""
+        cutoff = time.time() - 86400
+        for path in self._uploads.iterdir():
+            if re.fullmatch(r"[0-9a-f]{32}\.[a-z0-9]{1,8}", path.name) and path.is_file() and path.stat().st_mtime < cutoff:
+                path.unlink(missing_ok=True)
 
     def upload_path(self, token: str) -> Optional[Path]:
         """返回上传文件路径，token 不存在时返回 None。"""
-        p = self._uploads / token
-        return p if p.exists() else None
+        if not isinstance(token, str) or not re.fullmatch(r"[0-9a-f]{32}\.[a-z0-9]{1,8}", token, re.I):
+            return None
+        p = (self._uploads / token).resolve()
+        try:
+            p.relative_to(self._uploads.resolve())
+        except ValueError:
+            return None
+        return p if p.is_file() and not p.is_symlink() else None
 
     # ── 图片副本 ─────────────────────────────────────────────────
 
@@ -144,7 +177,8 @@ class ReplayStore:
             "rounds": rounds_data,
             "summary_ready": False,
         }
-        atomic_write_json(d / "replay.json", payload)
+        with FileLock(d / "replay.json"):
+            atomic_write_json(d / "replay.json", payload)
 
     # ── 列表 & 加载 ──────────────────────────────────────────────
 
@@ -247,9 +281,10 @@ class ReplayStore:
 
             # 更新 summary_ready 标志
             replay = d / "replay.json"
-            payload = json.loads(replay.read_text(encoding="utf-8"))
-            payload["summary_ready"] = True
-            atomic_write_json(replay, payload)
+            with FileLock(replay):
+                payload = json.loads(replay.read_text(encoding="utf-8"))
+                payload["summary_ready"] = True
+                atomic_write_json(replay, payload)
 
             logger.info("对局 %s 总结生成完成", game_id)
         except Exception as exc:  # noqa: BLE001 — 总结失败不影响复盘存档

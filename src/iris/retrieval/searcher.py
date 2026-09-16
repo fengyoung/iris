@@ -86,6 +86,12 @@ class LocalRetriever:
         self._df: Dict[str, int] = {}  # document frequency per term
         self._corpus_stats_computed: bool = False
 
+    def hits_by_ids(self, ids: Iterable[str]) -> Dict[str, RetrievalHit]:
+        """为语义召回补齐当前源快照的正文与引用。"""
+        self._ensure_loaded()
+        wanted = set(ids)
+        return {c.chunk_id: _chunk_to_hit(c, [], "向量召回") for c in self._chunks if c.chunk_id in wanted}
+
     def search(self, query: str, *, top_k: int = 10, query_plan: QueryPlan | None = None) -> RetrievalResult:
         self._ensure_loaded()
 

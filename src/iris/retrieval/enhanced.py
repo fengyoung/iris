@@ -16,7 +16,7 @@ from iris.llm import LLMProviderError, LLMService
 from iris.retrieval.embedder import EmbedderError, TextEmbedder, build_embedder_from_config
 from iris.retrieval.planner import LLMQueryPlanner, QueryPlan, QueryPlanner
 from iris.retrieval.searcher import LocalRetriever, RetrievalHit
-from iris.retrieval.vector_index import VectorIndex
+from iris.retrieval.vector_index import VectorIndex, VectorIndexModelMismatchError
 from iris.utils.prompting import PromptTemplateLoader
 from iris.wiki.searcher import WikiSearcher
 
@@ -177,16 +177,19 @@ class EnhancedRetriever:
                             vector_candidates[cid] = score
                 if vector_candidates:
                     rrf_cfg = self._retrieval_cfg.get("rrf", {})
+                    evidence = self._local.hits_by_ids(vector_candidates)
+                    vector_candidates = {cid: score for cid, score in vector_candidates.items() if cid in evidence}
                     hits = _rrf_fuse(
                         hits, vector_candidates, top_k=max(top_k * 4, _MIN_LOCAL_CANDIDATES),
                         k=rrf_cfg.get("k", 60),
                         lexical_weight=rrf_cfg.get("lexical_weight", 0.5),
                         vector_weight=rrf_cfg.get("vector_weight", 0.5),
                         bm25_bonus=rrf_cfg.get("bm25_bonus", 0.02),
+                        vector_hits=evidence,
                     )
                     vector_hit_ids = list(vector_candidates.keys())
                     vector_enabled = True
-            except EmbedderError:
+            except (EmbedderError, VectorIndexModelMismatchError):
                 logger.warning("向量检索降级，回退到纯词法检索")
 
         wiki_hits_raw = self._wiki_searcher.search(rewritten.rewritten, top_k=4) if self._wiki_searcher else []
@@ -283,7 +286,7 @@ def _apply_rank_order(hits, ranked_ids, *, top_k: int) -> List[RetrievalHit]:
 
 def _rrf_fuse(lexical_hits, vector_scores, *, top_k: int, k: int = 60,
               lexical_weight: float = 0.5, vector_weight: float = 0.5,
-              bm25_bonus: float = 0.02) -> List[RetrievalHit]:
+              bm25_bonus: float = 0.02, vector_hits=None) -> List[RetrievalHit]:
     """RRF + 向量语义融合。
 
     RRF 得分量级 ~[0, 0.02]，归一化 BM25 得分量级 ~[0, 1]。
@@ -294,8 +297,8 @@ def _rrf_fuse(lexical_hits, vector_scores, *, top_k: int, k: int = 60,
     lexical_rrf = {}
     for rank, hit in enumerate(lexical_hits, start=1):
         lexical_rrf[hit.chunk_id] = lexical_weight * (1.0 / (k + rank))
-    max_vec = max(vector_scores.values()) if vector_scores else 1.0
-    vector_rrf = {cid: vector_weight * (score / max(max_vec, 1e-9)) for cid, score in vector_scores.items()}
+    vector_rrf = {cid: vector_weight / (k + rank) for rank, cid in enumerate(
+        sorted(vector_scores, key=lambda cid: (-vector_scores[cid], cid)), start=1)}
     all_ids = set(lexical_rrf) | set(vector_rrf)
     combined = {cid: lexical_rrf.get(cid, 0.0) + vector_rrf.get(cid, 0.0) for cid in all_ids}
     hit_by_id = {h.chunk_id: h for h in lexical_hits}
@@ -305,24 +308,14 @@ def _rrf_fuse(lexical_hits, vector_scores, *, top_k: int, k: int = 60,
     max_lexical = max((h.score for h in lexical_hits if h.score > 0), default=1.0)
 
     result = []
+    evidence = {**(vector_hits or {}), **hit_by_id}
     for cid in ranked_ids:
-        if cid in hit_by_id:
-            orig = hit_by_id[cid]
-            normalized_bm25 = (orig.score / max(max_lexical, 1e-9)) * bm25_bonus
-            blended = combined[cid] + normalized_bm25
-            result.append(orig.with_score(blended)._with_explanation(
-                orig.explanation + " [vector-fused]"))
-        # 包含纯向量命中（lexical 不足 top_k 时补充）
-        elif len(result) < top_k:
-            result.append(RetrievalHit(
-                chunk_id=cid, score=combined[cid], title="",
-                relative_path="", section_path=[], content_preview="",
-                line_start=0, line_end=0, chunk_type="vector",
-                explanation=f"向量相似度={combined[cid]:.4f}",
-            ))
-        if len(result) >= top_k:
-            break
-    return result
+        orig = evidence.get(cid)
+        if orig is None:
+            continue
+        bonus = (orig.score / max(max_lexical, 1e-9)) * bm25_bonus if cid in hit_by_id else 0.0
+        result.append(orig.with_score(combined[cid] + bonus)._with_explanation(orig.explanation + " [vector-fused]"))
+    return sorted(result, key=lambda hit: (-hit.score, hit.chunk_id))[:top_k]
 
 
 def _init_embedder(config: ConfigBundle):
@@ -330,7 +323,11 @@ def _init_embedder(config: ConfigBundle):
     emb_cfg = llm_cfg.get("embedding", {})
     if not emb_cfg.get("enabled", False):
         return None
-    return build_embedder_from_config(llm_cfg, data_dir=config.root / "data")
+    if isinstance(llm_cfg, dict):
+        payload = llm_cfg
+    else:
+        payload = llm_cfg.model_dump()
+    return build_embedder_from_config(payload, data_dir=config.root / "data")
 
 
 def _load_vector_indexes(config: ConfigBundle) -> Dict[str, VectorIndex]:
@@ -343,5 +340,9 @@ def _load_vector_indexes(config: ConfigBundle) -> Dict[str, VectorIndex]:
         index_path = metadata_root / f"{source_name}_vector_index"
         idx = VectorIndex(index_path)
         if idx.load():
+            expected = config.llm.get("embedding", {}).get("model", "text-embedding-v3")
+            if not idx._loaded_embedder_model or idx._loaded_embedder_model != expected:
+                logger.warning("向量模型不兼容 source=%s stored=%s expected=%s，已禁用向量通道，请重建", source_name, idx._loaded_embedder_model, expected)
+                continue
             indexes[source_name] = idx
     return indexes

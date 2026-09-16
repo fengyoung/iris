@@ -1,6 +1,6 @@
 [project]
 name = "iris"
-version = "3.39.2"
+version = "3.40.0"
 description = "工作知识助手 — 个人知识库与飞书团队知识库集成"
 requires-python = ">=3.11"
 license = {text = "MIT"}
@@ -162,7 +162,6 @@ module = [
     "iris.core",
     "iris.assistant._asr",
     "iris.wiki.generator",
-    "iris.retrieval.enhanced",
     "iris.app.cli._handlers._feed",
     "iris.assistant.live",
     "iris.analysis.service",

@@ -52,8 +52,8 @@ pip install -e ".[dev]" -c constraints.txt
 pre-commit install
 
 # 快速命令（Makefile）
-make test            # 运行全部测试（3,326 用例）
-make test-unit       # 纯逻辑单元测试（0.5s 快速反馈）
+make test            # 运行全部测试（3,538 用例）
+make test-unit       # unit 标记测试（含部分历史 I/O 测试）
 make test-integration # 集成测试
 make test-cov        # 运行测试 + 覆盖率报告
 make lint            # Ruff 代码检查
@@ -62,13 +62,21 @@ make format          # 代码格式化
 make audit           # 依赖安全审计
 python scripts/security_scan.py  # AST 安全静态扫描
 python scripts/generate_sbom.py --output dist/iris.spdx.json  # 生成 SPDX SBOM
-make typecheck       # 严格 mypy 类型检查（CI 门禁）
+make typecheck       # mypy 类型检查（CI 门禁；显式兼容边界见 pyproject.toml）
 make clean           # 清理缓存
 
 # 或直接使用 pytest
 python -m pytest tests/ -q
 python -m pytest tests/ -q --cov=iris --cov-report=term
 ```
+
+### 数据与 HTTP 回归门禁（v3.40.0）
+
+- 全局覆盖率下限 65%；`scripts/check_coverage_thresholds.py` 另检查 Web、复盘、向量、缓存等关键模块。
+- 路径/HTTP 测试必须覆盖目录穿越、符号链接、非法 JSON、跨站请求及资源配额。
+- 持久化测试覆盖读写并发、陈旧写者、部分发布失败以及连续新增/修改/删除。
+- 新增检索黄金集使用 `scripts/evaluate_retrieval.py`；用已标注 chunk ID 评估召回、引用完整性和过期证据。
+- 类型检查未启用全局 `strict`，当前 17 个历史模块保留显式豁免；新增模块不得扩大豁免，本版已移除 `retrieval.enhanced` 的豁免。
 
 ### 安全注意事项
 

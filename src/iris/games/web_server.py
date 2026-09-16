@@ -18,12 +18,15 @@ from __future__ import annotations
 
 import json
 import logging
-import queue
+import time
+from collections import deque
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, ValidationError, model_validator
+from typing import Literal
 import threading
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 from urllib.parse import urlparse
 
 from iris.config.loader import ConfigBundle
@@ -46,19 +49,77 @@ _IMG_MIME = {
 
 # ── 游戏会话 ─────────────────────────────────────────────────────
 
+class EventLog:
+    """有界广播日志，每个连接独立游标；结束事件可重复读取。"""
+
+    def __init__(self) -> None:
+        self.condition = threading.Condition()
+        self.entries: deque = deque(maxlen=4096)
+        self.sequence = 0
+        self.closed = False
+
+    def put(self, event) -> None:
+        with self.condition:
+            if self.closed:
+                return
+            self.sequence += 1
+            if event is None:
+                event = {"type": "stream_end"}
+                self.closed = True
+            self.entries.append((self.sequence, event))
+            self.condition.notify_all()
+
+    def read(self, cursor: int, timeout: float = 20):
+        with self.condition:
+            self.condition.wait_for(lambda: self.sequence > cursor or self.closed, timeout)
+            if self.entries and cursor < self.entries[0][0] - 1:
+                return [(self.sequence, {"type": "resync_required"})], True
+            return [(i, event) for i, event in self.entries if i > cursor], self.closed
+
+
 @dataclass
 class GameSession:
     game_id: str
-    event_queue: queue.Queue = field(default_factory=queue.Queue)
+    event_queue: EventLog = field(default_factory=EventLog)
     advance_event: threading.Event = field(default_factory=threading.Event)
+    cancel_event: threading.Event = field(default_factory=threading.Event)
     thread: Optional[threading.Thread] = None
     auto_advance: bool = True
     finished: bool = False
+    finished_at: float = 0.0
     error: str = ""
-    # 游戏结束后保存最终 players_info，供 replay_store 使用
     players_info: list = field(default_factory=list)
     summary_role: str = ""
     summary_model_id: str = ""
+
+
+class PlayerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    role: Literal["base_model", "adv_model"]
+    model_id: StrictStr = Field(min_length=1, max_length=128)
+
+
+class StartRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    players: list[PlayerRequest] = Field(min_length=3, max_length=12)
+    image_civilian: StrictStr = Field(pattern=r"^[0-9a-f]{32}\.(png|jpg|jpeg|gif|webp|bmp)$")
+    image_spy: StrictStr = Field(pattern=r"^[0-9a-f]{32}\.(png|jpg|jpeg|gif|webp|bmp)$")
+    spy_count: Optional[StrictInt] = None
+    seed: Optional[StrictInt] = None
+    order_mode: Literal["rotate", "fixed"] = "rotate"
+    auto_advance: bool = True
+    summary_model: Optional[PlayerRequest] = None
+
+    @model_validator(mode="after")
+    def validate_players(self):
+        keys = [(p.role, p.model_id) for p in self.players]
+        if len(set(keys)) != len(keys):
+            raise ValueError("玩家不能重复")
+        if self.spy_count is not None and not 1 <= self.spy_count < len(keys) / 2:
+            raise ValueError("卧底人数需至少 1 且小于玩家数的一半")
+        if self.summary_model and (self.summary_model.role, self.summary_model.model_id) in keys:
+            raise ValueError("裁判模型不能与参与玩家相同")
+        return self
 
 
 # ── 服务器状态 ───────────────────────────────────────────────────
@@ -70,6 +131,7 @@ class ServerState:
     html: bytes
     games: Dict[str, GameSession] = field(default_factory=dict)
     games_lock: threading.Lock = field(default_factory=threading.Lock)
+    game_slots: threading.BoundedSemaphore = field(default_factory=lambda: threading.BoundedSemaphore(2))
 
 
 # ── 请求处理器 ───────────────────────────────────────────────────
@@ -99,8 +161,34 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(code, body, "application/json; charset=utf-8")
 
     def _read_body(self) -> bytes:
-        length = int(self.headers.get("Content-Length", 0))
-        return self.rfile.read(length) if length > 0 else b""
+        if self.headers.get("Transfer-Encoding"):
+            raise ValueError("不支持分块请求")
+        lengths = self.headers.get_all("Content-Length", [])
+        if len(lengths) != 1:
+            raise ValueError("需要唯一 Content-Length")
+        length = int(lengths[0])
+        if not 0 <= length <= 20 * 1024 * 1024:
+            raise ValueError("请求体超过 20 MB 或长度非法")
+        body = self.rfile.read(length)
+        if len(body) != length:
+            raise ValueError("请求体不完整")
+        return body
+
+    def _check_origin(self) -> bool:
+        address = cast(tuple, self.server.server_address)
+        expected = f"{address[0]}:{address[1]}"
+        hosts = {expected, f"localhost:{address[1]}"}
+        host = self.headers.get("Host", "")
+        origin = self.headers.get("Origin")
+        if host not in hosts or (origin and origin != f"http://{host}"):
+            self._json(403, {"error": "禁止跨站访问"})
+            return False
+        return True
+
+    def setup(self) -> None:
+        super().setup()
+        self.connection.settimeout(30)
+
 
     def _parse_path(self) -> tuple[str, str]:
         """返回 (path, query_string)。"""
@@ -110,6 +198,8 @@ class _Handler(BaseHTTPRequestHandler):
     # ── GET ─────────────────────────────────────────────────────
 
     def do_GET(self) -> None:  # noqa: N802
+        if not self._check_origin():
+            return
         path, _ = self._parse_path()
 
         if path in ("/", "/index.html"):
@@ -180,25 +270,23 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
         try:
+            cursor = max(0, int(self.headers.get("Last-Event-ID", "0")))
+        except ValueError:
+            cursor = 0
+        try:
             while True:
-                try:
-                    item = session.event_queue.get(timeout=20)
-                except queue.Empty:
-                    # 心跳，防止代理超时
+                entries, closed = session.event_queue.read(cursor)
+                if not entries:
                     self.wfile.write(b": ping\n\n")
-                    self.wfile.flush()
-                    continue
-
-                if item is _SSE_SENTINEL:
-                    # 游戏结束
-                    self.wfile.write(b"data: {\"type\":\"stream_end\"}\n\n")
-                    self.wfile.flush()
-                    break
-
-                payload = json.dumps(item, ensure_ascii=False)
-                self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
+                for event_id, item in entries:
+                    payload = json.dumps(item, ensure_ascii=False)
+                    self.wfile.write(f"id: {event_id}\ndata: {payload}\n\n".encode("utf-8"))
+                    cursor = event_id
                 self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError):
+                if closed:
+                    self.close_connection = True
+                    break
+        except (OSError, TimeoutError):
             pass
 
     def _handle_history_list(self) -> None:
@@ -226,6 +314,15 @@ class _Handler(BaseHTTPRequestHandler):
     # ── POST ────────────────────────────────────────────────────
 
     def do_POST(self) -> None:  # noqa: N802
+        try:
+            self._dispatch_post()
+        except (ValueError, TypeError, TimeoutError) as exc:
+            self.close_connection = True
+            self._json(400, {"error": str(exc)})
+
+    def _dispatch_post(self) -> None:
+        if not self._check_origin():
+            return
         path, _ = self._parse_path()
 
         if path == "/api/upload":
@@ -292,10 +389,14 @@ class _Handler(BaseHTTPRequestHandler):
             self._json(400, {"error": f"卧底图像 token 不存在: {spy_token}"})
             return
 
+        if not state.game_slots.acquire(blocking=False):
+            self._json(429, {"error": "最多同时运行两局，请等待或取消现有对局"})
+            return
         game_id = store.new_game_id()
         try:
             civ_file, spy_file = store.copy_images(game_id, civ_token, spy_token)
         except Exception as exc:
+            state.game_slots.release()
             self._json(500, {"error": f"图片复制失败: {exc}"})
             return
 
@@ -304,11 +405,11 @@ class _Handler(BaseHTTPRequestHandler):
 
         players = [(p["role"], p["model_id"]) for p in req["players"]]
         spy_count = req.get("spy_count") or None
-        seed = req.get("seed") or None
+        seed = req.get("seed")
         order_mode = req.get("order_mode", "rotate")
         auto_advance = bool(req.get("auto_advance", True))
 
-        sm = req.get("summary_model", {})
+        sm = req.get("summary_model") or {}
         summary_role = sm.get("role", "base_model")
         summary_model_id = sm.get("model_id", "")
 
@@ -318,11 +419,11 @@ class _Handler(BaseHTTPRequestHandler):
             summary_role=summary_role,
             summary_model_id=summary_model_id,
         )
-        if not auto_advance:
-            # 手动模式：首轮自动开始，轮结束后等待 advance
-            session.advance_event.set()
 
         with state.games_lock:
+            expired = [key for key, game in state.games.items() if game.finished and time.monotonic() - game.finished_at > 3600]
+            for key in expired:
+                del state.games[key]
             state.games[game_id] = session
 
         # 构建 players_info（用于 replay.json，is_spy 在游戏结束事件里才知道）
@@ -363,18 +464,36 @@ class _Handler(BaseHTTPRequestHandler):
         if session is None:
             self._json(404, {"error": "game_not_found"})
             return
-        session.finished = True
-        session.error = "aborted"
+        session.cancel_event.set()
         # 设置 advance_event，让卡在 wait() 的游戏线程能退出
         session.advance_event.set()
-        # 推送哨兵让 SSE 关闭
-        session.event_queue.put(_SSE_SENTINEL)
+        # 等待后台保存部分复盘后再关闭事件流。
         self._json(200, {"ok": True})
 
 
 # ── 游戏线程 ─────────────────────────────────────────────────────
 
-def _run_game(
+def _run_game(state, session, *args) -> None:
+    """保证槽位与终态释放；分钟级对局接入任务面板。"""
+    from iris.taskpanel.reporter import TaskReporter
+    try:
+        with TaskReporter("undercover-game", task_id=session.game_id,
+                          data_root=Path(state.config.root) / "data") as reporter:
+            reporter.report_phase("运行对局")
+            _run_game_impl(state, session, *args)
+            reporter.report_phase("已取消" if session.cancel_event.is_set() else "保存复盘")
+            if session.error and not session.cancel_event.is_set():
+                raise RuntimeError(session.error)
+    except Exception:
+        logger.exception("对局未正常完成 game_id=%s", session.game_id)
+    finally:
+        session.finished = True
+        session.finished_at = time.monotonic()
+        session.event_queue.put(_SSE_SENTINEL)
+        state.game_slots.release()
+
+
+def _run_game_impl(
     state: ServerState,
     session: GameSession,
     civ_path: str,
@@ -407,21 +526,15 @@ def _run_game(
             order_mode=order_mode,
             on_event=on_event,
             advance_event=advance_ev,
+            cancel_event=session.cancel_event,
         )
         result = game.run()
     except Exception as exc:  # noqa: BLE001
         logger.exception("游戏 %s 运行异常", game_id)
         session.event_queue.put({"type": "error", "payload": {"message": str(exc)}})
         session.event_queue.put(_SSE_SENTINEL)
-        session.finished = True
+        session.error = str(exc)
         return
-
-    if session.finished:
-        # 游戏被中止，补发哨兵（若未发过）
-        session.event_queue.put(_SSE_SENTINEL)
-        return
-
-    session.finished = True
 
     # 更新 players_info 里的 is_spy 字段
     spy_set = set(result.spy_keys)
@@ -440,10 +553,12 @@ def _run_game(
             summary_model_key=sm_key,
         )
     except Exception as exc:  # noqa: BLE001
+        session.error = f"复盘写入失败: {exc}"
+        session.event_queue.put({"type": "error", "payload": {"message": session.error}})
         logger.warning("复盘写入失败 %s: %s", game_id, exc)
 
     # 触发 LLM 总结
-    if session.summary_model_id:
+    if session.summary_model_id and not session.cancel_event.is_set() and not session.error:
         try:
             llm = LLMService(state.config)
             state.replay_store.trigger_summary(
@@ -462,40 +577,10 @@ def _run_game(
 
 def _validate_start_request(req: dict) -> str:
     """返回错误字符串，无错时返回空字符串。"""
-    players = req.get("players")
-    if not isinstance(players, list) or len(players) < 3:
-        return "players 需至少 3 个"
-
-    seen: set = set()
-    for p in players:
-        if not isinstance(p, dict):
-            return "players 每项需为 {role, model_id} 对象"
-        role = p.get("role", "")
-        model_id = p.get("model_id", "")
-        if role not in ("base_model", "adv_model") or not model_id:
-            return f"非法玩家配置: {p}"
-        key = f"{role}/{model_id}"
-        if key in seen:
-            return f"重复玩家: {key}"
-        seen.add(key)
-
-    sm = req.get("summary_model", {})
-    sm_role = sm.get("role", "")
-    sm_model = sm.get("model_id", "")
-    if sm_role and sm_model:
-        sm_key = f"{sm_role}/{sm_model}"
-        if sm_key in seen:
-            return f"裁判模型不能与参与玩家相同: {sm_key}"
-
-    if "image_civilian" not in req or "image_spy" not in req:
-        return "需要 image_civilian 和 image_spy"
-
-    spy_count = req.get("spy_count")
-    if spy_count is not None:
-        n = len(players)
-        if not (1 <= spy_count < n / 2):
-            return f"spy_count={spy_count} 不合法（需 ≥1 且小于玩家数的一半）"
-
+    try:
+        StartRequest.model_validate(req)
+    except ValidationError as exc:
+        return str(exc)
     return ""
 
 
@@ -540,7 +625,10 @@ def _parse_multipart_file(content_type: str, body: bytes) -> tuple[bytes, str]:
                         break
 
         # 去掉末尾的 \r\n
-        file_body = file_body.rstrip(b"\r\n")
+        if file_body.endswith(b"\r\n"):
+            file_body = file_body[:-2]
+        elif file_body.endswith(b"\n"):
+            file_body = file_body[:-1]
         return file_body, filename
 
     raise ValueError("未找到文件部分")
@@ -555,6 +643,9 @@ class UndercoverWebServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
     def __init__(self, config: ConfigBundle, host: str = "127.0.0.1", port: int = 7862) -> None:
+        if host not in ("127.0.0.1", "localhost"):
+            raise ValueError("游戏服务仅允许本机监听；远程发布需要独立认证网关")
+        self._connections = threading.BoundedSemaphore(16)
         super().__init__((host, port), _Handler)
         data_root = (Path(config.root) / "data") if hasattr(config, "root") else Path("data")
         store = ReplayStore(data_root)
@@ -566,6 +657,25 @@ class UndercoverWebServer(ThreadingHTTPServer):
             replay_store=store,
             html=html,
         )
+
+    def process_request(self, request, client_address) -> None:
+        if not self._connections.acquire(blocking=False):
+            try:
+                request.sendall(b"HTTP/1.0 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n")
+            finally:
+                self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._connections.release()
+            raise
+
+    def process_request_thread(self, request, client_address) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._connections.release()
 
     def serve_forever(self, poll_interval: float = 0.5) -> None:
         logger.info("谁是卧底 Web 界面已启动，访问 http://%s:%d", self.server_address[0], self.server_address[1])

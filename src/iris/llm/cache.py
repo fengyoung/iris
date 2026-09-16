@@ -42,12 +42,15 @@ def _make_cache_key(
     route_context: Optional[Dict[str, Any]] = None,
     force_model: Optional[str] = None,
     temperature: Optional[float] = None,
+    max_tokens: Optional[int] = None,
+    extra_body: Optional[Dict[str, Any]] = None,
 ) -> str:
     """基于 prompt + route_context + force_model + temperature 生成缓存键。"""
     ctx_str = json.dumps(
         sorted((route_context or {}).items()), sort_keys=True, ensure_ascii=False
     )
-    key_parts = f"{prompt}|{ctx_str}|{force_model or ''}|t={temperature}"
+    extra_str = json.dumps(extra_body or {}, sort_keys=True, ensure_ascii=False)
+    key_parts = f"{prompt}|{ctx_str}|{force_model or ''}|t={temperature}|max={max_tokens}|extra={extra_str}"
     return hashlib.md5(key_parts.encode("utf-8")).hexdigest()
 
 
@@ -123,7 +126,8 @@ class LLMResponseCache:
         prompt: str,
         route_context: Optional[Dict[str, Any]] = None,
         force_model: Optional[str] = None,
-        temperature: Optional[float] = None,
+        temperature: Optional[float] = None, max_tokens: Optional[int] = None,
+        extra_body: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """检查缓存，命中则返回缓存条目 dict，未命中返回 None。
 
@@ -133,7 +137,7 @@ class LLMResponseCache:
         if not self._available:
             return None
 
-        key = _make_cache_key(prompt, route_context, force_model, temperature)
+        key = _make_cache_key(prompt, route_context, force_model, temperature, max_tokens, extra_body)
         entry_path = self._entry_path(key)
         try:
             with FileLock(self._cache_dir / ".cache"):
@@ -171,7 +175,8 @@ class LLMResponseCache:
         route_context: Optional[Dict[str, Any]],
         force_model: Optional[str],
         response: Any,
-        temperature: Optional[float] = None,
+        temperature: Optional[float] = None, max_tokens: Optional[int] = None,
+        extra_body: Optional[Dict[str, Any]] = None,
     ) -> None:
         """写入缓存条目。超限时通过内存 LRU 驱逐最旧条目。
 
@@ -180,7 +185,7 @@ class LLMResponseCache:
         if not self._available:
             return
 
-        key = _make_cache_key(prompt, route_context, force_model, temperature)
+        key = _make_cache_key(prompt, route_context, force_model, temperature, max_tokens, extra_body)
         entry_path = self._entry_path(key)
 
         # 从不同响应类型中提取字段

@@ -62,15 +62,28 @@ class LLMService:
 
     # ── 缓存访问 ────────────────────────────────────────────────────
 
+    def _cache_context(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        """配置只以摘要进入缓存身份，不落盘凭证。"""
+        import hashlib
+        import json
+        config = getattr(self._config, "llm", {})
+        if hasattr(config, "model_dump"):
+            config = config.model_dump()
+        fingerprint = hashlib.sha256(json.dumps(config, sort_keys=True, default=str).encode()).hexdigest()
+        return {**ctx, "_config_fingerprint": fingerprint}
+
     def _check_cache(
         self,
         prompt: str,
         ctx: Dict[str, Any],
         force_model: Optional[str],
         temperature: Optional[float],
+        max_tokens: Optional[int] = None,
+        extra_body: Optional[Dict[str, Any]] = None,
     ) -> Optional[GenerationResult]:
         """检查缓存并返回命中结果，未命中返回 None。"""
-        cached = self._cache.get(prompt, ctx, force_model, temperature)
+        ctx = self._cache_context(ctx)
+        cached = self._cache.get(prompt, ctx, force_model, temperature, max_tokens, extra_body)
         if cached is None:
             return None
         return GenerationResult(
@@ -123,13 +136,13 @@ class LLMService:
         Returns:
             GenerationResult：包含生成文本和调用元数据
         """
-        ctx = route_context or {"input_type": "text", "task_type": "qa", "complexity": "standard"}
+        ctx = dict(route_context or {"input_type": "text", "task_type": "qa", "complexity": "standard"})
         ctx.setdefault("source", self._source)  # 注入来源标记（CLI / Skill）
 
         # deadline 场景不读缓存（实时场景输入不同，缓存命中率低）
         _should_cache = (temperature == 0 or use_cache) and _deadline is None
         if _should_cache:
-            hit = self._check_cache(prompt, ctx, force_model, temperature)
+            hit = self._check_cache(prompt, ctx, force_model, temperature, max_tokens, extra_body)
             if hit is not None:
                 return hit
 
@@ -158,7 +171,7 @@ class LLMService:
             )
             # 确定性调用：写入缓存
             if _should_cache:
-                self._cache.put(prompt, ctx, force_model, response, temperature)
+                self._cache.put(prompt, self._cache_context(ctx), force_model, response, temperature, max_tokens, extra_body)
             return result
         except LLMProviderError as exc:
             logger.error("LLM 文本生成失败: %s", exc)
@@ -187,11 +200,11 @@ class LLMService:
         Returns:
             生成文本
         """
-        ctx = route_context or {
+        ctx = dict(route_context or {
             "input_type": "multimodal",
             "task_type": "image_understanding",
             "complexity": "complex",
-        }
+        })
         ctx.setdefault("source", self._source)  # 注入来源标记（CLI / Skill）
         try:
             return self._provider.generate_multimodal(
@@ -237,7 +250,7 @@ class LLMService:
         Returns:
             GenerationResult
         """
-        ctx = route_context or {"input_type": "text", "task_type": "qa"}
+        ctx = dict(route_context or {"input_type": "text", "task_type": "qa"})
         ctx.setdefault("source", self._source)
         request = LLMRequest(prompt=prompt, route_context=ctx, extra_body=extra_body)
         try:
@@ -277,10 +290,10 @@ class LLMService:
         Returns:
             生成文本
         """
-        ctx = route_context or {
+        ctx = dict(route_context or {
             "input_type": "multimodal",
             "task_type": "image_understanding",
-        }
+        })
         ctx.setdefault("source", self._source)
         try:
             return self._provider.generate_multimodal_as(
@@ -311,14 +324,7 @@ class LLMService:
         """
         import asyncio
 
-        ctx = route_context or {"input_type": "text", "task_type": "qa", "complexity": "standard"}
-
-        # 缓存逻辑：temperature=0 自动缓存，或 use_cache=True 显式启用
-        _should_cache = temperature == 0 or use_cache
-        if _should_cache:
-            hit = self._check_cache(prompt, ctx, force_model, temperature)
-            if hit is not None:
-                return hit
+        ctx = dict(route_context or {"input_type": "text", "task_type": "qa", "complexity": "standard"})
 
         # 在默认 executor 中运行同步 generate（兼容现有 provider 实现）
         loop = asyncio.get_running_loop()

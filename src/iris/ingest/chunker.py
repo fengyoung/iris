@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import uuid
 import logging
 import re
 from dataclasses import asdict, dataclass, field
@@ -84,9 +86,11 @@ class ChunkSummary:
     chunk_count: int
     chunks: List[ChunkRecord]
     build_stats: Dict[str, int] = field(default_factory=dict)
+    base_revision: Optional[str] = None
+    generation: str = field(default_factory=lambda: uuid.uuid4().hex)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"source_name": self.source_name, "scanned_at": self.scanned_at,
+        return {"schema_version": 2, "generation": self.generation, "source_name": self.source_name, "scanned_at": self.scanned_at,
                 "document_count": self.document_count, "chunk_count": self.chunk_count,
                 "chunks": [asdict(item) for item in self.chunks], "build_stats": self.build_stats}
 
@@ -102,13 +106,7 @@ class MarkdownChunker:
         self._metadata_dir = config.root / "data" / "metadata"
 
     def build_default_source_chunks(self, *, incremental: bool = False) -> ChunkSummary:
-        return self._build_chunks_from_scan(
-            self._scanner.scan_default_source() if not incremental
-            else self._scanner.scan_source_by_name(
-                self._config.data_source["default_source"], incremental=True,
-            ),
-            incremental=incremental,
-        )
+        return self.build_source_chunks(self._config.data_source["default_source"], incremental=incremental)
 
     def build_source_chunks(self, source_name: str, *, incremental: bool = False,
                             progress_callback: Optional[Callable[[int, int, str], None]] = None
@@ -118,10 +116,11 @@ class MarkdownChunker:
         :param progress_callback: 逐文档进度回调 (done, total, source_name)，
             供任务面板埋点（默认 None 零行为变化）。
         """
+        scan = self._scanner.scan_source_by_name(source_name)
+        if incremental:
+            object.__setattr__(scan, "_full_snapshot", True)
         return self._build_chunks_from_scan(
-            self._scanner.scan_source_by_name(source_name, incremental=incremental),
-            incremental=incremental,
-            progress_callback=progress_callback,
+            scan, incremental=incremental, progress_callback=progress_callback,
         )
 
     def build_all_enabled_sources_chunks(self, *, incremental: bool = False,
@@ -139,6 +138,8 @@ class MarkdownChunker:
         self, scan_summary: ScanSummary, *, incremental: bool = False,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
     ) -> ChunkSummary:
+        summary_path = self._metadata_dir / f"{scan_summary.source_name}_chunk_summary.json"
+        base_revision = hashlib.sha256(summary_path.read_bytes()).hexdigest() if summary_path.exists() else ""
         previous = self._load_previous_chunks_for_source(scan_summary.source_name)
         reused_documents = 0
         rebuilt_documents = 0
@@ -173,16 +174,19 @@ class MarkdownChunker:
         # 绝不能追加（否则死 chunk 会随每次全量重建累积，v3.22.3 修复）。
         # 注意：增量模式必须无条件保留（v3.28.1 修复）——增量 scan 只含变更文档，
         # 若按 deleted/reused 门控，「只有修改、无删除」的增量会丢弃全部未变更文档的 chunk。
-        if incremental:
+        if incremental and not getattr(scan_summary, "_full_snapshot", False):
             changed_paths = {doc.relative_path for doc in scan_summary.documents}
             for rp, cached_chunks in previous.items():
                 if rp not in changed_paths:
                     all_chunks.extend(cached_chunks)
+        elif incremental:
+            current_paths = {doc.relative_path for doc in scan_summary.documents}
+            cleaned_documents = len(set(previous) - current_paths)
 
         all_chunks.sort(key=lambda item: (item.relative_path, item.line_start, item.segment_index))
         return ChunkSummary(source_name=scan_summary.source_name, scanned_at=scan_summary.scanned_at,
                             document_count=scan_summary.document_count, chunk_count=len(all_chunks),
-                            chunks=all_chunks, build_stats={"reused_documents": reused_documents,
+                            chunks=all_chunks, base_revision=base_revision, build_stats={"reused_documents": reused_documents,
                                                             "rebuilt_documents": rebuilt_documents,
                                                             "cleaned_documents": cleaned_documents,
                                                             "rebuilt_paths": len(rebuilt_paths)})
@@ -191,8 +195,14 @@ class MarkdownChunker:
         self._metadata_dir.mkdir(parents=True, exist_ok=True)
         summary_path = self._metadata_dir / f"{summary.source_name}_chunk_summary.json"
         from iris.utils.shared import atomic_write_json
-        atomic_write_json(summary_path, summary.to_dict())
-        self.write_hash_index(summary)
+        from iris.core.locks import FileLock
+        from iris.core.exceptions import IrisRuntimeError
+        with FileLock(summary_path):
+            revision = hashlib.sha256(summary_path.read_bytes()).hexdigest() if summary_path.exists() else ""
+            if summary.base_revision is not None and revision != summary.base_revision:
+                raise IrisRuntimeError("源 chunk 已被其他构建更新，请重新构建")
+            atomic_write_json(summary_path, summary.to_dict())
+            self.write_hash_index(summary)
         return summary_path
 
     def write_hash_index(self, summary: ChunkSummary) -> Path:

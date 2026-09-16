@@ -43,6 +43,11 @@ from iris.utils.llm_parsing import try_parse_json
 logger = logging.getLogger(__name__)
 
 
+class _GameCancelled(IrisRuntimeError):
+    """内部协作取消信号。"""
+
+
+
 class UndercoverGameError(IrisRuntimeError):
     """游戏运行期错误。"""
 
@@ -716,6 +721,7 @@ class UndercoverGame:
         spy_count: Optional[int] = None,
         on_event: Optional[Callable[[str, dict], None]] = None,
         advance_event: Optional[threading.Event] = None,
+        cancel_event: Optional[threading.Event] = None,
     ):
         """初始化游戏。
 
@@ -811,6 +817,7 @@ class UndercoverGame:
 
         self._on_event = on_event
         self._advance_event = advance_event
+        self._cancel_event = cancel_event or threading.Event()
 
     # ── 事件系统 ────────────────────────────────────────────────
 
@@ -824,7 +831,27 @@ class UndercoverGame:
 
     # ── 公开 API ────────────────────────────────────────────────
 
+    def _check_cancelled(self) -> None:
+        if self._cancel_event.is_set():
+            raise _GameCancelled("游戏已取消")
+
     def run(self) -> GameResult:
+        """协作取消：已发出的网络请求等待超时，停止安排后续请求。"""
+        try:
+            return self._run_game()
+        except _GameCancelled:
+            result = self._partial_result
+            active = getattr(self, "_active_round", None)
+            if active is not None and active not in result.rounds:
+                result.rounds.append(active)
+            result.winner = "cancelled"
+            result.final_survivors = [p.key for p in self._players.values() if p.alive]
+            result.errors.append("cancelled: 用户取消")
+            self._emit("game_end", {"winner": "cancelled", "final_survivors": result.final_survivors,
+                                    "spy_keys": result.spy_keys, "total_rounds": len(result.rounds)})
+            return result
+
+    def _run_game(self) -> GameResult:
         """运行完整对局，返回结果。"""
         spy_keys = [p.key for p in self._players.values() if p.is_spy]
         result = GameResult(
@@ -837,6 +864,9 @@ class UndercoverGame:
             order_mode=self._order_mode,
             seed=self._seed,
         )
+
+        self._partial_result = result
+        self._check_cancelled()
 
         # 轮次上限：每轮最多淘汰 1 人。留出余量并强制封顶，防止「全员弃权→无人淘汰
         # →存活集合不变」时死循环（所有玩家调用失败或被熔断时会真实发生）。
@@ -862,11 +892,13 @@ class UndercoverGame:
 
         round_no = 0
         while round_no < max_rounds:
+            self._check_cancelled()
             round_no += 1
             started_at = time.monotonic()
             alive_players = [p for p in self._players.values() if p.alive]
 
             record = RoundRecord(round_no=round_no)
+            self._active_round = record
 
             speaking_order = self._round_order({p.key for p in alive_players}, round_no)
             self._emit("round_start", {
@@ -885,6 +917,7 @@ class UndercoverGame:
             record.silent = [s.key for s in speeches if s.status == "api_error"]
             record.malformed = [s.key for s in speeches if s.status == "malformed"]
 
+            self._check_cancelled()
             outcome = self._run_vote_phase(
                 alive_players, result.rounds, round_no, speeches, result.errors,
             )
@@ -923,9 +956,14 @@ class UndercoverGame:
 
             # 手动步进：等待外部 advance_event 后才继续下一轮（超时兜底防止窗口关闭后卡死）
             if self._advance_event is not None:
-                self._advance_event.wait(timeout=300)
+                deadline = time.monotonic() + 300
+                while not self._advance_event.wait(timeout=0.2):
+                    self._check_cancelled()
+                    if time.monotonic() >= deadline:
+                        break
                 self._advance_event.clear()
 
+            self._check_cancelled()
             survivors = [p for p in self._players.values() if p.alive]
             result.final_survivors = [p.key for p in survivors]
 
@@ -1041,6 +1079,8 @@ class UndercoverGame:
         """
         speeches: List[SpeechRecord] = []
         for index, player in enumerate(ordered_players):
+            if self._cancel_event.is_set():
+                break
             try:
                 speeches.append(fn(player, index, speeches))
             except Exception as exc:  # noqa: BLE001 — 单个玩家异常不应中断对局
@@ -1336,8 +1376,12 @@ class UndercoverGame:
             {player_key: value}，必然覆盖全部 players
         """
         results: Dict[str, Any] = {}
+        def guarded(player):
+            if self._cancel_event.is_set():
+                return player.key, fallback
+            return fn(player)
         with shared_pool.executor(max_workers=min(max_workers, max(len(players), 1))) as executor:
-            futures = {executor.submit(fn, p): p for p in players}
+            futures = {executor.submit(guarded, p): p for p in players}
             for future in as_completed(futures):
                 player = futures[future]
                 try:
