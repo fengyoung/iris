@@ -8,9 +8,10 @@
   try {
     showView('setup');
     check(getComputedStyle(document.getElementById('view-game')).display === 'none', '非观战页不占位');
-    _players = [{key:'base_model/a', model_id:'a', alive:true}];
+    // 编号取 player_number（全局固定）而非下标：给 2 号可区分「稳定编号」与「位置编号」两种实现
+    _players = [{key:'base_model/a', model_id:'a', alive:true, player_number:2}];
     renderPlayerStrip();
-    check(document.getElementById('player-strip').textContent.includes('P1'), '玩家稳定编号');
+    check(document.getElementById('player-strip').textContent.includes('2号'), '玩家稳定编号');
     document.getElementById('public-only').checked = true;
     onPlayerSpeech({key:'base_model/a', private:{self_identity:'civilian'}, public:{description:'公开描述'}});
     check(document.querySelector('#timeline .thinking-card').hidden, '新到私有事件遵循筛选');

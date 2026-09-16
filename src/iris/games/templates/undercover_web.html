@@ -873,7 +873,7 @@ function onGameStart(p) {
   _players = p.players.map(pl => ({ ...pl, alive: true }));
   _thinkingNodes = {};
   renderPlayerStrip();
-  document.getElementById('player-filter').replaceChildren(new Option('全部玩家',''), ..._players.map((pl,i) => new Option(`P${i+1} ${pl.model_id}`,pl.key)));
+  document.getElementById('player-filter').replaceChildren(new Option('全部玩家',''), ..._players.map((pl,i) => new Option(`${pl.player_number || (i+1)}号 ${pl.model_id}`,pl.key)));
   appendJudge(`游戏开始！共 ${_players.length} 名玩家，${p.spy_count} 名卧底。种子：${p.seed ?? '随机'}`);
   document.getElementById('topbar-round').textContent = '第 0 轮';
 }
@@ -1042,7 +1042,7 @@ function renderPlayerStrip() {
     const num = p.player_number || (i + 1);
     return `<div class="player-chip${p.alive ? '' : ' dead'}" style="border-color:${c.main};background:${c.muted}">
       <div class="dot" style="background:${c.dot}"></div>
-      <span style="color:${c.text}">${num}号 ${esc(p.model_id || p.key)}</span>
+      <span style="color:${c.text}" title="${esc(p.key)}">${num}号 ${esc(p.model_id || p.key)}</span>
       ${!p.alive ? '<span style="opacity:.5">☠</span>' : ''}
     </div>`;
   }).join('');
