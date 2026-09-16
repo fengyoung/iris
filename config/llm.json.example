@@ -278,7 +278,7 @@
           "provider": "anthropic",
           "api_base_url": "https://your-tokenhub.example.com/anthropic"
         },
-        "gpt-5.4": {
+        "gpt-5.4-zz": {
           "channel": "zz_tokenhub",
           "model": "gpt-5.4",
           "display_name": "GPT-5.4 (zz_tokenhub)",
@@ -713,7 +713,7 @@
           "provider": "openai",
           "api_base_url": "https://your-tokenhub.example.com/codex/v1"
         },
-        "kimi-k2.6": {
+        "kimi-k2.6-zz": {
           "channel": "zz_tokenhub",
           "model": "kimi-k2.6",
           "display_name": "Kimi K2.6 (zz_tokenhub)",
