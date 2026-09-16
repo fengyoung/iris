@@ -389,8 +389,9 @@ class TestPromptContracts:
 
     _DESCRIBE_VARS = {
         "spy_count": 2, "total_players": 8, "alive_count": 8, "round_no": 1,
-        "player_key": "base_model/m1", "speaking_position": 3,
+        "player_key": "base_model/m1", "player_number": 3, "speaking_position": 3,
         "history": "H", "prior_speeches": "P", "own_private_history": "O",
+        "incremental_requirement": "R",
     }
     _VOTE_VARS = {
         "spy_count": 2, "total_players": 8, "history": "H",

@@ -45,6 +45,8 @@ def _capture_prompts(mock_llm, game, describe_reply, vote_picker):
     """挂上会记录 prompt 的 mock，返回按调用顺序记录的 (phase, owner_key, text) 列表。
 
     vote_picker(candidates, voter) 返回该玩家要投的 key；返回 None 表示弃权。
+    裁判增量校验与投票共用 generate_as，按「候选清单」标记区分：没有该标记的
+    即为裁判调用，记作 referee 相位并一律判定有增量（不改变既有剧情走向）。
     """
     prompts = []
 
@@ -55,10 +57,14 @@ def _capture_prompts(mock_llm, game, describe_reply, vote_picker):
 
     def gen_side_effect(role, model_id, prompt, **kwargs):
         key = f"{role}/{model_id}"
+        result = MagicMock()
+        if "只能投给以下候选之一：" not in prompt:
+            prompts.append(("referee", key, prompt))
+            result.text = "增量：是\n理由：mock 裁判判定有增量"
+            return result
         prompts.append(("vote", key, prompt))
         candidates = prompt.split("只能投给以下候选之一：", 1)[1].strip().split(", ")
         target = vote_picker(candidates, key, prompt)
-        result = MagicMock()
         result.text = f"投票：{target}\n理由：理由-{key}" if target else "我不知道投给谁"
         return result
 
@@ -273,8 +279,12 @@ class TestSelfVoteExclusion:
 
         def gen_side_effect(role, model_id, prompt, **kwargs):
             key = f"{role}/{model_id}"
-            prompts[key] = prompt
             res = MagicMock()
+            # 裁判增量校验与投票共用 generate_as：前者无候选清单，不参与投票断言
+            if "只能投给以下候选之一：" not in prompt:
+                res.text = "增量：是\n理由：mock 裁判判定有增量"
+                return res
+            prompts[key] = prompt
             # 每个玩家都试图投自己
             res.text = f"投票：{key}\n理由：自投"
             return res
