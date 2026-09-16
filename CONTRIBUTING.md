@@ -52,7 +52,7 @@ pip install -e ".[dev]" -c constraints.txt
 pre-commit install
 
 # 快速命令（Makefile）
-make test            # 运行全部测试（3,540 用例）
+make test            # 运行全部测试（3,572 用例）
 make test-unit       # unit 标记测试（含部分历史 I/O 测试）
 make test-integration # 集成测试
 make test-cov        # 运行测试 + 覆盖率报告

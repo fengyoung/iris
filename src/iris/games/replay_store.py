@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from iris.core.exceptions import IrisRuntimeError
+from iris.core.exceptions import IrisRuntimeError, IrisValueError
 from iris.utils.shared import atomic_write_json, atomic_write_text, atomic_write_bytes
 from iris.core.locks import FileLock
 
@@ -72,15 +72,22 @@ class ReplayStore:
 
     def _save_upload(self, data: bytes, filename: str) -> str:
         """将上传图片写入暂存区，返回 token（暂存文件名去扩展名部分）。"""
-        from iris.games.image_validation import validate_image
+        from iris.games.image_validation import downscale_for_upload, validate_image
         suffix = Path(filename).suffix.lower()
         allowed = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
-        if suffix not in allowed or not data or len(data) > 20 * 1024 * 1024:
-            raise ValueError("仅允许不超过 20 MB 的常见图片")
+        if suffix not in allowed:
+            raise IrisValueError(f"不支持的扩展名 {suffix or '（无）'}，仅支持 png / jpg / jpeg / gif / webp / bmp")
+        if not data:
+            raise IrisValueError("上传内容为空")
+        if len(data) > 20 * 1024 * 1024:
+            raise IrisValueError(f"图片 {len(data) / 1024 / 1024:.1f} MB，超过 20 MB 上限")
         validate_image(data, suffix)
+        # 归一化在暂存前完成：预览、模型输入与复盘三处看到的即同一张图，
+        # 复盘还原的就是模型实际看到的画面。原始图仍保留在用户本机。
+        data, suffix = downscale_for_upload(data, suffix)
         self.cleanup_uploads()
         if sum(p.stat().st_size for p in self._uploads.iterdir() if p.is_file()) + len(data) > 200 * 1024 * 1024:
-            raise ValueError("上传暂存区已满")
+            raise IrisValueError("上传暂存区已满")
         token = uuid4().hex + suffix
         atomic_write_bytes(self._uploads / token, data)
         return token
