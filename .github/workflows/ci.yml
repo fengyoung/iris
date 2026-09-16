@@ -33,6 +33,11 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq libmupdf-dev
+          # 谁是卧底的浏览器回归（tests/test_browser_undercover.py）需要 Chrome，
+          # runner 镜像预装。此处显式断言：哪天镜像不再预装，那条测试会静默跳过，
+          # 看着像有覆盖其实没有——这种洞不该靠人去翻日志发现。
+          command -v google-chrome >/dev/null \
+            || { echo "::error::runner 上找不到 google-chrome，浏览器回归会静默跳过"; exit 1; }
 
       - name: Install Python dependencies
         run: |

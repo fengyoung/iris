@@ -7,7 +7,7 @@
 
 ## 项目概览
 
-**当前规模**：~45,000 行 / 192 个源码文件 / 28 模块 · CLI 70 命令 · 测试 3,597（pytest 全量）· 覆盖率 69.63%（`fail_under` 65）· Ruff、mypy（含显式兼容边界）、AST 安全扫描与 SPDX SBOM 门禁通过（动态/平台专属模块设显式兼容边界）· 10 个项目级 Skill · Wiki 238 页 · 知识图谱节点 238 / 关系边 2,724（wikilink 1,115 + LLM 1,609）· 数据源 900+ 文档 / 6,771 Chunk（text-embedding-v3 / 1,024 维）
+**当前规模**：~45,000 行 / 192 个源码文件 / 28 模块 · CLI 70 命令 · 测试 3,598（pytest 全量）· 覆盖率 69.63%（`fail_under` 65）· Ruff、mypy（含显式兼容边界）、AST 安全扫描与 SPDX SBOM 门禁通过（动态/平台专属模块设显式兼容边界）· 10 个项目级 Skill · Wiki 238 页 · 知识图谱节点 238 / 关系边 2,724（wikilink 1,115 + LLM 1,609）· 数据源 900+ 文档 / 6,771 Chunk（text-embedding-v3 / 1,024 维）
 
 本版修「谁是卧底」的三处**静默失效**（功能照跑、界面不报错，只是结果不对）：合并遗留的 DOM 悬空引用使网页端开不了局；总结模型未接线使总结从未生成；投票解析器的整段兜底按 key 长度挑目标，使投票理由与投票对象对不上。另按一局真实复盘的证据校准了游戏策略 prompt。详见 CHANGELOG。
 
@@ -137,7 +137,7 @@ iris3/
 ├── src/iris/          # 28 模块（见下）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
-├── tests/             # 3,597 用例（pytest 全量，conftest 自动打标记）
+├── tests/             # 3,598 用例（pytest 全量，conftest 自动打标记）
 ├── config/            # *.json gitignored，*.example 版本控制
 ├── data/              # 运行时数据（全 gitignore）
 ├── .claude/skills/    # 项目级 Skill（10 个）
