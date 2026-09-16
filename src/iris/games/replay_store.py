@@ -180,6 +180,14 @@ class ReplayStore:
         with FileLock(d / "replay.json"):
             atomic_write_json(d / "replay.json", payload)
 
+        # 对局已完整存档，删除断点文件（若存在）
+        checkpoint = d / "checkpoint.json"
+        if checkpoint.exists():
+            try:
+                checkpoint.unlink()
+            except OSError as exc:  # noqa: BLE001
+                logger.warning("删除断点文件失败（非关键）: %s", exc)
+
     # ── 列表 & 加载 ──────────────────────────────────────────────
 
     def list_games(self) -> List[Dict[str, Any]]:
@@ -237,6 +245,70 @@ class ReplayStore:
             if p.exists():
                 return p
         return None
+
+    # ── 断点存档 ─────────────────────────────────────────────────
+
+    def save_checkpoint(
+        self,
+        game_id: str,
+        setup: Dict[str, Any],
+        completed_rounds: List[Dict[str, Any]],
+        alive_keys: List[str],
+        spy_keys: List[str],
+        speaking_order_base: List[str],
+    ) -> None:
+        """每轮结束后原子写入 checkpoint.json，供断点恢复使用。"""
+        d = self.ensure_game_dir(game_id)
+        payload: Dict[str, Any] = {
+            "schema_version": _REPLAY_SCHEMA_VERSION,
+            "game_id": game_id,
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+            "setup": setup,
+            "completed_rounds": completed_rounds,
+            "alive_keys": alive_keys,
+            "spy_keys": spy_keys,
+            "speaking_order_base": speaking_order_base,
+        }
+        with FileLock(d / "checkpoint.json"):
+            atomic_write_json(d / "checkpoint.json", payload)
+
+    def load_checkpoint(self, game_id: str) -> Optional[Dict[str, Any]]:
+        """加载 checkpoint.json，不存在或损坏时返回 None。"""
+        import json
+        try:
+            d = self.game_dir(game_id)
+            cp = d / "checkpoint.json"
+            if not cp.exists():
+                return None
+            return json.loads(cp.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001 — 损坏断点不影响正常流程
+            logger.warning("加载断点 %s 失败: %s", game_id, exc)
+            return None
+
+    def list_incomplete_games(self) -> List[Dict[str, Any]]:
+        """列出有 checkpoint.json 但没有完整 replay.json 的对局（即断点对局）。"""
+        items: List[Dict[str, Any]] = []
+        for d in sorted(self._root.iterdir(), reverse=True):
+            if not d.is_dir() or d.name == "uploads":
+                continue
+            checkpoint = d / "checkpoint.json"
+            replay = d / "replay.json"
+            if not checkpoint.exists() or replay.exists():
+                continue
+            try:
+                import json
+                data = json.loads(checkpoint.read_text(encoding="utf-8"))
+                items.append({
+                    "id": data.get("game_id", d.name),
+                    "updated_at": data.get("updated_at", ""),
+                    "completed_rounds": len(data.get("completed_rounds", [])),
+                    "alive_keys": data.get("alive_keys", []),
+                    "spy_count": len(data.get("spy_keys", [])),
+                    "player_count": len(data.get("setup", {}).get("players", [])),
+                })
+            except Exception as exc:  # noqa: BLE001 — 损坏断点不影响列表
+                logger.warning("读取断点摘要 %s 失败: %s", d.name, exc)
+        return items
 
     # ── LLM 总结（异步） ─────────────────────────────────────────
 

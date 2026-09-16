@@ -96,6 +96,7 @@ class GamePlayer:
     is_spy: bool
     display_name: str = ""
     alive: bool = True
+    player_number: int = 0  # 全局固定编号（1-indexed），对局期间不变
 
 
 @dataclass
@@ -111,6 +112,7 @@ class SpeechRecord:
     # ── 公开面 ──
     description: str = ""
     response: str = ""
+    challenge: str = ""  # 对某位玩家的质疑（可为空），第2轮起可用
     # ── 私有面 ──
     observation_list: List[str] = field(default_factory=list)    # 完整观察清单
     public_elements: List[str] = field(default_factory=list)     # 自标 (公开)
@@ -228,9 +230,18 @@ _DESCRIBE_PROMPT = """你正在参与「谁是卧底」游戏。
 - 所有卧底都被投出，则平民获胜；场上卧底人数不少于平民人数，则卧底获胜。
 - 只要游戏在淘汰后继续进行，就说明场上仍有卧底存活。
 
+【允许的策略】
+- 可以隐瞒你词语的某些属性（略去某些元素不说）
+- 可以有意让描述方向偏离真相（措辞模糊、使用上位词），但不能描述你图片里根本不存在的元素
+- 可以对其他玩家的描述提出质疑，例如指出某人描述的元素与你的观察有矛盾
+- 所有其他玩家的发言（包括他们的质疑）都可以作为你的参考
+
+【增量发言要求（第2轮起强制执行）】
+{incremental_requirement}
+
 【本轮情况】
 轮次：第 {round_no} 轮
-你的标识：{player_key}
+你的标识：{player_key}（{player_number}号玩家）
 你在本轮发言顺序中排第 {speaking_position} 位（本轮共 {alive_count} 人发言）
 
 【此前轮次的完整公开记录】
@@ -243,7 +254,7 @@ _DESCRIBE_PROMPT = """你正在参与「谁是卧底」游戏。
 {own_private_history}
 
 【发言要求】
-第一阶段，先写私有部分。这部分其他玩家永远看不到，只写入复盘档案，用于核查你是否如实描述：
+第一阶段，先写私有部分。这部分其他玩家永远看不到，只写入复盘档案：
 1. 【观察清单】逐条列出你在这张图里能辨认出的全部元素，尽量完整，其中包括你认为可能只有自己才看到的元素。
    每条不超过 12 字，总数不超过 12 条。
    每条末尾用 (公开) 或 (保留) 标注你本轮是否打算把它说出去。
@@ -274,11 +285,14 @@ _DESCRIBE_PROMPT = """你正在参与「谁是卧底」游戏。
      若别人提到的元素你图里没有，你就不提它，但绝不能附和。
    - 严禁在公开内容中透露或暗示你是平民还是卧底，也严禁试图与其他玩家建立任何联络或约定。
      即使你已推断出谁是同类，也不能发出任何信号。
-4. 【回应】一句话，针对本轮在你之前发言的某位玩家。
+4. 【回应】一句话，针对本轮在你之前发言的某位玩家，或对上一轮某玩家的质疑/说法作出回应。
    若你本轮第一位发言，可以回应上一轮的任何玩家；若此前完全没有记录，写「无」。
    - 回应必须是关于图片内容的具体信息（你自己看到的某个元素），不能写成「同意某某」这类表态。
+   - 可以质疑对方的描述（例如指出矛盾或提出疑问），质疑必须基于你自己真实看到的内容。
    - 若对方提到的元素你图里没有，可以不回应他，但禁止附和，例如谎称自己也看到了。
    - 若你判断自己是卧底，上面关于真实性、禁止编造、禁止联络的要求同样适用。
+5. 【质疑】（可选）对某位玩家的描述提出质疑，不超过 30 字。若无质疑，写「无」。
+   质疑必须基于描述内容的具体矛盾，不能仅凭语气或风格。
 
 【输出格式】严格按下面的格式输出，不要在格式之外添加任何文字：
 【观察清单】
@@ -288,7 +302,36 @@ _DESCRIBE_PROMPT = """你正在参与「谁是卧底」游戏。
 【置信度】0 到 100 的整数
 【判断依据】一句话
 【公开描述】不超过 50 字的描述
-【回应】一句话，没有则写「无」"""
+【回应】一句话，没有则写「无」
+【质疑】针对某玩家的质疑，没有则写「无」"""
+
+_REFEREE_INCREMENT_PROMPT = """你是「谁是卧底」游戏的裁判，负责判断玩家本轮的发言是否包含增量信息。
+
+【玩家标识】{player_key}（{player_number}号玩家）
+【当前轮次】第 {round_no} 轮
+
+【该玩家过往各轮的公开描述及质疑】
+{prior_descriptions}
+
+【该玩家本轮的新发言】
+公开描述：{new_description}
+质疑：{new_challenge}
+
+【判定标准】
+增量信息是指以下任意一项：
+1. 本轮公开描述中提到了之前各轮从未提及的新元素、新角度、新视角；
+2. 本轮质疑中对某玩家的具体描述内容提出了有据可查的质疑（非空洞的「我不确信」）。
+
+以下情况视为无增量：
+- 描述内容与过往各轮高度重复（相似度超过 80%，即使换了说法）；
+- 质疑为空或等同于「无」；
+- 描述极为模糊，不含任何可辨认的元素。
+
+请先逐条对照，再给出判断：
+
+输出格式（严格遵守）：
+增量：是 或 否
+理由：一句话（不超过50字）"""
 
 _VOTE_PROMPT = """你正在参与「谁是卧底」游戏。全部 {total_players} 名玩家中有 {spy_count} 人看到的图片与其他人不同，这些人是卧底；其余人看到同一张图片。没有人知道自己的身份，包括你。
 
@@ -402,10 +445,12 @@ def _render_round(lines: List[str], record: RoundRecord) -> None:
 
 
 def _render_speech_line(lines: List[str], speech: SpeechRecord) -> None:
-    """渲染单条发言的公开面（描述 + 回应）。"""
+    """渲染单条发言的公开面（描述 + 回应 + 质疑）。"""
     lines.append(f"  {speech.order_index + 1}. {speech.key}: {speech.description}")
     if speech.response:
         lines.append(f"     └ 回应: {speech.response}")
+    if speech.challenge:
+        lines.append(f"     └ 质疑: {speech.challenge}")
 
 
 def _render_prior_speeches(speeches: Sequence[SpeechRecord]) -> str:
@@ -518,8 +563,8 @@ def _parse_vote(text: str, valid_keys: List[str]) -> tuple:
     return None, (reason or text.strip())[:100]
 
 
-#: 发言的六个分节标题。模型可能改写标题措辞，用宽松正则只要求标题里含关键词。
-_SECTION_RE = re.compile(r"【\s*(观察清单|身份自评|置信度|判断依据|公开描述|回应)\s*】")
+#: 发言的七个分节标题（新增「质疑」）。模型可能改写标题措辞，用宽松正则只要求标题里含关键词。
+_SECTION_RE = re.compile(r"【\s*(观察清单|身份自评|置信度|判断依据|公开描述|回应|质疑)\s*】")
 
 #: 观察清单条目行前缀（- / * / • / 1. / 1、 / 1) ）
 _OBSERVATION_PREFIX_RE = re.compile(r"^(?:[-*•·]|\d+[.、)）])\s*")
@@ -656,6 +701,8 @@ def _parse_speech(text: str, key: str, order_index: int) -> SpeechRecord:
         record.self_confidence = _parse_confidence(sections.get("置信度", ""))
         record.self_reason = _one_line(sections.get("判断依据", ""))[:200]
         record.response = _normalize_response(sections.get("回应", ""))
+        challenge_raw = _one_line(sections.get("质疑", ""))
+        record.challenge = "" if challenge_raw.lower() in _NO_RESPONSE_TOKENS else challenge_raw[:200]
         description = _one_line(sections.get("公开描述", ""))
         if description:
             record.description = description[:300]
@@ -722,6 +769,8 @@ class UndercoverGame:
         on_event: Optional[Callable[[str, dict], None]] = None,
         advance_event: Optional[threading.Event] = None,
         cancel_event: Optional[threading.Event] = None,
+        referee_model_id: str = "deepseek-flash-zz",
+        referee_role: str = "base_model",
     ):
         """初始化游戏。
 
@@ -742,6 +791,8 @@ class UndercoverGame:
                       回调在游戏线程内同步调用，实现应非阻塞（如 ``queue.Queue.put_nowait``）。
             advance_event: 可选手动步进锁。非 None 时，每轮结束后游戏阻塞等待该 Event
                            被 set（最长 300 秒超时后自动继续），以支持 Web UI 单轮控制。
+            referee_model_id: 裁判模型 ID，用于增量校验和对局总结（默认 deepseek-flash-zz）。
+            referee_role: 裁判模型角色（默认 base_model）。
         """
         if order_mode not in _ORDER_MODES:
             raise UndercoverGameError(
@@ -805,6 +856,7 @@ class UndercoverGame:
                 role=role, model_id=model_id, key=key,
                 is_spy=(idx in spy_indices),
                 display_name=key,
+                player_number=idx + 1,  # 全局固定编号（1-indexed）
             )
 
         # 发言顺序基准序：必须在抽卧底**之后** shuffle。反过来会改变 rng 的消费序列，
@@ -818,6 +870,10 @@ class UndercoverGame:
         self._on_event = on_event
         self._advance_event = advance_event
         self._cancel_event = cancel_event or threading.Event()
+        self._referee_model_id = referee_model_id
+        self._referee_role = referee_role
+        # 描述阶段裁判校验时需要读取当前已完成轮次（_run_describe_phase 运行时注入）
+        self._prior_rounds_for_check: List[RoundRecord] = []
 
     # ── 事件系统 ────────────────────────────────────────────────
 
@@ -828,6 +884,75 @@ class UndercoverGame:
                 self._on_event(event_type, payload)
             except Exception:  # noqa: BLE001
                 pass
+
+    # ── 裁判增量校验 ─────────────────────────────────────────────
+
+    def _check_description_increment(
+        self,
+        player: GamePlayer,
+        new_speech: "SpeechRecord",
+        prior_rounds: List["RoundRecord"],
+        round_no: int,
+    ) -> Tuple[bool, str]:
+        """调用裁判模型判断新发言是否包含增量信息。
+
+        Returns:
+            (has_increment, reason) — has_increment=True 表示有增量，可接受；
+            False 表示无增量，应要求玩家重新描述。若裁判调用失败则默认接受（True）。
+        """
+        if not self._referee_model_id:
+            return True, ""
+
+        # 收集该玩家所有历史轮次的公开描述和质疑
+        prior_lines: List[str] = []
+        for record in prior_rounds:
+            speech = next((s for s in record.speeches if s.key == player.key), None)
+            if speech is not None and speech.status != "api_error":
+                line = f"第{record.round_no}轮：{speech.description}"
+                if speech.challenge:
+                    line += f"（质疑：{speech.challenge}）"
+                prior_lines.append(line)
+
+        if not prior_lines:
+            # 没有历史记录，无法比较增量，直接接受
+            return True, ""
+
+        prompt = _REFEREE_INCREMENT_PROMPT.format(
+            player_key=player.key,
+            player_number=player.player_number,
+            round_no=round_no,
+            prior_descriptions="\n".join(prior_lines),
+            new_description=new_speech.description,
+            new_challenge=new_speech.challenge or "无",
+        )
+        try:
+            gen = self._llm.generate_as(
+                self._referee_role,
+                self._referee_model_id,
+                prompt,
+                route_context={"task_type": "undercover_referee"},
+            )
+            text = gen.text.strip()
+            # 解析 "增量：是/否"
+            for line in text.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("增量") and ("：" in stripped or ":" in stripped):
+                    value = stripped.split("：", 1)[-1].split(":", 1)[-1].strip()
+                    has_increment = value.startswith("是")
+                    # 提取理由
+                    reason = ""
+                    for rline in text.splitlines():
+                        rs = rline.strip()
+                        if rs.startswith("理由") and ("：" in rs or ":" in rs):
+                            reason = rs.split("：", 1)[-1].split(":", 1)[-1].strip()
+                            break
+                    return has_increment, reason
+            # 解析失败，默认接受
+            logger.warning("裁判增量判定结果解析失败，默认接受。原始: %s", text[:100])
+            return True, ""
+        except Exception as exc:  # noqa: BLE001 — 裁判失败不阻断游戏
+            logger.warning("裁判增量校验调用失败（%s），默认接受", exc)
+            return True, ""
 
     # ── 公开 API ────────────────────────────────────────────────
 
@@ -878,6 +1003,7 @@ class UndercoverGame:
                 {
                     "key": p.key, "role": p.role, "model_id": p.model_id,
                     "is_spy": p.is_spy, "display_name": p.display_name,
+                    "player_number": p.player_number,
                 }
                 for p in self._players.values()
             ],
@@ -952,6 +1078,15 @@ class UndercoverGame:
                 "malformed": record.malformed,
                 "eliminated": eliminated,
                 "tally": dict(tally),
+            })
+
+            # 每轮结束后发出 checkpoint 事件，外部存储层可据此落盘断点
+            self._emit("checkpoint", {
+                "round_no": round_no,
+                "alive_keys": [p.key for p in self._players.values() if p.alive],
+                "spy_keys": spy_keys,
+                "speaking_order_base": list(self._speaking_order_base),
+                "completed_rounds": len(result.rounds),
             })
 
             # 手动步进：等待外部 advance_event 后才继续下一轮（超时兜底防止窗口关闭后卡死）
@@ -1033,6 +1168,9 @@ class UndercoverGame:
         顺序是刻意的：需求要求「每个玩家陈述前可以参考本轮前面所有人的陈述」，
         这既是卧底校准措辞的前提，也是平民观察从众效应的前提。
         """
+        # 注入已完成轮次，供裁判增量校验使用
+        self._prior_rounds_for_check = prior_rounds
+
         order = self._round_order({p.key for p in alive_players}, round_no)
         by_key = {p.key: p for p in alive_players}
         ordered_players = [by_key[key] for key in order]
@@ -1107,65 +1245,132 @@ class UndercoverGame:
         errors: List[str],
     ) -> SpeechRecord:
         """单个玩家的发言：同一份 prompt 发给所有人（卧底与平民逐字相同）。"""
+
+        # Emit player_thinking event
+        self._emit("player_thinking", {
+            "round_no": round_no,
+            "player_key": player.key,
+            "player_number": player.player_number,
+            "phase": "describe",
+        })
+
         data_url = self._image_b_data_url if player.is_spy else self._image_a_data_url
+
+        # 构造增量要求文本（第2轮起强制）
+        incremental_requirement = ""
+        if round_no >= 2:
+            incremental_requirement = (
+                "从第2轮开始，你的本轮描述必须包含前几轮未提及的新角度、新元素，"
+                "或对其他玩家发起有据可查的质疑。不得重复已说过的内容。"
+            )
+        else:
+            incremental_requirement = "（第1轮无此要求）"
+
         prompt_text = _DESCRIBE_PROMPT.format(
             spy_count=self._spy_count,
             total_players=len(self._players),
             alive_count=alive_count,
             round_no=round_no,
             player_key=player.key,
+            player_number=player.player_number,
             speaking_position=index + 1,
             history=history_text,
             prior_speeches=prior_speeches_text,
             own_private_history=own_private_text,
+            incremental_requirement=incremental_requirement,
         )
         content_parts: List[Dict[str, Any]] = [
             {"type": "text", "text": prompt_text},
             {"type": "image_url", "image_url": {"url": data_url}},
         ]
-        try:
-            # max_tokens 不覆盖：交给模型自身配置（推理型模型如 deepseek-flash-zz
-            # 需要在 max_tokens 预算内先跑完思维链再输出正文，硬编码小值会导致
-            # finish_reason=length 而正文为空）。
-            text = self._llm.generate_multimodal_as(
-                player.role, player.model_id, content_parts,
-                route_context={"task_type": "undercover_describe"},
-            )
-        except LLMProviderError as exc:
-            logger.warning("玩家 %s 描述阶段调用失败: %s", player.key, exc)
-            errors.append(f"round={round_no} phase=describe player={player.key} error={exc}")
-            speech = SpeechRecord(
-                key=player.key,
-                order_index=index,
-                description=_DESCRIBE_FAILED_PLACEHOLDER,
-                status="api_error",
-            )
-            self._emit("player_speech", {
-                "round_no": round_no,
-                "key": player.key,
-                "public": {"description": speech.description, "response": speech.response, "status": speech.status},
-                "private": {},
-            })
-            return speech
-        speech = _parse_speech(text, player.key, index)
+
+        # 第2轮起需要裁判校验增量，最多重试3次
+        max_attempts = 3 if round_no >= 2 else 1
+        prior_rounds = getattr(self, "_prior_rounds_for_check", [])
+        speech: Optional[SpeechRecord] = None
+        forced = False
+        for attempt in range(1, max_attempts + 1):
+            try:
+                # max_tokens 不覆盖：交给模型自身配置（推理型模型如 deepseek-flash-zz
+                # 需要在 max_tokens 预算内先跑完思维链再输出正文，硬编码小值会导致
+                # finish_reason=length 而正文为空）。
+                text = self._llm.generate_multimodal_as(
+                    player.role, player.model_id, content_parts,
+                    route_context={"task_type": "undercover_describe"},
+                )
+            except LLMProviderError as exc:
+                logger.warning("玩家 %s 描述阶段调用失败: %s", player.key, exc)
+                errors.append(f"round={round_no} phase=describe player={player.key} error={exc}")
+                speech = SpeechRecord(
+                    key=player.key,
+                    order_index=index,
+                    description=_DESCRIBE_FAILED_PLACEHOLDER,
+                    status="api_error",
+                )
+                self._emit("player_speech", {
+                    "round_no": round_no,
+                    "key": player.key,
+                    "player_number": player.player_number,
+                    "public": {
+                        "description": speech.description,
+                        "response": speech.response,
+                        "challenge": speech.challenge,
+                        "status": speech.status,
+                    },
+                    "private": {},
+                })
+                return speech
+
+            speech = _parse_speech(text, player.key, index)
+
+            # 第2轮起校验增量（最后一次尝试不再校验，直接接受）
+            if round_no >= 2 and attempt < max_attempts:
+                has_increment, reason = self._check_description_increment(
+                    player, speech, prior_rounds, round_no
+                )
+                if not has_increment:
+                    logger.info(
+                        "玩家 %s 第 %d 轮第 %d 次尝试无增量，裁判理由: %s",
+                        player.key, round_no, attempt, reason,
+                    )
+                    # 带反馈重新生成（修改 content_parts[0] 的 text）
+                    feedback = (
+                        f"\n\n【裁判反馈（第{attempt}次）】"
+                        f"你本轮的描述被判定为无增量信息。理由：{reason}\n"
+                        f"请重新组织，提供前几轮未提及的新元素，或对其他玩家发起有据可查的质疑。"
+                    )
+                    content_parts[0] = {"type": "text", "text": prompt_text + feedback}
+                    continue
+                # 有增量，跳出循环
+                break
+            elif round_no >= 2 and attempt == max_attempts:
+                # 最后一次尝试：无论是否有增量都接受，标记 forced
+                has_increment, _ = self._check_description_increment(
+                    player, speech, prior_rounds, round_no
+                )
+                forced = not has_increment
+
         self._emit("player_speech", {
             "round_no": round_no,
             "key": player.key,
+            "player_number": player.player_number,
             "public": {
-                "description": speech.description,
-                "response": speech.response,
-                "status": speech.status,
+                "description": speech.description,  # type: ignore[union-attr]
+                "response": speech.response,  # type: ignore[union-attr]
+                "challenge": speech.challenge,  # type: ignore[union-attr]
+                "status": speech.status,  # type: ignore[union-attr]
             },
             "private": {
-                "observation_list": speech.observation_list,
-                "public_elements": speech.public_elements,
-                "withheld_elements": speech.withheld_elements,
-                "self_identity": speech.self_identity,
-                "self_confidence": speech.self_confidence,
-                "self_reason": speech.self_reason,
+                "observation_list": speech.observation_list,  # type: ignore[union-attr]
+                "public_elements": speech.public_elements,  # type: ignore[union-attr]
+                "withheld_elements": speech.withheld_elements,  # type: ignore[union-attr]
+                "self_identity": speech.self_identity,  # type: ignore[union-attr]
+                "self_confidence": speech.self_confidence,  # type: ignore[union-attr]
+                "self_reason": speech.self_reason,  # type: ignore[union-attr]
             },
+            "forced": forced,
         })
-        return speech
+        return speech  # type: ignore[return-value]
 
     # ── 投票阶段 ────────────────────────────────────────────────
 
@@ -1270,8 +1475,16 @@ class UndercoverGame:
         alive_list_text = ", ".join(p.key for p in alive_players)
         silent = [s.key for s in round_speeches if s.status == "api_error"]
         silent_list_text = ", ".join(silent) if silent else "无"
+        by_key = {p.key: p for p in alive_players}
 
         def _vote_one(player: GamePlayer) -> tuple:
+            # Emit thinking event before calling LLM
+            self._emit("player_thinking", {
+                "round_no": round_no,
+                "player_key": player.key,
+                "player_number": player.player_number,
+                "phase": "vote",
+            })
             # 不能投自己：从候选中剔除自身；剔空则退回原集合。
             own_candidates = [k for k in candidate_keys if k != player.key] or list(candidate_keys)
             prompt_text = _VOTE_PROMPT.format(
@@ -1313,9 +1526,11 @@ class UndercoverGame:
         reasons = {pid: target_reason[1] for pid, target_reason in raw.items()}
         # 逐票 emit（仅首投 / 重投中第一次调用 _collect_votes 时有实际观察价值）
         for pid, (target, reason) in raw.items():
+            player = by_key.get(pid)
             self._emit("vote_cast", {
                 "round_no": round_no,
                 "key": pid,
+                "player_number": player.player_number if player else 0,
                 "target": target,
                 "reason": reason,
             })

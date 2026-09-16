@@ -91,6 +91,8 @@ class GameSession:
     players_info: list = field(default_factory=list)
     summary_role: str = ""
     summary_model_id: str = ""
+    referee_model: str = "deepseek-flash-zz"
+    referee_role: str = "base_model"
 
 
 class PlayerRequest(BaseModel):
@@ -109,6 +111,8 @@ class StartRequest(BaseModel):
     order_mode: Literal["rotate", "fixed"] = "rotate"
     auto_advance: bool = True
     summary_model: Optional[PlayerRequest] = None
+    referee_model: StrictStr = Field(default="deepseek-flash-zz", min_length=1, max_length=128)
+    referee_role: StrictStr = Field(default="base_model", min_length=1, max_length=64)
 
     @model_validator(mode="after")
     def validate_players(self):
@@ -210,6 +214,14 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_models()
             return
 
+        if path == "/api/config/defaults":
+            self._handle_config_defaults()
+            return
+
+        if path == "/api/games/incomplete":
+            self._handle_incomplete_games()
+            return
+
         if path.startswith("/uploads/"):
             token = path[len("/uploads/"):]
             self._handle_upload_preview(token)
@@ -245,6 +257,32 @@ class _Handler(BaseHTTPRequestHandler):
         for role in ("base_model", "adv_model"):
             result[role] = mgr.list_models(role)
         self._json(200, result)
+
+    def _handle_config_defaults(self) -> None:
+        """返回裁判默认模型和全部多模态玩家列表，供前端预填充配置。"""
+        state = self._state()
+        llm = LLMService(state.config)
+        mgr = llm.get_provider().get_model_manager()
+        players = []
+        for role in ("base_model", "adv_model"):
+            for model_id, cfg in mgr.get_models_by_priority(role):
+                # 只返回支持多模态的模型（cfg 可能是 dict 或 dataclass）
+                if isinstance(cfg, dict):
+                    is_multimodal = cfg.get("multimodal", False)
+                else:
+                    is_multimodal = getattr(cfg, "multimodal", False)
+                if is_multimodal:
+                    players.append({"role": role, "model_id": model_id, "multimodal": True})
+        self._json(200, {
+            "referee_model": "deepseek-flash-zz",
+            "referee_role": "base_model",
+            "available_players": players,
+        })
+
+    def _handle_incomplete_games(self) -> None:
+        """返回有断点但无完整复盘的对局列表。"""
+        items = self._state().replay_store.list_incomplete_games()
+        self._json(200, items)
 
     def _handle_upload_preview(self, token: str) -> None:
         p = self._state().replay_store.upload_path(token)
@@ -343,6 +381,11 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_abort(game_id)
             return
 
+        if path.startswith("/api/game/") and path.endswith("/resume"):
+            game_id = path[len("/api/game/"):-len("/resume")]
+            self._handle_game_resume(game_id)
+            return
+
         self._json(404, {"error": "not_found"})
 
     def _handle_upload(self) -> None:
@@ -413,11 +456,16 @@ class _Handler(BaseHTTPRequestHandler):
         summary_role = sm.get("role", "base_model")
         summary_model_id = sm.get("model_id", "")
 
+        referee_model = req.get("referee_model", "deepseek-flash-zz")
+        referee_role = req.get("referee_role", "base_model")
+
         session = GameSession(
             game_id=game_id,
             auto_advance=auto_advance,
             summary_role=summary_role,
             summary_model_id=summary_model_id,
+            referee_model=referee_model,
+            referee_role=referee_role,
         )
 
         with state.games_lock:
@@ -429,8 +477,9 @@ class _Handler(BaseHTTPRequestHandler):
         # 构建 players_info（用于 replay.json，is_spy 在游戏结束事件里才知道）
         players_info_base = [
             {"key": f"{role}/{model_id}", "role": role, "model_id": model_id,
-             "is_spy": False, "display_name": f"{role}/{model_id}"}
-            for role, model_id in players
+             "is_spy": False, "display_name": f"{role}/{model_id}",
+             "player_number": idx + 1}
+            for idx, (role, model_id) in enumerate(players)
         ]
         session.players_info = players_info_base
 
@@ -470,17 +519,80 @@ class _Handler(BaseHTTPRequestHandler):
         # 等待后台保存部分复盘后再关闭事件流。
         self._json(200, {"ok": True})
 
+    def _handle_game_resume(self, game_id: str) -> None:
+        """从断点恢复对局：加载 checkpoint.json，重建 GameSession，继续运行。"""
+        state = self._state()
+        store = state.replay_store
+
+        # 验证断点存在且对局尚未完成
+        cp = store.load_checkpoint(game_id)
+        if cp is None:
+            self._json(404, {"error": "断点不存在或已损坏"})
+            return
+        replay_dir = store.game_dir(game_id)
+        if (replay_dir / "replay.json").exists():
+            self._json(400, {"error": "对局已完成，无需恢复"})
+            return
+
+        # 检查并发槽位
+        if not state.game_slots.acquire(blocking=False):
+            self._json(429, {"error": "最多同时运行两局，请等待或取消现有对局"})
+            return
+
+        setup = cp.get("setup", {})
+        players_info = setup.get("players", [])
+        players = [(p["role"], p["model_id"]) for p in players_info]
+        spy_count = len(cp.get("spy_keys", []))
+        seed = setup.get("seed")
+        order_mode = setup.get("order_mode", "rotate")
+        civ_file = setup.get("image_civilian", "")
+        spy_file = setup.get("image_spy", "")
+        civ_path = str(replay_dir / civ_file) if civ_file else ""
+        spy_path = str(replay_dir / spy_file) if spy_file else ""
+        referee_model = setup.get("referee_model", "deepseek-flash-zz")
+        referee_role_v = setup.get("referee_role", "base_model")
+        sm_key = setup.get("summary_model_key", "")
+        summary_role, summary_model_id = (sm_key.split("/", 1) + [""])[:2] if sm_key else ("base_model", "")
+
+        session = GameSession(
+            game_id=game_id,
+            auto_advance=True,
+            summary_role=summary_role,
+            summary_model_id=summary_model_id,
+            referee_model=referee_model,
+            referee_role=referee_role_v,
+        )
+        session.players_info = [
+            {**p, "player_number": idx + 1}
+            for idx, p in enumerate(players_info)
+        ]
+
+        with state.games_lock:
+            state.games[game_id] = session
+
+        t = threading.Thread(
+            target=_run_game,
+            args=(state, session, civ_path, spy_path, players, spy_count, seed, order_mode,
+                  civ_file, spy_file),
+            kwargs={"checkpoint": cp},
+            daemon=True,
+            name=f"game-resume-{game_id}",
+        )
+        session.thread = t
+        t.start()
+        self._json(200, {"game_id": game_id, "resumed_from_round": len(cp.get("completed_rounds", []))})
+
 
 # ── 游戏线程 ─────────────────────────────────────────────────────
 
-def _run_game(state, session, *args) -> None:
+def _run_game(state, session, *args, **kwargs) -> None:
     """保证槽位与终态释放；分钟级对局接入任务面板。"""
     from iris.taskpanel.reporter import TaskReporter
     try:
         with TaskReporter("undercover-game", task_id=session.game_id,
                           data_root=Path(state.config.root) / "data") as reporter:
             reporter.report_phase("运行对局")
-            _run_game_impl(state, session, *args)
+            _run_game_impl(state, session, *args, **kwargs)
             reporter.report_phase("已取消" if session.cancel_event.is_set() else "保存复盘")
             if session.error and not session.cancel_event.is_set():
                 raise RuntimeError(session.error)
@@ -504,14 +616,45 @@ def _run_game_impl(
     order_mode: str,
     civ_file: str,
     spy_file: str,
+    checkpoint: Optional[Dict[str, Any]] = None,
 ) -> None:
     """在后台线程运行完整对局，结束后写复盘、触发总结。"""
     game_id = session.game_id
+    store = state.replay_store
+
+    # 构建 checkpoint 时用的 setup 数据（用于 save_checkpoint）
+    _setup_for_checkpoint: Dict[str, Any] = {
+        "players": session.players_info,
+        "seed": seed,
+        "order_mode": order_mode,
+        "image_civilian": civ_file,
+        "image_spy": spy_file,
+        "referee_model": session.referee_model,
+        "referee_role": session.referee_role,
+        "summary_model_key": f"{session.summary_role}/{session.summary_model_id}" if session.summary_model_id else "",
+    }
+    _completed_rounds_for_ckpt: list = list(checkpoint.get("completed_rounds", [])) if checkpoint else []
 
     def on_event(event_type: str, payload: dict) -> None:
         if session.finished and event_type != "game_end":
             return  # 已中止，丢弃非结束事件
         session.event_queue.put({"type": event_type, "payload": payload})
+        # 每轮结束时，把轮次摘要追加到累计列表（仅需 round_no 以便断点恢复跳轮）
+        if event_type == "round_end":
+            _completed_rounds_for_ckpt.append({"round_no": payload.get("round_no")})
+        # checkpoint 事件触发落盘
+        if event_type == "checkpoint":
+            try:
+                store.save_checkpoint(
+                    game_id,
+                    setup=_setup_for_checkpoint,
+                    completed_rounds=_completed_rounds_for_ckpt,
+                    alive_keys=payload.get("alive_keys", []),
+                    spy_keys=payload.get("spy_keys", []),
+                    speaking_order_base=payload.get("speaking_order_base", []),
+                )
+            except Exception as exc:  # noqa: BLE001 — 断点失败不阻断游戏
+                logger.warning("断点写入失败 %s: %s", game_id, exc)
 
     advance_ev = None if session.auto_advance else session.advance_event
 
@@ -527,6 +670,8 @@ def _run_game_impl(
             on_event=on_event,
             advance_event=advance_ev,
             cancel_event=session.cancel_event,
+            referee_model_id=session.referee_model,
+            referee_role=session.referee_role,
         )
         result = game.run()
     except Exception as exc:  # noqa: BLE001

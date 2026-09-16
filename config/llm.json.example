@@ -304,6 +304,56 @@
           "notes": "2026-09-15 探测多次均 502（Upstream access forbidden / temporarily unavailable）；同批 gpt-5.6-terra 首测 502、复测成功 → 属上游间歇性波动，非模型名错误",
           "provider": "openai",
           "api_base_url": "https://your-tokenhub.example.com/codex/v1"
+        },
+        "deepseek-v4-pro-zz": {
+          "channel": "zz_tokenhub",
+          "model": "deepseek-v4-pro",
+          "display_name": "DeepSeek V4 Pro (zz_tokenhub)",
+          "multimodal": false,
+          "max_context_tokens": 1000000,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 300,
+          "max_retries": 2,
+          "priority": 45,
+          "cost_level": "low",
+          "reasoning_level": "advanced",
+          "supported_inputs": [
+            "text"
+          ],
+          "use_cases": [
+            "qa",
+            "analysis_complex"
+          ],
+          "notes": "【不支持图片】2026-09-15 实测图像能力不稳定（纯红偶答对，纯蓝/纯绿多次答「无法确定」），不参与图像链路；文本 1.7s；推理型，图像请求在 max_tokens=2048 下会被思考链耗尽预算",
+          "provider": "openai",
+          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
+        },
+        "glm-5.3-zz": {
+          "channel": "zz_tokenhub",
+          "model": "glm-5.3",
+          "display_name": "GLM 5.3 (zz_tokenhub)",
+          "multimodal": false,
+          "max_context_tokens": 131072,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 120,
+          "max_retries": 2,
+          "priority": 40,
+          "cost_level": "medium",
+          "reasoning_level": "advanced",
+          "supported_inputs": [
+            "text"
+          ],
+          "use_cases": [
+            "qa",
+            "analysis_complex"
+          ],
+          "notes": "【不支持图片】2026-09-15 实测文本 2.9s；图像请求 HTTP 400（content.type 仅接受 text）→ multimodal=false",
+          "provider": "openai",
+          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
         }
       }
     },
@@ -663,56 +713,6 @@
           "provider": "openai",
           "api_base_url": "https://your-tokenhub.example.com/codex/v1"
         },
-        "deepseek-v4-pro-zz": {
-          "channel": "zz_tokenhub",
-          "model": "deepseek-v4-pro",
-          "display_name": "DeepSeek V4 Pro (zz_tokenhub)",
-          "multimodal": false,
-          "max_context_tokens": 1000000,
-          "max_tokens": 8192,
-          "temperature": 0.2,
-          "top_p": 1.0,
-          "timeout_seconds": 300,
-          "max_retries": 2,
-          "priority": 130,
-          "cost_level": "low",
-          "reasoning_level": "advanced",
-          "supported_inputs": [
-            "text"
-          ],
-          "use_cases": [
-            "qa",
-            "analysis_complex"
-          ],
-          "notes": "【不支持图片】2026-09-15 实测图像能力不稳定（纯红偶答对，纯蓝/纯绿多次答「无法确定」），不参与图像链路；文本 1.7s；推理型，图像请求在 max_tokens=2048 下会被思考链耗尽预算",
-          "provider": "openai",
-          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
-        },
-        "glm-5.3-zz": {
-          "channel": "zz_tokenhub",
-          "model": "glm-5.3",
-          "display_name": "GLM 5.3 (zz_tokenhub)",
-          "multimodal": false,
-          "max_context_tokens": 131072,
-          "max_tokens": 8192,
-          "temperature": 0.2,
-          "top_p": 1.0,
-          "timeout_seconds": 120,
-          "max_retries": 2,
-          "priority": 125,
-          "cost_level": "medium",
-          "reasoning_level": "advanced",
-          "supported_inputs": [
-            "text"
-          ],
-          "use_cases": [
-            "qa",
-            "analysis_complex"
-          ],
-          "notes": "【不支持图片】2026-09-15 实测文本 2.9s；图像请求 HTTP 400（content.type 仅接受 text）→ multimodal=false",
-          "provider": "openai",
-          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
-        },
         "kimi-k2.6": {
           "channel": "zz_tokenhub",
           "model": "kimi-k2.6",
@@ -724,7 +724,7 @@
           "top_p": 1.0,
           "timeout_seconds": 120,
           "max_retries": 2,
-          "priority": 120,
+          "priority": 130,
           "cost_level": "medium",
           "reasoning_level": "standard",
           "supported_inputs": [
