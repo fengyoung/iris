@@ -512,7 +512,59 @@ class TestPromptContracts:
 
     def test_prompts_state_double_spy_win_condition(self):
         assert "所有卧底都被投出" in _DESCRIBE_PROMPT
-        assert "卧底人数不少于平民人数" in _DESCRIBE_PROMPT
+        assert "场上卧底人数多于平民人数" in _DESCRIBE_PROMPT
+
+    def test_describe_prompt_says_parity_keeps_playing(self):
+        """打平不算收局——玩家读到的规则必须与引擎的严格多数判定一致。
+
+        旧的「不少于即卧底胜」下，3v3 时卧底会以为自己已经赢了、平民会以为输了，
+        双方都会放弃最后一轮的最佳策略。
+        """
+        assert "人数相同时游戏不结束" in _DESCRIBE_PROMPT
+        assert "不少于平民人数" not in _DESCRIBE_PROMPT
+
+    # ── 策略层：投票判据分级（按 2026-09-16 复盘校准） ──────────────
+
+    def test_vote_prompt_grades_evidence(self):
+        assert "证据分两档，先用强证据" in _VOTE_PROMPT
+        assert "强证据（优先）" in _VOTE_PROMPT
+        assert "弱证据（兜底）" in _VOTE_PROMPT
+        assert "不能同时成立" in _VOTE_PROMPT
+
+    def test_vote_prompt_no_longer_recommends_absence_evidence(self):
+        """回归钉：旧文案把「未提及型」列为推荐判据，那是上一局误杀平民的主因。
+
+        该局被淘汰的 7 人中 6 名平民死于这条判据，而唯一出局的卧底死于明确互斥矛盾。
+        """
+        assert "而多数人提到的核心元素他完全没有提到" not in _VOTE_PROMPT
+
+    def test_vote_prompt_says_not_mentioned_is_not_not_seen(self):
+        assert "「没有提到」不等于「没有看到」" in _VOTE_PROMPT
+
+    def test_vote_prompt_keeps_abstention_exit(self):
+        """弃权被贬为下策，但出口必须保留——否则会逼出噪声票。"""
+        assert "弃权等于把本轮的决定权让给别人" in _VOTE_PROMPT
+        assert "且没有任何候选人可做横向比较时才弃权" in _VOTE_PROMPT
+
+    def test_vote_prompt_discounts_spy_hits_as_credibility(self):
+        """卖队友：投中过卧底不等于可信（上一局卧底靠这一手一路潜伏到终局）。"""
+        assert "「投中过卧底」不构成可信度证明" in _VOTE_PROMPT
+
+    def test_vote_prompt_handles_denial_of_own_observation(self):
+        """否认型埋钩：有人否认你亲眼看到的元素时，不要因此改口或转票。"""
+        assert "否认一个你亲眼看到的元素" in _VOTE_PROMPT
+        assert "公开场合不要改口" in _VOTE_PROMPT
+
+    def test_describe_prompt_distinguishes_self_certification_from_echo(self):
+        """自证与复读必须同时在场：只加自证会沦为复读许可，只禁止复读会逼出薄描述。"""
+        assert "是自证不是复读" in _DESCRIBE_PROMPT
+        assert "不得整段复述他人已公开的内容" in _DESCRIBE_PROMPT
+        # 自证不得豁免增量要求，否则第 2 轮起会被裁判反复打回
+        assert "不豁免增量要求" in _DESCRIBE_PROMPT
+
+    def test_describe_prompt_bans_absence_as_challenge_basis(self):
+        """质疑只看正面观察到的互斥矛盾，「我没看到」不构成理由。"""
+        assert "「我没看到」不构成质疑理由" in _DESCRIBE_PROMPT
 
 
 # ── schema 兼容 ───────────────────────────────────────────────────
