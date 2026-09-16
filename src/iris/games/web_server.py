@@ -93,6 +93,9 @@ class GameSession:
     summary_model_id: str = ""
     referee_model: str = "deepseek-flash-zz"
     referee_role: str = "base_model"
+    phase: str = "starting"
+    round_no: int = 0
+    replay_ready: bool = False
 
 
 class PlayerRequest(BaseModel):
@@ -161,6 +164,10 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _json(self, code: int, data: Any) -> None:
+        if code >= 400 and isinstance(data, dict) and "error" in data:
+            data = {**data, "code": {400: "INVALID_REQUEST", 403: "FORBIDDEN",
+                    404: "NOT_FOUND", 409: "INVALID_STATE", 429: "BUSY"}.get(code, "SERVER_ERROR"),
+                    "retryable": code in (429, 503)}
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self._send(code, body, "application/json; charset=utf-8")
 
@@ -230,6 +237,11 @@ class _Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/game/") and path.endswith("/events"):
             game_id = path[len("/api/game/"):-len("/events")]
             self._handle_sse(game_id)
+            return
+
+        if path.startswith("/api/game/"):
+            game_id = path[len("/api/game/"):]
+            self._handle_game_status(game_id)
             return
 
         if path == "/api/history":
@@ -330,6 +342,25 @@ class _Handler(BaseHTTPRequestHandler):
     def _handle_history_list(self) -> None:
         items = self._state().replay_store.list_games()
         self._json(200, items)
+
+    def _handle_game_status(self, game_id: str) -> None:
+        with self._state().games_lock:
+            session = self._state().games.get(game_id)
+        if session is None:
+            self._json(404, {"error": "game_not_found"})
+            return
+        with session.event_queue.condition:
+            status = "running"
+            if session.finished:
+                status = "failed" if session.error else "finished"
+            elif session.cancel_event.is_set():
+                status = "cancelling"
+            self._json(200, {
+                "game_id": game_id, "status": status, "error": session.error,
+                "phase": session.phase, "round_no": session.round_no,
+                "auto_advance": session.auto_advance, "replay_ready": session.replay_ready,
+                "sequence": session.event_queue.sequence,
+            })
 
     def _handle_history_detail(self, game_id: str) -> None:
         try:
@@ -503,7 +534,12 @@ class _Handler(BaseHTTPRequestHandler):
         if session is None:
             self._json(404, {"error": "game_not_found"})
             return
-        session.advance_event.set()
+        with session.event_queue.condition:
+            if session.finished or session.cancel_event.is_set() or session.phase != "waiting":
+                self._json(409, {"error": "当前不在等待下一轮状态"})
+                return
+            session.phase = "continuing"
+            session.advance_event.set()
         self._json(200, {"ok": True})
 
     def _handle_abort(self, game_id: str) -> None:
@@ -512,6 +548,9 @@ class _Handler(BaseHTTPRequestHandler):
             session = state.games.get(game_id)
         if session is None:
             self._json(404, {"error": "game_not_found"})
+            return
+        if session.finished or session.phase == "saving":
+            self._json(409, {"error": "对局已结束或正在保存"})
             return
         session.cancel_event.set()
         # 设置 advance_event，让卡在 wait() 的游戏线程能退出
@@ -638,7 +677,13 @@ def _run_game_impl(
     def on_event(event_type: str, payload: dict) -> None:
         if session.finished and event_type != "game_end":
             return  # 已中止，丢弃非结束事件
-        session.event_queue.put({"type": event_type, "payload": payload})
+        with session.event_queue.condition:
+            session.round_no = payload.get("round_no", session.round_no)
+            phases = {"game_start": "starting", "round_start": "describing",
+                      "vote_cast": "voting", "game_end": "saving",
+                      "round_waiting": "waiting"}
+            session.phase = phases.get(event_type, session.phase)
+            session.event_queue.put({"type": event_type, "payload": payload})
         # 每轮结束时，把轮次摘要追加到累计列表（仅需 round_no 以便断点恢复跳轮）
         if event_type == "round_end":
             _completed_rounds_for_ckpt.append({"round_no": payload.get("round_no")})
@@ -697,6 +742,7 @@ def _run_game_impl(
             civ_file, spy_file,
             summary_model_key=sm_key,
         )
+        session.replay_ready = True
     except Exception as exc:  # noqa: BLE001
         session.error = f"复盘写入失败: {exc}"
         session.event_queue.put({"type": "error", "payload": {"message": session.error}})
