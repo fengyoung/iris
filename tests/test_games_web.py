@@ -1,7 +1,10 @@
 """本机 HTTP 集成契约：安全边界、广播、资源配额和复盘持久化。"""
 import http.client
 import json
+import socket
+import struct
 import threading
+import time
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -121,6 +124,44 @@ def test_summary_failure_and_skipped_state(web):
     assert data['summary_status'] == 'failed' and not data['summary_ready']
 
 
+def test_cancelled_game_still_records_summary_pending(web):
+    """取消的对局也要出总结：已跑完的轮次仍有分析价值，winner=cancelled 已标明是部分复盘。"""
+    result = GameResult(image_civilian='a', image_spy='b', players=[], spy_keys=[], winner='cancelled')
+    store = web.state.replay_store
+    store.save_result('cancelled-sum', result, [], 'c.png', 's.png', 'base_model/judge')
+    assert store.load_game('cancelled-sum')['summary_status'] == 'pending'
+
+
+def test_summary_prompt_names_cancelled_as_partial():
+    """裁判提示词要说明这是被终止的部分复盘，不能把 cancelled 原样丢给模型。"""
+    from iris.games.replay_store import _build_summary_prompt
+    prompt = _build_summary_prompt({
+        'setup': {'players': [], 'spy_keys': []},
+        'result': {'winner': 'cancelled', 'total_rounds': 1},
+        'rounds': [],
+    })
+    assert '部分复盘' in prompt
+    assert 'cancelled' not in prompt
+
+
+def test_summary_model_falls_back_to_referee(web):
+    """回归：前端只发 referee_model（裁判改成文本框后不再发 summary_model），
+    而后端只读 req["summary_model"]——于是 summary_model_id 恒为空、复盘一律记
+    summary_status=skipped，总结从未生成过。总结必须挂在裁判模型上。
+    """
+    token = web.state.replay_store.save_upload(image_bytes(), 'test.png')
+    payload = {'players': [{'role': 'base_model', 'model_id': str(i)} for i in range(3)],
+               'image_civilian': token, 'image_spy': token, 'referee_model': 'judge-x'}
+    result = GameResult(image_civilian='a', image_spy='b', players=[], spy_keys=[], winner='cancelled')
+    with patch('iris.games.web_server.UndercoverGame') as game:
+        game.return_value.run.return_value = result
+        status, body = request(web, 'POST', '/api/game/start', json.dumps(payload))
+        assert status == 200
+        session = web.state.games[json.loads(body)['game_id']]
+        assert session.referee_model == 'judge-x'
+        assert session.summary_model_id == 'judge-x'
+
+
 def test_start_validation_quota_and_saved_result(web):
     token = web.state.replay_store.save_upload(image_bytes(), 'test.png')
     payload = {'players': [{'role': 'base_model', 'model_id': str(i)} for i in range(3)],
@@ -146,6 +187,80 @@ def test_start_validation_quota_and_saved_result(web):
         assert request(web, 'POST', '/api/game/start', invalid)[0] == 400
     payload['image_spy'] = 'a' * 32 + '.png'
     assert request(web, 'POST', '/api/game/start', json.dumps(payload))[0] == 400
+
+
+def _rst_close(sock):
+    """SO_LINGER=0 让 close() 发 RST 而非 FIN。
+
+    浏览器取消 SSE 时正是如此：接收缓冲里还有服务端推来的未读事件，
+    进程一关内核就回 RST，而不是礼貌的 FIN。
+    """
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, 0))
+    sock.close()
+
+
+def test_connection_errors_are_silenced(web, capsys):
+    """连接类异常必须静默——默认 handle_error 会 traceback.print_exc。
+
+    直接构造异常调用，不依赖网络时序：这样测的正是分类逻辑本身。
+    """
+    for exc_type in (ConnectionResetError, BrokenPipeError, ConnectionAbortedError):
+        try:
+            raise exc_type(54, 'reset by peer')
+        except exc_type:
+            web.handle_error(None, ('127.0.0.1', 1))
+    assert 'Traceback' not in capsys.readouterr().err
+
+
+def test_client_reset_does_not_dump_traceback(web, capsys):
+    """端到端：客户端 RST 断开后，控制台不该出现整栈。"""
+    host, port = web.server_address
+    for _ in range(2):  # 连上即断
+        _rst_close(socket.create_connection((host, port), timeout=3))
+    s = socket.create_connection((host, port), timeout=3)  # 发一半就断
+    s.sendall(b'GET / HTTP/1.1\r\nHost: x')
+    _rst_close(s)
+    s = socket.create_connection((host, port), timeout=3)  # 发完整请求但不等响应
+    s.sendall(b'GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n')
+    _rst_close(s)
+
+    err = ''
+    deadline = time.time() + 3
+    while time.time() < deadline and 'Traceback' not in err:
+        err += capsys.readouterr().err
+        time.sleep(0.05)
+    assert 'Traceback' not in err, f'客户端断开不应打印 traceback：{err[:300]}'
+
+
+def test_unexpected_error_still_reported(web, capsys):
+    """只静默连接类异常——真故障仍要打出来，别跟着一起吞掉。"""
+    try:
+        raise RuntimeError('boom')
+    except RuntimeError:
+        web.handle_error(None, ('127.0.0.1', 1))
+    assert 'RuntimeError' in capsys.readouterr().err
+
+
+def test_referee_default_is_official_and_mutually_exclusive_with_players(web):
+    """裁判默认走官方 deepseek-flash；裁判与玩家互斥由后端兜底，不依赖前端禁用。
+
+    前端会把裁判占用的模型置灰，但那只是交互约定——直接构造请求仍须被拒。
+    """
+    from iris.games import web_server
+    assert web_server._DEFAULT_REFEREE_MODEL == 'deepseek-flash'
+    # 三个落点都要跟着常量走，改漏一处就会出现「前端显示 A、后端实跑 B」
+    assert web_server.StartRequest.model_fields['referee_model'].default == 'deepseek-flash'
+    assert web_server.GameSession.__dataclass_fields__['referee_model'].default == 'deepseek-flash'
+
+    token = web.state.replay_store.save_upload(image_bytes(), 'test.png')
+    payload = {'players': [{'role': 'base_model', 'model_id': str(i)} for i in range(3)],
+               'image_civilian': token, 'image_spy': token, 'referee_model': '1'}
+    status, body = request(web, 'POST', '/api/game/start', json.dumps(payload))
+    assert status == 400 and '不能与参与玩家相同' in json.loads(body)['error']
+
+    # 同一模型换到裁判没占用的角色则不冲突（裁判固定以 base_model 调用）
+    payload['referee_model'] = '9'
+    assert request(web, 'POST', '/api/game/start', json.dumps(payload))[0] != 400
 
 
 def test_summary_updates_replay(web):

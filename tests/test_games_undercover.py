@@ -1,6 +1,7 @@
 """测试 games.undercover — 多模型对抗游戏逻辑。"""
 
 import random
+import re
 from collections import Counter
 from unittest.mock import MagicMock, patch
 
@@ -63,7 +64,10 @@ def _capture_prompts(mock_llm, game, describe_reply, vote_picker):
             result.text = "增量：是\n理由：mock 裁判判定有增量"
             return result
         prompts.append(("vote", key, prompt))
-        candidates = prompt.split("只能投给以下候选之一：", 1)[1].strip().split(", ")
+        # 候选清单渲染成「N号=key」，这里还原成裸 key——picker 与断言都按 key 写，
+        # 编号格式只是呈现层的事，不该漏进测试 API。
+        raw = prompt.split("只能投给以下候选之一：", 1)[1].strip().split(", ")
+        candidates = [c.split("=", 1)[-1] for c in raw]
         target = vote_picker(candidates, key, prompt)
         result.text = f"投票：{target}\n理由：理由-{key}" if target else "我不知道投给谁"
         return result
@@ -117,6 +121,127 @@ class TestParseVote:
         text = "投票：不确定\n我倾向 base_model/m1"
         target, _ = _parse_vote(text, keys)
         assert target == "base_model/m1"
+
+    def test_multi_candidate_body_without_vote_line_abstains(self):
+        """回归：正文里逐个列出多名玩家的 key 时，不得按长度挑一个当投票对象。
+
+        这正是「投票理由通篇论证甲、投票对象却是乙」的根因——挑中谁只取决于
+        key 的字符串长度，与模型真正投的人无关。多个候选时无从判断意图，宁可弃权。
+        """
+        keys = ["base_model/m1", "base_model/m2", "base_model/m10"]
+        text = "我核对了 base_model/m1 与 base_model/m2 的描述，两者都可疑。"
+        target, _ = _parse_vote(text, keys)
+        assert target is None
+
+    def test_resolves_number_vote(self):
+        """模型常只写编号（prompt 里每个玩家都带 N号= 前缀），按 numbers 精确映射。"""
+        keys = ["base_model/m1", "base_model/m2", "base_model/m3"]
+        numbers = {"base_model/m1": 1, "base_model/m2": 2, "base_model/m3": 3}
+        target, _ = _parse_vote("投票：3号\n理由：离群", keys, numbers)
+        assert target == "base_model/m3"
+
+    def test_resolves_verbatim_label(self):
+        """模型照抄候选清单里的「N号=key」整串也要能解析。"""
+        keys = ["base_model/m2"]
+        target, _ = _parse_vote("投票：2号=base_model/m2\n理由：x", keys, {"base_model/m2": 2})
+        assert target == "base_model/m2"
+
+    def test_longer_number_not_stolen_by_shorter(self):
+        """「14号」不能被「4号」抢走。"""
+        keys = [f"base_model/m{i}" for i in range(1, 15)]
+        numbers = {k: i + 1 for i, k in enumerate(keys)}
+        target, _ = _parse_vote("投票：14号\n理由：x", keys, numbers)
+        assert target == "base_model/m14"
+
+    def test_number_vote_wins_over_multi_key_preamble(self):
+        """回归：前言列了多个 key、投票行只写编号——必须按编号解析，不能被前言带走。"""
+        keys = ["base_model/m1", "base_model/m2", "base_model/m10"]
+        numbers = {"base_model/m1": 1, "base_model/m2": 2, "base_model/m10": 10}
+        text = ("先逐个核对各玩家：\n- base_model/m1 提到农田\n- base_model/m2 提到城市\n"
+                "投票：10号\n理由：与多数玩家核心元素冲突")
+        target, _ = _parse_vote(text, keys, numbers)
+        assert target == "base_model/m10"
+
+    def test_number_not_in_candidates_is_not_votable(self):
+        """编号指向自己（不能投自己）时不应命中。"""
+        keys = ["base_model/m2", "base_model/m3"]
+        numbers = {"base_model/m1": 1, "base_model/m2": 2, "base_model/m3": 3}
+        target, _ = _parse_vote("投票：1号\n理由：x", keys, numbers)
+        assert target is None
+
+
+class TestOpeningSpeakerGuidance:
+    """「少说细节」的提示只给本局第一位发言者，其余人拿到「不适用」。
+
+    给所有人发会让后面的玩家以为说的是自己——他们有前置内容可参考，恰恰不该保守。
+    """
+
+    def test_only_the_very_first_speaker_gets_it(self):
+        game, mock_llm = _make_game(players=_players(4), rng=random.Random(5))
+        prompts = _capture_prompts(
+            mock_llm, game, describe_reply=lambda key: f"描述-{key}",
+            vote_picker=lambda candidates, voter, prompt: None,
+        )
+        game.run()
+
+        describe = [t for phase, _o, t in prompts if phase == "describe"]
+        assert describe
+        assert "你是本局第一位发言的人" in describe[0]
+        # 不能只剩「少说」：整轮零信息会让同伴无从比对，首轮白白空转
+        assert "可核对" in describe[0]
+        assert "不要展开最具体的辨识特征" in describe[0]
+        # 模板检查只看模板本身，这条是运行时拼接的，得在渲染结果上查
+        assert "**" not in describe[0]
+        for text in describe[1:]:
+            assert "（不适用：你不是本局第一位发言者）" in text
+            assert "你是本局第一位发言的人" not in text
+
+
+class TestPlayerNumberUnambiguous:
+    """玩家引用统一成 `N号=key`，且 N 取全局固定编号而非本轮发言位次。
+
+    早先描述 prompt 用 `player_number`、历史块用发言位次：第 1 轮两者恰好重合，
+    第 2 轮起位次随轮转变化就分叉，模型说「4号」时无从判断指哪一个。
+    """
+
+    def test_every_label_uses_fixed_number(self):
+        """跑满多轮，逐条核对 N号 与 player_number 一致。
+
+        若标签用的是发言位次，第 2 轮轮转后就会与固定编号分叉——本断言即失败。
+        """
+        game, mock_llm = _make_game(players=_players(6), rng=random.Random(5))
+        prompts = _capture_prompts(
+            mock_llm, game, describe_reply=lambda key: f"描述-{key}",
+            vote_picker=lambda candidates, voter, prompt: None,
+        )
+        game.run()
+
+        numbers = game._player_numbers()
+        checked = 0
+        for phase, _owner, text in prompts:
+            if phase != "vote":
+                continue
+            for match in re.finditer(r"(\d+)号=([\w./\-]+)", text):
+                num, key = int(match.group(1)), match.group(2)
+                assert numbers.get(key) == num, f"{key} 标成 {num}号，实际固定编号为 {numbers.get(key)}"
+                checked += 1
+        assert checked > 0, "prompt 里应至少出现一处玩家编号标签"
+
+    def test_candidate_list_is_votable_verbatim(self):
+        """候选清单形如 `N号=key`，模型照抄整串也要能被解析回该玩家。"""
+        game, mock_llm = _make_game(players=_players(4), rng=random.Random(5))
+        prompts = _capture_prompts(
+            mock_llm, game, describe_reply=lambda key: f"描述-{key}",
+            vote_picker=lambda candidates, voter, prompt: None,
+        )
+        game.run()
+
+        text = [t for p, _o, t in prompts if p == "vote"][0]
+        raw = text.split("只能投给以下候选之一：", 1)[1].strip()
+        for item in raw.split(", "):
+            number, key = item.split("=", 1)
+            assert number.endswith("号")
+            assert game._players[key].player_number == int(number[:-1])
 
 
 class TestFormatHistory:
@@ -618,7 +743,8 @@ class TestDefectRegressions:
             history = text.split("以下是本局到目前为止的完整公开记录：", 1)[1]
             history = history.split("当前存活玩家：", 1)[0]
             assert _DESCRIBE_FAILED_PLACEHOLDER not in history
-            assert f"[第1轮未发言] {silent_key}" in history
+            number = game._players[silent_key].player_number
+            assert f"[第1轮未发言] {number}号={silent_key}" in history
 
     def test_malformed_speaker_stays_in_comparison_block(self):
         """输出不合规必须留在比对块里——否则「装死」就是卧底的严格优势策略。"""

@@ -391,7 +391,7 @@ class TestPromptContracts:
         "spy_count": 2, "total_players": 8, "alive_count": 8, "round_no": 1,
         "player_key": "base_model/m1", "player_number": 3, "speaking_position": 3,
         "history": "H", "prior_speeches": "P", "own_private_history": "O",
-        "incremental_requirement": "R",
+        "incremental_requirement": "R", "opening_note": "N",
     }
     _VOTE_VARS = {
         "spy_count": 2, "total_players": 8, "history": "H",
@@ -419,6 +419,34 @@ class TestPromptContracts:
         assert "严禁为了隐藏而写下你图中并不存在的元素" in _DESCRIBE_PROMPT
         assert "严禁否认你实际看到的元素" in _DESCRIBE_PROMPT
 
+    def test_self_assessment_covers_attribute_conflict(self):
+        """回归 2026-09-16 复盘：卧底主体元素全对得上、只有服饰与多数人互斥，
+        旧门槛只认「主体元素几乎无人提及」，于是它自评「平民 96%」，
+        随后按平民目标行动、当众纠正他人，一轮就被投出。
+
+        同一主体、个别关键属性不同，是这类游戏最常见的差异形态，必须在判定口径内。
+        """
+        assert "主体矛盾" in _DESCRIBE_PROMPT
+        assert "属性冲突" in _DESCRIBE_PROMPT
+        assert "局部的关键属性冲突同样是身份证据" in _DESCRIBE_PROMPT
+        assert "不要因为「主体元素都对得上」就排除自己" in _DESCRIBE_PROMPT
+
+    def test_spy_is_told_not_to_voice_real_discrepancies(self):
+        """「质疑必须基于真实内容」这条对卧底是陷阱——照做即自曝，必须给出路。"""
+        assert "既不要指出这个差异，也不要附和" in _DESCRIBE_PROMPT
+        # 质疑条也要留出口，否则被上面那条的正面要求抵消
+        assert "只在这个矛盾连你自己也认同时才质疑" in _DESCRIBE_PROMPT
+
+    def test_describe_prompt_forbids_whole_clause_echo(self):
+        """整段复述不该是零成本隐身术——与「防装死」同源：无信息不该是优势策略。"""
+        assert "不得整段复述他人已公开的内容" in _DESCRIBE_PROMPT
+        assert "至少要包含一项" in _DESCRIBE_PROMPT
+
+    def test_prompt_has_no_markdown_emphasis(self):
+        """模板通体是纯文本，混入 markdown 强调会让风格不一致（实测模型会照抄）。"""
+        assert "**" not in _DESCRIBE_PROMPT
+        assert "**" not in _VOTE_PROMPT
+
     def test_describe_prompt_forbids_identity_leak_and_coordination(self):
         assert "严禁在公开内容中透露或暗示你是平民还是卧底" in _DESCRIBE_PROMPT
         assert "严禁试图与其他玩家建立任何联络" in _DESCRIBE_PROMPT
@@ -427,8 +455,37 @@ class TestPromptContracts:
         assert "不要试图与其他玩家建立联络" in _VOTE_PROMPT
 
     def test_describe_prompt_contains_concealment_tactics(self):
-        for tactic in ("取舍", "概括", "借用共享词", "措辞模糊化"):
+        for tactic in ("取舍", "概括", "借用共享词", "措辞模糊化", "转移视线"):
             assert tactic in _DESCRIBE_PROMPT
+
+    def test_describe_prompt_states_identity_dependent_goals(self):
+        """目标必须按「你推断出的身份」分叉表述，而非按真实身份。
+
+        模板对全部玩家逐字相同（身份只体现在图片上），所以只能写成条件句——
+        若改成「你是卧底则…」，还没开局就把身份泄给模型了。
+        """
+        assert "你的目标由你推断出的身份决定" in _DESCRIBE_PROMPT
+        assert "目标是把卧底找出来投出去" in _DESCRIBE_PROMPT
+        assert "目标是活到最后" in _DESCRIBE_PROMPT
+
+    def test_describe_prompt_guides_the_opening_speaker(self):
+        """首位发言者没有可比对内容，细节说太满最容易当场暴露。"""
+        assert "{opening_note}" in _DESCRIBE_PROMPT
+
+    def test_describe_prompt_covers_spy_teammate_handling(self):
+        """卧底对推断出的同类不发信号、也不攻击——识别只能靠描述吻合这一条推断。"""
+        assert "不要把质疑或投票指向你推断出的同类" in _DESCRIBE_PROMPT
+        assert "识别只能靠" in _DESCRIBE_PROMPT
+        # 放宽到「可以联络」会同时废掉「玩家不知自己身份」的前提，必须仍禁止
+        assert "也不能发出任何信号" in _DESCRIBE_PROMPT
+
+    def test_vote_prompt_states_identity_dependent_goals(self):
+        assert "你的目标同样由你推断出的身份决定" in _VOTE_PROMPT
+        assert "目标是投出卧底" in _VOTE_PROMPT
+        assert "目标是活到最后" in _VOTE_PROMPT
+
+    def test_vote_prompt_forbids_voting_own_kind(self):
+        assert "不要投给你推断出的同类" in _VOTE_PROMPT
 
     def test_borrowed_words_restricted_to_own_image(self):
         assert "只有当这个词在你自己的图里也成立时才能用" in _DESCRIBE_PROMPT

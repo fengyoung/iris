@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 import time
 from collections import deque
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, ValidationError, model_validator
@@ -38,6 +39,11 @@ logger = logging.getLogger(__name__)
 
 _TEMPLATE = Path(__file__).parent / "templates" / "undercover_web.html"
 _SSE_SENTINEL = None   # 游戏结束或中止时 put 进队列，通知 SSE handler 退出
+
+# 裁判默认模型：走官方直连通道（与玩家模型互斥，前端会把它从玩家列表里禁用）。
+# 定义成常量是因为它有 5 个落点（会话默认 / 请求模型 / 默认值接口 / 开局回退 / 断点回退），
+# 散落的字面量改漏一处就会出现「前端显示 A、后端实跑 B」。
+_DEFAULT_REFEREE_MODEL = "deepseek-flash"
 
 # MIME 类型映射（图片）
 _IMG_MIME = {
@@ -91,7 +97,7 @@ class GameSession:
     players_info: list = field(default_factory=list)
     summary_role: str = ""
     summary_model_id: str = ""
-    referee_model: str = "deepseek-flash-zz"
+    referee_model: str = _DEFAULT_REFEREE_MODEL
     referee_role: str = "base_model"
     phase: str = "starting"
     round_no: int = 0
@@ -114,7 +120,7 @@ class StartRequest(BaseModel):
     order_mode: Literal["rotate", "fixed"] = "rotate"
     auto_advance: bool = True
     summary_model: Optional[PlayerRequest] = None
-    referee_model: StrictStr = Field(default="deepseek-flash-zz", min_length=1, max_length=128)
+    referee_model: StrictStr = Field(default=_DEFAULT_REFEREE_MODEL, min_length=1, max_length=128)
     referee_role: StrictStr = Field(default="base_model", min_length=1, max_length=64)
 
     @model_validator(mode="after")
@@ -125,6 +131,8 @@ class StartRequest(BaseModel):
         if self.spy_count is not None and not 1 <= self.spy_count < len(keys) / 2:
             raise ValueError("卧底人数需至少 1 且小于玩家数的一半")
         if self.summary_model and (self.summary_model.role, self.summary_model.model_id) in keys:
+            raise ValueError("裁判模型不能与参与玩家相同")
+        if (self.referee_role, self.referee_model) in keys:
             raise ValueError("裁判模型不能与参与玩家相同")
         return self
 
@@ -286,7 +294,7 @@ class _Handler(BaseHTTPRequestHandler):
                 if is_multimodal:
                     players.append({"role": role, "model_id": model_id, "multimodal": True})
         self._json(200, {
-            "referee_model": "deepseek-flash-zz",
+            "referee_model": _DEFAULT_REFEREE_MODEL,
             "referee_role": "base_model",
             "available_players": players,
         })
@@ -483,12 +491,16 @@ class _Handler(BaseHTTPRequestHandler):
         order_mode = req.get("order_mode", "rotate")
         auto_advance = bool(req.get("auto_advance", True))
 
-        sm = req.get("summary_model") or {}
-        summary_role = sm.get("role", "base_model")
-        summary_model_id = sm.get("model_id", "")
-
-        referee_model = req.get("referee_model", "deepseek-flash-zz")
+        referee_model = req.get("referee_model", _DEFAULT_REFEREE_MODEL)
         referee_role = req.get("referee_role", "base_model")
+
+        # 总结固定由裁判模型产出（界面上的「裁判模型（增量校验 + 总结）」）。
+        # 曾经这里只读 req["summary_model"]，而前端改发 referee_model 之后没人再发它——
+        # summary_model_id 恒为空，复盘一律记成 summary_status=skipped，总结从未生成过。
+        # 仍接受显式传入的 summary_model 以兼容旧客户端。
+        sm = req.get("summary_model") or {}
+        summary_role = sm.get("role", referee_role)
+        summary_model_id = sm.get("model_id", referee_model)
 
         session = GameSession(
             game_id=game_id,
@@ -588,10 +600,15 @@ class _Handler(BaseHTTPRequestHandler):
         spy_file = setup.get("image_spy", "")
         civ_path = str(replay_dir / civ_file) if civ_file else ""
         spy_path = str(replay_dir / spy_file) if spy_file else ""
-        referee_model = setup.get("referee_model", "deepseek-flash-zz")
+        referee_model = setup.get("referee_model", _DEFAULT_REFEREE_MODEL)
         referee_role_v = setup.get("referee_role", "base_model")
+        # 同 _handle_game_start：总结由裁判产出；旧断点里可能没有 summary_model_key，
+        # 此时回落到裁判而不是留空（留空会让复盘写成 summary_status=skipped）。
         sm_key = setup.get("summary_model_key", "")
-        summary_role, summary_model_id = (sm_key.split("/", 1) + [""])[:2] if sm_key else ("base_model", "")
+        if sm_key:
+            summary_role, summary_model_id = (sm_key.split("/", 1) + [""])[:2]
+        else:
+            summary_role, summary_model_id = referee_role_v, referee_model
 
         session = GameSession(
             game_id=game_id,
@@ -748,8 +765,9 @@ def _run_game_impl(
         session.event_queue.put({"type": "error", "payload": {"message": session.error}})
         logger.warning("复盘写入失败 %s: %s", game_id, exc)
 
-    # 触发 LLM 总结
-    if session.summary_model_id and not session.cancel_event.is_set() and not session.error:
+    # 触发 LLM 总结。取消的对局同样出总结——已跑完的轮次仍有分析价值，
+    # 复盘里 winner=cancelled 已经标明这是部分复盘。
+    if session.summary_model_id and not session.error:
         try:
             llm = LLMService(state.config)
             state.replay_store.trigger_summary(
@@ -848,6 +866,21 @@ class UndercoverWebServer(ThreadingHTTPServer):
             replay_store=store,
             html=html,
         )
+
+    def handle_error(self, request, client_address) -> None:
+        """客户端中途断开不是服务端故障，不打整栈到控制台。
+
+        浏览器会开预连接再关掉、刷新页面时取消 SSE 长连接——这些都会让
+        `rfile.readline` 抛 ConnectionResetError，默认实现（traceback.print_exc）
+        会把几十行栈刷满终端，看着像服务崩了。降为 debug 记录，真出问题时
+        打开 debug 日志仍可查；其余异常保持默认行为，不跟着一起吞。
+        """
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (ConnectionResetError, BrokenPipeError,
+                            ConnectionAbortedError, TimeoutError)):
+            logger.debug("客户端断开 %s（%s）", client_address, type(exc).__name__)
+            return
+        super().handle_error(request, client_address)
 
     def process_request(self, request, client_address) -> None:
         if not self._connections.acquire(blocking=False):

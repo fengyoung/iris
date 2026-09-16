@@ -31,7 +31,7 @@ from collections import Counter
 from concurrent.futures import as_completed
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from iris.config.loader import ConfigBundle
 from iris.core.exceptions import IrisRuntimeError
@@ -230,6 +230,15 @@ _DESCRIBE_PROMPT = """你正在参与「谁是卧底」游戏。
 - 所有卧底都被投出，则平民获胜；场上卧底人数不少于平民人数，则卧底获胜。
 - 只要游戏在淘汰后继续进行，就说明场上仍有卧底存活。
 
+【你的目标由你推断出的身份决定】
+你事先不知道自己是哪一类，但你的行动必须服从当下的判断：
+- 若你判断自己属于多数派（平民）：目标是把卧底找出来投出去。说清楚你看到的独特元素，
+  帮同伴缩小范围；发现别人描述里的具体矛盾时直接指出来。
+- 若你判断自己属于少数派（卧底）：目标是活到最后。让别人无法从你的发言里认出你与多数派
+  不同——这是本局你唯一的目标，赢下每一轮投票不如活到最后一轮。
+- 判断不确定时，按多数派的方式说话（如实描述、给出信息）。含糊其辞本身就是异常信号，
+  会把你直接标成最与众不同的那个。
+
 【允许的策略】
 - 可以隐瞒你词语的某些属性（略去某些元素不说）
 - 可以有意让描述方向偏离真相（措辞模糊、使用上位词），但不能描述你图片里根本不存在的元素
@@ -239,9 +248,12 @@ _DESCRIBE_PROMPT = """你正在参与「谁是卧底」游戏。
 【增量发言要求（第2轮起强制执行）】
 {incremental_requirement}
 
+【首发提示（仅本局第一位发言者适用）】
+{opening_note}
+
 【本轮情况】
 轮次：第 {round_no} 轮
-你的标识：{player_key}（{player_number}号玩家）
+你的标识：{player_number}号={player_key}
 你在本轮发言顺序中排第 {speaking_position} 位（本轮共 {alive_count} 人发言）
 
 【此前轮次的完整公开记录】
@@ -265,7 +277,12 @@ _DESCRIBE_PROMPT = """你正在参与「谁是卧底」游戏。
    - 不确定：证据不足
    同时给出 0 到 100 的置信度，并用一句话说明依据。
    重要：用词不同、详略不同、观察角度不同、关注点不同，都不等于图片不同，绝大多数差异来自表述习惯。
-   只有在「你看到的主体元素几乎无人提及，同时多数人反复提到的主体元素你完全没有看到」时，才应判定为卧底。
+   只有下面任一条成立时，才应判定为卧底：
+   - 主体矛盾：你看到的主体元素几乎无人提及，同时多数人反复提到的主体元素你完全没有看到；
+   - 属性冲突：多数人反复提到某个具体属性 A，而你明确看到的是与 A 互斥的 B。
+     例如他们都说「圆领、无翻领」，而你看到「有翻领和纽扣」——即使人物、背景等主体元素
+     完全一致，局部的关键属性冲突同样是身份证据，不要因为「主体元素都对得上」就排除自己。
+     冲突的属性越具体、提到 A 的人越多，你属于少数派的把握就越大。
    如果本轮已有别人描述的正是你看到的主体元素，而那不是大多数人的内容，你们很可能同属少数派——但这只说明你们看到同一张图，不能据此推断自己是平民。
    如果你是本轮第一位发言的人，你没有任何比较对象，必须填「不确定」。
    宁可填「不确定」。误判自己是卧底会让你说话含糊，反而更容易被淘汰。
@@ -279,7 +296,15 @@ _DESCRIBE_PROMPT = """你正在参与「谁是卧底」游戏。
      取舍：略去别人没提到、而你独有的元素；
      概括：用上位词代替具体物件；
      借用共享词：优先使用别人已经用过、并且在你自己的图里同样成立的词；
-     措辞模糊化：不给出可被单独核查的具体名词。
+     措辞模糊化：不给出可被单独核查的具体名词；
+     转移视线：把讨论引向他人描述中真实存在的差异（必须真实，不得凭空指控或编造）。
+   - 若你判断自己是卧底，留意哪些玩家的公开内容与你自己那张图相符——他们很可能是同类。
+     不要把质疑或投票指向你推断出的同类（那等于替多数派清场），把注意力引向其他人的真实差异。
+     识别只能靠「他的描述与我看到的一致」这一条推断；严禁用任何方式向对方示意、试探或回应信号，
+     也不得因为对方可能是同类就放弃上面关于真实性与禁止编造的要求。
+   - 不得整段复述他人已公开的内容。借用共享词是允许的，但你的描述里至少要包含一项
+     你自己独立观察到的元素——整段照抄等于这一轮没发言，既没帮到同伴，也让「复读」成了
+     零成本的隐身术。
    - 严禁为了隐藏而写下你图中并不存在的元素；严禁否认你实际看到的元素。
    - 注意「借用共享词」的边界：只有当这个词在你自己的图里也成立时才能用。
      若别人提到的元素你图里没有，你就不提它，但绝不能附和。
@@ -290,9 +315,17 @@ _DESCRIBE_PROMPT = """你正在参与「谁是卧底」游戏。
    - 回应必须是关于图片内容的具体信息（你自己看到的某个元素），不能写成「同意某某」这类表态。
    - 可以质疑对方的描述（例如指出矛盾或提出疑问），质疑必须基于你自己真实看到的内容。
    - 若对方提到的元素你图里没有，可以不回应他，但禁止附和，例如谎称自己也看到了。
+   - 若你判断自己是卧底，而对方的描述与你自己那张图确实对不上：
+     既不要指出这个差异，也不要附和。改为只回应双方都成立的中性元素（人物、场景、光线类别），
+     把差异留在私有档案里，等下一轮再决定是否透露。
+     当众指出真实差异等于宣布自己是少数派——这是最快被淘汰的失分方式，
+     哪怕你说的每个字都属实、质疑也合乎规则。
    - 若你判断自己是卧底，上面关于真实性、禁止编造、禁止联络的要求同样适用。
 5. 【质疑】（可选）对某位玩家的描述提出质疑，不超过 30 字。若无质疑，写「无」。
    质疑必须基于描述内容的具体矛盾，不能仅凭语气或风格。
+   若你判断自己是卧底：只在这个矛盾连你自己也认同时才质疑（即对方说的与多数人、
+   也包括你自己都不符）。若那个矛盾恰好是你与多数人不同的地方，写「无」——
+   质疑它就是把自己的破绽端到台面上。
 
 【输出格式】严格按下面的格式输出，不要在格式之外添加任何文字：
 【观察清单】
@@ -307,7 +340,7 @@ _DESCRIBE_PROMPT = """你正在参与「谁是卧底」游戏。
 
 _REFEREE_INCREMENT_PROMPT = """你是「谁是卧底」游戏的裁判，负责判断玩家本轮的发言是否包含增量信息。
 
-【玩家标识】{player_key}（{player_number}号玩家）
+【玩家标识】{player_number}号={player_key}
 【当前轮次】第 {round_no} 轮
 
 【该玩家过往各轮的公开描述及质疑】
@@ -344,14 +377,22 @@ _VOTE_PROMPT = """你正在参与「谁是卧底」游戏。全部 {total_player
 【你往轮留下的私有档案（只有你自己能看到）】
 {own_private_history}
 
-请投票选出最可能是卧底的玩家。判断时请注意：
+请投出你的一票。你的目标同样由你推断出的身份决定：
+
+若你判断自己属于多数派（平民）——目标是投出卧底。判断时请注意：
 - 依据必须是描述文本中具体元素的差异，例如某位玩家反复提到别人都没提到的元素，而多数人提到的核心元素他完全没有提到。
 - 用词习惯、详略、语气、关注点差异都不是判据。
 - 发言位次本身不是判据。本轮靠前发言的人掌握的信息更少，描述更容易显得独特，这是结构性的，不要因此投给他。
 - 因系统故障未发言的玩家不参与比对，不作为判据。
 - 不要因为别人已经投了某人就跟随。理由必须引用具体的元素差异。
+
+若你判断自己属于少数派（卧底）——目标是活到最后，这一票服务于这个目标：
+- 不要投给你推断出的同类（描述与你自己的图相符的人），那等于替多数派清场。
+- 投给一位公开描述中共同元素较少的其他玩家以转移视线，优先选择能造成平票的目标，为自己争取时间。不要浪费票。
+- 识别同类只能靠公开描述与你自己所见的吻合程度，不得用任何方式向对方示意或试探。
+
+共同要求：
 - 被淘汰者的身份不会当场公布；只要游戏没有结束，就说明场上仍有卧底存活。
-- 若你判断自己是卧底，你应当投给一位公开描述中共同元素较少的其他玩家以转移视线，并优先选择能造成平票的目标，为自己争取时间。不要浪费票。
 - 无论你判断自己是什么身份，都不要在理由中透露或暗示你的身份判断，也不要试图与其他玩家建立联络。
 
 请按以下格式输出：
@@ -365,6 +406,7 @@ _VOTE_PROMPT = """你正在参与「谁是卧底」游戏。全部 {total_player
 def _format_history(
     rounds: Sequence[RoundRecord],
     current_round: int,
+    numbers: Optional[Mapping[str, int]] = None,
     *,
     current_speeches: Optional[List[SpeechRecord]] = None,
 ) -> str:
@@ -382,7 +424,7 @@ def _format_history(
     for record in rounds:
         if record.round_no >= current_round:
             break
-        _render_round(lines, record)
+        _render_round(lines, record, numbers)
     if current_speeches:
         _render_speeches_block(
             lines,
@@ -391,6 +433,7 @@ def _format_history(
             {s.key: s.description for s in current_speeches},
             {s.key: s.response for s in current_speeches if s.response},
             [s.key for s in current_speeches if s.status == "api_error"],
+            numbers,
         )
     return "\n".join(lines)
 
@@ -402,8 +445,13 @@ def _render_speeches_block(
     descriptions: Dict[str, str],
     responses: Dict[str, str],
     silent: Sequence[str],
+    numbers: Optional[Mapping[str, int]] = None,
 ) -> None:
-    """渲染一轮的描述 + 未发言块（历史轮与当前轮共用同一套语义）。"""
+    """渲染一轮的描述 + 未发言块（历史轮与当前轮共用同一套语义）。
+
+    行首的 `N.` 是**本轮发言位次**（轮转后每轮不同，是游戏机制的一部分），
+    紧随其后的 `N号=key` 是**全局固定编号**——两者含义不同，都保留。
+    """
     lines.append(f"[第{round_no}轮描述]")
     silent_set = set(silent)
     for index, key in enumerate(order):
@@ -412,18 +460,23 @@ def _render_speeches_block(
         # 位次编号仍按真实序号走，不因跳过而重排。
         if key in silent_set:
             continue
-        lines.append(f"  {index + 1}. {key}: {descriptions.get(key, '')}")
+        lines.append(f"  {index + 1}. {_player_label(key, numbers)}: {descriptions.get(key, '')}")
         response = responses.get(key, "")
         if response:
             lines.append(f"     └ 回应: {response}")
     if silent:
+        labels = ", ".join(_player_label(k, numbers) for k in silent)
         lines.append(
-            f"[第{round_no}轮未发言] {', '.join(silent)}"
+            f"[第{round_no}轮未发言] {labels}"
             f"（系统故障导致，与图片内容无关，不参与比对、不作为判据）"
         )
 
 
-def _render_round(lines: List[str], record: RoundRecord) -> None:
+def _render_round(
+    lines: List[str],
+    record: RoundRecord,
+    numbers: Optional[Mapping[str, int]] = None,
+) -> None:
     """渲染一个已完成的轮次（描述 → 未发言 → 投票 → 结果）。"""
     # 顺序发言后位次是语义信息，不能再依赖 dict 插入序；无 speeches 时回落 v1 的 dict。
     _render_speeches_block(
@@ -433,27 +486,43 @@ def _render_round(lines: List[str], record: RoundRecord) -> None:
         record.descriptions,
         record.responses,
         record.silent,
+        numbers,
     )
     if record.votes:
         lines.append(f"[第{record.round_no}轮投票]")
         for key, target in record.votes.items():
-            lines.append(f"  {key} 投给 {target}，理由：{record.vote_reasons.get(key, '')}")
+            lines.append(
+                f"  {_player_label(key, numbers)} 投给 {_player_label(target, numbers)}，"
+                f"理由：{record.vote_reasons.get(key, '')}"
+            )
     if record.eliminated:
         # 刻意不公布被淘汰者身份（无论他是不是卧底）——「场上仍有卧底存活」这个事实
         # 已经蕴含在游戏继续这一观察里，由模型自行推断。
-        lines.append(f"[第{record.round_no}轮结果] {record.eliminated} 被淘汰出局，场上仍有卧底存活")
+        lines.append(
+            f"[第{record.round_no}轮结果] {_player_label(record.eliminated, numbers)} "
+            f"被淘汰出局，场上仍有卧底存活"
+        )
 
 
-def _render_speech_line(lines: List[str], speech: SpeechRecord) -> None:
+def _render_speech_line(
+    lines: List[str],
+    speech: SpeechRecord,
+    numbers: Optional[Mapping[str, int]] = None,
+) -> None:
     """渲染单条发言的公开面（描述 + 回应 + 质疑）。"""
-    lines.append(f"  {speech.order_index + 1}. {speech.key}: {speech.description}")
+    lines.append(
+        f"  {speech.order_index + 1}. {_player_label(speech.key, numbers)}: {speech.description}"
+    )
     if speech.response:
         lines.append(f"     └ 回应: {speech.response}")
     if speech.challenge:
         lines.append(f"     └ 质疑: {speech.challenge}")
 
 
-def _render_prior_speeches(speeches: Sequence[SpeechRecord]) -> str:
+def _render_prior_speeches(
+    speeches: Sequence[SpeechRecord],
+    numbers: Optional[Mapping[str, int]] = None,
+) -> str:
     """渲染「本轮已发言玩家」块。
 
     只含 `status != "api_error"` 的发言：技术性沉默不该以「本轮弃权」的刺眼形态
@@ -464,7 +533,7 @@ def _render_prior_speeches(speeches: Sequence[SpeechRecord]) -> str:
         return "（本轮前面还没有人给出可参考的有效发言）"
     lines: List[str] = []
     for speech in visible:
-        _render_speech_line(lines, speech)
+        _render_speech_line(lines, speech, numbers)
     return "\n".join(lines)
 
 
@@ -514,7 +583,12 @@ def _render_private_history(
     return "\n".join(blocks)
 
 
-def _format_tie_note(attempt: int, tied: List[str], previous_votes: Dict[str, str]) -> str:
+def _format_tie_note(
+    attempt: int,
+    tied: List[str],
+    previous_votes: Dict[str, str],
+    numbers: Optional[Mapping[str, int]] = None,
+) -> str:
     """构造平票重投的补充说明。
 
     重投时上一次投票尚未写入 RoundRecord，模型看不到「谁投了谁」，
@@ -524,22 +598,48 @@ def _format_tie_note(attempt: int, tied: List[str], previous_votes: Dict[str, st
     lines = [f"（第 {attempt} 次平票重投）"]
     if previous_votes:
         lines.append("上一次投票分布（出现平票，需要重新表态）：")
-        lines.extend(f"  {pid} 投给 {target}" for pid, target in previous_votes.items())
-    lines.append(f"平票候选：{', '.join(tied)}")
-    lines.append(f"本次只能投给候选范围内的玩家：{', '.join(tied)}")
+        lines.extend(
+            f"  {_player_label(pid, numbers)} 投给 {_player_label(target, numbers)}"
+            for pid, target in previous_votes.items()
+        )
+    tied_labels = ", ".join(_player_label(k, numbers) for k in tied)
+    lines.append(f"平票候选：{tied_labels}")
+    lines.append(f"本次只能投给候选范围内的玩家：{tied_labels}")
     return "\n".join(lines)
 
 
 # ── 解析：投票 / 发言分节 / 身份自评 ──────────────────────────────
 
 
-def _parse_vote(text: str, valid_keys: List[str]) -> tuple:
+def _player_label(key: str, numbers: Optional[Mapping[str, int]] = None) -> str:
+    """统一的玩家标识：`N号=key`。
+
+    早先历史块用**发言位次**编号（每轮轮转后变化），描述 prompt 用
+    `player_number`（全局固定），两套编号并存——第 1 轮恰好重合，第 2 轮起
+    分叉，模型说「4号」时无从判断指哪一个。所有引用点统一成 `N号=key` 后，
+    模型写编号或写 key 都能被精确解析。
+    """
+    number = (numbers or {}).get(key)
+    return f"{number}号={key}" if number else key
+
+
+def _parse_vote(
+    text: str,
+    valid_keys: List[str],
+    numbers: Optional[Mapping[str, int]] = None,
+) -> tuple:
     """解析投票输出，返回 (target_key_or_None, reason)。
 
     模型可能不严格遵守格式，做宽松匹配：
-      1. 按 "投票：" / "投票:" 前缀提取目标行
-      2. 在候选 key 中找出现在目标行中的那个（大小写不敏感，任意顺序）
-      3. 都失败则返回 (None, 原始文本前100字)，计为弃权
+      1. 「投票：」行里命中候选 key（长的优先，避免 key 互为前缀时误判）
+      2. 「投票：」行里出现「N号」，按 numbers（{key: player_number}）反查
+      3. 整段输出里**恰好**提到一个候选 key 时采纳（模型改用散文表达投票意图）
+      4. 其余情况返回 (None, 原始文本前100字)，计为弃权
+
+    第 3 条的「恰好一个」是硬约束：早先只要正文里出现 key 就按**长度**取最长的那个，
+    而模型常在分析前言里逐个列出各玩家 key——于是挑中谁取决于字符串长度，与它真正
+    投的人无关，表现为「投票理由通篇论证甲、投票对象却是乙」。多个候选时无从判断
+    意图，宁可记弃权，也不猜。
     """
     reason = ""
     target_line = ""
@@ -550,17 +650,38 @@ def _parse_vote(text: str, valid_keys: List[str]) -> tuple:
         elif stripped.startswith("理由") and ("：" in stripped or ":" in stripped):
             reason = stripped.split("：", 1)[-1].split(":", 1)[-1].strip()
 
-    # 长 key 优先匹配：key 之间可能互为前缀（如 base_model/m1 与 base_model/m10），
-    # 若按原顺序做 `in` 判断，投给 m10 会被误判成 m1。
-    ordered_keys = sorted(valid_keys, key=len, reverse=True)
-    for search_space in (target_line, text):
-        if not search_space:
-            continue
-        for key in ordered_keys:
-            if key in search_space:
+    if target_line:
+        # 长 key 优先匹配：key 之间可能互为前缀（如 base_model/m1 与 base_model/m10），
+        # 若按原顺序做 `in` 判断，投给 m10 会被误判成 m1。
+        for key in sorted(valid_keys, key=len, reverse=True):
+            if key in target_line:
                 return key, reason[:100]
+        by_number = {n: k for k, n in (numbers or {}).items() if k in valid_keys}
+        # 号大者优先：「14号」不该被「4号」抢走（(?<!\d) 已挡住前导数字，排序再兜一层）
+        for number in sorted(by_number, reverse=True):
+            if re.search(rf"(?<!\d){number}\s*号", target_line):
+                return by_number[number], reason[:100]
+
+    hits = _distinct_key_hits(text, valid_keys)
+    if len(hits) == 1:
+        return hits[0], reason[:100]
 
     return None, (reason or text.strip())[:100]
+
+
+def _distinct_key_hits(text: str, valid_keys: Sequence[str]) -> List[str]:
+    """按最长优先做**不重叠**匹配，返回文本中出现的候选 key。
+
+    不重叠是关键：`base_model/m1` 是 `base_model/m10` 的子串，若各自独立做
+    `in` 判断，提到 m10 会把 m1 也算成命中，把「恰好一个」误判成两个。
+    """
+    hits: List[str] = []
+    remaining = text
+    for key in sorted(valid_keys, key=len, reverse=True):
+        if key in remaining:
+            hits.append(key)
+            remaining = remaining.replace(key, "\x00")
+    return hits
 
 
 #: 发言的七个分节标题（新增「质疑」）。模型可能改写标题措辞，用宽松正则只要求标题里含关键词。
@@ -956,6 +1077,14 @@ class UndercoverGame:
 
     # ── 公开 API ────────────────────────────────────────────────
 
+    def _player_numbers(self) -> Dict[str, int]:
+        """{key: player_number}：渲染层统一用它标注玩家。
+
+        早先描述 prompt 用 player_number、历史块用发言位次，两套编号并存且会
+        分叉（位次随轮转变化），模型说「N号」时无从判断指哪一个。
+        """
+        return {p.key: p.player_number for p in self._players.values()}
+
     def _check_cancelled(self) -> None:
         if self._cancel_event.is_set():
             raise _GameCancelled("游戏已取消")
@@ -1179,7 +1308,8 @@ class UndercoverGame:
         by_key = {p.key: p for p in alive_players}
         ordered_players = [by_key[key] for key in order]
 
-        history_text = _format_history(prior_rounds, round_no)
+        numbers = self._player_numbers()
+        history_text = _format_history(prior_rounds, round_no, numbers)
         alive_count = len(ordered_players)
 
         def _one(player: GamePlayer, index: int, accumulated: List[SpeechRecord]) -> SpeechRecord:
@@ -1187,7 +1317,7 @@ class UndercoverGame:
                 player,
                 index,
                 history_text=history_text,
-                prior_speeches_text=_render_prior_speeches(accumulated),
+                prior_speeches_text=_render_prior_speeches(accumulated, numbers),
                 own_private_text=_render_private_history(prior_rounds, player.key),
                 round_no=round_no,
                 alive_count=alive_count,
@@ -1270,6 +1400,18 @@ class UndercoverGame:
         else:
             incremental_requirement = "（第1轮无此要求）"
 
+        # 本局第一位发言者没有任何可比对的前置内容，说得越细越容易被立刻锁定
+        if round_no == 1 and index == 0:
+            opening_note = (
+                "你是本局第一位发言的人，此前没有任何可比对的内容：\n"
+                "先给出一两个可核对的中性锚点（人物、场景类别、背景），让别人能与你比对——\n"
+                "整轮若没有人给出可核对的内容，同伴就无从判断谁最与众不同，你自己也拿不到参照。\n"
+                "但不要展开最具体的辨识特征（精确颜色、款式、数量），也不要主动质疑他人；\n"
+                "把具体细节与质疑都留到听过别人的描述之后再决定。"
+            )
+        else:
+            opening_note = "（不适用：你不是本局第一位发言者）"
+
         prompt_text = _DESCRIBE_PROMPT.format(
             spy_count=self._spy_count,
             total_players=len(self._players),
@@ -1282,6 +1424,7 @@ class UndercoverGame:
             prior_speeches=prior_speeches_text,
             own_private_history=own_private_text,
             incremental_requirement=incremental_requirement,
+            opening_note=opening_note,
         )
         content_parts: List[Dict[str, Any]] = [
             {"type": "text", "text": prompt_text},
@@ -1423,7 +1566,7 @@ class UndercoverGame:
             # 平票：候选范围限定为平票者，但全部存活玩家都参与重投
             revote_votes, revote_reasons = self._collect_votes(
                 alive_players, prior_rounds, round_no, round_speeches, tied, errors,
-                extra_note=_format_tie_note(attempt, tied, votes),
+                extra_note=_format_tie_note(attempt, tied, votes, self._player_numbers()),
             )
             revote_log.append({
                 "attempt": attempt,
@@ -1475,10 +1618,11 @@ class UndercoverGame:
         Returns:
             (votes, reasons)：votes 只含有效票，reasons 含全部玩家（含弃权者）
         """
-        history_text = _format_history(prior_rounds, round_no, current_speeches=round_speeches)
-        alive_list_text = ", ".join(p.key for p in alive_players)
+        numbers = self._player_numbers()
+        history_text = _format_history(prior_rounds, round_no, numbers, current_speeches=round_speeches)
+        alive_list_text = ", ".join(_player_label(p.key, numbers) for p in alive_players)
         silent = [s.key for s in round_speeches if s.status == "api_error"]
-        silent_list_text = ", ".join(silent) if silent else "无"
+        silent_list_text = ", ".join(_player_label(k, numbers) for k in silent) if silent else "无"
         by_key = {p.key: p for p in alive_players}
 
         def _vote_one(player: GamePlayer) -> tuple:
@@ -1507,7 +1651,7 @@ class UndercoverGame:
                 prompt_text = f"{prompt_text}\n{extra_note}"
             prompt_text = (
                 f"{prompt_text}\n你是 {player.key}，不能投自己。"
-                f"只能投给以下候选之一：{', '.join(own_candidates)}"
+                f"只能投给以下候选之一：{', '.join(_player_label(k, numbers) for k in own_candidates)}"
             )
             try:
                 # 同上：不覆盖 max_tokens，交给模型自身配置。
@@ -1515,7 +1659,7 @@ class UndercoverGame:
                     player.role, player.model_id, prompt_text,
                     route_context={"task_type": "undercover_vote"},
                 )
-                target, reason = _parse_vote(gen_result.text, own_candidates)
+                target, reason = _parse_vote(gen_result.text, own_candidates, numbers)
                 return player.key, (target, reason)
             except LLMProviderError as exc:
                 logger.warning("玩家 %s 投票阶段调用失败: %s", player.key, exc)

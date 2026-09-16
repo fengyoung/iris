@@ -277,6 +277,11 @@ details[open] summary::before { content: "▼ "; font-size: 10px; }
     color: oklch(15% 0 0);
   }
 }
+/* 小节标题 + 批量操作 */
+.section-head { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
+.section-head h2 { margin-bottom: 0; margin-right: auto; }
+.btn-mini { padding: 2px 10px; font-size: 12px; }
+
 /* 玩家选择 checkbox 布局 */
 .player-check-list { display: flex; flex-direction: column; gap: var(--space-2); max-height: 320px; overflow-y: auto; }
 .player-check-row {
@@ -289,6 +294,10 @@ details[open] summary::before { content: "▼ "; font-size: 10px; }
   font-size: 11px; padding: 1px 6px; border-radius: 20px;
   background: var(--accent-soft); color: var(--accent); font-weight: 600;
 }
+/* 被裁判占用的模型：与玩家互斥，禁用但不隐藏——隐藏会让人以为模型丢了 */
+.player-check-row.is-referee { opacity: .55; }
+.player-check-row.is-referee label { cursor: not-allowed; }
+.player-check-row.is-referee .role-tag::after { content: ' · 裁判'; }
 #loading-overlay {
   display: none; position: fixed; inset: 0; background: oklch(0% 0 0 / .45);
   z-index: 200; align-items: center; justify-content: center; flex-direction: column; gap: var(--space-4);
@@ -323,7 +332,11 @@ details[open] summary::before { content: "▼ "; font-size: 10px; }
 
   <!-- 参与模型（checkbox 自动预填，可手动调整） -->
   <div class="setup-section card" id="player-check-section">
-    <h2>参与模型</h2>
+    <div class="section-head">
+      <h2>参与模型</h2>
+      <button type="button" class="btn-ghost btn-mini" onclick="selectAllPlayers(true)">全选</button>
+      <button type="button" class="btn-ghost btn-mini" onclick="selectAllPlayers(false)">全取消</button>
+    </div>
     <div class="player-check-list" id="player-check-list"></div>
     <p style="font-size:12px;color:var(--muted);margin-top:var(--space-2)" id="player-count-msg">加载中…</p>
     <p class="err-msg" id="err-players"></p>
@@ -404,8 +417,9 @@ details[open] summary::before { content: "▼ "; font-size: 10px; }
     <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
       <div style="flex:2;min-width:200px">
         <label>模型 ID</label>
-        <input type="text" id="referee-model-input" value="deepseek-flash-zz" style="width:100%"
-               placeholder="例如 deepseek-flash-zz">
+        <input type="text" id="referee-model-input" value="deepseek-flash" style="width:100%"
+               oninput="syncJudgeExclusion()"
+               placeholder="例如 deepseek-flash">
       </div>
     </div>
     <p style="font-size:12px;color:var(--muted);margin-top:var(--space-2)">裁判不参与描述和投票，负责每轮增量校验和对局总结。</p>
@@ -465,7 +479,7 @@ details[open] summary::before { content: "▼ "; font-size: 10px; }
 // 全局状态
 // ────────────────────────────────────────────────────────────────
 let _models = { base_model: [], adv_model: [] };
-let _defaults = { referee_model: 'deepseek-flash-zz', referee_role: 'base_model', available_players: [] };
+let _defaults = { referee_model: 'deepseek-flash', referee_role: 'base_model', available_players: [] };
 let _tokenA = null, _tokenB = null;
 let _gameId = null, _es = null;
 let _players = [];          // [{key, role, model_id, is_spy, alive, player_number}]
@@ -529,17 +543,17 @@ async function init() {
     ]);
     _models = modelsData;
     _defaults = await defaultsRes.json();
+    // 预填裁判模型；有历史记录时 restoreSetup 会覆盖为上次用的
+    document.getElementById('referee-model-input').value = _defaults.referee_model || 'deepseek-flash';
     renderPlayerChecklist();
-    // 预填裁判模型
-    document.getElementById('referee-model-input').value = _defaults.referee_model || 'deepseek-flash-zz';
-    refreshJudgeModels();
+    restoreSetup();
+    syncJudgeExclusion();   // 最后统一执行裁判互斥，覆盖默认全选与历史记录两种情况
   } catch (e) {
     document.getElementById('err-players').textContent = '模型加载失败：' + e.message;
     // 回退到手动添加
     addPlayerRow();
     addPlayerRow();
     addPlayerRow();
-    refreshJudgeModels();
   }
   try { _gameId = localStorage.getItem('undercover-game'); } catch (_) { /* 可选存储 */ }
   document.getElementById('resume-game').hidden = !_gameId;
@@ -574,8 +588,8 @@ function renderPlayerChecklist() {
       <span class="role-tag">${p.role}</span>
     </div>`
   ).join('');
-  updatePlayerCount();
-  list.addEventListener('change', updatePlayerCount);
+  // 勾选变化要连带重算卧底数上限，故走 syncJudgeExclusion 而非只更新计数
+  list.addEventListener('change', syncJudgeExclusion);
 }
 
 function updatePlayerCount() {
@@ -656,32 +670,77 @@ function getPlayers() {
 // ────────────────────────────────────────────────────────────────
 // 手动添加玩家行（回退模式）
 // ────────────────────────────────────────────────────────────────
-function refreshJudgeModels() {
-  const role = document.getElementById('judge-role').value;
-  const sel = document.getElementById('judge-model');
-  const previous = sel.value;
-  const models = _models[role] || [];
-  const playerKeys = new Set(getPlayers().map(p => `${p.role}/${p.model_id}`));
-  const available = models
-    .filter(m => !playerKeys.has(`${role}/${m.model_id}`))
-    .map(m => new Option(m.display_name || m.model_id, m.model_id));
-  sel.replaceChildren(new Option('不生成总结', ''), ...available);
-  sel.value = available.some(o => o.value === previous) ? previous : '';
+// 裁判以 base_model 角色调用（后端 referee_role 固定为 base_model），故其标识为 base_model/<模型>
+function refereeKey() {
+  const input = document.getElementById('referee-model-input');
+  const model = input ? input.value.trim() : '';
+  return model ? `base_model/${model}` : '';
 }
 
+// 裁判与玩家互斥：裁判所在的模型不能同时作为玩家，禁用其勾选并取消。
+// 换裁判时旧裁判会被重新启用（但不自动勾回，以免覆盖用户当前的选择）。
 function syncJudgeExclusion() {
-  document.getElementById('spy-count').max = Math.max(1, Math.floor((getPlayers().length - 1) / 2));
-  refreshJudgeModels();
-  // 若当前裁判被选为玩家则清空选择
-  const judgeRole = document.getElementById('judge-role').value;
-  const judgeModel = document.getElementById('judge-model').value;
-  const playerKeys = new Set(getPlayers().map(p => `${p.role}/${p.model_id}`));
-  if (judgeModel && playerKeys.has(`${judgeRole}/${judgeModel}`)) {
-    document.getElementById('judge-model').value = '';
-    document.getElementById('err-judge').textContent = '裁判模型已被选为玩家，请重新选择';
-  } else {
-    document.getElementById('err-judge').textContent = '';
+  const key = refereeKey();
+  document.querySelectorAll('#player-check-list input[type=checkbox]').forEach(cb => {
+    const isReferee = key !== '' && cb.value === key;
+    cb.disabled = isReferee;
+    if (isReferee) cb.checked = false;
+    const row = cb.closest('.player-check-row');
+    if (row) row.classList.toggle('is-referee', isReferee);
+  });
+  // 卧底数上限由当前玩家数决定；玩家减少时同步下调已填值，避免开局才报错
+  const spyInput = document.getElementById('spy-count');
+  const maxSpies = Math.max(1, Math.floor((getPlayers().length - 1) / 2));
+  spyInput.max = maxSpies;
+  if (Number(spyInput.value) > maxSpies) spyInput.value = maxSpies;
+  updatePlayerCount();
+}
+
+// 全选 / 全取消：跳过被裁判占用的项
+function selectAllPlayers(checked) {
+  document.querySelectorAll('#player-check-list input[type=checkbox]').forEach(cb => {
+    if (!cb.disabled) cb.checked = checked;
+  });
+  syncJudgeExclusion();
+}
+
+// ────────────────────────────────────────────────────────────────
+// 记住上一次的开局配置（存本机 localStorage，随浏览器走）
+// ────────────────────────────────────────────────────────────────
+const SETUP_KEY = 'undercover-setup';
+
+function saveSetup() {
+  try {
+    localStorage.setItem(SETUP_KEY, JSON.stringify({
+      players: getPlayers().map(p => `${p.role}/${p.model_id}`),
+      referee: document.getElementById('referee-model-input').value.trim(),
+      spyCount: document.getElementById('spy-count').value,
+      orderMode: document.getElementById('order-mode').value,
+      runMode: document.querySelector('input[name=run-mode]:checked').value,
+    }));
+  } catch (_) { /* 存储不可用时仍可正常开局 */ }
+}
+
+// 返回是否恢复成功；无历史记录时保持默认全选
+function restoreSetup() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(SETUP_KEY) || 'null'); } catch (_) { saved = null; }
+  if (!saved || typeof saved !== 'object') return false;
+  if (saved.referee) document.getElementById('referee-model-input').value = saved.referee;
+  if (saved.spyCount) document.getElementById('spy-count').value = saved.spyCount;
+  if (saved.orderMode) document.getElementById('order-mode').value = saved.orderMode;
+  if (saved.runMode) {
+    const radio = document.querySelector(`input[name=run-mode][value="${saved.runMode}"]`);
+    if (radio) radio.checked = true;
   }
+  if (Array.isArray(saved.players)) {
+    // 只按记录勾选；已下线或不在多模态列表里的模型自然落空
+    const wanted = new Set(saved.players);
+    document.querySelectorAll('#player-check-list input[type=checkbox]').forEach(cb => {
+      cb.checked = wanted.has(cb.value);
+    });
+  }
+  return true;
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -761,10 +820,10 @@ async function startGame() {
     return;
   }
 
-  const judgeRole = document.getElementById('judge-role').value;
-  const judgeModel = document.getElementById('judge-model').value;
-  if (judgeModel && seen.has(`${judgeRole}/${judgeModel}`)) {
-    document.getElementById('err-judge').textContent = '裁判模型不能与玩家重复';
+  // 裁判模型（用于增量校验和总结）——与玩家互斥，禁用之外再兜一道
+  const refereeModel = document.getElementById('referee-model-input').value.trim() || _defaults.referee_model;
+  if (seen.has(`base_model/${refereeModel}`)) {
+    document.getElementById('err-players').textContent = `裁判模型 ${refereeModel} 已被选为玩家，二者互斥`;
     return;
   }
 
@@ -777,8 +836,7 @@ async function startGame() {
   const autoAdvance = document.querySelector('input[name="run-mode"]:checked').value === 'auto';
   _manualMode = !autoAdvance;
 
-  // 裁判模型（用于增量校验和总结）
-  const refereeModel = document.getElementById('referee-model-input').value.trim() || 'deepseek-flash-zz';
+  saveSetup();
 
   setLoading(true);
   try {

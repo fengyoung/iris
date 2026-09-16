@@ -183,7 +183,9 @@ class ReplayStore:
             },
             "rounds": rounds_data,
             "summary_ready": False,
-            "summary_status": "pending" if summary_model_key.rstrip("/") not in ("", "base_model", "adv_model") and result.winner != "cancelled" else "skipped",
+            # 取消的对局也出总结（复盘里 winner=cancelled 已标明是部分复盘）；
+            # 只有拿不到裁判模型标识时才跳过——那意味着没人能写总结。
+            "summary_status": "pending" if summary_model_key.rstrip("/") not in ("", "base_model", "adv_model") else "skipped",
         }
         with FileLock(d / "replay.json"):
             atomic_write_json(d / "replay.json", payload)
@@ -406,7 +408,12 @@ def _build_summary_prompt(data: Dict[str, Any]) -> str:
         player_lines.append(f"  - {key}（{role}）")
     players_text = "\n".join(player_lines)
 
-    winner_map = {"civilians": "平民方获胜", "spy": "卧底方获胜", "stalemate": "平局（达到轮次上限）"}
+    winner_map = {
+        "civilians": "平民方获胜",
+        "spy": "卧底方获胜",
+        "stalemate": "平局（达到轮次上限）",
+        "cancelled": "对局被主动终止，胜负未分（以下为已进行轮次的部分复盘）",
+    }
     winner_text = winner_map.get(result.get("winner", ""), result.get("winner", ""))
 
     # 构建轮次摘要

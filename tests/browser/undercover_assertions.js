@@ -38,6 +38,64 @@
     check(document.getElementById('history-grid').textContent.includes('暂无'), '搜索空态');
     onGameEnd({winner:'cancelled',spy_keys:[],total_rounds:1});
     check(document.getElementById('topbar-phase').textContent.includes('保存'), '结束后等待保存');
+
+    // ── 参与模型选择：裁判互斥 / 全选全取消 / 记住上次选择 ──
+    try { localStorage.removeItem(SETUP_KEY); } catch (_) { /* 存储不可用时下文会退化 */ }
+    _defaults = { referee_model: 'deepseek-flash', available_players: [
+      {role:'base_model', model_id:'deepseek-flash'},
+      {role:'base_model', model_id:'deepseek-flash-zz'},
+      {role:'adv_model',  model_id:'qwen3.8-max-zz'},
+      {role:'adv_model',  model_id:'qwen3.7-plus-zz'},
+    ]};
+    const boxes = () => [...document.querySelectorAll('#player-check-list input[type=checkbox]')];
+    const picked = () => boxes().filter(c => c.checked).map(c => c.value);
+    document.getElementById('referee-model-input').value = 'deepseek-flash';
+
+    renderPlayerChecklist();
+    check(restoreSetup() === false, '首次进入无历史记录');
+    syncJudgeExclusion();
+
+    // 裁判与玩家互斥：裁判所在的模型被禁用且不参与勾选
+    const refBox = boxes().find(c => c.value === 'base_model/deepseek-flash');
+    check(refBox && refBox.disabled && !refBox.checked, '裁判模型禁用且未勾选');
+    check(picked().length === 3, '默认勾选其余全部模型');
+
+    selectAllPlayers(false);
+    check(picked().length === 0, '全取消');
+    selectAllPlayers(true);
+    check(picked().length === 3 && !refBox.checked, '全选跳过裁判占用的模型');
+
+    // 换裁判：旧裁判应恢复可选，新裁判被占用
+    document.getElementById('referee-model-input').value = 'deepseek-flash-zz';
+    syncJudgeExclusion();
+    check(!refBox.disabled, '换裁判后旧裁判恢复可选');
+    const newRef = boxes().find(c => c.value === 'base_model/deepseek-flash-zz');
+    check(newRef.disabled && !newRef.checked, '新裁判被占用');
+
+    // 记住上一次选择：改选择 → 保存 → 打回默认 → 恢复
+    document.getElementById('referee-model-input').value = 'qwen3.8-max-zz';
+    boxes().forEach(cb => { cb.checked = ['base_model/deepseek-flash','adv_model/qwen3.7-plus-zz'].includes(cb.value); });
+    document.getElementById('spy-count').value = '1';
+    document.getElementById('order-mode').value = 'fixed';
+    document.querySelector('input[name=run-mode][value=manual]').checked = true;
+    saveSetup();
+
+    document.getElementById('referee-model-input').value = 'deepseek-flash';
+    document.getElementById('spy-count').value = '3';
+    document.getElementById('order-mode').value = 'rotate';
+    document.querySelector('input[name=run-mode][value=auto]').checked = true;
+    boxes().forEach(cb => { cb.checked = true; });
+
+    check(restoreSetup() === true, '有历史记录时恢复');
+    syncJudgeExclusion();
+    check(picked().join(',') === 'base_model/deepseek-flash,adv_model/qwen3.7-plus-zz', '恢复上次的玩家选择');
+    check(document.getElementById('referee-model-input').value === 'qwen3.8-max-zz', '恢复上次的裁判');
+    check(document.getElementById('order-mode').value === 'fixed', '恢复上次的发言顺序');
+    check(document.querySelector('input[name=run-mode]:checked').value === 'manual', '恢复上次的运行模式');
+    check(document.getElementById('spy-count').value === '1', '恢复上次的卧底数');
+    // 恢复的选择里含裁判 qwen3.8-max-zz？它是 adv_model/ 前缀，与裁判的 base_model/ 不是同一项
+    try { localStorage.removeItem(SETUP_KEY); } catch (_) { /* 清理，避免影响下次运行 */ }
+
     document.body.dataset.testResult = 'PASS';
     document.body.dataset.tests = results.join('；');
   } catch(e) {
