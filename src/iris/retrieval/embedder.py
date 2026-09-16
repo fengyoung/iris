@@ -59,7 +59,17 @@ class TextEmbedder:
             endpoint = self._api_base_url + "/embeddings"
             payload = {"model": self._model, "input": uncached_texts}
             data = self._post_json(endpoint, payload)
+            entries = data.get("data", [])
+            expected = list(range(len(uncached_texts)))
+            if not isinstance(entries, list) or sorted(item.get("index", -1) for item in entries) != expected:
+                raise EmbedderError("Embedding 响应索引缺失、重复或越界")
             vectors = _extract_vectors(data)
+            import math
+            if len(vectors) != len(expected) or not vectors or not vectors[0]:
+                raise EmbedderError("Embedding 响应数量不完整")
+            dim = len(vectors[0])
+            if any(len(v) != dim or any(not isinstance(x, (int, float)) or not math.isfinite(x) for x in v) for v in vectors):
+                raise EmbedderError("Embedding 响应维度或数值不合法")
             # 记录 embedding API 用量
             self._record_usage(data, len(uncached_texts))
             for j, vec in enumerate(vectors):

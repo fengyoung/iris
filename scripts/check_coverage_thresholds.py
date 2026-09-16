@@ -14,6 +14,10 @@ THRESHOLDS = {
     "src/iris/config/loader.py": 80.0,
     "src/iris/feishu/doc_convert.py": 35.0,
     "src/iris/taskpanel/server.py": 70.0,
+    "src/iris/games/web_server.py": 60.0,
+    "src/iris/games/replay_store.py": 70.0,
+    "src/iris/retrieval/vector_index.py": 80.0,
+    "src/iris/llm/cache.py": 80.0,
 }
 
 

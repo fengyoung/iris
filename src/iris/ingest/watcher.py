@@ -66,6 +66,7 @@ class SourceWatcher:
 
         self._snapshot: Dict[str, Dict[str, float]] = {}  # source_name → {relative_path: mtime}
         self._debounce_window: float = 2.0  # 秒
+        self._pending: Dict[str, FileEvent] = {}
         self._recent_events: Dict[str, float] = {}  # path → last event time
 
     def snapshot(self) -> Dict[str, Dict[str, float]]:
@@ -117,7 +118,7 @@ class SourceWatcher:
                         relative_path=rel_path,
                         event_type="created",
                     ))
-                elif mtime > prev_mtime + 0.1:  # 容忍亚秒级浮点误差
+                elif mtime != prev_mtime:  # 容忍亚秒级浮点误差
                     events.append(FileEvent(
                         path=str(source_root / rel_path),
                         relative_path=rel_path,
@@ -147,14 +148,20 @@ class SourceWatcher:
         now = time.monotonic()
         filtered: List[FileEvent] = []
         for evt in events:
-            key = f"{evt.relative_path}:{evt.event_type}"
-            if key not in self._recent_events:
-                # 首次出现，放行
+            key = evt.path
+            if key not in self._recent_events or now - self._recent_events[key] >= self._debounce_window:
                 filtered.append(evt)
-                self._recent_events[key] = now
-            elif now - self._recent_events[key] >= self._debounce_window:
-                filtered.append(evt)
-                self._recent_events[key] = now
+                self._pending.pop(key, None)
+            else:
+                self._pending[key] = evt
+            self._recent_events[key] = now
+        for key in list(self._pending):
+            if now - self._recent_events[key] >= self._debounce_window:
+                filtered.append(self._pending.pop(key))
+                self._recent_events.pop(key, None)
+        for key in list(self._recent_events):
+            if key not in self._pending and now - self._recent_events[key] >= self._debounce_window:
+                del self._recent_events[key]
         return filtered
 
     def start(
@@ -186,7 +193,10 @@ class SourceWatcher:
                     try:
                         on_change(events)
                     except Exception as exc:
-                        logger.warning("变更回调异常: %s", exc)
+                        for event in events:
+                            self._pending[event.path] = event
+                            self._recent_events[event.path] = time.monotonic()
+                        logger.warning("变更回调异常，将重试: %s", exc)
                 if run_once:
                     break
         except KeyboardInterrupt:
@@ -233,5 +243,6 @@ def build_incremental_on_change(config: ConfigBundle) -> Callable[[List[FileEven
                 )
             except Exception as exc:
                 logger.warning("自动构建失败 [%s]: %s", src_name, exc)
+                raise
 
     return _on_change

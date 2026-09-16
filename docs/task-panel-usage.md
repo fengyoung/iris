@@ -1,6 +1,6 @@
 # 任务面板 — 使用指南
 
-> 当前验证版本：Iris 3.35.0 · 功能基线：v3.27.0（v3.35.0 安全增补）。Web 只读展示层：在浏览器中查看 iris 任务状态与进程。操作仍在 CC CLI——面板不做任何任务操作（无 kill/重试），只回答「什么在跑、跑到哪了、出过什么事」。
+> 当前验证版本：Iris 3.40.0 · 功能基线：v3.27.0（v3.35.0 安全增补）。Web 只读展示层：在浏览器中查看 iris 任务状态与进程。操作仍在 CC CLI——面板不做任何任务操作（无 kill/重试），只回答「什么在跑、跑到哪了、出过什么事」。
 
 ## 快速开始
 
@@ -112,3 +112,7 @@ A: `launchctl unload ~/Library/LaunchAgents/com.iris.task-panel.plist` 并删除
 
 **Q: 想让新任务也出现在面板？**
 A: 在新任务代码里 `with TaskReporter("<name>") as r: r.report_phase(...)`（磁盘错误全静默，不影响业务）；常驻进程可只依赖探测兜底。详见 [task-panel-design.md](task-panel-design.md) 第 6 节。
+
+## v3.40.0 游戏对局埋点
+
+Web 对局使用独立 game_id 注册 `undercover-game` 任务，记录运行与保存复盘阶段。协作取消结果以 `cancelled` 写入复盘；已发送的网络请求结束后停止后续调用。

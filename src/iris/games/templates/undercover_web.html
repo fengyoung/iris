@@ -584,7 +584,7 @@ async function startGame() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         players,
-        summary_model: judgeModel ? { role: judgeRole, model_id: judgeModel } : {},
+        summary_model: judgeModel ? { role: judgeRole, model_id: judgeModel } : null,
         image_civilian: _tokenA,
         image_spy: _tokenB,
         spy_count: spyCount,
@@ -644,6 +644,7 @@ function handleEvent(msg) {
     case 'round_end':    onRoundEnd(payload); break;
     case 'game_end':     onGameEnd(payload); break;
     case 'stream_end':   if (_es) { _es.close(); _es = null; } break;
+    case 'resync_required': if (_es) { _es.close(); _es = null; } appendJudge('事件已过期，请在历史对局中查看复盘'); break;
     case 'error':        appendJudge('⚠️ 错误: ' + (payload.message || '')); break;
   }
 }

@@ -32,6 +32,7 @@ class VectorIndex:
         self._path = index_path
         self._data: Dict[str, Dict] = {}
         self._loaded = False
+        self._generation = ""
         self._embedder_model: str = ""
         self._loaded_embedder_model: str = ""
         # 缓存矩阵（避免每次 search 重建）
@@ -48,6 +49,8 @@ class VectorIndex:
                 data_dir = self._active_binary_dir()
                 if data_dir is not None:
                     ok = self._load_binary(data_dir)
+                    if ok:
+                        self._generation = data_dir.name if data_dir.parent.name == _GENERATIONS_DIR else ""
                     if ok:
                         self._invalidate_cache()
                     return ok
@@ -119,8 +122,12 @@ class VectorIndex:
         from iris.core.locks import FileLock
         self._path.parent.mkdir(parents=True, exist_ok=True)
         # FileLock 保护向量索引三文件并发写入
-        lock_path = self._binary_dir() / _VECTORS_NPY
+        lock_path = self._binary_dir() / "index"
         with FileLock(lock_path):
+            pointer = self._binary_dir() / _CURRENT_JSON
+            current = json.loads(pointer.read_text())["generation"] if pointer.exists() else ""
+            if current != self._generation:
+                raise VectorIndexModelMismatchError("索引已被其他构建更新，请重新加载后重试")
             self._save_binary()
 
     def _save_binary(self) -> None:
@@ -153,6 +160,7 @@ class VectorIndex:
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             })
             atomic_write_json(bin_dir / _CURRENT_JSON, {"generation": generation})
+            self._generation = generation
         except Exception:
             shutil.rmtree(generation_dir, ignore_errors=True)
             raise
@@ -240,6 +248,8 @@ class VectorIndex:
         if not self._valid_mask.any():
             return []
         qvec = np.array(query_vector, dtype=np.float32)
+        if qvec.ndim != 1 or qvec.shape[0] != self._matrix_cache.shape[1] or not np.isfinite(qvec).all():
+            raise VectorIndexModelMismatchError("查询向量维度或数值不合法，请重建索引")
         qnorm = float(np.linalg.norm(qvec))
         if qnorm == 0:
             return []
@@ -269,7 +279,9 @@ def build_vector_index(source_name: str, chunks: list, embedder, index_path: Pat
     if force_rebuild:
         # 全量重建：丢弃旧向量（同时清理已删除文档的残留 chunk），重新嵌入全部 chunk
         logger.info("向量索引 %s 全量重建（embedder 模型 %s）", source_name, current_model or "unknown")
+        previous_generation = index._generation
         index = VectorIndex(index_path)
+        index._generation = previous_generation
     elif current_model:
         loaded_model = index._loaded_embedder_model
         if loaded_model and loaded_model != current_model:
@@ -319,6 +331,8 @@ def build_vector_index(source_name: str, chunks: list, embedder, index_path: Pat
         texts = [item[1] for item in batch]
         hashes = [item[2] for item in batch]
         vectors = embedder.embed(texts)
+        if len(vectors) != len(ids):
+            raise VectorIndexModelMismatchError("Embedding 批次数量不完整，拒绝发布")
         for chunk_id, vec, text, doc_hash in zip(ids, vectors, texts, hashes):
             index.upsert(chunk_id, vec, text, doc_hash=doc_hash)
     index.save()
