@@ -10,60 +10,8 @@
   "models": {
     "base_model": {
       "enabled": true,
-      "default_model_id": "claude-sonnet-5-zz",
+      "default_model_id": "deepseek-flash-zz",
       "models": {
-        "claude-sonnet-5-zz": {
-          "channel": "zz_tokenhub",
-          "model": "claude-sonnet-5",
-          "display_name": "Claude Sonnet 5 (zz_tokenhub)",
-          "multimodal": true,
-          "max_context_tokens": 200000,
-          "max_tokens": 8192,
-          "temperature": 0.2,
-          "top_p": 1.0,
-          "timeout_seconds": 180,
-          "max_retries": 2,
-          "priority": 110,
-          "cost_level": "medium",
-          "reasoning_level": "advanced",
-          "supported_inputs": [
-            "text",
-            "image"
-          ],
-          "use_cases": [
-            "qa",
-            "summary",
-            "analysis_basic"
-          ],
-          "notes": "base_model 主模型（zz_tokenhub Anthropic 兼容接口）；历史 in_max 387K",
-          "provider": "anthropic",
-          "api_base_url": "https://your-tokenhub.example.com/anthropic"
-        },
-        "qwen3.8-flash-zz": {
-          "channel": "zz_tokenhub",
-          "model": "qwen3.8-flash",
-          "display_name": "Qwen 3.8 Flash (zz_tokenhub)",
-          "multimodal": true,
-          "max_context_tokens": 131072,
-          "max_tokens": 8192,
-          "temperature": 0.2,
-          "top_p": 1.0,
-          "timeout_seconds": 300,
-          "max_retries": 2,
-          "priority": 105,
-          "cost_level": "low",
-          "reasoning_level": "standard",
-          "supported_inputs": [
-            "text",
-            "image"
-          ],
-          "use_cases": [
-            "qa",
-            "summary",
-            "analysis_basic"
-          ],
-          "notes": "base_model 降级备选 2；openai 协议路径延迟偏高"
-        },
         "deepseek-flash-zz": {
           "channel": "zz_tokenhub",
           "model": "deepseek-flash",
@@ -87,7 +35,9 @@
             "summary",
             "analysis_basic"
           ],
-          "notes": "推理型：温度链吃额度，实测 16384 不出正文，32768 可用"
+          "notes": "推理型：温度链吃额度，实测 16384 不出正文，32768 可用",
+          "provider": "openai",
+          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
         },
         "deepseek-flash": {
           "channel": "deepseek",
@@ -114,10 +64,10 @@
           ],
           "notes": "官方直连；新模型（旧名 deepseek-v4-flash 已下架）；实测 65536 才出正文"
         },
-        "glm-5.3-flash-zz": {
-          "channel": "zz_tokenhub",
-          "model": "glm-5.3-flash",
-          "display_name": "GLM 5.3 Flash (zz_tokenhub)",
+        "qwen3.8-flash": {
+          "channel": "bailian",
+          "model": "qwen3.8-flash",
+          "display_name": "Qwen 3.8 Flash (百炼)",
           "multimodal": true,
           "max_context_tokens": 131072,
           "max_tokens": 8192,
@@ -126,31 +76,6 @@
           "timeout_seconds": 120,
           "max_retries": 2,
           "priority": 90,
-          "cost_level": "low",
-          "reasoning_level": "advanced",
-          "supported_inputs": [
-            "text",
-            "image"
-          ],
-          "use_cases": [
-            "qa",
-            "summary",
-            "analysis_basic"
-          ],
-          "notes": "实测文本 1.9s / 图像 3.3s；额度过小(64)会陷入推理链"
-        },
-        "gpt-5.6-terra-zz": {
-          "channel": "zz_tokenhub",
-          "model": "gpt-5.6-terra",
-          "display_name": "GPT-5.6 Terra (zz_tokenhub)",
-          "multimodal": true,
-          "max_context_tokens": 200000,
-          "max_tokens": 8192,
-          "temperature": 0.2,
-          "top_p": 1.0,
-          "timeout_seconds": 300,
-          "max_retries": 2,
-          "priority": 85,
           "cost_level": "low",
           "reasoning_level": "standard",
           "supported_inputs": [
@@ -162,18 +87,45 @@
             "summary",
             "analysis_basic"
           ],
-          "notes": "延迟波动大（实测 4.7s~100.1s，冷启动），timeout 需 300s"
+          "notes": "百炼直连，实测同族 qwen3.8-max 文本 1.6s / 图像 4.4s"
         },
-        "gpt-5.6-luna-zz": {
+        "claude-sonnet-5-zz": {
           "channel": "zz_tokenhub",
-          "model": "gpt-5.6-luna",
-          "display_name": "GPT-5.6 Luna (zz_tokenhub)",
+          "model": "claude-sonnet-5",
+          "display_name": "Claude Sonnet 5 (zz_tokenhub)",
           "multimodal": true,
           "max_context_tokens": 200000,
           "max_tokens": 8192,
           "temperature": 0.2,
           "top_p": 1.0,
-          "timeout_seconds": 600,
+          "timeout_seconds": 180,
+          "max_retries": 2,
+          "priority": 85,
+          "cost_level": "medium",
+          "reasoning_level": "advanced",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "summary",
+            "analysis_basic"
+          ],
+          "notes": "zz_tokenhub Anthropic 兼容接口；历史 in_max 387K",
+          "provider": "anthropic",
+          "api_base_url": "https://your-tokenhub.example.com/anthropic"
+        },
+        "qwen3.8-flash-zz": {
+          "channel": "zz_tokenhub",
+          "model": "qwen3.8-flash",
+          "display_name": "Qwen 3.8 Flash (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 131072,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 300,
           "max_retries": 2,
           "priority": 80,
           "cost_level": "low",
@@ -187,12 +139,14 @@
             "summary",
             "analysis_basic"
           ],
-          "notes": "实测延迟可达 213.6s（两字回答），timeout 需 600s"
+          "notes": "openai 协议路径延迟偏高",
+          "provider": "openai",
+          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
         },
-        "qwen3.8-flash": {
-          "channel": "bailian",
-          "model": "qwen3.8-flash",
-          "display_name": "Qwen 3.8 Flash (百炼)",
+        "glm-5.3-flash-zz": {
+          "channel": "zz_tokenhub",
+          "model": "glm-5.3-flash",
+          "display_name": "GLM 5.3 Flash (zz_tokenhub)",
           "multimodal": true,
           "max_context_tokens": 131072,
           "max_tokens": 8192,
@@ -201,6 +155,33 @@
           "timeout_seconds": 120,
           "max_retries": 2,
           "priority": 75,
+          "cost_level": "low",
+          "reasoning_level": "advanced",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "summary",
+            "analysis_basic"
+          ],
+          "notes": "实测文本 1.9s / 图像 3.3s；额度过小(64)会陷入推理链",
+          "provider": "openai",
+          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
+        },
+        "gpt-5.6-terra-zz": {
+          "channel": "zz_tokenhub",
+          "model": "gpt-5.6-terra",
+          "display_name": "GPT-5.6 Terra (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 200000,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 300,
+          "max_retries": 2,
+          "priority": 70,
           "cost_level": "low",
           "reasoning_level": "standard",
           "supported_inputs": [
@@ -212,7 +193,117 @@
             "summary",
             "analysis_basic"
           ],
-          "notes": "百炼直连，实测同族 qwen3.8-max 文本 1.6s / 图像 4.4s"
+          "notes": "延迟波动大（实测 4.7s~100.1s，冷启动），timeout 需 300s",
+          "provider": "openai",
+          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
+        },
+        "gpt-5.6-luna-zz": {
+          "channel": "zz_tokenhub",
+          "model": "gpt-5.6-luna",
+          "display_name": "GPT-5.6 Luna (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 200000,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 600,
+          "max_retries": 2,
+          "priority": 65,
+          "cost_level": "low",
+          "reasoning_level": "standard",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "summary",
+            "analysis_basic"
+          ],
+          "notes": "实测延迟可达 213.6s（两字回答），timeout 需 600s",
+          "provider": "openai",
+          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
+        },
+        "claude-haiku-4-5-20251001-zz": {
+          "channel": "zz_tokenhub",
+          "model": "claude-haiku-4-5-20251001",
+          "display_name": "Claude Haiku 4.5 (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 200000,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 180,
+          "max_retries": 2,
+          "priority": 60,
+          "cost_level": "low",
+          "reasoning_level": "standard",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "summary",
+            "analysis_basic"
+          ],
+          "notes": "2026-09-15 实测文本 35.0s / 图像 18.8s（图像识别正确）",
+          "provider": "anthropic",
+          "api_base_url": "https://your-tokenhub.example.com/anthropic"
+        },
+        "claude-sonnet-4-6-zz": {
+          "channel": "zz_tokenhub",
+          "model": "claude-sonnet-4-6",
+          "display_name": "Claude Sonnet 4.6 (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 200000,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 180,
+          "max_retries": 2,
+          "priority": 55,
+          "cost_level": "medium",
+          "reasoning_level": "advanced",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "summary",
+            "analysis_basic"
+          ],
+          "notes": "2026-09-15 实测文本 15.3s / 图像 39.6s（图像识别正确）",
+          "provider": "anthropic",
+          "api_base_url": "https://your-tokenhub.example.com/anthropic"
+        },
+        "gpt-5.4": {
+          "channel": "zz_tokenhub",
+          "model": "gpt-5.4",
+          "display_name": "GPT-5.4 (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 200000,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 300,
+          "max_retries": 2,
+          "priority": 50,
+          "cost_level": "low",
+          "reasoning_level": "standard",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "summary",
+            "analysis_basic"
+          ],
+          "notes": "2026-09-15 探测多次均 502（Upstream access forbidden / temporarily unavailable）；同批 gpt-5.6-terra 首测 502、复测成功 → 属上游间歇性波动，非模型名错误",
+          "provider": "openai",
+          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
         }
       }
     },
@@ -271,7 +362,9 @@
             "image_understanding",
             "wiki_rebuild"
           ],
-          "notes": "历史输出 p95=12878 / max=14604，max_tokens 需 ≥24576"
+          "notes": "历史输出 p95=12878 / max=14604，max_tokens 需 ≥24576",
+          "provider": "openai",
+          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
         },
         "qwen3.7-plus-zz": {
           "channel": "zz_tokenhub",
@@ -296,7 +389,9 @@
             "analysis_complex",
             "image_understanding"
           ],
-          "notes": "跨通道合并样本历史输出 max=6615"
+          "notes": "跨通道合并样本历史输出 max=6615",
+          "provider": "openai",
+          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
         },
         "qwen3.6-plus-zz": {
           "channel": "zz_tokenhub",
@@ -321,7 +416,9 @@
             "analysis_complex",
             "image_understanding"
           ],
-          "notes": "样本少（历史 2 次），按同族保守取值"
+          "notes": "样本少（历史 2 次），按同族保守取值",
+          "provider": "openai",
+          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
         },
         "claude-fable-5-zz": {
           "channel": "zz_tokenhub",
@@ -377,30 +474,6 @@
           "provider": "anthropic",
           "api_base_url": "https://your-tokenhub.example.com/anthropic"
         },
-        "glm-5.3-zz": {
-          "channel": "zz_tokenhub",
-          "model": "glm-5.3",
-          "display_name": "GLM 5.3 (zz_tokenhub)",
-          "multimodal": false,
-          "max_context_tokens": 131072,
-          "max_tokens": 8192,
-          "temperature": 0.2,
-          "top_p": 1.0,
-          "timeout_seconds": 120,
-          "max_retries": 2,
-          "priority": 170,
-          "cost_level": "low",
-          "reasoning_level": "standard",
-          "supported_inputs": [
-            "text"
-          ],
-          "use_cases": [
-            "qa",
-            "summary",
-            "analysis_basic"
-          ],
-          "notes": "【不支持图片】实测 HTTP 400 code 1210（content.type 仅允许 text）"
-        },
         "gpt-5.6-sol-zz": {
           "channel": "zz_tokenhub",
           "model": "gpt-5.6-sol",
@@ -425,7 +498,9 @@
             "image_understanding",
             "conflict_resolution"
           ],
-          "notes": "TTFT 极高：5 token 回答耗时 49s；评审类任务实测 80.7s"
+          "notes": "TTFT 极高：5 token 回答耗时 49s；评审类任务实测 80.7s",
+          "provider": "openai",
+          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
         },
         "gpt-6-astra-zz": {
           "channel": "zz_tokenhub",
@@ -450,7 +525,9 @@
             "analysis_complex",
             "image_understanding"
           ],
-          "notes": "实测文本 71.5s / 图像 52.9s，慢但可用"
+          "notes": "实测文本 71.5s / 图像 52.9s，慢但可用",
+          "provider": "openai",
+          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
         },
         "qwen3.8-max": {
           "channel": "bailian",
@@ -477,6 +554,191 @@
             "conflict_resolution"
           ],
           "notes": "百炼直连，实测文本 1.6s / 图像 4.4s；历史 p95=10820 / max=12023"
+        },
+        "claude-opus-4-8-zz": {
+          "channel": "zz_tokenhub",
+          "model": "claude-opus-4-8",
+          "display_name": "Claude Opus 4.8 (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 200000,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 180,
+          "max_retries": 2,
+          "priority": 150,
+          "cost_level": "medium",
+          "reasoning_level": "advanced",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "analysis_complex",
+            "image_understanding"
+          ],
+          "notes": "2026-09-15 实测文本 6.6s / 图像 19.0s（图像识别正确）",
+          "provider": "anthropic",
+          "api_base_url": "https://your-tokenhub.example.com/anthropic"
+        },
+        "claude-opus-4-7-zz": {
+          "channel": "zz_tokenhub",
+          "model": "claude-opus-4-7",
+          "display_name": "Claude Opus 4.7 (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 200000,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 180,
+          "max_retries": 2,
+          "priority": 145,
+          "cost_level": "medium",
+          "reasoning_level": "advanced",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "analysis_complex",
+            "image_understanding"
+          ],
+          "notes": "2026-09-15 实测文本 13.3s / 图像 11.1s（图像识别正确）",
+          "provider": "anthropic",
+          "api_base_url": "https://your-tokenhub.example.com/anthropic"
+        },
+        "claude-opus-4-6-zz": {
+          "channel": "zz_tokenhub",
+          "model": "claude-opus-4-6",
+          "display_name": "Claude Opus 4.6 (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 200000,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 180,
+          "max_retries": 2,
+          "priority": 140,
+          "cost_level": "medium",
+          "reasoning_level": "advanced",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "analysis_complex",
+            "image_understanding"
+          ],
+          "notes": "2026-09-15 实测文本 13.3s / 图像 19.7s（图像识别正确）",
+          "provider": "anthropic",
+          "api_base_url": "https://your-tokenhub.example.com/anthropic"
+        },
+        "gpt-5.5-zz": {
+          "channel": "zz_tokenhub",
+          "model": "gpt-5.5",
+          "display_name": "GPT-5.5 (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 200000,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 300,
+          "max_retries": 2,
+          "priority": 135,
+          "cost_level": "low",
+          "reasoning_level": "standard",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "analysis_complex",
+            "image_understanding"
+          ],
+          "notes": "2026-09-15 实测文本 9.8s / 图像 7.4s；同族 GPT 在 zz 上延迟方差大，timeout 取 300",
+          "provider": "openai",
+          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
+        },
+        "deepseek-v4-pro-zz": {
+          "channel": "zz_tokenhub",
+          "model": "deepseek-v4-pro",
+          "display_name": "DeepSeek V4 Pro (zz_tokenhub)",
+          "multimodal": false,
+          "max_context_tokens": 1000000,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 300,
+          "max_retries": 2,
+          "priority": 130,
+          "cost_level": "low",
+          "reasoning_level": "advanced",
+          "supported_inputs": [
+            "text"
+          ],
+          "use_cases": [
+            "qa",
+            "analysis_complex"
+          ],
+          "notes": "【不支持图片】2026-09-15 实测图像能力不稳定（纯红偶答对，纯蓝/纯绿多次答「无法确定」），不参与图像链路；文本 1.7s；推理型，图像请求在 max_tokens=2048 下会被思考链耗尽预算",
+          "provider": "openai",
+          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
+        },
+        "glm-5.3-zz": {
+          "channel": "zz_tokenhub",
+          "model": "glm-5.3",
+          "display_name": "GLM 5.3 (zz_tokenhub)",
+          "multimodal": false,
+          "max_context_tokens": 131072,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 120,
+          "max_retries": 2,
+          "priority": 125,
+          "cost_level": "medium",
+          "reasoning_level": "advanced",
+          "supported_inputs": [
+            "text"
+          ],
+          "use_cases": [
+            "qa",
+            "analysis_complex"
+          ],
+          "notes": "【不支持图片】2026-09-15 实测文本 2.9s；图像请求 HTTP 400（content.type 仅接受 text）→ multimodal=false",
+          "provider": "openai",
+          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
+        },
+        "kimi-k2.6": {
+          "channel": "zz_tokenhub",
+          "model": "kimi-k2.6",
+          "display_name": "Kimi K2.6 (zz_tokenhub)",
+          "multimodal": true,
+          "max_context_tokens": 262144,
+          "max_tokens": 8192,
+          "temperature": 0.2,
+          "top_p": 1.0,
+          "timeout_seconds": 120,
+          "max_retries": 2,
+          "priority": 120,
+          "cost_level": "medium",
+          "reasoning_level": "standard",
+          "supported_inputs": [
+            "text",
+            "image"
+          ],
+          "use_cases": [
+            "qa",
+            "analysis_complex",
+            "image_understanding"
+          ],
+          "notes": "2026-09-15 实测文本 0.6s / 图像 0.6s（图像识别正确）；max_context 按 K2 系列惯例推断",
+          "provider": "anthropic",
+          "api_base_url": "https://your-tokenhub.example.com/anthropic"
         }
       }
     }
