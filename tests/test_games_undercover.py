@@ -885,3 +885,82 @@ class TestParseGameModels:
         assert self._parse(" base_model / m1 , ,adv_model/m2 ") == [
             ("base_model", "m1"), ("adv_model", "m2"),
         ]
+
+
+def test_checkpoint_restores_history_identity_and_next_round():
+    from iris.games.undercover import RoundRecord, SpeechRecord
+    game, _ = _make_game(max_rounds=2)
+    keys = list(game._players)
+    history = RoundRecord(round_no=1, speeches=[SpeechRecord(key=keys[0], description="历史锚点")])
+    cp = {"resume_version": 1, "completed_rounds": [history.to_dict()],
+          "alive_keys": keys[1:], "spy_keys": [keys[1]], "speaking_order_base": keys[::-1]}
+    seen = []
+    game._on_event = lambda kind, payload: seen.append((kind, payload))
+    with patch.object(game, "_run_describe_phase", return_value=[]) as describe, \
+         patch.object(game, "_run_vote_phase") as vote:
+        vote.return_value.votes = {}
+        vote.return_value.reasons = {}
+        vote.return_value.initial_votes = {}
+        vote.return_value.initial_reasons = {}
+        vote.return_value.revote_rounds = []
+        result = game.run(checkpoint=cp)
+    assert [r.round_no for r in result.rounds] == [1, 2]
+    assert result.rounds[0].speeches[0].description == "历史锚点"
+    assert result.spy_keys == [keys[1]]
+    assert result.speaking_order_base == keys[::-1]
+    assert [p.key for p in describe.call_args.args[0]] == keys[1:]
+    assert describe.call_args.args[2] == 2
+    assert next(p for k, p in seen if k == "checkpoint")["completed_rounds"][0] == history.to_dict()
+
+
+def test_legacy_checkpoint_rejected_before_model_calls():
+    game, llm = _make_game()
+    with pytest.raises(UndercoverGameError, match="旧断点"):
+        game.run(checkpoint={"completed_rounds": [{"round_no": 1}]})
+    llm.generate_multimodal_as.assert_not_called()
+
+
+def test_restored_manual_game_waits_and_can_be_cancelled_before_next_round():
+    advance = threading.Event()
+    game, llm = _make_game(advance_event=advance)
+    keys = list(game._players)
+    cp = {"resume_version": 1, "completed_rounds": [RoundRecord(1).to_dict()],
+          "alive_keys": keys, "spy_keys": keys[:1], "speaking_order_base": keys}
+    events = []
+
+    def on_event(kind, payload):
+        events.append(kind)
+        if kind == "round_waiting":
+            assert payload["round_no"] == 1
+            game._cancel_event.set()
+
+    game._on_event = on_event
+    result = game.run(checkpoint=cp)
+    assert result.winner == "cancelled"
+    assert len(result.rounds) == 1
+    assert "round_start" not in events
+    llm.generate_multimodal_as.assert_not_called()
+    llm.generate_as.assert_not_called()
+
+
+@pytest.mark.parametrize("survivors,winner", [([1, 2], "civilians"), ([0], "spy")])
+def test_restored_terminal_game_does_not_call_models(survivors, winner):
+    game, llm = _make_game()
+    keys = list(game._players)
+    cp = {"resume_version": 1, "completed_rounds": [RoundRecord(1).to_dict()],
+          "alive_keys": [keys[i] for i in survivors], "spy_keys": keys[:1], "speaking_order_base": keys}
+    result = game.run(checkpoint=cp)
+    assert result.winner == winner
+    assert result.final_survivors == cp["alive_keys"]
+    llm.generate_multimodal_as.assert_not_called()
+
+
+@pytest.mark.parametrize("history", [[{"round_no": 1}], [RoundRecord(2).to_dict()], None])
+def test_versioned_but_incomplete_checkpoint_is_rejected(history):
+    game, llm = _make_game()
+    keys = list(game._players)
+    cp = {"resume_version": 1, "completed_rounds": history,
+          "alive_keys": keys, "spy_keys": keys[:1], "speaking_order_base": keys}
+    with pytest.raises(UndercoverGameError, match="损坏"):
+        game.run(checkpoint=cp)
+    llm.generate_multimodal_as.assert_not_called()

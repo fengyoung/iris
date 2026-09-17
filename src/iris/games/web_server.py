@@ -32,7 +32,7 @@ from urllib.parse import urlparse
 
 from iris.config.loader import ConfigBundle
 from iris.games.replay_store import ReplayStore
-from iris.games.undercover import UndercoverGame
+from iris.games.undercover import UndercoverGame, UndercoverGameError
 from iris.llm.service import LLMService
 
 logger = logging.getLogger(__name__)
@@ -572,27 +572,39 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _handle_game_resume(self, game_id: str) -> None:
         """从断点恢复对局：加载 checkpoint.json，重建 GameSession，继续运行。"""
+        # 检查与注册必须处于同一临界区，避免双击或并发请求覆盖仍在运行的会话。
+        with self._state().games_lock:
+            existing = self._state().games.get(game_id)
+            if existing is not None and not existing.finished:
+                self._json(409, {"error": "对局仍在运行，无需恢复"})
+                return
+            self._resume_locked(game_id)
+
+    def _resume_locked(self, game_id: str) -> None:
+        """调用方持有 games_lock，完成断点读取和会话注册。"""
         state = self._state()
         store = state.replay_store
 
         # 验证断点存在且对局尚未完成
-        cp = store.load_checkpoint(game_id)
-        if cp is None:
-            self._json(404, {"error": "断点不存在或已损坏"})
-            return
         replay_dir = store.game_dir(game_id)
         if (replay_dir / "replay.json").exists():
             self._json(400, {"error": "对局已完成，无需恢复"})
             return
-
-        # 检查并发槽位
-        if not state.game_slots.acquire(blocking=False):
-            self._json(429, {"error": "最多同时运行两局，请等待或取消现有对局"})
+        cp = store.load_checkpoint(game_id)
+        if cp is None:
+            self._json(404, {"error": "断点不存在或已损坏"})
             return
-
+        if cp.get("resume_version") != 1:
+            self._json(409, {"error": "旧断点缺少完整轮次记录，无法安全恢复，请开始新局"})
+            return
         setup = cp.get("setup", {})
         players_info = setup.get("players", [])
         players = [(p["role"], p["model_id"]) for p in players_info]
+        try:
+            UndercoverGame.checkpoint_rounds(cp, [f"{role}/{model}" for role, model in players])
+        except UndercoverGameError as exc:
+            self._json(409, {"error": str(exc)})
+            return
         spy_count = len(cp.get("spy_keys", []))
         seed = setup.get("seed")
         order_mode = setup.get("order_mode", "rotate")
@@ -612,7 +624,7 @@ class _Handler(BaseHTTPRequestHandler):
 
         session = GameSession(
             game_id=game_id,
-            auto_advance=True,
+            auto_advance=setup.get("auto_advance", True),
             summary_role=summary_role,
             summary_model_id=summary_model_id,
             referee_model=referee_model,
@@ -623,8 +635,10 @@ class _Handler(BaseHTTPRequestHandler):
             for idx, p in enumerate(players_info)
         ]
 
-        with state.games_lock:
-            state.games[game_id] = session
+        if not state.game_slots.acquire(blocking=False):
+            self._json(429, {"error": "最多同时运行两局，请等待或取消现有对局"})
+            return
+        state.games[game_id] = session
 
         t = threading.Thread(
             target=_run_game,
@@ -635,8 +649,14 @@ class _Handler(BaseHTTPRequestHandler):
             name=f"game-resume-{game_id}",
         )
         session.thread = t
-        t.start()
-        self._json(200, {"game_id": game_id, "resumed_from_round": len(cp.get("completed_rounds", []))})
+        try:
+            t.start()
+        except RuntimeError:
+            del state.games[game_id]
+            state.game_slots.release()
+            raise
+        self._json(200, {"game_id": game_id, "resumed_from_round": len(cp.get("completed_rounds", [])),
+                         "auto_advance": session.auto_advance})
 
 
 # ── 游戏线程 ─────────────────────────────────────────────────────
@@ -683,13 +703,13 @@ def _run_game_impl(
         "players": session.players_info,
         "seed": seed,
         "order_mode": order_mode,
+        "auto_advance": session.auto_advance,
         "image_civilian": civ_file,
         "image_spy": spy_file,
         "referee_model": session.referee_model,
         "referee_role": session.referee_role,
         "summary_model_key": f"{session.summary_role}/{session.summary_model_id}" if session.summary_model_id else "",
     }
-    _completed_rounds_for_ckpt: list = list(checkpoint.get("completed_rounds", [])) if checkpoint else []
 
     def on_event(event_type: str, payload: dict) -> None:
         if session.finished and event_type != "game_end":
@@ -701,16 +721,13 @@ def _run_game_impl(
                       "round_waiting": "waiting"}
             session.phase = phases.get(event_type, session.phase)
             session.event_queue.put({"type": event_type, "payload": payload})
-        # 每轮结束时，把轮次摘要追加到累计列表（仅需 round_no 以便断点恢复跳轮）
-        if event_type == "round_end":
-            _completed_rounds_for_ckpt.append({"round_no": payload.get("round_no")})
         # checkpoint 事件触发落盘
         if event_type == "checkpoint":
             try:
                 store.save_checkpoint(
                     game_id,
                     setup=_setup_for_checkpoint,
-                    completed_rounds=_completed_rounds_for_ckpt,
+                    completed_rounds=payload.get("completed_rounds", []),
                     alive_keys=payload.get("alive_keys", []),
                     spy_keys=payload.get("spy_keys", []),
                     speaking_order_base=payload.get("speaking_order_base", []),
@@ -735,7 +752,7 @@ def _run_game_impl(
             referee_model_id=session.referee_model,
             referee_role=session.referee_role,
         )
-        result = game.run()
+        result = game.run(checkpoint=checkpoint) if checkpoint else game.run()
     except Exception as exc:  # noqa: BLE001
         logger.exception("游戏 %s 运行异常", game_id)
         session.event_queue.put({"type": "error", "payload": {"message": str(exc)}})

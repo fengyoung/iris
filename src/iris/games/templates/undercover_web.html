@@ -496,7 +496,11 @@ const winnerNames = {civilians:'平民获胜', spy:'卧底获胜', stalemate:'�
 async function api(url, options = {}) {
   const response = await fetch(url, {...options, signal:AbortSignal.timeout(30000)});
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || `请求失败 (${response.status})`);
+  if (!response.ok) {
+    const error = new Error(data.error || `请求失败 (${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
 
@@ -849,7 +853,7 @@ async function startGame() {
         image_spy: _tokenB,
         spy_count: spyCount,
         order_mode: orderMode,
-        seed: seedVal ? parseInt(seedVal) : null,
+        seed: seedVal ? Number(seedVal) : null,
         auto_advance: autoAdvance,
         referee_model: refereeModel,
         referee_role: 'base_model',
@@ -928,7 +932,7 @@ function playerLabel(key, number) {
 }
 
 function onGameStart(p) {
-  _players = p.players.map(pl => ({ ...pl, alive: true }));
+  _players = p.players.map(pl => ({ ...pl, alive: pl.alive !== false }));
   _thinkingNodes = {};
   renderPlayerStrip();
   document.getElementById('player-filter').replaceChildren(new Option('全部玩家',''), ..._players.map((pl,i) => new Option(`${pl.player_number || (i+1)}号 ${pl.model_id}`,pl.key)));
@@ -1386,10 +1390,30 @@ async function pollGameStatus() {
 async function resumeGame() {
   if (!_gameId) return;
   try {
-    const state = await api(`/api/game/${_gameId}`);
+    let state;
+    try {
+      state = await api(`/api/game/${_gameId}`);
+    } catch (e) {
+      if (e.status !== 404) throw e;
+      // 服务重启后内存会话消失，先检查复盘，再从完整断点续跑。
+      try {
+        const replay = await api(`/api/history/${_gameId}`);
+        showView('replay'); renderReplay(replay); pollSummary(replay);
+        return;
+      } catch (replayError) {
+        if (replayError.status !== 404) throw replayError;
+      }
+      try {
+        state = await api(`/api/game/${_gameId}/resume`, {method:'POST', body:''});
+      } catch (resumeError) {
+        // 另一标签页可能已先恢复；重新读取状态，不重复启动线程。
+        if (resumeError.status !== 409) throw resumeError;
+        try { state = await api(`/api/game/${_gameId}`); } catch (_) { throw resumeError; }
+      }
+    }
     _manualMode = !state.auto_advance;
     initGameView(); showView('game'); connectSSE();
-  } catch (e) { await loadReplay(_gameId); }
+  } catch (e) { alert('恢复对局失败: ' + e.message); }
 }
 
 function identityBadge(identity, confidence) {

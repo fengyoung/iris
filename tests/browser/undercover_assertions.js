@@ -96,6 +96,43 @@
     // 恢复的选择里含裁判 qwen3.8-max-zz？它是 adv_model/ 前缀，与裁判的 base_model/ 不是同一项
     try { localStorage.removeItem(SETUP_KEY); } catch (_) { /* 清理，避免影响下次运行 */ }
 
+    // 实际执行开局提交，核验校验值与发往后端的种子一致。
+    _gameId = null;
+    _tokenA = 'a'; _tokenB = 'b';
+    document.getElementById('referee-model-input').value = 'judge';
+    syncJudgeExclusion(); selectAllPlayers(true);
+    document.getElementById('seed').value = '1e3';
+    let submitted;
+    const originalFetch = window.fetch;
+    window.fetch = async (url, options) => {
+      submitted = JSON.parse(options.body);
+      return {ok:false, json:async () => ({error:'测试拦截，不启动模型'})};
+    };
+    await startGame();
+    window.fetch = originalFetch;
+    check(submitted.seed === 1000, '整数种子校验与提交一致');
+    onGameStart({players:[{key:'base_model/a', model_id:'a', alive:false, player_number:1}],spy_count:1});
+    check(_players[0].alive === false, '恢复观战保留淘汰状态');
+
+    // 执行服务重启后的完整恢复分支，避免只测页面函数而漏掉接口接线。
+    _gameId = 'restart-test';
+    const calls = [];
+    const originalConnect = connectSSE;
+    let connected = false;
+    connectSSE = () => { connected = true; };
+    window.fetch = async (url, options) => {
+      calls.push([url, options.method || 'GET']);
+      const resumed = url.endsWith('/resume');
+      return {ok:resumed, status:resumed ? 200 : 404,
+        json:async () => resumed ? {auto_advance:false} : {error:'不存在'}};
+    };
+    await resumeGame();
+    check(calls.some(([url,method]) => url.endsWith('/resume') && method === 'POST'), '服务重启后调用恢复接口');
+    check(connected && _manualMode, '恢复后连接事件流并保留手动模式');
+    connectSSE = originalConnect;
+    window.fetch = originalFetch;
+    clearTimeout(_statusTimer);
+
     document.body.dataset.testResult = 'PASS';
     document.body.dataset.tests = results.join('；');
   } catch(e) {
