@@ -1,6 +1,8 @@
 # 谁是卧底 beta 验收记录（2026-09-17）
 
-本轮保留并复核上一会话的全部未提交修改，完成恢复链路修复、测试、页面检查和中文文档更新。功能回归通过；共享环境依赖审计未通过，不能视为全部发布门禁已完成。未提交、合并或部署本轮修改。
+本轮保留并复核上一会话的全部未提交修改，完成恢复链路修复、测试、页面检查和中文文档更新。功能回归通过；共享环境依赖审计未通过，不能视为全部发布门禁已完成。
+
+本记录同时作为 **v3.40.5** 的发布验收：改动已合并入 `main` 并以第三级版本号发布（产品版本 3.40.4 → 3.40.5，协议 3.24 与数据版本不变）。发布前在合并后的工作区重跑了全部门禁，结果见下表。
 
 ## 源码复核与修复
 
@@ -15,28 +17,28 @@
 
 | 检查 | 结果与证据 |
 |---|---|
-| 全量 pytest + coverage | **3,621 passed，104.92 秒，70.01%**；`/tmp/iris-beta-tests.log`、`/tmp/iris-beta-coverage.json` |
+| 全量 pytest + coverage | **3,621 passed，104.82 秒，70.00%**（JSON 精确值 70.0008%，24,624 语句 / 7,387 未覆盖）；`/tmp/iris-3405-tests.log`、`/tmp/iris-3405-coverage.json` |
 | 恢复相关专项 | **85 passed**：`tests/test_games_web.py`、`tests/test_games_undercover.py`、`tests/test_browser_undercover.py` |
-| 关键模块覆盖率 | `python scripts/check_coverage_thresholds.py /tmp/iris-beta-coverage.json` 全部通过 |
+| 关键模块覆盖率 | `python scripts/check_coverage_thresholds.py /tmp/iris-3405-coverage.json` 全部通过（含 `games/web_server.py` 86.4%、`games/replay_store.py` 80.5%） |
 | Ruff | `ruff check src scripts tests` 通过 |
 | mypy | `mypy src/iris --no-incremental`：192 个源文件通过 |
 | AST 安全扫描 | `python scripts/security_scan.py` 通过 |
-| 页面 DOM 与交互 | 无头 Chrome + 本机 HTTP，桌面 1440×1000、窄屏 500×844 各 26 项通过 |
-| 页面视觉检查 | 已查看两种宽度截图；导航与模型选择可见，窄屏图片区单列；`innerWidth` 与 `scrollWidth` 相等，无横向溢出 |
-| 构建 | `pip wheel . --no-deps --no-build-isolation` 成功；`/tmp/iris-beta-dist/iris-3.40.4-py3-none-any.whl` |
-| SPDX SBOM | `/tmp/iris-beta-dist/iris.spdx.json` 生成成功；产品版本 3.40.4 |
-| macOS CLI smoke | `python scripts/run_cli.py --help` 成功；`/tmp/iris-beta-cli-help.txt` |
+| 页面 DOM 与交互 | 无头 Chrome + 本机 HTTP，桌面 1440×1000 与窄屏 500×844 **各 26 项断言 PASS**（真实 Chrome 执行，非跳过）；发布前在合并后的代码上重跑，结果一致 |
+| 页面视觉检查 | 已查看两种宽度截图；导航与模型选择可见，窄屏图片区单列；`innerWidth` 与 `scrollWidth` 相等，无横向溢出。**沿用发布前实跑结果**——核对过 `HEAD` 的 `src/iris/games/` 与出报告时的工作区逐字节相同（合并未改动游戏代码），故该结论对发布产物成立 |
+| 构建 | `pip wheel . --no-deps --no-build-isolation` 成功；`/tmp/iris-3405-dist/iris-3.40.5-py3-none-any.whl` |
+| SPDX SBOM | `/tmp/iris-3405-dist/iris.spdx.json` 生成成功；产品版本 **3.40.5** |
+| macOS CLI smoke | `python scripts/run_cli.py --help` 成功；`/tmp/iris-3405-cli-help.txt` |
 | 依赖审计 | **未通过**：`pip-audit` 退出码 1，17 个包、119 条漏洞记录；`/tmp/iris-beta-audit.json` |
 
 复现全量回归：
 
 ```bash
-pytest tests/ --cov=src/iris --cov-report=json:/tmp/iris-beta-coverage.json \
-  --cov-report=term -q --tb=short > /tmp/iris-beta-tests.log 2>&1
-python scripts/check_coverage_thresholds.py /tmp/iris-beta-coverage.json
+pytest tests/ --cov=src/iris --cov-report=json:/tmp/iris-3405-coverage.json \
+  --cov-report=term -q --tb=short > /tmp/iris-3405-tests.log 2>&1
+python scripts/check_coverage_thresholds.py /tmp/iris-3405-coverage.json
 ```
 
-页面截图与 DOM 留在 `/tmp/iris-beta-page-check/`。Chrome 的无头窗口最小布局宽度为 500px，因此窄屏证据明确记为 500px，未将最初被裁切的 390px 截图认作手机设备模拟通过。浏览器使用测试响应，不调用付费模型；Python HTTP 测试单独覆盖真实服务与持久化，引擎测试覆盖恢复执行。
+页面截图留在 `/tmp/iris-beta-page-check/`（发布前的视觉检查）。发布前重跑的 DOM 断言经 `--dump-dom` 一次性取回、未另存文件：常规链路随时可重跑 `pytest tests/test_browser_undercover.py -q`（默认视口，找不到 Chrome 时跳过）；两种窗口宽度是对同一页面副本分别加 `--window-size` 各跑一次，断言脚本同一份（`tests/browser/undercover_assertions.js`）。Chrome 的无头窗口最小布局宽度为 500px，因此窄屏证据明确记为 500px，未将最初被裁切的 390px 截图认作手机设备模拟通过。浏览器使用测试响应，不调用付费模型；Python HTTP 测试单独覆盖真实服务与持久化，引擎测试覆盖恢复执行。
 
 ## 剩余限制
 
@@ -45,4 +47,4 @@ python scripts/check_coverage_thresholds.py /tmp/iris-beta-coverage.json
 - 断点为轮次边界快照，中断轮尚未完成的工作会重跑；旧版仅轮号断点无法迁移为完整历史。
 - 恢复后的实时观战时间线从恢复时开始，之前完整轮次保留于引擎上下文和最终复盘。当前页面入口依赖浏览器保存的对局 ID；清除存储后需用已有查询/恢复接口定位断点。
 - 随机种子只保证开局身份与顺序的可复现性；生成器内部状态未保存，恢复后平票抽签不保证与不中断时相同。模型输出本身也不保证确定性。
-- 版本记为待发布变更，产品版本仍为 3.40.4，协议与配置版本不变。文档和修改保留在工作区供后续审阅。
+- 版本已发布为 **3.40.5**（产品版本，第三级补丁递增）；协议版本 3.24 与数据版本不变。
