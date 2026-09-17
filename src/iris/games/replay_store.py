@@ -276,6 +276,7 @@ class ReplayStore:
             "schema_version": _REPLAY_SCHEMA_VERSION,
             "game_id": game_id,
             "updated_at": datetime.now().isoformat(timespec="seconds"),
+            "resume_version": 1,
             "setup": setup,
             "completed_rounds": completed_rounds,
             "alive_keys": alive_keys,
@@ -293,7 +294,8 @@ class ReplayStore:
             cp = d / "checkpoint.json"
             if not cp.exists():
                 return None
-            return json.loads(cp.read_text(encoding="utf-8"))
+            data = json.loads(cp.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else None
         except Exception as exc:  # noqa: BLE001 — 损坏断点不影响正常流程
             logger.warning("加载断点 %s 失败: %s", game_id, exc)
             return None

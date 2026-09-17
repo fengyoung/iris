@@ -280,3 +280,66 @@ def test_summary_updates_replay(web):
 def test_nonlocal_bind_rejected(tmp_path):
     with pytest.raises(ValueError, match='本机'):
         UndercoverWebServer(SimpleNamespace(root=tmp_path), host='0.0.0.0')
+
+
+def test_resume_preserves_mode_and_rejects_duplicate(web):
+    store = web.state.replay_store
+    game_id = store.new_game_id()
+    players = [{"role": "base_model", "model_id": f"m{i}"} for i in range(3)]
+    keys = [f"base_model/m{i}" for i in range(3)]
+    store.save_checkpoint(game_id, {"players": players, "auto_advance": False}, [], keys, keys[:1], keys)
+    with patch('iris.games.web_server._run_game') as worker:
+        assert request(web, 'POST', f'/api/game/{game_id}/resume', '')[0] == 200
+        assert web.state.games[game_id].auto_advance is False
+        assert request(web, 'POST', f'/api/game/{game_id}/resume', '')[0] == 409
+        assert worker.call_count == 1
+    assert web.state.game_slots.acquire(blocking=False)
+    assert not web.state.game_slots.acquire(blocking=False)
+    web.state.game_slots.release()
+    web.state.game_slots.release()
+
+
+def test_resume_rejects_legacy_without_consuming_slot(web):
+    store = web.state.replay_store
+    game_id = store.new_game_id()
+    directory = store.ensure_game_dir(game_id)
+    (directory / 'checkpoint.json').write_text('{"completed_rounds": [{"round_no": 1}]}')
+    assert request(web, 'POST', f'/api/game/{game_id}/resume', '')[0] == 409
+    assert game_id not in web.state.games
+    assert web.state.game_slots.acquire(blocking=False)
+    assert web.state.game_slots.acquire(blocking=False)
+    web.state.game_slots.release()
+    web.state.game_slots.release()
+
+
+def test_resume_runs_engine_with_saved_history_and_persists_result(web):
+    from iris.games.undercover import RoundRecord
+    store = web.state.replay_store
+    game_id = store.new_game_id()
+    players = [{"key": f"base_model/m{i}", "role": "base_model", "model_id": f"m{i}"} for i in range(3)]
+    keys = [p["key"] for p in players]
+    history = RoundRecord(1, descriptions={keys[0]: "恢复前的公开描述"})
+    store.save_checkpoint(game_id, {"players": players, "auto_advance": False},
+                          [history.to_dict()], keys, keys[:1], keys)
+    with patch('iris.games.web_server.UndercoverGame') as engine, patch.object(store, 'trigger_summary'):
+        engine.return_value.run.return_value = GameResult(
+            image_civilian='', image_spy='', players=keys, spy_keys=keys[:1],
+            rounds=[history], winner='stalemate')
+        assert request(web, 'POST', f'/api/game/{game_id}/resume', '')[0] == 200
+        session = web.state.games[game_id]
+        session.thread.join(3)
+        assert not session.thread.is_alive()
+        assert engine.return_value.run.call_args.kwargs['checkpoint']['completed_rounds'] == [history.to_dict()]
+        assert engine.call_args.kwargs['advance_event'] is session.advance_event
+    assert store.load_game(game_id)['rounds'] == [history.to_dict()]
+    assert request(web, 'POST', f'/api/game/{game_id}/resume', '')[0] == 400
+
+
+def test_resume_rejects_versioned_incomplete_history(web):
+    store = web.state.replay_store
+    game_id = store.new_game_id()
+    keys = [f"base_model/m{i}" for i in range(3)]
+    players = [{"role": "base_model", "model_id": f"m{i}"} for i in range(3)]
+    store.save_checkpoint(game_id, {"players": players}, [{"round_no": 1}], keys, keys[:1], keys)
+    assert request(web, 'POST', f'/api/game/{game_id}/resume', '')[0] == 409
+    assert game_id not in web.state.games

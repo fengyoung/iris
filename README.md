@@ -1,5 +1,7 @@
 # Iris 3.40.4
 
+> 工作区待发布优化（2026-09-17）：谁是卧底完整轮次断点恢复、重复恢复保护、手动等待与页面恢复接线修复。使用方法与恢复边界见 [Web 使用说明](docs/undercover-web-ui.md)，验收证据见 [本轮报告](docs/undercover-beta-acceptance-20260917.md)。
+
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 最新动态

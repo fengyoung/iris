@@ -1114,10 +1114,10 @@ class UndercoverGame:
         if self._cancel_event.is_set():
             raise _GameCancelled("游戏已取消")
 
-    def run(self) -> GameResult:
+    def run(self, checkpoint: Optional[Dict[str, Any]] = None) -> GameResult:
         """协作取消：已发出的网络请求等待超时，停止安排后续请求。"""
         try:
-            return self._run_game()
+            return self._run_game(checkpoint)
         except _GameCancelled:
             result = self._partial_result
             active = getattr(self, "_active_round", None)
@@ -1130,8 +1130,46 @@ class UndercoverGame:
                                     "spy_keys": result.spy_keys, "total_rounds": len(result.rounds)})
             return result
 
-    def _run_game(self) -> GameResult:
+    @staticmethod
+    def checkpoint_rounds(checkpoint: Dict[str, Any], player_keys: Sequence[str]) -> List[RoundRecord]:
+        """恢复前校验历史与身份，HTTP 和引擎共用，避免接受只有版本标记的残缺断点。"""
+        if checkpoint.get("resume_version") != 1:
+            raise UndercoverGameError("旧断点缺少完整轮次记录，无法安全恢复")
+        try:
+            keys = set(player_keys)
+            for name in ("alive_keys", "spy_keys", "speaking_order_base"):
+                values = checkpoint[name]
+                if not isinstance(values, list) or len(set(values)) != len(values) or not set(values) <= keys:
+                    raise ValueError("玩家集合不合法")
+            if set(checkpoint["speaking_order_base"]) != keys or not checkpoint["spy_keys"]:
+                raise ValueError("身份或发言顺序缺失")
+            history = checkpoint["completed_rounds"]
+            if not isinstance(history, list):
+                raise ValueError("轮次历史必须为列表")
+            rounds = []
+            required = set(RoundRecord(1).to_dict())
+            for index, data in enumerate(history, 1):
+                if not isinstance(data, dict) or not required <= data.keys() or data["round_no"] != index:
+                    raise ValueError("轮次记录缺失或不连续")
+                values = dict(data)
+                values["speeches"] = [SpeechRecord(**s) for s in values["speeches"]]
+                rounds.append(RoundRecord(**values))
+            return rounds
+        except (KeyError, TypeError, ValueError) as exc:
+            raise UndercoverGameError("断点历史或玩家状态损坏，无法安全恢复") from exc
+
+    def _restore_checkpoint(self, checkpoint: Dict[str, Any]) -> List[RoundRecord]:
+        """恢复完整历史及身份，不重新抽签；旧版仅含轮号的断点不能续跑。"""
+        rounds = self.checkpoint_rounds(checkpoint, list(self._players))
+        for player in self._players.values():
+            player.alive = player.key in checkpoint["alive_keys"]
+            player.is_spy = player.key in checkpoint["spy_keys"]
+        self._speaking_order_base = list(checkpoint["speaking_order_base"])
+        return rounds
+
+    def _run_game(self, checkpoint: Optional[Dict[str, Any]] = None) -> GameResult:
         """运行完整对局，返回结果。"""
+        restored_rounds = self._restore_checkpoint(checkpoint) if checkpoint else []
         spy_keys = [p.key for p in self._players.values() if p.is_spy]
         result = GameResult(
             image_civilian=self._image_a_path,
@@ -1142,6 +1180,8 @@ class UndercoverGame:
             speaking_order_base=list(self._speaking_order_base),
             order_mode=self._order_mode,
             seed=self._seed,
+            rounds=restored_rounds,
+            final_survivors=[p.key for p in self._players.values() if p.alive],
         )
 
         self._partial_result = result
@@ -1158,6 +1198,7 @@ class UndercoverGame:
                     "key": p.key, "role": p.role, "model_id": p.model_id,
                     "is_spy": p.is_spy, "display_name": p.display_name,
                     "player_number": p.player_number,
+                    "alive": p.alive,
                 }
                 for p in self._players.values()
             ],
@@ -1170,7 +1211,18 @@ class UndercoverGame:
             "max_rounds": max_rounds,
         })
 
-        round_no = 0
+        round_no = len(restored_rounds)
+        if checkpoint:
+            survivors = [p for p in self._players.values() if p.alive]
+            spies = sum(p.is_spy for p in survivors)
+            if spies == 0 or spies > len(survivors) - spies:
+                result.winner = "civilians" if spies == 0 else "spy"
+                self._emit("game_end", {"winner": result.winner,
+                           "final_survivors": result.final_survivors,
+                           "spy_keys": spy_keys, "total_rounds": round_no})
+                return result
+            if round_no < max_rounds and self._advance_event is not None:
+                self._wait_for_advance(round_no)
         while round_no < max_rounds:
             self._check_cancelled()
             round_no += 1
@@ -1240,7 +1292,7 @@ class UndercoverGame:
                 "alive_keys": [p.key for p in self._players.values() if p.alive],
                 "spy_keys": spy_keys,
                 "speaking_order_base": list(self._speaking_order_base),
-                "completed_rounds": len(result.rounds),
+                "completed_rounds": [r.to_dict() for r in result.rounds],
             })
 
             # 手动步进：等待外部 advance_event 后才继续下一轮（超时兜底防止窗口关闭后卡死）
@@ -1251,13 +1303,7 @@ class UndercoverGame:
             # 手动步进模式下该轮不进入等待态而被静默跳过。
             continuing = round_no < max_rounds and 0 < remaining_spies <= len(alive) - remaining_spies
             if self._advance_event is not None and continuing:
-                self._emit("round_waiting", {"round_no": round_no})
-                deadline = time.monotonic() + 300
-                while not self._advance_event.wait(timeout=0.2):
-                    self._check_cancelled()
-                    if time.monotonic() >= deadline:
-                        break
-                self._advance_event.clear()
+                self._wait_for_advance(round_no)
 
             self._check_cancelled()
             survivors = [p for p in self._players.values() if p.alive]
@@ -1299,6 +1345,17 @@ class UndercoverGame:
             "total_rounds": round_no,
         })
         return result
+
+    def _wait_for_advance(self, round_no: int) -> None:
+        """正常轮间与断点恢复共用手动等待逻辑。"""
+        assert self._advance_event is not None
+        self._emit("round_waiting", {"round_no": round_no})
+        deadline = time.monotonic() + 300
+        while not self._advance_event.wait(timeout=0.2):
+            self._check_cancelled()
+            if time.monotonic() >= deadline:
+                break
+        self._advance_event.clear()
 
     # ── 发言顺序 ────────────────────────────────────────────────
 
