@@ -14,12 +14,14 @@ from iris.games.undercover import (
     _DESCRIBE_PROMPT,
     _SPEECH_MALFORMED_PLACEHOLDER,
     _VOTE_PROMPT,
+    GamePlayer,
     GameResult,
     RoundRecord,
     SpeechRecord,
     UndercoverGame,
     UndercoverGameError,
     _format_history,
+    _judge_survivors,
     _parse_confidence,
     _parse_identity,
     _parse_observation_list,
@@ -301,7 +303,11 @@ class TestSpyCount:
         assert game._spy_count == 1
 
     def test_spy_count_at_half_of_players_rejected(self):
-        """卧底达到总人数一半时开局即满足卧底胜，游戏没有意义。"""
+        """卧底达到总人数一半时开局即满足卧底胜，游戏没有意义。
+
+        多数即胜下这句话是字面成立的：`spy_count == total/2` 让开局态本身就满足
+        `卧底 >= 平民`，不投即负于平民——故必须在开局拒绝，而不是等第一轮抽签。
+        """
         with pytest.raises(UndercoverGameError, match="小于总人数的一半"):
             _make_game(players=_players(4), spy_count=2)
 
@@ -321,6 +327,48 @@ class TestSpyCount:
         ]
         game, _ = _make_game(players=players, max_players=3, rng=random.Random(1))
         assert len(game._players) == 3
+
+
+class TestJudgeSurvivors:
+    """胜负判据的唯一来源——主循环、断点恢复、手动步进的继续判定都经由它。
+
+    这组用例是「三处副本漂移」这一类问题的底线：判词本身被钉死在纯函数层，
+    编排层再怎么改都不会悄悄换掉规则。
+    """
+
+    @staticmethod
+    def _alive(spies: int, civilians: int):
+        players = [
+            GamePlayer(key=f"spy{i}", role="base_model", model_id=f"s{i}", is_spy=True)
+            for i in range(spies)
+        ] + [
+            GamePlayer(key=f"civ{i}", role="base_model", model_id=f"c{i}", is_spy=False)
+            for i in range(civilians)
+        ]
+        return players
+
+    def test_no_spy_left_means_civilians_win(self):
+        assert _judge_survivors(self._alive(0, 3)) == "civilians"
+
+    def test_spies_at_parity_win(self):
+        """人数打平即卧底胜——本次改动的核心，与严格多数（返回空串）的分界点。"""
+        assert _judge_survivors(self._alive(2, 2)) == "spy"
+        assert _judge_survivors(self._alive(1, 1)) == "spy"
+
+    def test_spies_outnumbering_civilians_win(self):
+        assert _judge_survivors(self._alive(3, 1)) == "spy"
+
+    def test_spies_fewer_than_civilians_keeps_playing(self):
+        """未分出胜负时返回空串——这正是 continuing 的取反来源。"""
+        assert _judge_survivors(self._alive(1, 2)) == ""
+        assert _judge_survivors(self._alive(2, 3)) == ""
+
+    def test_empty_survivors_is_civilians_win(self):
+        """全员出局（理论上不可达）判平民胜而非越界——0 名卧底确实成立。"""
+        assert _judge_survivors([]) == "civilians"
+
+    def test_all_spies_win(self):
+        assert _judge_survivors(self._alive(2, 0)) == "spy"
 
 
 class TestSpeakingOrder:
@@ -510,18 +558,32 @@ class TestPromptContracts:
     def test_vote_prompt_tells_silent_players_are_not_evidence(self):
         assert "因系统故障未发言的玩家不参与比对" in _VOTE_PROMPT
 
-    def test_prompts_state_double_spy_win_condition(self):
-        assert "所有卧底都被投出" in _DESCRIBE_PROMPT
-        assert "场上卧底人数多于平民人数" in _DESCRIBE_PROMPT
+    def test_prompts_state_the_win_condition(self):
+        """描述侧与投票侧的规则文本必须同源。
 
-    def test_describe_prompt_says_parity_keeps_playing(self):
-        """打平不算收局——玩家读到的规则必须与引擎的严格多数判定一致。
-
-        旧的「不少于即卧底胜」下，3v3 时卧底会以为自己已经赢了、平民会以为输了，
-        双方都会放弃最后一轮的最佳策略。
+        `_VOTE_PROMPT` 是另一份独立文本，此前只有描述侧被断言过——只改一侧就会
+        让模型按半旧半新的规则推理。这里把两侧一并钉住。
         """
-        assert "人数相同时游戏不结束" in _DESCRIBE_PROMPT
-        assert "不少于平民人数" not in _DESCRIBE_PROMPT
+        assert "所有卧底都被投出" in _DESCRIBE_PROMPT
+        assert "场上卧底人数不少于平民人数" in _DESCRIBE_PROMPT
+        assert "多于平民人数" not in _DESCRIBE_PROMPT
+        # 投票侧：推断句此前完全没有测试覆盖
+        assert "卧底人数少于平民人数" in _VOTE_PROMPT
+        assert "不多于平民人数" not in _VOTE_PROMPT
+        assert "人数相同时一票就能决定胜负" not in _VOTE_PROMPT
+
+    def test_describe_prompt_says_parity_is_a_spy_win(self):
+        """打平即卧底胜——玩家读到的规则必须与引擎的多数判定一致。
+
+        旧的「人数相同时游戏不结束」会让模型在打平轮以为还没收局、继续按未完局
+        的方式推理，而引擎当场判卧底胜，双方对局面的判断分叉。
+        """
+        assert "人数相同时卧底" in _DESCRIBE_PROMPT
+        assert "人数相同时游戏不结束" not in _DESCRIBE_PROMPT
+        assert "不少于平民人数" in _DESCRIBE_PROMPT
+        # 这条负向断言不可省：「（且卧底人数不多于平民人数）」是另一处独立文本，
+        # 只断言「不少于平民人数」在场无法区分它和规则句本身。
+        assert "不多于平民人数" not in _DESCRIBE_PROMPT
 
     # ── 策略层：投票判据分级（按 2026-09-16 复盘校准） ──────────────
 

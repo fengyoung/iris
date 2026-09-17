@@ -338,12 +338,19 @@ class TestUndercoverGameRun:
         assert spy_key not in result.final_survivors
         assert len(result.rounds) == 1
         assert result.rounds[0].eliminated == spy_key
+        # 平民胜未必「人多势众」：3 人局第 1 轮投出卧底后只剩 2 人。这条原属已删除的
+        # 打平态用例，是「幸存者可以很少」的唯一覆盖。
+        assert len(result.final_survivors) == 2
 
-    def test_spies_win_only_when_outnumbering(self):
-        """卧底必须在人数上严格多于平民才获胜。
+    def test_spies_win_when_not_outnumbered(self):
+        """卧底人数不少于平民人数即获胜——人数打平当场收局，不进入下一轮。
 
-        3 人局恒投平民：第 1 轮淘汰后停在 1v1 打平态，此时**不能**收局——再淘汰一名
-        平民、轮到 1v0 时才判卧底胜。旧的「存活 ≤2 且卧底存活」语义下这里正好是 2 人收局。
+        3 人局恒投平民：第 1 轮淘汰一名平民后剩 1 卧底 + 1 平民，人数打平即判卧底胜。
+        本用例同时钉住两件事：轮数为 1（旧规则下要再打一轮到 1v0）与幸存 2 人。
+
+        顺带记下 3 人局的整体形态：两种淘汰结果都在第 1 轮收局——淘汰平民则 1v1
+        打平判卧底胜，淘汰卧底则卧底清零判平民胜。故 3 人局恒为 1 轮（或无人淘汰
+        时的 stalemate），不存在「需要第 2 轮投票」的路径。
         """
         game, mock_llm = _make_game(rng=random.Random(0))
         spy_key = next(p.key for p in game._players.values() if p.is_spy)
@@ -363,8 +370,8 @@ class TestUndercoverGameRun:
 
         assert result.winner == "spy"
         assert spy_key in result.final_survivors
-        assert len(result.final_survivors) == 1
-        assert len(result.rounds) == 2
+        assert len(result.final_survivors) == 2
+        assert len(result.rounds) == 1
 
     def test_all_players_failing_ends_as_stalemate(self):
         """全员调用失败→无有效票→无人淘汰。必须靠轮次上限收敛，不能死循环。"""
@@ -606,11 +613,14 @@ class TestSequentialDescribe:
 
 
 class TestOutcomeConditions:
-    """胜负判定：卧底须严格多于平民才获胜，人数打平时继续。"""
+    """胜负判定：卧底人数不少于平民人数即获胜（打平收局）；平民须清空卧底才赢。"""
 
     def test_eliminating_one_spy_does_not_end_the_game(self):
         """淘汰一名卧底后游戏必须继续——这正是「游戏未结束⇒被淘汰者不是卧底」
-        这条旧措辞在双卧底下的失效点。"""
+        这条旧措辞在双卧底下的失效点。
+
+        此刻存活 1 卧底 + 6 平民，卧底仍**少于**平民，不满足终局判据。
+        本用例是本次改动的对照组：两个卧底都出局才平民胜，新旧规则下一致。"""
         game, mock_llm = _make_game(players=_players(8), rng=random.Random(4))
         spies = [p.key for p in game._players.values() if p.is_spy]
         assert len(spies) == 2
@@ -631,11 +641,11 @@ class TestOutcomeConditions:
         assert result.rounds[1].eliminated == spies[1]
         assert result.winner == "civilians"
 
-    def test_no_win_at_parity(self):
-        """人数打平不收局（8 人局：2 卧底 vs 2 平民时继续，直到卧底严格多于平民）。
+    def test_spies_win_at_parity(self):
+        """人数打平即收局（8 人局：第 4 轮后 2 卧底 vs 2 平民，判卧底胜）。
 
-        本用例是「打平继续」的正面回归钉，**必须显式断言轮数**：旧规则下这三条关于
-        幸存者构成的断言会全部照旧成立（只是提前一轮收局），属于典型的假阳性。
+        **必须显式断言轮数**：只断言终局构成而不锁轮数，会在新旧规则下同为真
+        （旧规则下提前一轮收局同样得到「卧底幸存」），是典型的假阳性。
         """
         game, mock_llm = _make_game(players=_players(8), rng=random.Random(4))
         spies = {p.key for p in game._players.values() if p.is_spy}
@@ -649,36 +659,22 @@ class TestOutcomeConditions:
         )
         result = game.run()
 
-        # 每轮淘汰一名平民：8 → 7 → 6 → 5（第 4 轮后是 2v2，打平不收局）→ 4（2v1 收局）
-        assert len(result.rounds) == 5
+        # 每轮淘汰一名平民：8 → 7 → 6 → 5（第 4 轮后是 2v2，打平即收局）
+        assert len(result.rounds) == 4
         assert all(r.eliminated_was_spy is False for r in result.rounds)
         spy_alive = sum(1 for k in result.final_survivors if k in spies)
         civ_alive = len(result.final_survivors) - spy_alive
-        assert (spy_alive, civ_alive) == (2, 1)
-        assert spy_alive > civ_alive
+        assert (spy_alive, civ_alive) == (2, 2)
+        assert spy_alive >= civ_alive
         assert result.winner == "spy"
 
-    def test_civilians_win_from_parity_state(self):
-        """打平态下平民的胜利路径没有被改坏：1v1 时投出卧底照样平民胜。"""
-        game, mock_llm = _make_game(players=_players(3), rng=random.Random(0))
-        spy_key = next(p.key for p in game._players.values() if p.is_spy)
-        civilians = [p.key for p in game._players.values() if not p.is_spy]
+    def test_parity_at_round_cap_is_spy_win_not_stalemate(self):
+        """打平与轮次上限同时命中时，判胜负而非 stalemate。
 
-        def picker(candidates, voter, prompt):
-            # 第 1 轮误淘汰平民（制造 1v1 打平态），此后投卧底
-            target = spy_key if "[第1轮结果]" in prompt else civilians[0]
-            return target if target in candidates else None
-
-        _capture_prompts(mock_llm, game, describe_reply=lambda key: "描述", vote_picker=picker)
-        result = game.run()
-
-        assert result.rounds[0].eliminated_was_spy is False
-        assert result.rounds[1].eliminated == spy_key
-        assert result.winner == "civilians"
-        assert len(result.final_survivors) == 1
-
-    def test_stalemate_when_round_cap_reached_at_parity(self):
-        """打平态撞上轮次上限同样记 stalemate，不谎报一方胜利。"""
+        守护的是判定与上限的**顺序**：判词在循环内每轮末尾执行，上限只决定「是否
+        再进一轮」。若有人把判词挪到循环外、或先判上限再判胜负，本用例立刻抓住——
+        `test_all_players_failing_ends_as_stalemate` 抓不到（那条路径没有淘汰）。
+        """
         game, mock_llm = _make_game(players=_players(3), rng=random.Random(0), max_rounds=1)
         civilians = [p.key for p in game._players.values() if not p.is_spy]
 
@@ -688,22 +684,25 @@ class TestOutcomeConditions:
         _capture_prompts(mock_llm, game, describe_reply=lambda key: "描述", vote_picker=picker)
         result = game.run()
 
-        # 第 1 轮淘汰平民后停在 1v1 打平态，而轮次上限已到
+        # 第 1 轮淘汰平民后停在 1v1 打平态，而轮次上限也恰好已到——判胜负优先
         assert len(result.rounds) == 1
         assert result.rounds[0].eliminated_was_spy is False
-        assert result.winner == "stalemate"
+        assert result.winner == "spy"
         assert len(result.final_survivors) == 2
-        assert any("stalemate" in e for e in result.errors)
 
-    def test_round_waiting_emitted_at_parity_in_step_mode(self):
-        """打平轮也必须发 round_waiting——否则手动步进模式下该轮被静默跳过。
+    def test_round_waiting_stops_at_parity_in_step_mode(self):
+        """打平轮**不再**发 round_waiting——该轮已判胜负，不该让玩家为结束的对局点步进。
 
-        这是「继续 ⟺ 卧底存活且不多于平民」这条互补关系的唯一守卫。若 continuing
-        仍写成 卧底 < 平民，打平轮不发事件，Web 端相位停在 waiting 之外，步进按钮
-        不启用（web_server 的相位守卫会返回 409），对局静默推进到下一轮。
+        这是「继续 ⟺ 判词为空」这条互补关系的唯一守卫，方向与 v3.40.4~3.40.5 相反：
+        那时打平要继续、故打平轮必须发事件；现在打平即终局，多发一次事件会让 Web 端
+        相位进入 waiting、步进按钮亮起，玩家点一次才看到 game_end。
+
+        断言不能只看事件列表：`[]` 是「坏了也成立」的值——事件管道整体失灵、或对局
+        因任何别的原因提前结束，都能满足它。故同时回传 winner 与轮数，把「没有等待」
+        限定为「因为已判胜负所以无需等待」。
         """
 
-        def wait_rounds_for(player_count: int) -> list:
+        def run_stepped(player_count: int):
             advance = threading.Event()
             waiting: list = []
 
@@ -724,13 +723,19 @@ class TestOutcomeConditions:
                 return civilians[0] if civilians else None
 
             _capture_prompts(mock_llm, game, describe_reply=lambda key: "描述", vote_picker=picker)
-            game.run()
-            return waiting
+            return waiting, game.run()
 
-        # 3 人局：第 1 轮淘汰平民后停在 1v1 打平态，须等待；第 2 轮分出胜负，不再等待
-        assert wait_rounds_for(3) == [1]
-        # 8 人局：2v2 出现在第 4 轮之后，故第 1 到 4 轮都等待
-        assert wait_rounds_for(8) == [1, 2, 3, 4]
+        # 3 人局：第 1 轮淘汰平民后即 1v1 打平收局，全程无需等待
+        waiting3, result3 = run_stepped(3)
+        assert waiting3 == []
+        assert result3.winner == "spy"
+        assert len(result3.rounds) == 1
+
+        # 8 人局：2v2 出现在第 4 轮之后，故第 1 到 3 轮等待，打平的第 4 轮直接收局
+        waiting8, result8 = run_stepped(8)
+        assert waiting8 == [1, 2, 3]
+        assert result8.winner == "spy"
+        assert len(result8.rounds) == 4
 
 
 class TestPrivateIsolation:
@@ -888,8 +893,14 @@ class TestParseGameModels:
 
 
 def test_checkpoint_restores_history_identity_and_next_round():
+    """恢复后应进入下一轮。
+
+    刻意用 5 人局：恢复出的 4 名存活者中 1 名卧底、3 名平民（卧底**少于**平民），
+    不满足终局判据，才能验证「继续跑第 2 轮」。若用默认 3 人局，`keys[1:]` 恰好是
+    1 卧底 + 1 平民的打平态——多数即胜下该局面当场收局，本用例会因夹具而非逻辑失败。
+    """
     from iris.games.undercover import RoundRecord, SpeechRecord
-    game, _ = _make_game(max_rounds=2)
+    game, _ = _make_game(players=_players(5), max_rounds=2)
     keys = list(game._players)
     history = RoundRecord(round_no=1, speeches=[SpeechRecord(key=keys[0], description="历史锚点")])
     cp = {"resume_version": 1, "completed_rounds": [history.to_dict()],
@@ -943,8 +954,13 @@ def test_restored_manual_game_waits_and_can_be_cancelled_before_next_round():
     llm.generate_as.assert_not_called()
 
 
-@pytest.mark.parametrize("survivors,winner", [([1, 2], "civilians"), ([0], "spy")])
+@pytest.mark.parametrize("survivors,winner", [([1, 2], "civilians"), ([0], "spy"), ([0, 1], "spy")])
 def test_restored_terminal_game_does_not_call_models(survivors, winner):
+    """恢复出的局面已达终局条件时直接结算，不再调用模型。
+
+    第三档 `[0, 1]` 是 1 卧底 + 1 平民的打平态，也是**恢复路径那份判词的唯一守卫**：
+    前两档（卧底清零 / 平民清零）在新旧规则下都成立，只有打平档能区分两者。
+    """
     game, llm = _make_game()
     keys = list(game._players)
     cp = {"resume_version": 1, "completed_rounds": [RoundRecord(1).to_dict()],

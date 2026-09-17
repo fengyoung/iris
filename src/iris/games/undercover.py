@@ -17,8 +17,12 @@
   之所以要私有，是因为身份自评若公开，卧底要么自曝、要么就得对身份说谎——而
   「不可编造或说谎」是本游戏对图片描述侧的硬约束。
 
-胜负：所有卧底被投出 → 平民胜；场上卧底人数多于平民人数 → 卧底胜。
-人数相同时对局继续——下一票直接决定胜负，故两侧的取胜成本是对等的。
+胜负：所有卧底被投出 → 平民胜；场上卧底人数不少于平民人数 → 卧底胜（人数相同时卧底胜）。
+判据只此一处（`_judge_survivors`），主循环、断点恢复与手动步进的继续判定共用它。
+
+v3.40.6 由严格多数（`>`）改回多数（`>=`）：按试玩反馈，打平继续的体验不理想，
+改回通行玩法；打平当场收局，不再进入下一轮。
+注意连带代价：3 人局（1 卧底）任何一次淘汰都直达终局，恒为 1 轮或僵持。
 """
 
 from __future__ import annotations
@@ -228,9 +232,8 @@ _DESCRIBE_PROMPT = """你正在参与「谁是卧底」游戏。
 - 全部 {total_players} 名玩家中，有 {spy_count} 人看到的图片与其他人不同，这些人是「卧底」；其余人看到同一张图片。
 - 没有人知道自己的身份，包括你。你只能根据每一轮其他人的发言来推断自己是不是卧底。
 - 每轮所有人依次发言，发言顺序在开局确定；发言完毕后全体投票，得票最多者被淘汰出局。
-- 所有卧底都被投出，则平民获胜；场上卧底人数多于平民人数，则卧底获胜。
-  人数相同时游戏不结束，会继续下一轮——此时一票就能决定胜负。
-- 只要游戏在淘汰后继续进行，就说明场上仍有卧底存活（且卧底人数不多于平民人数）。
+- 所有卧底都被投出，则平民获胜；场上卧底人数不少于平民人数，则卧底获胜——人数相同时卧底即胜。
+- 只要游戏在淘汰后继续进行，就说明场上仍有卧底存活（且卧底人数少于平民人数）。
 
 【你的目标由你推断出的身份决定】
 你事先不知道自己是哪一类，但你的行动必须服从当下的判断：
@@ -412,8 +415,8 @@ _VOTE_PROMPT = """你正在参与「谁是卧底」游戏。全部 {total_player
 - 识别同类只能靠公开描述与你自己所见的吻合程度，不得用任何方式向对方示意或试探。
 
 共同要求：
-- 被淘汰者的身份不会当场公布；只要游戏没有结束，就说明场上仍有卧底存活（且卧底人数不多于平民人数）。
-  人数相同时一票就能决定胜负。
+- 被淘汰者的身份不会当场公布；只要游戏没有结束，就说明场上仍有卧底存活（且卧底人数少于平民人数）。
+  人数相同时卧底即已获胜。
 - 弃权等于把本轮的决定权让给别人：你少一票，与你判断相同的人也少一票，而卧底的票通常更集中。
   只有在强证据与弱证据都不成立、且没有任何候选人可做横向比较时才弃权；
   否则投给现有证据相对最强的那个目标，并在理由里说明依据属于哪一档。
@@ -888,6 +891,24 @@ def _parse_speech(text: str, key: str, order_index: int) -> SpeechRecord:
     return record
 
 
+def _judge_survivors(survivors: Sequence[GamePlayer]) -> str:
+    """胜负的**唯一**判据来源：返回 "civilians" / "spy"，未分出胜负返回空串。
+
+    判词只此一处——主循环、checkpoint 恢复分支与手动步进的 `continuing` 判定
+    全部经由它得出，不再各写一份。于是「游戏继续 ⟺ 本函数返回空串」从注释纪律
+    变成结构保证：三处调用不可能不同步。
+
+    判定为**多数即胜**：卧底全出局则平民胜；卧底人数不少于平民人数则卧底胜
+    （人数打平即终局，不进入下一轮）。
+    """
+    spies = sum(1 for p in survivors if p.is_spy)
+    if spies == 0:
+        return "civilians"
+    if spies >= len(survivors) - spies:
+        return "spy"
+    return ""
+
+
 class UndercoverGame:
     """多模型对抗游戏「谁是卧底」编排器。
 
@@ -986,8 +1007,8 @@ class UndercoverGame:
             if spy_count is not None
             else (2 if total >= _DOUBLE_SPY_MIN_PLAYERS else 1)
         )
-        # 卧底人数须少于总人数的一半。人数对半时平民第一轮只要投错一个平民，卧底即刻以
-        # 严格多数获胜——胜负实际由单轮抽签决定，博弈没有意义。
+        # 卧底人数须少于总人数的一半。人数对半时开局态本身就已满足卧底胜判据（卧底 ≥ 平民），
+        # 不投即负于平民，博弈没有意义。
         if resolved_spy_count < 1 or resolved_spy_count * 2 >= total:
             raise UndercoverGameError(
                 f"卧底人数需 ≥1 且小于总人数的一半，当前 {resolved_spy_count} 名 / {total} 人"
@@ -1213,10 +1234,11 @@ class UndercoverGame:
 
         round_no = len(restored_rounds)
         if checkpoint:
+            # 与主循环共用同一判据：恢复出的局面若已达终局条件，直接结算、不再调用模型。
             survivors = [p for p in self._players.values() if p.alive]
-            spies = sum(p.is_spy for p in survivors)
-            if spies == 0 or spies > len(survivors) - spies:
-                result.winner = "civilians" if spies == 0 else "spy"
+            verdict = _judge_survivors(survivors)
+            if verdict:
+                result.winner = verdict
                 self._emit("game_end", {"winner": result.winner,
                            "final_survivors": result.final_survivors,
                            "spy_keys": spy_keys, "total_rounds": round_no})
@@ -1295,46 +1317,31 @@ class UndercoverGame:
                 "completed_rounds": [r.to_dict() for r in result.rounds],
             })
 
-            # 手动步进：等待外部 advance_event 后才继续下一轮（超时兜底防止窗口关闭后卡死）
-            alive = [p for p in self._players.values() if p.alive]
-            remaining_spies = sum(p.is_spy for p in alive)
-            # 这里必须与下面的胜负判定严格互补：继续 ⟺ 卧底存活且不多于平民。
-            # 人数打平的那一轮仍会继续，故用 <=；写成 < 会让打平轮不发 round_waiting，
-            # 手动步进模式下该轮不进入等待态而被静默跳过。
-            continuing = round_no < max_rounds and 0 < remaining_spies <= len(alive) - remaining_spies
+            survivors = [p for p in self._players.values() if p.alive]
+            verdict = _judge_survivors(survivors)
+
+            # 手动步进：等待外部 advance_event 后才继续下一轮（超时兜底防止窗口关闭后卡死）。
+            # continuing 由判词直接取反，与胜负判定严格互补——打平即终局，该轮不再等待。
+            continuing = round_no < max_rounds and not verdict
             if self._advance_event is not None and continuing:
                 self._wait_for_advance(round_no)
 
             self._check_cancelled()
-            survivors = [p for p in self._players.values() if p.alive]
             result.final_survivors = [p.key for p in survivors]
 
-            spy_alive = sum(1 for p in survivors if p.is_spy)
-            civ_alive = len(survivors) - spy_alive
-            # 判定必须用严格多数：人数相同时游戏继续，下一票直接决定胜负。
-            # 若写成 spy_alive >= civ_alive，卧底只要打平即胜，而平民必须清空卧底才能赢，
-            # 两侧的取胜成本不对等（单卧底时即退化为旧的「存活 ≤2 且卧底存活」）。
-            if spy_alive == 0:
-                result.winner = "civilians"
+            if verdict:
+                result.winner = verdict
                 self._emit("game_end", {
-                    "winner": "civilians",
-                    "final_survivors": result.final_survivors,
-                    "spy_keys": spy_keys,
-                    "total_rounds": round_no,
-                })
-                return result
-            if spy_alive > civ_alive:
-                result.winner = "spy"
-                self._emit("game_end", {
-                    "winner": "spy",
+                    "winner": verdict,
                     "final_survivors": result.final_survivors,
                     "spy_keys": spy_keys,
                     "total_rounds": round_no,
                 })
                 return result
 
-        # 达到轮次上限仍未分出胜负。两条成因：全员弃权导致每轮无人被淘汰；
-        # 或人数打平后的僵持。记为 stalemate 而非谎报一方胜利，errors 里已有失败明细可供诊断。
+        # 达到轮次上限仍未分出胜负。起因只有一种：连续若干轮无人被淘汰（全员弃权或调用失败），
+        # 存活集合不再变化——判定改为多数即胜后，「打平僵持」这条成因已不存在（打平当场收局）。
+        # 记为 stalemate 而非谎报一方胜利，errors 里已有失败明细可供诊断。
         logger.warning("对局达到轮次上限 %d 仍未分出胜负，记为 stalemate", max_rounds)
         result.winner = "stalemate"
         result.errors.append(f"stalemate: 达到轮次上限 {max_rounds} 仍无人被淘汰")
