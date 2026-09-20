@@ -89,6 +89,12 @@ def _fmt_memory_delete(p: Dict[str, Any]) -> str:
     return f"删除纠正规则「{p.get('concept', '')}」：{'成功' if deleted else '未找到'}"
 
 
+def _fmt_memory_confirm(p: Dict[str, Any]) -> str:
+    verb = "确认" if p.get("value", True) else "取消确认"
+    ok = "成功" if p.get("confirmed") else "未找到"
+    return f"{verb}纠正规则「{p.get('concept', '')}」：{ok}"
+
+
 def _fmt_memory_export(p: Dict[str, Any]) -> str:
     return f"记忆已导出到：{p.get('output_file', '')}"
 
@@ -463,6 +469,7 @@ _FORMATTERS: Dict[str, Any] = {
     "memory-status": _fmt_memory_status,
     "memory-list": _fmt_memory_list,
     "memory-delete": _fmt_memory_delete,
+    "memory-confirm": _fmt_memory_confirm,
     "memory-export": _fmt_memory_export,
     "memory-import": _fmt_memory_import,
     "working-set": _fmt_working,

@@ -165,6 +165,10 @@ class MemoryLifecycle:
         for entry in frequent:
             concept = entry["concept"]
             item = items.get(concept, {})
+            # 已人工确认的规则不再报冲突：update_count 高未必是反复纠正，
+            # 多概念合并（last_source 为「合并自: ...」）同样会累加计数。
+            if item.get("confirmed"):
+                continue
             preferred = str(item.get("preferred", ""))
             last_source = str(item.get("last_source", ""))
             count = entry.get("update_count", 0)

@@ -250,6 +250,28 @@ class CorrectionMemoryStore:
             self._save(state)
         return True
 
+    def confirm(self, concept: str, *, confirmed: bool = True) -> bool:
+        """标记/取消标记一条纠正记录为「已人工确认」。
+
+        已确认的记录不再被 detect_conflicts 报为冲突。用于把反复更新但语义
+        稳定的规则（如「文档签名规则」）从「需人工确认」告警中摘出来——这类
+        记录的高 update_count 往往来自多概念合并，而非反复纠正。
+        """
+        concept = _clean_term(concept)
+        if not concept:
+            return False
+        with FileLock(self._path):
+            state = self._load_unlocked()
+            items = state.setdefault("items", {})
+            item = items.get(concept)
+            if item is None:
+                return False
+            item["confirmed"] = bool(confirmed)
+            item["confirmed_at"] = _now_iso() if confirmed else ""
+            state["updated_at"] = _now_iso()
+            self._save(state)
+        return True
+
     def save(self, payload: Dict[str, Any]) -> None:
         payload.setdefault("items", {})
         payload["updated_at"] = payload.get("updated_at") or _now_iso()

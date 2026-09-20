@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -19,7 +20,7 @@ from .discovery_utils import (
     infer_page_type, is_high_value_title, is_high_value_term,
     path_weight, extract_terms, extract_persons, build_candidates,
     suppress_path_concentrated_noise, cluster_and_resolve,
-    is_wiki_stale,
+    is_wiki_stale, drop_sensitive_candidates,
 )
 
 
@@ -123,6 +124,8 @@ class CandidateDiscovery:
         candidates = cluster_and_resolve(candidates)
         # 过滤周报模板固定文本/章节标题噪音（如「本内容由AI」「💼 本周工作」）
         candidates = [c for c in candidates if not is_noise_candidate(c.title)]
+        # 过滤敏感标题（如正常文档里的「## 930 名单」章节）
+        candidates = drop_sensitive_candidates(candidates)
 
         # 按类型分层排序，确保每种类型都有展示
         per_type_min = max(limit // 5, 3)
@@ -194,13 +197,27 @@ class CandidateDiscovery:
         return None
 
     def _load_chunks(self):
+        """加载候选发现用的 chunk，整篇排除敏感文档。
+
+        过滤必须发生在计数之前：sample_paths 会被 append_sample 截到 3 条，
+        若在计数后按路径过滤，敏感来源可能已被挤出样本导致漏判。
+        """
         from iris.ingest import iter_chunk_items
+        from ._sensitive import is_sensitive_path
         chunks = []
+        skipped = 0
         for item in iter_chunk_items(self._metadata_root, self._config.data_source.get("sources", {})):
             try:
-                chunks.append(ChunkSlim.from_dict(item))
+                chunk = ChunkSlim.from_dict(item)
             except (TypeError, ValueError):
                 continue
+            if is_sensitive_path(chunk.relative_path):
+                skipped += 1
+                continue
+            chunks.append(chunk)
+        if skipped:
+            logging.getLogger(__name__).info(
+                "候选发现：跳过 %d 个敏感文档 chunk", skipped)
         return chunks
 
     def export_jsonl(self, candidates: List[CandidateItem], path: Path) -> Path:

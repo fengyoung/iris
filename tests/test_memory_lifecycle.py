@@ -212,6 +212,54 @@ def test_detect_conflicts_low_count_ignored(lifecycle):
     assert conflicts == []
 
 
+def test_detect_conflicts_skips_confirmed(lifecycle):
+    """已人工确认的规则不再报冲突。
+
+    回归背景：`文档签名规则`/`飞书操作规则` 这类稳定规则因 last_source 为
+    「合并自: ...」而累加了 update_count，被 count >= min_count*2 的纯计数
+    判据误报为「需人工确认」，每次 daily-start 都重复告警。
+    """
+    items = {
+        "文档签名规则": {
+            "preferred": "所有文档末尾加签名",
+            "update_count": 7,
+            "last_source": "合并自: 文档签名, 文档签名规则",
+            "confirmed": True,
+            "updated_at": _now_iso(),
+        }
+    }
+    lifecycle._corrections.load.return_value = {
+        "version": "1.0", "updated_at": _now_iso(), "items": items
+    }
+    lifecycle._corrections.get_frequent_corrections.return_value = [
+        {"concept": "文档签名规则", "update_count": 7}
+    ]
+
+    assert lifecycle.detect_conflicts(min_count=3) == []
+
+
+def test_detect_conflicts_still_flags_unconfirmed(lifecycle):
+    """未确认的高频项仍应被报出——确认标记不能顺带关掉整个检测。"""
+    items = {
+        "未确认规则": {
+            "preferred": "某个值",
+            "update_count": 7,
+            "last_source": "trello-priority-rule",
+            "updated_at": _now_iso(),
+        }
+    }
+    lifecycle._corrections.load.return_value = {
+        "version": "1.0", "updated_at": _now_iso(), "items": items
+    }
+    lifecycle._corrections.get_frequent_corrections.return_value = [
+        {"concept": "未确认规则", "update_count": 7}
+    ]
+
+    conflicts = lifecycle.detect_conflicts(min_count=3)
+    assert len(conflicts) == 1
+    assert conflicts[0]["concept"] == "未确认规则"
+
+
 # ── summarize() ────────────────────────────────────────────────────────
 
 

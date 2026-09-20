@@ -30,4 +30,17 @@ class StorageError(IrisRuntimeError):
     """存储层相关错误（SQLite / 索引文件）。"""
 
 
-__all__ = ["IrisError", "IrisRuntimeError", "IrisValueError", "StorageError"]
+class SensitiveDocumentError(IrisValueError):
+    """请求的文档/标题命中敏感策略，拒绝进入下游衍生制品。
+
+    由 ``iris.wiki._sensitive`` 的判定触发，用于 Wiki 页面生成与更新路径。
+    """
+
+
+__all__ = [
+    "IrisError",
+    "IrisRuntimeError",
+    "IrisValueError",
+    "StorageError",
+    "SensitiveDocumentError",
+]

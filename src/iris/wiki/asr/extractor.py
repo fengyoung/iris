@@ -203,7 +203,10 @@ class TermExtractor:
 
         # 每页最多 15 个术语，防止膨胀
         # 优先级：标题 > 标题段落 > 粗体 > Wiki 链接
-        return results[:15]
+        # 敏感术语在此收口：下游 generate_misreadings（LLM）与 format_replace_dict
+        # 均消费本列表，前置过滤可同时避免敏感词进 prompt 与进词典
+        from .._sensitive import is_sensitive_term
+        return [t for t in results[:15] if not is_sensitive_term(t.term)]
 
     def _deduplicate(self, terms: List[AsrTerm]) -> List[AsrTerm]:
         """按 term 去重，保留最先出现的类别。"""

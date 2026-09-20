@@ -158,6 +158,7 @@ class LocalRetriever:
             return
         # 优先尝试 SQLite（FTS5 全文搜索，性能更高）
         if self._try_load_sqlite():
+            self._drop_sensitive_chunks()
             self._loaded = True
             self._compute_corpus_stats()
             return
@@ -174,8 +175,32 @@ class LocalRetriever:
                 self._by_source.setdefault(source_name, []).append(chunk)
             except (TypeError, ValueError):
                 continue
+        self._drop_sensitive_chunks()
         self._loaded = True
         self._compute_corpus_stats()
+
+    def _drop_sensitive_chunks(self) -> None:
+        """剔除敏感文档 chunk：其内容不得参与任何检索。
+
+        Wiki 证据收集、iris-ask 问答、向量召回补齐共用本检索器，故此处是
+        唯一能同时覆盖三者的拦截点。在 _compute_corpus_stats 之前过滤，
+        使敏感文档也不参与 idf 权重。
+
+        延迟导入：iris.wiki 在模块级导入本模块，模块级反向导入会成环。
+        """
+        from iris.wiki._sensitive import is_sensitive_path
+
+        before = len(self._chunks)
+        self._chunks = [c for c in self._chunks
+                        if not is_sensitive_path(getattr(c, "relative_path", ""))]
+        for key, chunks in self._by_source.items():
+            self._by_source[key] = [
+                c for c in chunks
+                if not is_sensitive_path(getattr(c, "relative_path", ""))
+            ]
+        dropped = before - len(self._chunks)
+        if dropped:
+            logger.info("检索器：跳过 %d 个敏感文档 chunk（共 %d）", dropped, before)
 
     def _compute_corpus_stats(self) -> None:
         """计算全局 BM25 统计量：文档总数、平均长度、词项文档频率。

@@ -32,10 +32,15 @@ def format_hotwords_file(hotwords: List[str], output_path: str) -> str:
     Returns:
         写入的文件路径
     """
-    # 防御性去重，保持顺序
+    # 防御性去重，保持顺序；同时兜底剔除敏感词
+    # （主防线在 _wiki.py 的 _drop_sensitive_hotwords，此处防未来新增来源绕过）
+    from .._sensitive import is_sensitive_term
+
     seen = set()
     unique = []
     for w in hotwords:
+        if is_sensitive_term(w):
+            continue
         key = w.lower().replace(" ", "")
         if key not in seen:
             seen.add(key)
@@ -74,6 +79,11 @@ def format_replace_dict(
         写入的文件路径
     """
     from iris.wiki.asr.coverage import is_dangerous_mapping
+    from .._sensitive import is_sensitive_term
+
+    # 敏感术语整体跳过：term 与其携带的全部 mis 都不进词典
+    # （replace_map 的 key 与 value 都会被写盘，两侧都需拦截）
+    terms = [t for t in terms if not is_sensitive_term(t.term)]
 
     # 全部正确术语集合：误识别词若与任一正确术语重合（规范化后），
     # 替换会改掉真实术语 → 交叉冲突，跳过

@@ -169,6 +169,17 @@ def suppress_path_concentrated_noise(candidates: list) -> list:
     return filtered
 
 
+def drop_sensitive_candidates(candidates: list) -> list:
+    """剔除标题本身命中敏感策略的候选（任一命中即丢）。
+
+    与 suppress_path_concentrated_noise 的「路径集中度」判定（全部样本都低价值
+    才丢）语义相反，故独立成函数，不并入后者——否则会因 sample_paths 只有
+    3 条而漏判。
+    """
+    from ._sensitive import is_sensitive_title
+    return [c for c in candidates if not is_sensitive_title(c.title)]
+
+
 def cluster_and_resolve(candidates: list) -> list:
     merged: list = []
     candidates = sorted(candidates, key=lambda item: (-item.score, -item.evidence_count, item.title))

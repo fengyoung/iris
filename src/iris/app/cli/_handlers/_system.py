@@ -373,6 +373,19 @@ def handle_memory_delete(args, bundle, logger) -> int:
     return 0
 
 
+def handle_memory_confirm(args, bundle, logger) -> int:
+    """标记纠正记录为已人工确认，使其不再出现在冲突告警中。"""
+    if not args.concept:
+        raise ValueError("memory-confirm 需要 --concept")
+    manager = LongTermMemoryManager(bundle)
+    confirmed = not getattr(args, "unconfirm", False)
+    result = manager.confirm_correction(args.concept, confirmed=confirmed)
+    if not result.get("confirmed"):
+        raise ValueError(f"未找到纠正记录: {args.concept}")
+    _emit_output(args.command, result, pretty=args.pretty)
+    return 0
+
+
 def handle_memory_maintenance(args, bundle, logger) -> int:
     lifecycle = MemoryLifecycle(bundle)
     age_days = getattr(args, "age_days", 90)
@@ -619,6 +632,7 @@ SYSTEM_HANDLERS = {
     "memory-status": handle_memory_status,
     "memory-list": handle_memory_list,
     "memory-delete": handle_memory_delete,
+    "memory-confirm": handle_memory_confirm,
     "memory-maintenance": handle_memory_maintenance,
     "memory-export": handle_memory_export,
     "memory-import": handle_memory_import,

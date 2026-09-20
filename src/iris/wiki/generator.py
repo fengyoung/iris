@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from iris.config.loader import ConfigBundle
+from iris.core.exceptions import SensitiveDocumentError
 from iris.llm import LLMProviderError, LLMService
 from iris.retrieval.searcher import LocalRetriever
 from iris.utils.logging import IrisLogger
@@ -21,6 +22,7 @@ from ._constants import (
     get_display_name, get_dir_map, get_prefix_map, get_display_name_map,
 )
 from .discovery_utils import inject_source_fingerprint, is_wiki_stale
+from ._sensitive import is_sensitive_title
 from ._wiki_io import slugify_title as _slugify_title
 
 logger = logging.getLogger(__name__)
@@ -83,6 +85,10 @@ class WikiGenerator:
 
     def build_page(self, *, query: str, page_type: str, title: str, top_k: int = 5) -> WikiPageDraft:
         self._ensure_page_type(page_type)
+        # 敏感守卫前置到检索与 LLM 之前：命中即拒，避免敏感标题进入
+        # 检索、prompt、日志（下方 self._logger.log 会记录 title/query）
+        if is_sensitive_title(title):
+            raise SensitiveDocumentError(f"标题命中敏感策略，拒绝生成 Wiki 页面: {title!r}")
         slug = _slugify_title(title)
         subdir = PAGE_DIRS[page_type]
         prefix = PAGE_PREFIXES[page_type]
@@ -130,7 +136,15 @@ class WikiGenerator:
         for idx, item in enumerate(item_list):
             if progress_callback:
                 progress_callback(idx + 1, len(item_list))
-            draft = self.build_page(query=item.query, page_type=item.page_type, title=item.title, top_k=top_k)
+            try:
+                draft = self.build_page(query=item.query, page_type=item.page_type, title=item.title, top_k=top_k)
+            except SensitiveDocumentError as exc:
+                # 逐项降级：单条敏感项不应让整批生成中断
+                logging.getLogger("iris.wiki.generator").warning(
+                    "跳过敏感页面 [%s] %s: %s", item.page_type, item.title, exc)
+                results.append({"query": item.query, "page_type": item.page_type,
+                                "title": item.title, "status": "refused_sensitive"})
+                continue
             payload = {"query": item.query, "page_type": draft.page_type, "title": draft.title,
                        "slug": draft.slug, "output_path": draft.output_path, "markdown": draft.markdown}
             if write:
@@ -791,6 +805,14 @@ sources:
         existing_content: str, top_k: int,
     ) -> Dict[str, Any]:
         """增量更新单个页面（已有内容和路径，避免重复扫描文件）。"""
+        # 敏感守卫：本路径不经过 build_page，需独立拦截。
+        # 返回状态而非抛异常——「策略拒绝」不是「错误」，混进 errors 计数会
+        # 让 daily-start 的告警噪音掩盖真实故障。
+        if is_sensitive_title(title):
+            logging.getLogger("iris.wiki.generator").warning(
+                "跳过敏感页面更新 [%s] %s", page_type, title)
+            return {"status": "refused_sensitive", "title": title, "path": str(path)}
+
         last_updated = self._parse_frontmatter_field(existing_content, "updated")
 
         evidence_hits = self._collect_evidence(query=title, title=title,

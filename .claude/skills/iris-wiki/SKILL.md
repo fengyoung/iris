@@ -114,6 +114,32 @@ python3 scripts/run_cli.py --call-source skill wiki-lint --fix
 
 `wiki-lint` 检查 6 个维度：frontmatter 完整性、摘要存在性、出链有效性、draft 状态、过期页面、断链。
 
+## 敏感文档排除（强制规则）
+
+**调薪方案、人员盘点与评估过程记录、绩效评价、Leader 盘点**类文档只允许保留在
+SOURCE 原件，**不得生成或保留 Wiki 页面**。巡检发现这类页面直接移除，无需逐次询问。
+
+判定与拦截已在代码层固化（`src/iris/wiki/_sensitive.py`），覆盖以下入口：
+
+| 入口 | 位置 | 行为 |
+|------|------|------|
+| 候选发现 | `CandidateDiscovery._load_chunks` | 敏感文档整篇不参与计数 |
+| 候选标题 | `drop_sensitive_candidates` | 剔除敏感标题（含正常文档里的敏感章节） |
+| 页面生成 | `WikiGenerator.build_page` | 命中即抛 `SensitiveDocumentError` |
+| 批量生成 | `build_pages` | 逐项降级为 `status: refused_sensitive`，不中断整批 |
+| 增量更新 | `_update_page_with_content` | 返回 `refused_sensitive`，不计入 errors |
+| 检索证据 | `LocalRetriever._drop_sensitive_chunks` | 敏感 chunk 不参与任何检索（含 `ask` 问答） |
+| ASR 热词/词典 | `_drop_sensitive_hotwords`、`format_replace_dict` | 敏感词不进热词与替换词典 |
+
+**Claude 的职责**：审核候选时若看到敏感主题（标题含「调薪」「人员盘点」「绩效」
+「Leader盘点」「评估过程记录」等），直接跳过，不生成。代码已拦截大部分，但人工
+审核是最后一道。
+
+**判定纪律**：只匹配**文档身份**（文件名/标题），不匹配正文。裸词「盘点」「定级」
+「校准」误伤率高（实测 5/9、24/24、31 篇），**禁止**加入敏感词表——只能以组合词
+形式使用（如「人员盘点」「盘点落位」）。修改词表须同步更新
+`tests/unit/test_wiki_sensitive.py` 的真实语料反例。
+
 ## 页面类型指南
 
 | 类型 | 目录 | 前缀 | 何时使用 |

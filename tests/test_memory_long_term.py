@@ -227,3 +227,53 @@ class TestCorrectionDelete:
         store = CorrectionMemoryStore(config)
         result = store.delete("不存在的概念XYZ")
         assert result is False
+
+
+class TestCorrectionConfirm:
+    """人工确认标记：把反复更新但语义稳定的规则摘出冲突告警。"""
+
+    def test_confirm_sets_flag_and_timestamp(self, tmp_path):
+        config = _make_config(tmp_path)
+        store = CorrectionMemoryStore(config)
+        store.save({"items": {"文档签名规则": {"preferred": "加签名", "update_count": 7}}})
+
+        assert store.confirm("文档签名规则") is True
+
+        item = store.load()["items"]["文档签名规则"]
+        assert item["confirmed"] is True
+        assert item["confirmed_at"]
+
+    def test_confirm_preserves_other_fields(self, tmp_path):
+        config = _make_config(tmp_path)
+        store = CorrectionMemoryStore(config)
+        store.save({"items": {"A": {"preferred": "值", "update_count": 6,
+                                    "last_source": "合并自: X, Y"}}})
+
+        store.confirm("A")
+
+        item = store.load()["items"]["A"]
+        assert item["preferred"] == "值"
+        assert item["update_count"] == 6
+        assert item["last_source"] == "合并自: X, Y"
+
+    def test_unconfirm_clears_flag(self, tmp_path):
+        config = _make_config(tmp_path)
+        store = CorrectionMemoryStore(config)
+        store.save({"items": {"A": {"preferred": "值", "update_count": 6}}})
+        store.confirm("A")
+
+        assert store.confirm("A", confirmed=False) is True
+
+        item = store.load()["items"]["A"]
+        assert item["confirmed"] is False
+        assert item["confirmed_at"] == ""
+
+    def test_confirm_nonexistent_returns_false(self, tmp_path):
+        config = _make_config(tmp_path)
+        store = CorrectionMemoryStore(config)
+        assert store.confirm("不存在的概念XYZ") is False
+
+    def test_confirm_empty_concept_returns_false(self, tmp_path):
+        config = _make_config(tmp_path)
+        store = CorrectionMemoryStore(config)
+        assert store.confirm("") is False

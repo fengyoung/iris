@@ -232,6 +232,8 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
         max_hotwords = getattr(args, "max_hotwords", 490) or 490
         hotwords = hotword_extractor.extract(llm_service, max_hotwords=max_hotwords,
                                              domain_context=domain_context)
+        # 敏感热词守卫：下游 hotwords_to_terms / 写盘 / --deploy 均消费此列表
+        hotwords = _drop_sensitive_hotwords(hotwords, "Phase 1")
         print(f"[asr]   ... Phase 1 完成 ({time.monotonic() - _t1:.1f}s): "
               f"{len(hotwords)} 热词", file=sys.stderr)
 
@@ -263,6 +265,9 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
                   f"{total_mappings} 映射", file=sys.stderr)
 
             _apply_asr_feedback(terms, hotwords, data_dir)
+            # 反馈反向优化会就地向 hotwords 追加热词，完全绕过 Phase 1 守卫，
+            # 且 --deploy 读的是内存列表而非落盘文件——此处必须再滤一次。
+            hotwords = _drop_sensitive_hotwords(hotwords, "反馈补充")
 
             max_mappings = _resolve_max_mappings(args, logger)
             max_chars = getattr(args, "max_chars", 20) or 20
@@ -371,6 +376,26 @@ def _asr_prompt_payload(hotwords: List[str], hotwords_file: str, terms: List,
     if deployed:
         payload["deployed"] = deployed
     return payload
+
+
+def _drop_sensitive_hotwords(hotwords: List[str], stage: str) -> List[str]:
+    """剔除敏感热词并回报。
+
+    热词链路有两处来源（Phase 1 LLM 提取、_apply_asr_feedback 反馈追加），
+    且 ``--deploy`` 直接消费内存列表而非落盘文件，故两处都需过滤。
+
+    只打印命中的敏感词类别、不打印完整词面——避免把新泄漏词写进日志。
+    """
+    from iris.wiki._sensitive import filter_sensitive_terms
+
+    def _report(term: str, matched: str) -> None:
+        print(f"[asr] ⛔ 剔除敏感热词（命中「{matched}」）", file=sys.stderr)
+
+    kept = filter_sensitive_terms(hotwords, on_drop=_report)
+    if len(kept) != len(hotwords):
+        print(f"[asr]   {stage}: 剔除 {len(hotwords) - len(kept)} 个敏感热词",
+              file=sys.stderr)
+    return kept
 
 
 def _apply_asr_feedback(terms: List, hotwords: List[str], data_dir: Path) -> None:
@@ -642,9 +667,12 @@ def handle_asr_audit(args, bundle, logger) -> int:
     loader = WikiContextLoader(wiki_root)
     pages = loader.load_pages(sort_order=["person", "concept", "project", "domain"])
 
-    # 加载最新热词文件
+    # 加载最新热词文件。
+    # 目录必须与 build-asr-prompt 的写盘点一致（bundle.root/output），否则
+    # 审计会静默读到历史遗留目录 output/asr-modify/ 下的陈旧产物——2026-09-20
+    # 实测该目录最新文件停留在 7 月 8 日，审计数字全部失真。
     hotwords: List[str] = []
-    output_dir = Path(bundle.app.get("data_dir", os.getcwd())) / "output" / "asr-modify"
+    output_dir = bundle.root / "output"
     hotword_files = sorted(output_dir.glob("asr-hotwords-*.txt"), reverse=True)
     if hotword_files:
         hotwords = [line.strip() for line in hotword_files[0].read_text(encoding="utf-8").splitlines() if line.strip()]

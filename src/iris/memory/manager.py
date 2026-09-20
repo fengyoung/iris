@@ -40,6 +40,11 @@ class LongTermMemoryManager:
         removed = self._corrections.delete(concept)
         return {"concept": concept, "deleted": removed}
 
+    def confirm_correction(self, concept: str, *, confirmed: bool = True) -> Dict[str, Any]:
+        """标记纠正记录为已人工确认，使其不再出现在冲突告警中。"""
+        ok = self._corrections.confirm(concept, confirmed=confirmed)
+        return {"concept": concept, "confirmed": ok, "value": confirmed}
+
     def export_to_file(self, output_path: Path) -> Path:
         payload = {
             "profile": self._profile.load(),

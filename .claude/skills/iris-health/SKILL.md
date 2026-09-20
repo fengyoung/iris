@@ -65,6 +65,31 @@ python3 scripts/run_cli.py --call-source skill enrich-persons
 - 部门信息
 - 邮箱地址
 
+## 敏感内容巡检（强制项）
+
+Wiki 中**不允许**存在调薪方案、人员盘点/评估过程记录、绩效评价、Leader 盘点类内容。
+这类内容会通过 `[[wikilink]]` 与人物页正文扩散，形成难以追踪的引用网。
+
+**每次巡检必须执行**（零 LLM 成本，秒级）：
+
+```bash
+# 扫 Wiki 全库的敏感标记（文件名 + source_fingerprint + 正文）
+grep -rlE "调薪|人员盘点|Leader盘点|评估过程记录|930名单" "$IRIS_WIKI_ROOT" --include="*.md"
+# 扫具体薪酬/绩效数字泄漏
+grep -rlE "元/月|元至|上调 *[0-9,]+ *元|绩效 *[ABC][+级]?" "$IRIS_WIKI_ROOT" --include="*.md"
+```
+
+**发现后的处理**：
+1. 先核验 SOURCE 原件存在（`find SOURCE -name "*关键词*"`），确认后再动手，避免删成唯一副本
+2. 删除 Wiki 页前先全量快照：`tar -czf data/backups/llm-wiki-<日期>.tar.gz -C <wiki父目录> <wiki名>`
+3. 不要直接 `rm`（会被安全分类器拦截）——移到 `data/backups/wiki-cleanup-<日期>/` 隔离目录
+4. 清理残留 `[[...]]` 链接，否则产生断链
+5. **人物页只清理敏感段落，不要整页删除**——人物页是正常知识资产，泄漏的是其中被检索证据带进来的句子
+6. 若页面正文含敏感内容，**增量更新无法清除**（`_generate_incremental_update` 吃
+   `existing_content` 只能追加），必须用 `build-wiki --overwrite --backup` 重建
+
+判定词表与拦截逻辑见 `src/iris/wiki/_sensitive.py`，规则同 `iris-wiki` skill。
+
 ## Claude 的工作流程
 
 ### 定期巡检（推荐每月一次）
