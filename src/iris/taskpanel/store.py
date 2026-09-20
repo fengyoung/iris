@@ -54,6 +54,12 @@ class TaskStatus:
     started_at: str = ""
     ended_at: str = ""
     error: str = ""
+    trace_id: str = ""
+    elapsed_seconds: Optional[float] = None
+    llm_calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    estimated_cost: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         """序列化为 JSON dict。"""
@@ -70,6 +76,12 @@ class TaskStatus:
             "started_at": self.started_at,
             "ended_at": self.ended_at,
             "error": self.error,
+            "trace_id": self.trace_id,
+            "elapsed_seconds": self.elapsed_seconds,
+            "llm_calls": self.llm_calls,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "estimated_cost": self.estimated_cost,
         }
 
     @classmethod
@@ -88,6 +100,12 @@ class TaskStatus:
             started_at=str(data.get("started_at", "")),
             ended_at=str(data.get("ended_at", "")),
             error=str(data.get("error", "")),
+            trace_id=str(data.get("trace_id", "")),
+            elapsed_seconds=data.get("elapsed_seconds"),
+            llm_calls=int(data.get("llm_calls", 0) or 0),
+            input_tokens=int(data.get("input_tokens", 0) or 0),
+            output_tokens=int(data.get("output_tokens", 0) or 0),
+            estimated_cost=float(data.get("estimated_cost", 0.0) or 0.0),
         )
 
 

@@ -95,6 +95,15 @@ def _get_page_accuracy_prompt() -> str:
 _SOURCE_CONTEXT_MAX = 3500
 
 
+def _parse_accuracy_verdict(line: str) -> tuple[str, str]:
+    """只接受明确的判词，避免 consistent 命中 inconsistent 或否定句。"""
+    label, separator, detail = line.partition("|")
+    label = label.strip().lower()
+    if label not in ("consistent", "inconsistent", "unverifiable"):
+        label = "unverifiable"
+    return label, detail.strip() if separator else line
+
+
 class AccuracyVerifier:
     """准确性校验器：逐条审核 Wiki 引用是否与源文档一致。"""
 
@@ -172,11 +181,8 @@ class AccuracyVerifier:
         content = wiki_content.strip()
         if len(content) < 200:
             return False
-        # 如果引用有章节注记，检查相应内容存在
-        if entry.description and len(entry.description) > 5:
-            # 只要 Wiki 有实质内容就行
-            return True
-        return False
+        # 描述为空正是页面级兜底的入口，不能再要求描述非空。
+        return True
 
     def _build_source_context(self, entry: ReferenceEntry, base_content: str) -> str:
         """合并行号定位内容与描述相关 chunk，规避引用行号失真。
@@ -245,23 +251,7 @@ class AccuracyVerifier:
                 detail=f"LLM 调用失败: {e}",
             )
 
-        # 解析 LLM 输出
-        verdict_str = "unverifiable"
-        detail = ""
-        if "|" in result_line:
-            verdict_str, detail = result_line.split("|", 1)
-            verdict_str = verdict_str.strip().lower()
-            detail = detail.strip()
-        else:
-            # fallback: 直接匹配关键词
-            for v in ("consistent", "inconsistent", "unverifiable"):
-                if v in result_line.lower():
-                    verdict_str = v
-                    break
-            detail = result_line
-
-        if verdict_str not in ("consistent", "inconsistent", "unverifiable"):
-            verdict_str = "unverifiable"
+        verdict_str, detail = _parse_accuracy_verdict(result_line)
 
         return AccuracyVerdict(
             reference=entry,
@@ -308,21 +298,7 @@ class AccuracyVerifier:
                 detail=f"LLM 调用失败（页面级校验）: {e}",
             )
 
-        verdict_str = "unverifiable"
-        detail = ""
-        if "|" in result_line:
-            verdict_str, detail = result_line.split("|", 1)
-            verdict_str = verdict_str.strip().lower()
-            detail = detail.strip()
-        else:
-            for v in ("consistent", "inconsistent", "unverifiable"):
-                if v in result_line.lower():
-                    verdict_str = v
-                    break
-            detail = result_line
-
-        if verdict_str not in ("consistent", "inconsistent", "unverifiable"):
-            verdict_str = "unverifiable"
+        verdict_str, detail = _parse_accuracy_verdict(result_line)
 
         return AccuracyVerdict(
             reference=entry,
@@ -383,6 +359,8 @@ class ComprehensivenessVerifier:
 
         gaps = []
         for candidate_path in candidates:
+            if candidate_path in referenced_sources:
+                continue
             # 取候选源内容（首部 800 字）
             content = self._locator.lookup(candidate_path)
             if not content:
@@ -409,7 +387,7 @@ class ComprehensivenessVerifier:
             except LLMProviderError:
                 continue
 
-            is_gap = "has_gap" in result_line.lower()
+            is_gap = result_line.split("|", 1)[0].strip().lower() == "has_gap"
             detail = result_line.split("|", 1)[1].strip() if "|" in result_line else result_line
 
             if is_gap:

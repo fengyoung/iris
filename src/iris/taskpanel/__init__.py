@@ -6,4 +6,9 @@
     probe.py     进程探测兜底 + stale 判定 + watchdog
     server.py    stdlib HTTP 服务（/ + /api/state）
     daemon.py    守护进程本体 + start/stop/status/install 命令
+    budget.py    长任务时间、调用、token 和成本预算
 """
+
+from .budget import TaskBudget, TaskBudgetExceeded
+
+__all__ = ["TaskBudget", "TaskBudgetExceeded"]

@@ -150,3 +150,32 @@ class TestIsWikiStaleFingerprint:
         old_date = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
         page = _make_page(tmp_path, updated=old_date, fingerprint={"a.md": "abc"})
         assert is_wiki_stale(page) is True
+
+    def test_new_unreferenced_source_can_mark_page_stale(self, tmp_path):
+        page = _make_page(tmp_path, updated="2026-07-01", fingerprint={"a.md": "abc"})
+        hash_index = {
+            "a.md": {"hash": "abc123", "modified_at": "2026-07-01"},
+            "new.md": {"hash": "new123", "modified_at": "2026-07-02"},
+        }
+        assert is_wiki_stale(page, hash_index=hash_index,
+                             detect_new_sources=True) is True
+
+    def test_new_source_suffix_limits_detection(self, tmp_path):
+        page = _make_page(tmp_path, updated="2026-07-01", fingerprint={"a.md": "abc"})
+        hash_index = {
+            "a.md": {"hash": "abc123", "modified_at": "2026-07-01"},
+            "new-other.md": {"hash": "x", "modified_at": "2026-07-02"},
+            "20260702-张三.md": {"hash": "y", "modified_at": "2026-07-02"},
+        }
+        assert is_wiki_stale(page, hash_index=hash_index,
+                             detect_new_sources=True,
+                             new_source_suffix="-张三.md") is True
+
+    def test_old_unreferenced_source_does_not_mark_page_stale(self, tmp_path):
+        page = _make_page(tmp_path, updated="2026-07-10", fingerprint={"a.md": "abc"})
+        hash_index = {
+            "a.md": {"hash": "abc123", "modified_at": "2026-07-01"},
+            "old.md": {"hash": "old123", "modified_at": "2026-06-30"},
+        }
+        assert is_wiki_stale(page, hash_index=hash_index,
+                             detect_new_sources=True) is False

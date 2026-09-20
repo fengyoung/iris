@@ -237,7 +237,7 @@ class AnalysisReportService:
 
         if dry_run:
             # 仅输出文件清单和 OP 方向预览，不调用 LLM
-            op_result = self._stage0a_parse_op(op_doc)
+            op_result = self._stage0a_parse_op(op_doc, cache_only=True)
             directions = op_result.get("directions", [])
             dir_summary = "\n".join(
                 f"- 方向{d.get('id', '?')}: {d.get('name', '?')} — {d.get('scope_summary', '')[:120]}"
@@ -337,7 +337,7 @@ class AnalysisReportService:
 
     # ── Stage 0a: OP 文档解析 ──────────────────────────────────
 
-    def _stage0a_parse_op(self, op_doc: str) -> dict:
+    def _stage0a_parse_op(self, op_doc: str, *, cache_only: bool = False) -> dict:
         """解析 OP 文档为结构化方向定义（content_hash 缓存）。"""
         if not op_doc:
             return {"directions": []}
@@ -347,6 +347,9 @@ class AnalysisReportService:
         cached_directions = self._cache.load_op_directions(content_hash)
         if cached_directions is not None:
             return {"directions": cached_directions}
+
+        if cache_only:
+            return {"directions": []}
 
         prompt = self._prompt_loader.render("biweekly_stage0a_op.md", {"op_doc": op_doc})
         result = self._llm.generate(prompt=prompt, route_context={
@@ -427,10 +430,9 @@ class AnalysisReportService:
         all_labels = {f["label"] for f in files}
         owner_map_text = _s1_build_owner_map(directions)
 
-        inv_hash = self._cache.content_hash(file_inventory, 2000)
-        dir_hash = self._cache.content_hash(
-            json.dumps([{"id": d.get("id"), "name": d.get("name")} for d in directions],
-                       ensure_ascii=False, sort_keys=True), 2000)
+        inv_hash = self._cache.content_hash(file_inventory, len(file_inventory))
+        direction_json = json.dumps(directions, ensure_ascii=False, sort_keys=True)
+        dir_hash = self._cache.content_hash(direction_json, len(direction_json))
 
         cached = self._cache.load_stage1_filter(inv_hash, dir_hash, len(directions))
         if cached is not None:
@@ -542,12 +544,13 @@ class AnalysisReportService:
                 continue
 
             # 包含方向上下文签名，当文件的方向分配变化时缓存自动失效
-            dir_sig = self._cache.content_hash(
-                json.dumps(sorted(dir_names), ensure_ascii=False), 128
-            )
-            hash_key = self._cache.content_hash(
-                f_data["content"] + "||dir_ctx:" + dir_sig, 2000
-            )
+            # 全文、方向定义和文件元数据共同决定摘要，不能只取前 2000 字。
+            cache_input = json.dumps({
+                "content": f_data["content"], "label": label,
+                "date": f_data["date"].isoformat(), "dir": f_data["dir"],
+                "directions": [d for d in directions if d.get("name") in dir_names],
+            }, ensure_ascii=False, sort_keys=True)
+            hash_key = self._cache.content_hash(cache_input, len(cache_input))
             brief_hash_keys[label] = hash_key
 
             cached_brief = self._cache.load_brief(label, hash_key, brief_index)

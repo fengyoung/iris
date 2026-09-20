@@ -352,10 +352,10 @@ class TestHasRelevantWikiContent:
         long_content = "字" * 300
         assert verifier._has_relevant_wiki_content(long_content, _entry()) is True
 
-    def test_substantial_content_without_description_false(self):
+    def test_substantial_content_without_description_allows_fallback(self):
         verifier = AccuracyVerifier(_FakeLLM(), _FakeLocator({}))
         long_content = "字" * 300
-        assert verifier._has_relevant_wiki_content(long_content, _entry(description="")) is False
+        assert verifier._has_relevant_wiki_content(long_content, _entry(description="")) is True
 
 
 class TestAccuracyVerifierVerify:

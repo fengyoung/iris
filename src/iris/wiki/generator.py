@@ -664,7 +664,13 @@ sources:
             # 跳过 LLM 增量更新（判定失败时兜底照常走 LLM 更新）。
             if hash_index:
                 try:
-                    if not is_wiki_stale(path, hash_index=hash_index):
+                    # 新增源文档检测目前针对人物页启用：成员周报文件名带有
+                    # 人物后缀，能安全发现新增材料；其他页面仍只按已引用指纹
+                    # 判定，避免一份新文档导致所有页面重新调用 LLM。
+                    if not is_wiki_stale(path, hash_index=hash_index,
+                                          detect_new_sources=(page_type == "person"),
+                                          new_source_suffix=(f"-{title}.md"
+                                                              if page_type == "person" else None)):
                         return {"status": "no_changes", "title": title, "path": str(path),
                                 "reason": "源文档未变化（指纹新鲜），跳过 LLM 更新"}
                 except Exception:
@@ -805,6 +811,9 @@ sources:
         validated = self._validate_update_output(new_content, existing_content, title)
         if validated != new_content:
             self._logger.log("wiki_update_validation", {"title": title, "action": validated})
+            if validated == existing_content:
+                # 无效输出被拒绝时，不得把新证据写进指纹冒充已吸收。
+                return {"status": "error", "title": title, "reason": "LLM 输出无效，保留原页面"}
             new_content = validated
 
         # 刷新源文档指纹（LLM 可能丢弃或保留旧指纹，统一以本次检索为准）

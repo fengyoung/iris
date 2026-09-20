@@ -8,6 +8,9 @@ import sys
 from pathlib import Path
 
 THRESHOLDS = {
+    "src/iris/analysis/service.py": 70.0,
+    "src/iris/evaluation/deep_eval.py": 70.0,
+    "src/iris/wiki/generator.py": 70.0,
     "src/iris/core/async_http.py": 60.0,
     "src/iris/core/write_guard.py": 85.0,
     "src/iris/core/locks.py": 80.0,

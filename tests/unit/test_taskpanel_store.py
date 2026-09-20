@@ -51,7 +51,10 @@ class TestTaskStatus:
     def test_to_dict_contains_all_fields(self):
         d = _make_task().to_dict()
         for key in ("task_id", "name", "command", "agent_id", "pid", "status",
-                    "phase", "phase_detail", "progress", "started_at", "ended_at", "error"):
+            "phase", "phase_detail", "progress", "started_at", "ended_at", "error"):
+            assert key in d
+        for key in ("trace_id", "elapsed_seconds", "llm_calls", "input_tokens",
+                    "output_tokens", "estimated_cost"):
             assert key in d
 
 

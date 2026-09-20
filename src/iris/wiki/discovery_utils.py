@@ -236,11 +236,19 @@ def normalized_key(title: str) -> str:
     return re.sub(r"[^A-Za-z0-9一-鿿]", "", title).lower()
 
 
-def is_wiki_stale(wiki_path: Path, *, hash_index: Optional[Dict[str, Dict[str, str]]] = None) -> bool:
+def is_wiki_stale(
+    wiki_path: Path,
+    *,
+    hash_index: Optional[Dict[str, Dict[str, str]]] = None,
+    detect_new_sources: bool = False,
+    new_source_suffix: Optional[str] = None,
+) -> bool:
     """检查 Wiki 页面是否过时。
 
     优先按源文档指纹判定：frontmatter 的 source_fingerprint 中任一源文档
     hash 已变化（或文档已删除）→ 过时；全部未变 → 新鲜（不再重生成，省 LLM 成本）。
+    ``detect_new_sources`` 用于批量更新路径：索引里出现页面生成后新增的源文档时，
+    也判定页面过时，避免新增周报永远不进入 Wiki。默认关闭以保持旧调用方语义。
     无指纹（旧页面）或未提供 hash_index 时，兜底按生成天数判定（默认 30 天）。
     """
     if hash_index:
@@ -250,6 +258,28 @@ def is_wiki_stale(wiki_path: Path, *, hash_index: Optional[Dict[str, Dict[str, s
                 current = (hash_index.get(rel_path) or {}).get("hash", "")
                 if not current or not current.startswith(digest):
                     return True
+            if detect_new_sources:
+                generated_at = parse_wiki_generated_at(str(wiki_path))
+                if generated_at is None:
+                    return True
+                for rel_path, entry in hash_index.items():
+                    if rel_path in fingerprint:
+                        continue
+                    if new_source_suffix and not rel_path.endswith(new_source_suffix):
+                        continue
+                    modified_at = str(entry.get("modified_at", ""))
+                    if not modified_at:
+                        continue
+                    try:
+                        modified = datetime.fromisoformat(modified_at)
+                    except (TypeError, ValueError):
+                        return True
+                    if generated_at.tzinfo and modified.tzinfo is None:
+                        modified = modified.replace(tzinfo=generated_at.tzinfo)
+                    if not generated_at.tzinfo and modified.tzinfo:
+                        modified = modified.replace(tzinfo=None)
+                    if modified > generated_at:
+                        return True
             return False
     from ._constants import STALE_DAYS_THRESHOLD
     generated_at = parse_wiki_generated_at(str(wiki_path))

@@ -19,11 +19,14 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from iris.taskpanel.store import TaskStatus, finalize_task, write_current
+from iris.taskpanel.budget import TaskBudget
 from iris.utils.paths import get_project_root
 from iris.utils.shared import now_iso
 
@@ -66,7 +69,8 @@ class TaskReporter:
     def __init__(self, name: str, *, command: str = "",
                  agent_id: Optional[str] = None,
                  task_id: Optional[str] = None,
-                 data_root: Optional[Path] = None) -> None:
+                 data_root: Optional[Path] = None,
+                 budget: Optional[TaskBudget] = None) -> None:
         """初始化埋点器。
 
         :param name: 任务类型名（daily-start / build-chunks / ...）
@@ -80,6 +84,8 @@ class TaskReporter:
         self._command = _safe_command_summary(command, name)
         self._agent_id = agent_id or os.environ.get("IRIS_AGENT_ID", "default")
         self._task_id = task_id or generate_task_id(name)
+        self._budget = budget
+        self._started_mono = time.monotonic()
         try:
             self._data_root = data_root or (get_project_root() / "data")
         except Exception:
@@ -92,6 +98,7 @@ class TaskReporter:
             pid=os.getpid(),
             status="running",
             started_at=now_iso(),
+            trace_id=uuid.uuid4().hex,
         )
         self._entered = False
 
@@ -113,6 +120,7 @@ class TaskReporter:
         if not self._entered or _DISABLED or self._data_root is None:
             return
         try:
+            self._task.elapsed_seconds = round(time.monotonic() - self._started_mono, 3)
             if exc_type is None:
                 finalize_task(self._data_root, self._task, "success")
             else:
@@ -142,6 +150,29 @@ class TaskReporter:
         except Exception as e:
             logger.warning("任务埋点阶段上报失败: %s", e)
 
+    def check_budget(self, *, calls: int = 1) -> None:
+        """检查任务预算；未配置预算时为空操作。"""
+        if self._budget is not None:
+            self._budget.check(calls=calls)
+
+    def record_usage(self, *, input_tokens: int = 0, output_tokens: int = 0,
+                     cost: float = 0.0, calls: int = 1) -> None:
+        """记录 LLM 用量，并同步到任务状态。"""
+        if self._budget is not None:
+            self._budget.record(input_tokens=input_tokens, output_tokens=output_tokens,
+                                cost=cost, calls=calls)
+        self._task.llm_calls += calls
+        self._task.input_tokens += input_tokens
+        self._task.output_tokens += output_tokens
+        self._task.estimated_cost += cost
+        if self._budget is not None:
+            self._task.elapsed_seconds = self._budget.elapsed_seconds
+        if self._entered and not _DISABLED and self._data_root is not None:
+            try:
+                write_current(self._data_root, self._task)
+            except Exception as e:
+                logger.warning("任务埋点用量上报失败: %s", e)
+
     # ── 属性 ──────────────────────────────────────────────
 
     @property
@@ -151,3 +182,7 @@ class TaskReporter:
     @property
     def task(self) -> TaskStatus:
         return self._task
+
+    @property
+    def budget(self) -> Optional[TaskBudget]:
+        return self._budget
