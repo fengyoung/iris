@@ -130,7 +130,13 @@ class EnhancedRetriever:
         self._cache_lock = threading.Lock()
 
     def _cache_key(self, query: str, top_k: int, mode: str) -> str:
-        return f"{query}::t{top_k}::m{mode}"
+        generation = ""
+        if self._retrieval_cfg.get("include_decisions", True):
+            from iris.intelligence.context import data_root
+            pointer = data_root(self._config) / "decisions" / "CURRENT"
+            if pointer.exists():
+                generation = pointer.read_text(encoding="utf-8").strip()
+        return f"{query}::t{top_k}::m{mode}::d{generation}"
 
     def _cache_get(self, key: str) -> Optional[EnhancedRetrievalResult]:
         with self._cache_lock:
@@ -209,6 +215,14 @@ class EnhancedRetriever:
             reranked_hits = hits[:top_k]
             llm_meta = None
             rerank_mode = "local"
+
+        if self._retrieval_cfg.get("include_decisions", True):
+            from iris.decisions.retrieval import decision_hits
+            decisions = decision_hits(self._config, query, limit=min(3, top_k))
+            if decisions:
+                # 独立证据通道保留少量位置，避免跨评分体系比较 BM25 与决策分数。
+                reranked_hits = decisions + reranked_hits[:max(0, top_k - len(decisions))]
+                explanations.append(f"正式决策 {len(decisions)} 条")
 
         result = EnhancedRetrievalResult(query=query, query_intent=effective_plan.query_intent,
                                           rewritten_query=rewritten.rewritten, total_hits=base_result.total_hits,

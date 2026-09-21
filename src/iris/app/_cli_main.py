@@ -47,7 +47,7 @@ COMMANDS = [
     "feed-setup", "feed-list", "feed-add", "feed-remove",
     "feed-config", "feed-collect", "feed-pending",
     "feed-confirm", "feed-ignore",
-    "frontmatter-batch",
+    "frontmatter-batch", "decisions", "briefing", "signals", "okr-evidence", "okr-check",
 ]
 
 _DELEGATED_SCRIPTS = {
@@ -62,8 +62,18 @@ _DELEGATED_SCRIPTS = {
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Iris 命令行入口")
     parser.add_argument("command", choices=COMMANDS, help="执行的命令")
-    parser.add_argument("workspace_action", nargs="?", choices=["list", "current"], default="current",
-                        help="workspace 子命令（list/current）")
+    parser.add_argument("workspace_action", nargs="?", choices=["list", "current", "search", "show", "add", "update", "report", "pending", "approve", "reject", "migrate", "tag", "check", "export-wiki"], default="current",
+                        help="工作空间或情报命令子操作")
+    parser.add_argument("subject", nargs="?", default="", help="决策编号、候选编号或搜索词")
+    parser.add_argument("--status", default="", help="决策执行状态")
+    parser.add_argument("--owner", default="", help="决策负责人")
+    parser.add_argument("--kr", default="", help="KR 标识")
+    parser.add_argument("--days", type=int, default=0, help="回溯天数")
+    parser.add_argument("--reason", default="", help="审核原因")
+    parser.add_argument("--patch", default="", help="批准前修改候选的 JSON 对象")
+    parser.add_argument("--topic", default="", help="情报包主题")
+    parser.add_argument("--participants", default="", help="与会人，逗号分隔")
+    parser.add_argument("--date", default="", help="会议日期 YYYY-MM-DD")
     parser.add_argument("--project-root",
                         default=str(get_project_root()),
                         help="Iris 项目根目录（默认读取 IRIS_PROJECT_ROOT 或自动探测）")

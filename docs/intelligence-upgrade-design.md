@@ -2,7 +2,7 @@
 
 > **目标**：将 iris3 从「问了才答」升级为「主动织网」的情报系统。
 > **范围**：5 个新能力模块，按优先级分三阶段实现。
-> **状态**：设计草稿，待实现。编写日期：2026-09-20。
+> **状态**：已补充需求澄清与决策分级入库方案，待实现。编写日期：2026-09-20；更新日期：2026-09-21。
 
 ---
 
@@ -35,7 +35,7 @@
 
 @dataclass
 class Decision:
-    decision_id: str          # 自动生成，格式 DEC-YYYYMMDD-NNNN
+    decision_id: str          # 正式入库时生成，格式 DEC-YYYYMMDD-NNNN，按本地入库日期每日递增
     title: str                # 决策标题（15字以内）
     summary: str              # 决策内容摘要
     context: str              # 决策背景（为什么要做这个决定）
@@ -46,7 +46,10 @@ class Decision:
     decided_at: date          # 决策日期
     review_at: date | None    # 预计复盘时间（可选）
     status: str               # open | implemented | revised | cancelled
-    source_doc: str           # 来源文档路径（相对 SOURCE 目录）
+    sources: list[DecisionSource]  # 多来源：SOURCE 相对路径、原文引用、位置及字段证据
+    review_status: str        # auto_approved | approved（待审核候选另存）
+    review_details: dict      # 程序校验、模型复核、不确定项及审核记录
+    change_history: list[dict]  # 字段变更与修订历史
     related_krs: list[str]    # 关联的 OKR KR 标识
     related_decisions: list[str]  # 关联的其他决策 ID
     tags: list[str]           # 自由标签
@@ -56,8 +59,10 @@ class Decision:
 
 #### 存储方案
 
-- 索引文件：`data/decisions/index.json`（所有决策的结构化列表）
+- 索引文件：`data/decisions/index.json`（正式决策的结构化列表，包含 schema 版本与每日编号计数）
 - 单决策文件：`data/decisions/<decision_id>.json`（完整字段）
+- 待审核候选：使用独立 `candidate_id`，与正式决策隔离存储；批准后才分配 DEC 编号。
+- 索引、单决策、编号计数等关联数据通过 generation 目录原子发布，整个读改写过程置于同一 `FileLock` 临界区。
 - Wiki 页面（可选）：`LLM-WIKI/05-决策/决策-<title>.md`（新增 Wiki 类型）
 
 #### 提取流程
@@ -66,16 +71,45 @@ class Decision:
 
 ```
 纪要文本
-  → DecisionExtractor._extract_candidates()   # LLM 识别候选决策段落
-  → DecisionExtractor._structure_decision()   # LLM 填充结构化字段
-  → DecisionExtractor._resolve_persons()      # 人名 → 人物页归一化
-  → DecisionStore.save()                      # 写入 index.json + 单文件
+  → 按来源文件名/标题进行敏感文档过滤
+  → DecisionExtractor._extract_candidates()   # base_model 识别候选
+  → DecisionExtractor._structure_decision()   # 结构化字段 + 原文位置与证据
+  → DecisionExtractor._resolve_persons()      # 人物归一化，不确定则保留待确认
+  → 程序校验                                 # 原文、字段、日期、重复与冲突
+  → 独立 adv_model 复核                      # 同篇纪要候选批量复核
+  → 分级：高置信度自动入库 / 有歧义进入待审核区 / 非决策丢弃
+  → DecisionStore                            # 多来源合并或正式入库，原子发布
 ```
 
 提取 prompt 关键点：
 - 识别信号词：「决定」「确认」「同意」「不做」「暂缓」「方案选 X」「采用」「放弃」
 - 排除：议题讨论（未有结论）、行动项（已有 todos）、纯信息同步
 - 一条会议纪要可提取 0-N 条决策
+
+#### 已确认的提取与分级入库规则（2026-09-21）
+
+**失败处理**：决策提取失败后重试一次，两次都失败则跳过本次提取，记录失败原因，不阻断纪要生成。独立复核失败不得视为通过，候选保留待审核；不得因缺少复核而自动入库。
+
+**证据要求**：每条候选必须携带原文引用、引用位置，以及支持结论、负责人和决策日期的字段证据。程序必须确认引用确实存在于原文。负责人、复盘日期、关联 KR 等可选字段没有依据时留空，不允许猜测；“下个月考虑评估”不能生成确定的 `review_at`。必填信息缺失或人物归一化有歧义时转待审核，不补造事实。
+
+**两层校验**：先以程序检查敏感来源、原文引用、必填字段、日期、状态、重复与冲突；再通过独立模型调用对照原文，核对是否已拍板、否定词/范围/前提是否保留，以及是否存在尚未解决的矛盾。初期采用 `base_model` 提取、`adv_model` 复核，同篇纪要候选批量复核以控制成本。不得仅依赖提取模型自报的置信度；两个模型意见一致也不替代原文校验与抽查。
+
+| 分级 | 判据 | 处理 |
+|---|---|---|
+| 高置信度 | 明确拍板、原文可核验、程序校验和独立复核通过、无未解决冲突 | 自动进入正式决策库，标记 `auto_approved` |
+| 待确认 | 有决策价值，但结论、条件、上下文或必填信息存在歧义 | 进入待审核区，人工确认或修改后入库 |
+| 非决策 | 普通讨论、提议、纯行动项或缺乏原文支撑 | 不进入正式库或人工审核队列 |
+
+审核状态与执行状态分离：审核状态为 `pending / auto_approved / approved / rejected`；执行状态仍为 `open / implemented / revised / cancelled`。候选使用独立编号，只有正式入库才在锁内分配 `DEC-YYYYMMDD-NNNN`，按本地入库日期每日递增。待审核候选不作为已确认事实进入问答、图谱、Wiki 决策页或情报包。
+
+**去重与修订**：
+- 相同决策合并为一条，追加不同来源及各自原文证据；重复处理同一来源不得重复追加。
+- 补充信息只有在有明确依据时才更新字段，并记录变更历史。
+- 改变原结论的决策保留为新记录，关联旧决策；只有明确的取代证据才可自动将旧记录标记为 `revised`，否则进入待确认。
+
+**人工审核**：首版提供 CLI 的待审核列表、批准和拒绝入口；允许人工修改候选后批准。终端与每日信号文件展示待审核数量，发给冯扬的飞书摘要附候选结论、原文证据及待确认原因。飞书按钮审核作为后续扩展，不纳入首版必需范围。
+
+**准确率验收**：整理包含明确拍板、暂缓、否定、条件决策、意见冲突的真实纪要验证集。初期采用严格自动入库条件并抽查结果，以自动入库准确率达到 95% 以上为初始验收目标，同时记录自动入库比例、待审核数量与误判类型，再按实测决定是否放宽条件。
 
 #### CLI 接口
 
@@ -95,8 +129,13 @@ iris decisions add --interactive
 # 更新状态
 iris decisions update DEC-20260915-0003 --status implemented
 
+# 人工审核（候选可先修改再批准）
+iris decisions pending
+iris decisions approve <candidate_id>
+iris decisions reject <candidate_id> --reason "仍在讨论"
+
 # 导出为 Markdown 报告
-iris decisions report [--since 2026-07-01] [--output decisions-q3.md]
+iris decisions report [--since 2026-07-01] [--kr KR2] [--output decisions-q3.md]
 ```
 
 #### 知识图谱集成
@@ -110,7 +149,7 @@ iris decisions report [--since 2026-07-01] [--output decisions-q3.md]
 
 | 集成位置 | 改动内容 |
 |---|---|
-| `transcribe_meeting/` | 生成纪要后调用 `DecisionExtractor`，结果追加到纪要尾部 |
+| `transcribe_meeting/` | 生成纪要后调用 `DecisionExtractor`，正式入库结果与待审核提示分开展示在纪要尾部 |
 | `wiki/wiki_generator.py` | 新增 `decision` 页面类型（05-决策/），frontmatter 含 `decision_id` |
 | `app/cli/handlers.py` | 注册 `decisions` 命令组 |
 | `qa/retriever.py` | 检索时可选包含决策文档 |
@@ -221,7 +260,7 @@ class SignalType(Enum):
     KR_AT_RISK            # KR 相关讨论含风险/阻塞关键词
 
     # 决策类（依赖 M2）
-    DECISION_REVIEW_DUE   # 决策的 review_at 日期临近（7 天内）
+    DECISION_REVIEW_DUE   # 0 <= (review_at - 本地今天).days <= 7，包含当天
     OPEN_DECISION_STALE   # open 状态的决策超过 30 天无后续文档
 
     # 知识图谱类
@@ -258,6 +297,12 @@ SignalDetector.run(since: date)
 
 ━━━
 ```
+
+#### 信号交付（已确认）
+
+每次生成的摘要同时输出到终端、写入本地文件，并通过飞书由 **Iris → 冯扬** 发送。首版不是仅终端展示；文件保存到 `data/signals/`，使用本地时间命名并原子写入。摘要包含信号、来源、建议动作及决策待审核信息。
+
+实现时解析并配置冯扬的飞书收件人标识，使用 Iris 身份发送；用户已授权这一通知方向。记录投递状态，避免对同一份摘要重复发送；发送失败保留本地结果并明确告知，不影响 daily-start 已完成的维护工作。不得将敏感来源内容带入通知。
 
 #### 飞书话题检测实现
 
@@ -315,9 +360,11 @@ daily-start → OKREvidenceTagger.run_incremental()
   ├─ 读取上次打标时间 index.json
   ├─ 扫描 SOURCE 中新增/修改的文档（mtime > last_tagged）
   ├─ 对每篇新文档：
-  │   └─ 向量相似度 vs 所有 KR 向量 → 阈值筛选（>0.65）→ 写入 .jsonl
+  │   └─ 向量相似度 vs 所有 KR 向量 → 阈值筛选（> 配置值，默认 0.65）→ 写入 .jsonl
   └─ 更新 index.json 中的 last_updated
 ```
+
+证据相似度阈值纳入配置，默认 `0.65`，校验为 0–1 范围；遵循现有配置加载约定，并在配置示例和使用文档中说明。
 
 #### KR 向量构建
 
@@ -537,12 +584,24 @@ Week 10：
 以下约定适用于本次所有新模块，与 iris3 现行约定一致：
 
 1. **异常**：新增异常继承 `IrisRuntimeError` 或 `IrisValueError`，不得直接 raise `Exception`。
-2. **持久化**：所有写操作使用 `atomic_write_json`，多文件制品用 generation 目录原子切换。
+2. **持久化**：JSON 使用 `atomic_write_json`，Markdown/JSONL 等使用对应的 `atomic_write_text/bytes`；索引与明细等多文件制品用 generation 目录原子切换，避免仅单文件原子写导致整体不一致。
 3. **锁**：`data/decisions/`、`data/okr_evidence/` 目录的读改写操作加 `FileLock`。
-4. **LLM 调用**：提取类任务用 `base_model`，综合生成类用 `adv_model`，遵循现有路由规则扩充（在 `config/llm_routes.json` 补充 `decision_extraction` / `briefing_synthesis` 规则）。
+4. **LLM 调用**：提取类任务用 `base_model`，综合生成类用 `adv_model`，遵循现有路由规则扩充（在 `config/llm_routes.json` 补充 `decision_extraction` / `briefing_synthesis` 规则，并增加独立决策复核路由 `decision_review`）。
 5. **复杂度**：新函数 ruff C901 门禁 `max-complexity = 20`，超限拆分。
 6. **测试**：每个新模块至少 10 项基础测试；提取器/合成器 mock LLM 调用。
 7. **CLI 注册**：在 `app/cli/handlers.py` 的 facade 层注册，保持命令平铺风格（`iris decisions list`）。
+8. **敏感文档**：所有新消费者继承 `src/iris/wiki/_sensitive.py` 的唯一判定规则，仅匹配文件名/标题，绝不匹配正文。提取前过滤，并确保决策库、审核候选、情报包、OKR 证据、质量信号和飞书通知均不产生敏感文档的下游衍生内容。
+9. **本地时间**：日期窗口、编号、复盘提醒、增量游标与输出日期统一采用本地时间；持久化时间戳携带时区偏移，不混用无时区时间与 UTC。复盘提醒范围明确为 `0 <= (review_at - 今天).days <= 7`。
+10. **版本迁移**：决策、信号、OKR 证据等持久化结构显式携带 `schema_version`；JSONL/向量缓存版本由对应清单管理。提供逐版本迁移机制，迁移前备份，在锁内生成并校验新 generation 后原子发布，失败保留旧版本并支持恢复。重复执行迁移应安全；遇到未知高版本拒绝写入，避免覆盖。版本迁移必须覆盖索引、明细与关联关系，并补充旧版升级、重复执行、失败恢复和未知版本测试。
+11. **长任务与预算**：评估接入 `TaskReporter`，记录提取、复核、检索、合成和发送等阶段；对批量 LLM/Embedding 调用设置预算，避免每日维护成本失控。
+
+### 澄清后的实施清单补充
+
+- **阶段一**：加入多来源数据结构、按天编号、重复处理幂等性、敏感来源过滤、提取重试、独立复核、分级入库、待审核 CLI、变更历史和决策存储迁移；增加真实纪要验证集及自动入库准确率验收。情报包只读取正式决策。
+- **阶段二**：每日摘要完成终端、文件、飞书三路交付，配置 Iris 身份与冯扬收件人，记录发送状态并防止重复投递；汇总待审核决策。图谱仅纳入正式决策。
+- **阶段三**：OKR 证据阈值配置化（默认 0.65），实现证据索引/日志/向量缓存的版本兼容与迁移测试。
+- **贯穿全部阶段**：统一本地时间及边界测试，验证敏感来源不进入任何新制品；补充并发编号、去重追加来源、修订冲突、复核失败、候选隔离、迁移恢复与发送失败的行为测试。
+
 
 ---
 
@@ -670,4 +729,4 @@ iris decisions report --since 2026-07-01 --kr KR2 --output q3-decisions.md
 
 ---
 
-*文档签名：Iris Intelligence Upgrade Design v1.0 · 2026-09-20*
+*文档签名：Iris Intelligence Upgrade Design v1.1 · 2026-09-21*
