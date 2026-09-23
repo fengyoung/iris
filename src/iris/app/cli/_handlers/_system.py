@@ -54,7 +54,8 @@ def handle_daily_start(args, bundle, logger) -> int:
 
         # 4. 扫描 + 切块 + 向量索引
         _tr.report_phase("scan_chunk", "第4/8阶段：扫描+切块+向量索引", progress=4 / 8)
-        scan_info, chunk_summaries, vector_index_result = _daily_scan_and_chunk(bundle)
+        scan_info, chunk_summaries, vector_index_result, scan_summaries = _daily_scan_and_chunk(bundle)
+        source_index_result = _build_source_index(bundle, scan_summaries)
 
         # 5. Wiki 自动发现 + 索引维护 + 增量更新
         _tr.report_phase("wiki_maintenance", "第5/8阶段：Wiki 维护", progress=5 / 8)
@@ -89,6 +90,7 @@ def handle_daily_start(args, bundle, logger) -> int:
                                 "reused_documents": cs.build_stats.get("reused_documents", 0),
                                 "rebuilt_documents": cs.build_stats.get("rebuilt_documents", 0)} for cs in chunk_summaries],
                    "vector_index": vector_index_result,
+                   "source_index": source_index_result,
                    "wiki_discover": _auto_discover_wiki_for_daily(bundle, chunk_summaries),
                    "wiki_update": wiki_update_result,
                    "person_enrich": person_enrich_result,
@@ -159,7 +161,7 @@ def _daily_scan_and_chunk(bundle) -> tuple:
         scan_info.append({"source_name": scan_summary.source_name,
                           "document_count": scan_summary.document_count})
     vector_index_result = _daily_vector_index(bundle)
-    return scan_info, chunk_summaries, vector_index_result
+    return scan_info, chunk_summaries, vector_index_result, scan_summaries
 
 
 def _daily_vector_index(bundle) -> dict:
@@ -188,6 +190,64 @@ def _daily_vector_index(bundle) -> dict:
         except VectorIndexModelMismatchError as exc:
             return {"status": "model_mismatch", "reason": str(exc)}
         return {"status": "ok", "indexed": idx.size()}
+    except Exception as exc:
+        return {"status": "error", "reason": str(exc)}
+
+
+def _build_source_index(bundle, scan_summaries) -> dict:
+    """生成/更新 SOURCE/_INDEX.md — 按一级子目录分组列出所有文档。
+
+    无 SOURCE 路径或扫描结果为空时静默跳过，不影响 daily-start 主流程。
+    """
+    try:
+        from iris.utils.paths import resolve_source_root
+        from iris.core.write_guard import safe_write_text
+        from datetime import datetime, timezone
+
+        source_root = resolve_source_root(bundle)
+        if not source_root or not source_root.is_dir():
+            return {"status": "skipped", "reason": "SOURCE 目录未配置或不存在"}
+
+        # 收集所有文档 —— 合并所有数据源的扫描结果
+        all_docs = []
+        for ss in scan_summaries:
+            all_docs.extend(ss.documents)
+
+        if not all_docs:
+            return {"status": "skipped", "reason": "无文档记录"}
+
+        # 按一级子目录分组
+        groups: dict[str, list] = {}
+        for doc in all_docs:
+            try:
+                rel = Path(doc.path).relative_to(source_root)
+            except ValueError:
+                rel = Path(doc.relative_path) if doc.relative_path else Path(doc.path).name
+            parts = rel.parts
+            group_key = parts[0] if len(parts) > 1 else "（根目录）"
+            groups.setdefault(group_key, []).append((rel, doc))
+
+        now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        total = len(all_docs)
+        lines = [
+            "# SOURCE 文档索引",
+            "",
+            f"> 自动生成于 {now}，共 {total} 篇文档。",
+            "",
+        ]
+
+        for group in sorted(groups):
+            docs_in_group = sorted(groups[group], key=lambda x: str(x[0]))
+            lines.append(f"## {group}（{len(docs_in_group)} 篇）")
+            lines.append("")
+            for rel, doc in docs_in_group:
+                title = doc.title or rel.stem
+                lines.append(f"- [{title}]({rel.as_posix()})")
+            lines.append("")
+
+        index_path = source_root / "_INDEX.md"
+        safe_write_text(index_path, "\n".join(lines), bundle, allow_existing_outside=True)
+        return {"status": "ok", "total": total, "groups": len(groups), "path": str(index_path)}
     except Exception as exc:
         return {"status": "error", "reason": str(exc)}
 
