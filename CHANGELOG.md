@@ -1,3 +1,15 @@
+## v3.40.10 (2026-09-21) — 向量通道静默失效修复（v3.40.0 回归）
+
+`iris ask` 的向量检索自 v3.40.0 起**静默失效了五天**：索引在、维度对、模型匹配，三重检查全绿，只有召回质量在悄悄变差。是排查一次问答结果时偶然撞见的——那行降级提示一直打在最上面，只是没人当回事。
+
+- **根因**：`retrieval/enhanced.py` 的 `_init_embedder` 在 v3.40.0 从 `build_embedder_from_config(llm_cfg, ...)` 改成传 `llm_cfg.model_dump()`，而 **Pydantic v2 的 `model_dump()` 不解包 `SecretStr`**（`EmbeddingConfig.api_key` 正是 SecretStr）。于是 `f"Bearer {api_key}"` 把密钥渲染成掩码 `Bearer **********`，请求带着一串星号打 DashScope，必然 401。
+- **为什么五天没被发现**：401 被 `except (EmbedderError, VectorIndexModelMismatchError)` 的「向量检索降级」兜底吞掉，只留一行 `logger.warning`；而**索引侧走的是另一条路径**——`build-vector-index` 直传 `bundle.llm`（拿到的是普通 `str`），所以索引文件新鲜、维度校验通过、`_load_vector_indexes` 的模型比对也通过。坏的只有查询侧，两个方向各自看都「正常」。
+- **爆炸半径**：全仓仅此一处用 `model_dump()` 构造 embedder。`llm/service.py` 另一处 `model_dump()` 只用于缓存指纹（`default=str` 是有意脱敏，不落盘凭证），无害；聊天 LLM 通道实测正常。
+- **修复**：新增 `unwrap_secret()` 在凭证边界统一解包，接入 `build_embedder_from_config` 与 `TextEmbedder.__init__` 两处。顺带修掉一个潜在洞——**空的 SecretStr 恒为真值**，会绕过 `if not api_key` 判空，把「未配置」拖到请求时才暴露成 401。
+- **可观测性（本次的真正教训）**：`iris status` 新增 `vector_channel` 段，`--pretty` 渲染为「向量通道：正常 / ⚠️ 已降级」并给出可执行原因（凭证不可用→查 401；模型不匹配→`--force-rebuild`；索引缺失→`build-vector-index`）。该检查刻意**走与检索同一条构造路径**（`_init_embedder`）而非复述配置文件——否则这类 bug 依旧测不出来。另新增 `VectorIndex.read_meta()` 作为轻量只读元数据入口，避免 status 把 7500 条向量读进内存。
+- **测试**：新增 31 项（21 项健康检查与渲染 + 10 项凭证解包）。**反假阳性**：把 `unwrap_secret` 退回旧行为后实测 7 条用例失败，其中 `test_init_embedder_gets_plaintext_not_mask` 的报错正是 `assert '**********' == 'sk-real-key'`——生产 bug 的精确复现。全量 3,774 → **3,805 通过**（+31），覆盖率 72.84% → **72.91%**；13 个模块覆盖率门禁、Ruff、mypy（194 源文件，0 错误）、AST 安全扫描通过。
+- 产品版本 3.40.9→**3.40.10**；协议版本与配置/持久化格式不变。
+
 ## v3.40.9 (2026-09-20) — 敏感文档边界固化为代码强制
 
 调薪方案、人员盘点/评估过程记录、绩效评价、Leader 盘点类文档「只保留 SOURCE 原件」这条规则，此前**只存在于 Claude 的工作记忆里，代码中零强制**。本版把它变成结构保证，并清理已发生的存量泄漏。

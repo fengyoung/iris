@@ -7,7 +7,7 @@ import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from iris.core.exceptions import IrisRuntimeError
 
@@ -19,12 +19,25 @@ class EmbedderError(IrisRuntimeError):
     """Embedding 相关错误。"""
 
 
+def unwrap_secret(value: Any) -> str:
+    """把凭证包装（Pydantic SecretStr 等）解成明文，非凭证输入原样返回。
+
+    Pydantic v2 的 ``model_dump()`` 不会解包 SecretStr，配置经它转手后
+    ``f"Bearer {api_key}"`` 会渲染成掩码 ``Bearer **********``——请求带着星号去
+    鉴权必然 401，而失败又会被「向量检索降级」的兜底吞掉，表现为检索质量悄悄变差。
+    统一在凭证进入 embedder 的边界解包，避免调用方各自记得处理。
+    """
+    if hasattr(value, "get_secret_value"):
+        value = value.get_secret_value()
+    return str(value) if value else ""
+
+
 class TextEmbedder:
     def __init__(self, api_base_url: str, api_key: str, model: str, *,
                  timeout: int = 30, max_retries: int = 2,
                  data_dir: Optional[Path] = None):
         self._api_base_url = api_base_url.rstrip("/")
-        self._api_key = api_key
+        self._api_key = unwrap_secret(api_key)
         self._model = model
         self._timeout = timeout
         self._max_retries = max_retries
@@ -158,7 +171,9 @@ def build_embedder_from_config(llm_config: dict, *,
     emb_cfg = llm_config.get("embedding", {})
     if not emb_cfg.get("enabled", False):
         return None
-    api_key = emb_cfg.get("api_key", "")
+    # 先解包再判空：空的 SecretStr 恒为真值，不解包会绕过这道检查，
+    # 构造出凭证为空的 embedder，把「未配置」拖到请求时才暴露成 401。
+    api_key = unwrap_secret(emb_cfg.get("api_key", ""))
     if not api_key:
         return None
     return TextEmbedder(api_base_url=emb_cfg.get("api_base_url", ""),

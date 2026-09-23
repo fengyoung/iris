@@ -127,6 +127,70 @@ def _build_diagnose_payload(bundle, logger: IrisLogger) -> Dict[str, Any]:
     }
 
 
+def _credential_looks_usable(api_key: str) -> bool:
+    """判断解包后的凭证是否像真凭证——空串或掩码（全星号）都算不可用。
+
+    掩码形态来自 Pydantic SecretStr 被 f-string 插值，是「配置看着有值、
+    请求必然 401」的典型伪装，健康检查必须把它和真凭证区分开。
+    """
+    key = (api_key or "").strip()
+    return bool(key) and set(key) != {"*"}
+
+
+def _build_vector_channel_health(bundle) -> Dict[str, Any]:
+    """向量检索通道健康——纯静态检查，不发真实 embedding 请求。
+
+    覆盖两类此前只能靠「检索质量悄悄变差」才察觉的故障：
+      ① 凭证不可用（掩码/空）——请求必然 401，又被降级兜底吞掉；
+      ② 索引缺失，或 embedder 模型与索引不一致——向量通道被静默禁用。
+
+    embedder 刻意走与检索同一条构造路径（enhanced._init_embedder），
+    这样「status 报健康」才等价于「检索真的能用」，而不是只复述配置文件。
+    """
+    from iris.retrieval.enhanced import _init_embedder
+    from iris.retrieval.vector_index import VectorIndex
+
+    emb_cfg = (bundle.llm.get("embedding", {}) or {}) if bundle.llm else {}
+    if not emb_cfg.get("enabled", False):
+        return {"enabled": False, "status": "disabled"}
+
+    expected_model = emb_cfg.get("model", "text-embedding-v3")
+    try:
+        embedder = _init_embedder(bundle)
+    except (OSError, ValueError, AttributeError, KeyError):
+        embedder = None
+
+    health: Dict[str, Any] = {
+        "enabled": True,
+        "expected_model": expected_model,
+        "embedder_ready": embedder is not None,
+        "credential_usable": _credential_looks_usable(
+            getattr(embedder, "_api_key", "") if embedder else ""),
+    }
+
+    metadata_root = bundle.root / "data" / "metadata"
+    indexes: Dict[str, Any] = {}
+    for source_name, cfg in (bundle.data_source.get("sources", {}) or {}).items():
+        if not cfg.get("enabled", True):
+            continue
+        meta = VectorIndex(metadata_root / f"{source_name}_vector_index").read_meta()
+        stored_model = meta.get("embedder_model", "")
+        indexes[source_name] = {
+            "chunk_count": meta.get("count", 0),
+            "stored_model": stored_model or None,
+            "model_ok": stored_model == expected_model,
+        }
+    health["indexes"] = indexes
+
+    if not health["embedder_ready"] or not health["credential_usable"]:
+        health["status"] = "degraded"          # 必然降级为纯词法检索
+    elif not indexes or any(not i["model_ok"] for i in indexes.values()):
+        health["status"] = "degraded"          # 索引缺失或模型不匹配
+    else:
+        health["status"] = "ok"
+    return health
+
+
 def _build_status_payload(bundle, logger: IrisLogger) -> Dict[str, Any]:
     payload = _build_diagnose_payload(bundle, logger)
     freshness = _compute_freshness(bundle)
@@ -140,6 +204,7 @@ def _build_status_payload(bundle, logger: IrisLogger) -> Dict[str, Any]:
     payload.update({
         "latest_source_mtime": freshness["latest_source_mtime"],
         "suggested_next_action": freshness["suggested_next_action"],
+        "vector_channel": _build_vector_channel_health(bundle),
         **wiki_info,
     })
     return payload

@@ -8,7 +8,7 @@ import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +194,24 @@ class VectorIndex:
 
     def size(self) -> int:
         return len(self._data)
+
+    def read_meta(self) -> Dict[str, Any]:
+        """只读当前代际的 meta.json，不加载向量。
+
+        供健康检查等轻量场景使用——load() 会把全部向量读进内存，
+        对「只想知道索引在不在、模型对不对」的调用方代价过高。
+        """
+        data_dir = self._active_binary_dir()
+        if data_dir is None:
+            return {}
+        meta_path = data_dir / _META_JSON
+        if not meta_path.exists():
+            return {}
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return meta if isinstance(meta, dict) else {}
 
     def _invalidate_cache(self) -> None:
         """标记缓存矩阵为过期（upsert/remove 后调用）。"""

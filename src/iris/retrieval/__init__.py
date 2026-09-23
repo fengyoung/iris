@@ -1,6 +1,6 @@
 """检索模块。"""
 
-from .embedder import EmbedderError, TextEmbedder, build_embedder_from_config
+from .embedder import EmbedderError, TextEmbedder, build_embedder_from_config, unwrap_secret
 from .enhanced import EnhancedRetrievalResult, EnhancedRetriever, QueryRewriter, RewrittenQuery
 from .planner import LLMQueryPlanner, QueryPlan, QueryPlanner
 from .searcher import LocalRetriever, RetrievalHit, RetrievalResult
@@ -23,4 +23,5 @@ __all__ = [
     "VectorIndexModelMismatchError",
     "build_embedder_from_config",
     "build_vector_index",
+    "unwrap_secret",
 ]

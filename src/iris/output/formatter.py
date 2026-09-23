@@ -25,11 +25,36 @@ def _fmt_diagnose(p: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+_VECTOR_STATUS_LABELS = {
+    "ok": "正常",
+    "degraded": "⚠️ 已降级（纯词法检索）",
+    "disabled": "未启用",
+}
+
+
+def _vector_degraded_reason(vc: Dict[str, Any]) -> str:
+    """把向量通道的降级原因翻成可执行的下一步。"""
+    if not vc.get("embedder_ready"):
+        return "embedder 未构造成功，检查 llm.json 的 embedding 段"
+    if not vc.get("credential_usable"):
+        return "embedding 凭证不可用（空值或被掩码），请求会 401"
+    if not vc.get("indexes"):
+        return "未发现任何已启用数据源的向量索引，执行 build-vector-index"
+    bad = [name for name, info in vc["indexes"].items() if not info.get("model_ok")]
+    return f"索引模型不匹配：{', '.join(bad)}，执行 build-vector-index --force-rebuild"
+
+
 def _fmt_status(p: Dict[str, Any]) -> str:
     lines = ["## 项目状态"]
     _add_kv(lines, "数据源存在", p.get("data_source_exists"))
     _add_kv(lines, "Base Model", p.get("base_model_has_key"))
     _add_kv(lines, "Adv Model", p.get("adv_model_has_key"))
+    vc = p.get("vector_channel") or {}
+    if vc:
+        status = str(vc.get("status") or "")
+        _add_kv(lines, "向量通道", _VECTOR_STATUS_LABELS.get(status, status))
+        if status == "degraded":
+            lines.append(f"  原因：{_vector_degraded_reason(vc)}")
     if p.get("suggested_next_action"):
         lines.append(f"\n建议操作：{p['suggested_next_action']}")
     return "\n".join(lines)
