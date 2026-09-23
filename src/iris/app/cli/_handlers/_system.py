@@ -74,6 +74,10 @@ def handle_daily_start(args, bundle, logger) -> int:
         _tr.report_phase("reminders", "第8/8阶段：主动提醒", progress=8 / 8)
         reminders_result = _daily_reminders(bundle)
 
+        # 证据先积累，再生成信号；辅助失败不阻断原有维护。
+        _tr.report_phase("intelligence", "OKR 证据积累与主动信号", progress=0.95)
+        intelligence_result = _daily_intelligence(bundle)
+
         payload = {"memory_sync": {"scanned": sync_result.get("scanned", 0), "skipped": sync_result.get("skipped", 0),
                                     "corrections_added": sync_result.get("corrections_added", 0),
                                     "cc_files_created": sync_result.get("cc_files_created", 0),
@@ -91,7 +95,8 @@ def handle_daily_start(args, bundle, logger) -> int:
                    "graph": graph_result,
                    "usage_summary": usage_summary,
                    "asr_audit": asr_audit_result,
-                   "reminders": reminders_result}
+                   "reminders": reminders_result,
+                   "intelligence": intelligence_result}
         _emit_output(args.command, payload, pretty=args.pretty)
     return 0
 
@@ -646,3 +651,21 @@ SYSTEM_HANDLERS = {
     "metrics-export": handle_metrics_export,
     "reminders": handle_reminders,
 }
+
+
+def _daily_intelligence(bundle):
+    """独立失败显式记录，不影响既有维护结果。"""
+    from iris.intelligence.context import settings
+    cfg = settings(bundle)
+    if not cfg.get('enabled', True):
+        return {'status': 'disabled'}
+    result = {}
+    for name, module, method in [('okr_evidence', 'iris.okr_evidence.service', 'tag'),
+                                  ('signals', 'iris.signals.service', 'run')]:
+        try:
+            from importlib import import_module
+            result[name] = getattr(import_module(module), method)(bundle)
+        except Exception as exc:
+            logging.getLogger(__name__).warning('daily-start %s 失败：%s', name, exc)
+            result[name] = {'status': 'error', 'reason': str(exc)}
+    return result

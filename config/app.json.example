@@ -137,5 +137,16 @@
       "${IRIS_MEMORY_DIR}",
       "${IRIS_DATA_DIR}"
     ]
+  },
+  "intelligence": {
+    "enabled": true,
+    "okr_threshold": 0.65,
+    "max_documents": 100,
+    "max_prompt_chars": 48000,
+    "okr_source": "",
+    "okr_cycle_id": "",
+    "feishu_user_id": "",
+    "feishu_profile": "",
+    "feishu_app_id": ""
   }
 }

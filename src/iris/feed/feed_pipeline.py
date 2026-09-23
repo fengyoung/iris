@@ -178,6 +178,13 @@ class FeedPipeline:
         if not topics:
             return PipelineResult.empty("未检测到有价值话题")
 
+        if not dry_run:
+            try:
+                from iris.signals.feed_cache import cache_topics
+                cache_topics(self._data_dir, topics)
+            except (OSError, ValueError) as exc:
+                logger.warning("话题缓存写入失败，主流程继续：%s", exc)
+
         # Step 3b: OKR 标签解析（将 kr_id 解析为实际描述）
         if okr_context:
             for t in topics:

@@ -876,6 +876,46 @@
         "route_to": "base_model",
         "fallback_to": "adv_model",
         "description": "常规纯文本任务走基础模型（兜底）"
+      },
+      {
+        "name": "decision_extraction",
+        "enabled": true,
+        "priority": 8,
+        "match": {
+          "task_type": "decision_extraction"
+        },
+        "route_to": "base_model",
+        "description": "主动情报任务路由"
+      },
+      {
+        "name": "decision_review",
+        "enabled": true,
+        "priority": 8,
+        "match": {
+          "task_type": "decision_review"
+        },
+        "route_to": "adv_model",
+        "description": "主动情报任务路由"
+      },
+      {
+        "name": "briefing_synthesis",
+        "enabled": true,
+        "priority": 8,
+        "match": {
+          "task_type": "briefing_synthesis"
+        },
+        "route_to": "adv_model",
+        "description": "主动情报任务路由"
+      },
+      {
+        "name": "okr_evidence_check",
+        "enabled": true,
+        "priority": 8,
+        "match": {
+          "task_type": "okr_evidence_check"
+        },
+        "route_to": "adv_model",
+        "description": "主动情报任务路由"
       }
     ]
   },

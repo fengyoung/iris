@@ -489,6 +489,12 @@ class WikiGraph:
             report["llm_error"] = str(exc)
             logger.warning("LLM 关系提取失败: %s", exc)
 
+        # 正式决策投影，候选不进入图谱。
+        from iris.decisions.graph import add_decisions
+        from iris.decisions.store import DecisionStore
+        from iris.intelligence.context import data_root
+        report["decision_nodes"] = add_decisions(self, DecisionStore(data_root(self._config) / "decisions").list())
+        report["nodes"] = len(self._nodes)
         # 4. 持久化
         self.save()
 

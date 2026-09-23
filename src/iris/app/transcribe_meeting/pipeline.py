@@ -145,6 +145,7 @@ class TranscribeMeetingPipeline:
                 out = self._temp_dir / f"{stem}.md"
             from iris.core.write_guard import safe_write_text
             safe_write_text(out, minutes, self._bundle, allow_existing_outside=True)
+            self._extract_decisions(out, minutes, meeting_date, _tr)
             print(f"     完成 → {out.name}", file=sys.stderr)
             _tr.report_phase("done", f"输出: {out.name}", progress=1.0)
 
@@ -156,6 +157,38 @@ class TranscribeMeetingPipeline:
                 result["route"] = route_result.get("route", "")
                 result["route_reason"] = route_result.get("reason", "")
         return result
+
+    def _extract_decisions(self, out, minutes, meeting_date, reporter):
+        """辅助提取失败不影响纪要；仅处理已归档 SOURCE 的文档。"""
+        try:
+            from iris.intelligence.context import data_root, source_root, settings
+            from iris.decisions.store import DecisionStore
+            from iris.decisions.extractor import DecisionExtractor
+            from iris.decisions.reporter import render_report
+            from iris.utils.shared import atomic_write_text
+            root = source_root(self._bundle)
+            from iris.wiki.searcher import parse_frontmatter
+            from iris.wiki._sensitive import is_sensitive_path, is_sensitive_title
+            metadata, _ = parse_frontmatter(minutes)
+            if is_sensitive_path(metadata.get("source", "")) or is_sensitive_title(metadata.get("title", "")):
+                return
+            if not out.resolve().is_relative_to(root):
+                logger.info("纪要未归档 SOURCE，跳过决策提取")
+                return
+            reporter.report_phase("decisions", "提取并复核决策", progress=0.95)
+            result = DecisionExtractor(DecisionStore(data_root(self._bundle) / "decisions"), self._llm,
+                                       max_chars=settings(self._bundle)["max_prompt_chars"]).extract(
+                minutes, path=out.relative_to(root).as_posix(), title=out.stem,
+                decided_at=meeting_date.replace("年", "-").replace("月", "-").replace("日", ""))
+            if result['saved'] or result['pending']:
+                addition = render_report(result['saved'])
+                addition += f"\n待人工确认：{len(result['pending'])} 条（iris decisions pending）\n"
+                atomic_write_text(out, minutes + "\n\n---\n" + addition)
+            if result['status'] == 'skipped':
+                logger.warning("决策提取跳过：%s", result.get('reason'))
+        except Exception as exc:
+            # 辅助能力不能阻断已保存的会议纪要，明确记录降级原因。
+            logger.warning("决策提取失败，纪要已保留：%s", exc)
 
     def run_batch(self, file_paths: List[str], *, output_dir: Optional[str] = None,
                   whisper_model: str = "base", force_retranscribe: bool = False,

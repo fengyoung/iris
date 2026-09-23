@@ -112,6 +112,7 @@ class AppConfig(BaseConfigModel):
     retrieval: Dict[str, Any] = Field(default_factory=dict)
     organization: Dict[str, Any] = Field(default_factory=dict)
     reminders: Dict[str, Any] = Field(default_factory=dict)
+    intelligence: Dict[str, Any] = Field(default_factory=dict)
     assistant: Dict[str, Any] = Field(default_factory=dict)
 
 
