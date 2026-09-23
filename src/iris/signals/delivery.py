@@ -47,6 +47,8 @@ class SignalDelivery:
     def deliver(self, text, *, day, user_id='', dry_run=False):
         print(text)
         digest = hashlib.sha256((day + user_id + text).encode()).hexdigest()
+        # 存储 key 与幂等键统一使用同一截断值，避免两者不一致。
+        idempotency_key = digest[:40]
         path = self.root / f'{day}-{digest[:12]}.md'
         atomic_write_text(path, text)
         if dry_run:
@@ -55,17 +57,17 @@ class SignalDelivery:
             return {'file': str(path), 'status': 'not_configured', 'reason': '未配置冯扬的飞书 open_id'}
         # 发送全过程用独立锁，避免两个 daily-start 同时投递。
         with FileLock(self.root / 'send'):
-            old = self.store.read().get('records', {}).get(digest, {})
+            old = self.store.read().get('records', {}).get(idempotency_key, {})
             if old.get('status') in {'sent', 'sending', 'uncertain'}:
                 return {'file': str(path), 'status': old['status'], 'duplicate': True}
-            self._record(digest, {'status': 'sending', 'file': str(path)})
+            self._record(idempotency_key, {'status': 'sending', 'file': str(path)})
             try:
-                receipt = self.sender(user_id, text, digest[:40])
+                receipt = self.sender(user_id, text, idempotency_key)
             except (OSError, subprocess.SubprocessError, ValueError, IrisRuntimeError) as exc:
                 # 网络超时可能已送达，不盲目重发；记录不确定状态供人工核验。
-                self._record(digest, {'status': 'uncertain', 'error': str(exc), 'file': str(path)})
+                self._record(idempotency_key, {'status': 'uncertain', 'error': str(exc), 'file': str(path)})
                 return {'file': str(path), 'status': 'uncertain', 'reason': str(exc)}
-            self._record(digest, {'status': 'sent', 'receipt': receipt, 'file': str(path)})
+            self._record(idempotency_key, {'status': 'sent', 'receipt': receipt, 'file': str(path)})
             return {'file': str(path), 'status': 'sent'}
 
     def _record(self, key, value):

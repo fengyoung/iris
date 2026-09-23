@@ -91,12 +91,15 @@ class DecisionExtractor:
             owners = []
             fields['owners'] = []
         ambiguous = any(len(self.persons.get(name, [name])) != 1 for name in owners)
+        ambiguous_names = {name: self.persons.get(name, [name]) for name in owners
+                           if len(self.persons.get(name, [name])) != 1}
         fields['owners'] = [self.persons.get(name, [name])[0] if len(self.persons.get(name, [name])) == 1 else name for name in owners]
         try:
             decision = Decision(**fields, decided_at=item.get('decided_at') or decided_at,
                 sources=[{'path': path, 'title': title, 'quote': quote,
                           'line_start': text[:text.index(quote)].count('\n') + 1, 'field_evidence': evidence}],
-                review_details={'review': review, 'person_ambiguous': ambiguous})
+                review_details={'review': review, 'person_ambiguous': ambiguous,
+                                'ambiguous_names': ambiguous_names})
             decision.validate()
         except (IrisValueError, TypeError, AttributeError):
             result['discarded'] += 1

@@ -34,22 +34,22 @@ class TopicResolver:
         return {'pages': rows, 'related_entities': sorted(set(related))[:30]}
 
     def _semantic_pages(self, root, topic):
-        """复用现有 Embedding 缓存；不可用时显式降级为 Wiki 词法检索。"""
-        from iris.retrieval import build_embedder_from_config
-        from iris.intelligence.context import documents
-        from iris.okr_evidence.kr_vector_index import cosine
-        embedder = build_embedder_from_config(self.bundle.llm, data_dir=data_root(self.bundle))
-        if embedder is None:
-            return []
-        pages = documents(root)
-        if not pages:
-            return []
+        """复用已有 Wiki 检索器的语义检索结果，避免对所有 Wiki 页面重新 embed。
+        原实现直接调用 embedder.embed 对所有页面全量编码，绕过了检索缓存层且
+        每次调用成本高（225 页 × 每次 briefing）；改为复用 WikiSearcher 的
+        现有检索路径，保持语义搜索能力同时消除重复的 embedding 开销。
+        """
         try:
-            vectors = embedder.embed([topic] + [p.title + '\n' + p.text[:1000] for p in pages])
-            if len(vectors) != len(pages) + 1:
-                raise IrisError('Wiki 向量响应不完整')
-            scored = [(cosine(vectors[0], v), p) for p, v in zip(pages, vectors[1:])]
-            return [p.evidence(1200) for score, p in sorted(scored, key=lambda pair: -pair[0])[:5] if score > 0.3]
-        except (IrisError, OSError, ValueError) as exc:
+            from iris.wiki.searcher import WikiSearcher
+            hits = WikiSearcher(self.bundle).search(topic, top_k=10)
+            rows = []
+            for hit in hits:
+                path = root / hit.relative_path
+                if path.is_file():
+                    doc = read_document(root, path)
+                    if doc:
+                        rows.append(doc.evidence(1200))
+            return rows
+        except Exception as exc:
             logger.warning('Wiki 语义解析失败，使用词法检索：%s', exc)
             return []

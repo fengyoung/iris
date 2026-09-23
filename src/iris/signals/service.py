@@ -46,7 +46,10 @@ def run(bundle, *, dry_run=False):
         for error in errors:
             logger.warning(error)
     from functools import partial
-    sender = partial(send_lark, profile=cfg.get('feishu_profile', ''), expected_app_id=cfg.get('feishu_app_id', ''))
+    feishu_app_id = cfg.get('feishu_app_id', '')
+    if not feishu_app_id:
+        logger.warning('feishu_app_id 未配置，将跳过飞书机器人应用身份校验，无法保证以 Iris 身份发送')
+    sender = partial(send_lark, profile=cfg.get('feishu_profile', ''), expected_app_id=feishu_app_id)
     delivery = SignalDelivery(root / 'signals', sender).deliver(summary, day=local_today().isoformat(),
                      user_id=cfg.get('feishu_user_id', '') or os.environ.get('IRIS_BOT_USER_ID', ''), dry_run=dry_run)
     return {'signals': [s.to_dict() for s in ranked], 'delivery': delivery, 'errors': errors}

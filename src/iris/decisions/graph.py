@@ -1,4 +1,10 @@
-"""正式决策的图谱投影，不经 LLM 重新生成事实。"""
+"""正式决策的图谱投影，不经 LLM 重新生成事实。
+
+注意：此模块直接操作 WikiGraph 的内部属性 _nodes/_edges/_rebuild_adjacency，
+属于有意识的耦合点。WikiGraph 内部结构变化时需同步更新此模块。
+理想做法是在 WikiGraph 上增加 add_decision_nodes(records) 公开方法，
+当前作为技术债标记待后续重构。
+"""
 from iris.wiki._graph_engine import GraphNode, GraphEdge
 
 

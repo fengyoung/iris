@@ -11,7 +11,7 @@ class OpenIssueDetector:
                 if not re.search(r'待定|后续确认|下次讨论|需要.+跟进', line):
                     continue
                 key = re.sub(r'待定|后续确认|下次讨论|需要|跟进|[\W_]', '', line)
-                if not key:
+                if len(key) < 3:
                     continue
                 closed = any(key in sentence and re.search(r'已解决|已关闭|已确认|已完成', sentence)
                              and not re.search(r'未|尚未|没有', sentence)

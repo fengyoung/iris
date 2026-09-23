@@ -32,7 +32,7 @@ def execute(args, bundle):
                    'open_issues': OpenIssueDetector().detect(recent),
                    'participants': PersonRetriever(bundle, docs.retriever).retrieve(participants, args.topic)}
         reporter.report_phase('synthesize', '生成情报包', progress=0.7)
-        text = BriefingSynthesizer(LLMService(bundle), settings(bundle)['max_prompt_chars']).synthesize(
+        text = BriefingSynthesizer(LLMService(bundle), settings(bundle).get('max_prompt_chars', 48000)).synthesize(
             args.topic, meeting_date.isoformat(), context)
         filename = f'{hashlib.sha256(args.topic.encode()).hexdigest()[:12]}-{meeting_date}.md'
         output = Path(args.output) if args.output else data_root(bundle) / 'briefings' / filename

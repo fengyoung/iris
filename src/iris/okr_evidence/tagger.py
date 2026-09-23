@@ -1,11 +1,14 @@
 """全文指纹增量打标，更新替换旧证据，失败不推进游标。"""
 import hashlib
 import json
+import logging
 from iris.core.exceptions import IrisValueError
 from iris.decisions.schema import now
 from iris.intelligence.context import documents, read_document
 from iris.taskpanel.budget import TaskBudget
 from .kr_vector_index import cosine
+
+logger = logging.getLogger(__name__)
 
 
 class OKREvidenceTagger:
@@ -29,10 +32,13 @@ class OKREvidenceTagger:
         changed = [d for d in docs if not same or prior.get(d.path) != d.fingerprint]
         changed = sorted(changed, key=lambda d: (d.date, d.path), reverse=True)[:self.max_documents]
         updates = {}
+        skipped_large = 0
         for doc in changed:
             budget.check()
             snippets = [doc.text[n:n+1800] for n in range(0, len(doc.text), 1800)]
             if len(snippets) > 100:
+                logger.info('跳过大文档 %s（%d 段，超过 100 段上限）', doc.path, len(snippets))
+                skipped_large += 1
                 continue  # 大文档不截断记成功，下次仍保留为待处理。
             embeddings = self.embedder.embed(snippets)
             budget.record()
@@ -74,6 +80,7 @@ class OKREvidenceTagger:
             data.setdefault('documents', {})[cycle] = tracked
             data.setdefault('signatures', {})[cycle] = signature
             data['last_updated'] = now()
-            return {'processed': len(valid), 'remaining': len(docs) - len(tracked), 'cycle': cycle,
+            return {'processed': len(valid), 'remaining': len(docs) - len(tracked),
+                    'skipped_large': skipped_large, 'cycle': cycle,
                     'budget': budget.snapshot()}
         return self.store.change(mutate)

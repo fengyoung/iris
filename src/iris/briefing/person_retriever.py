@@ -13,6 +13,9 @@ class PersonRetriever:
         root = Path(self.bundle.wiki['wiki_root']) if self.bundle.wiki else None
         result = {}
         for name in participants:
+            name = name.strip()
+            if not name:
+                continue
             pages = []
             if root:
                 for path in (root / '04-人物').rglob('*.md'):

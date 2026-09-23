@@ -7,6 +7,8 @@ from .store import DecisionStore
 
 def decision_hits(bundle, query, limit=5):
     terms = set(tokenize(query))
+    if not terms:
+        return []
     rows = DecisionStore(data_root(bundle) / 'decisions').list()
     if not rows:
         return []
@@ -15,7 +17,8 @@ def decision_hits(bundle, query, limit=5):
     for row in rows:
         text = ' '.join([row['title'], row['outcome'], row['context'], *row['tags']])
         matched = terms.intersection(tokenize(text))
-        if not matched or not row['sources']:
+        # 要求至少 40% 的查询词命中，避免常见词（方案/问题）命中几乎所有决策。
+        if len(matched) < max(1, len(terms) * 0.4) or not row['sources']:
             continue
         source = row['sources'][0]
         quote = source.get('quote', '')

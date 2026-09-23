@@ -41,7 +41,12 @@ def execute(args, bundle):
     if action == 'add':
         if args.input_file:
             from pathlib import Path
-            fields = json.loads(Path(args.input_file).read_text(encoding='utf-8'))
+            # --input-file 是全局共享参数（与记忆导入同源），路径由用户显式指定，
+            # 不做目录限制；仅校验存在性，避免读到不存在时抛裸 FileNotFoundError。
+            input_path = Path(args.input_file)
+            if not input_path.is_file():
+                raise IrisValueError('--input-file 指向的文件不存在')
+            fields = json.loads(input_path.read_text(encoding='utf-8'))
         elif args.interactive:
             fields = {'title': input('决策标题：'), 'outcome': input('决定内容：'),
                       'decided_at': input('决策日期 YYYY-MM-DD：')}
