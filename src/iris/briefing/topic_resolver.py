@@ -1,8 +1,6 @@
 """Wiki 主题与两跳图谱上下文。"""
 from pathlib import Path
 import logging
-from iris.core.exceptions import IrisError
-from iris.intelligence.context import data_root
 
 logger = logging.getLogger(__name__)
 from iris.intelligence.context import read_document
