@@ -1055,12 +1055,16 @@ class WeeklyReportMarkdownGenerator:
     def get_report_week_info(email_date: datetime) -> Tuple[int, int]:
         """根据邮件发送日期判断周报所属周。
 
-        规则：周五~周日(weekday 4-6) → 本周；周一~周四(0-3) → 上周
+        规则：周四~周日(weekday 3-6) → 本周；周一~周三(0-2) → 上周。
+
+        周四归本周而非上周：本团队周报周期为周一~周日，周四/周五发送的是当周内容
+        （2026-06-18、2026-09-24 两批周四发送的实际都落在当周）。若把周四算作上周，
+        对已按周提交过的人会产生同一周号的两个文件（2026-09-24 刘天悦/郭奇奇曾踩此坑）。
         """
         weekday = email_date.weekday()
-        if weekday <= 3:  # 周一~周四
+        if weekday <= 2:  # 周一~周三
             report_date = email_date - timedelta(days=7)
-        else:  # 周五~周日
+        else:  # 周四~周日
             report_date = email_date
         iso_year, iso_week, _ = report_date.isocalendar()
         return iso_year, iso_week

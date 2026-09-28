@@ -195,7 +195,7 @@ def _daily_vector_index(bundle) -> dict:
 
 
 def _build_source_index(bundle, scan_summaries) -> dict:
-    """生成/更新 SOURCE/_INDEX.md — 按一级子目录分组列出所有文档。
+    """生成/更新 SOURCE/_INDEX.md — 按一级子目录分组列出文档数量统计与来源规则。
 
     无 SOURCE 路径或扫描结果为空时静默跳过，不影响 daily-start 主流程。
     """
@@ -222,7 +222,7 @@ def _build_source_index(bundle, scan_summaries) -> dict:
             try:
                 rel = Path(doc.path).relative_to(source_root)
             except ValueError:
-                rel = Path(doc.relative_path) if doc.relative_path else Path(doc.path).name
+                rel = Path(doc.relative_path or Path(doc.path).name)
             parts = rel.parts
             group_key = parts[0] if len(parts) > 1 else "（根目录）"
             groups.setdefault(group_key, []).append((rel, doc))
@@ -234,16 +234,34 @@ def _build_source_index(bundle, scan_summaries) -> dict:
             "",
             f"> 自动生成于 {now}，共 {total} 篇文档。",
             "",
+            "## 归档路由规则",
+            "",
+            "| 目录 | 来源说明 |",
+            "|------|------|",
+            "| 01-目标管理 | 年度 OP 规划、Q3 OKR、双周检查记录 |",
+            "| 02-部门管理 | 组织架构、人员盘点、调薪方案（敏感文档，不进下游） |",
+            "| 03-方案报告 | 技术方案、阶段简报、汇报材料、研究报告 |",
+            "| 04-讨论思考 | 1对1 / 双人讨论、内部研讨纪要、方向思考（首要信号） |",
+            "| 05-会议纪要 | 多人（≥3 人）正式会议纪要 |",
+            "| 06-我的周报 | 本人周报 |",
+            "| 07-成员周报 | 团队成员周报 |",
+            "| 08-参考资料 | 外部会议 / 大会内容、调研报告、技术文章 |",
+            "| 09-工作简报 | 项目 / 部门工作简报 |",
+            "",
+            "## 文档数量统计",
+            "",
+            "| 目录 | 文档数 |",
+            "|------|-------:|",
         ]
 
         for group in sorted(groups):
-            docs_in_group = sorted(groups[group], key=lambda x: str(x[0]))
-            lines.append(f"## {group}（{len(docs_in_group)} 篇）")
-            lines.append("")
-            for rel, doc in docs_in_group:
-                title = doc.title or rel.stem
-                lines.append(f"- [{title}]({rel.as_posix()})")
-            lines.append("")
+            count = len(groups[group])
+            lines.append(f"| {group} | {count} |")
+
+        lines += [
+            f"| **合计** | **{total}** |",
+            "",
+        ]
 
         index_path = source_root / "_INDEX.md"
         safe_write_text(index_path, "\n".join(lines), bundle, allow_existing_outside=True)

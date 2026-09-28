@@ -230,3 +230,45 @@ def test_generate_content_annotates_mismatch():
     assert "主题日期与发送日期不一致" in out
     assert "主题标注 2026-07-31" in out
     assert "实际发送 2026-08-07" in out
+
+
+# ── 周号归属：周四发送算本周 ─────────────────────────────
+#
+# 2026-09-14~09-20 = ISO w38，2026-09-21~09-27 = ISO w39。
+# 旧规则把周一~周四都算作上周，导致 2026-09-24（周四）发出的 w39 周报被标成 w38，
+# 与同一人 09-18 的 w38 报告重号（刘天悦/郭奇奇实际踩过）。
+
+
+@pytest.mark.parametrize(
+    "date_str, expected_week",
+    [
+        ("2026-09-21", 38),  # 周一 → 上周
+        ("2026-09-22", 38),  # 周二 → 上周
+        ("2026-09-23", 38),  # 周三 → 上周
+        ("2026-09-24", 39),  # 周四 → 本周
+        ("2026-09-25", 39),  # 周五 → 本周
+        ("2026-09-26", 39),  # 周六 → 本周
+        ("2026-09-27", 39),  # 周日 → 本周
+        ("2026-09-28", 39),  # 下周一 → 上周（即 w39）
+    ],
+)
+def test_report_week_info_boundaries(date_str, expected_week):
+    from datetime import datetime
+
+    _, week = ewr.WeeklyReportMarkdownGenerator.get_report_week_info(
+        datetime.strptime(date_str, "%Y-%m-%d")
+    )
+    assert week == expected_week
+
+
+def test_report_week_info_thursday_does_not_collide_with_prior_friday():
+    """周四发送与上周五发送必须落在不同周，否则同一人同一周号出两个文件。"""
+    from datetime import datetime
+
+    _, friday_w38 = ewr.WeeklyReportMarkdownGenerator.get_report_week_info(
+        datetime(2026, 9, 18)
+    )
+    _, thursday_w39 = ewr.WeeklyReportMarkdownGenerator.get_report_week_info(
+        datetime(2026, 9, 24)
+    )
+    assert (friday_w38, thursday_w39) == (38, 39)
