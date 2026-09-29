@@ -1,4 +1,4 @@
-# Iris 3.41.2
+# Iris 3.41.3
 
 > 主动情报体系（决策 / 备会 / 信号 / OKR 证据）设计见 [设计文档](docs/intelligence-upgrade-design.md)，用法见 [使用说明](docs/intelligence-upgrade-usage.md)；
 > 谁是卧底 Web 使用方法与恢复边界见 [Web 使用说明](docs/undercover-web-ui.md)，历史验收证据见 [验收记录](docs/undercover-beta-acceptance-20260917.md)。
@@ -7,7 +7,15 @@
 
 ## 最新动态
 
-**v3.41.1 / v3.41.2 (2026-09-23 / 09-27)** - SOURCE/_INDEX.md 自动生成与定稿：
+**v3.41.3 (2026-09-29)** - HTTP 重试缺口修复：
+- 🐛 **读取阶段的传输层异常绕过了全部重试**：`http_post_json` 的重试循环只捕获 `HTTPError` / `URLError` / `socket.timeout`，而 `IncompleteRead`（响应体截断）、`RemoteDisconnected`、`ConnectionResetError`、`ssl.SSLError` 都由 `response.read()` 直接抛出、不经 urllib 包装成 `URLError`，**一个都没命中**。后果是 `max_retries` 形同虚设——`config/llm.json` 里 28 个模型与 embedding 全配了 `max_retries: 2`，一次网络截断仍会整轮失败
+- 🔍 **发现场景**：2026-09-29 跑完 `daily-start` 后验证 `okr-evidence tag`，嵌入 KR 文本时抛 `IncompleteRead(134665 bytes read, 82817 more expected)` 致整轮中止；原样重试立刻成功，确认为偶发截断
+- ✅ **修复**：新增 `(http.client.HTTPException, OSError)` 兜底分支。分支顺序是关键——`HTTPError`（`URLError` 子类）与 `socket.timeout`（`OSError` 子类）在上方先行处理，不会被兜底截胡专属错误信息
+- ✅ **测试 +5**：四类异常各一条「失败→重试→成功」，外加 `test_incomplete_read_actually_retries` —— **断言 `urlopen` 调用次数等于 `max_retries+1`**，因为只断言异常类型区分不出「重试过」与「一次就抛」；5 条均实测在旧代码下失败
+- ✅ **同源排查**：异步孪生 `core/async_http.py` 走 httpx，传输层错误统一包装为 `RequestError` 子类，**无此缺口**；该坑只存在于 urllib 路径
+- ✅ 产品版本 3.41.2 → **3.41.3**；协议版本与数据格式不变
+
+**上一版 v3.41.1 / v3.41.2 (2026-09-23 / 09-27)** - SOURCE/_INDEX.md 自动生成与定稿：
 - ✅ **`daily-start` 自动维护 `SOURCE/_INDEX.md`**（v3.41.1）：第 4 阶段（扫描+切块）完成后自动生成，结果计入 `source_index` 输出字段，状态可观测（`ok` / `skipped` / `error`）；写入走 `safe_write_text(..., allow_existing_outside=True)`，符合项目写保护规则
 - ✅ **格式定稿**（v3.41.2）：从逐篇列出全部文档改为两段更高信号密度的结构——「归档路由规则表」（9 个一级子目录逐一来源说明，含 02-部门管理 敏感文档不进下游、04-讨论思考 首要信号等提示）+「分目录文档数量统计表」（含合计行）
 - ✅ **周报周号归属修复**（v3.41.2）：`extract_weekly_reports` 旧规则把「周一~周四发送」都算上周，与团队「周一~周日」周报周期不符——周四发的当周周报被标成上周号，与同一人上周五的报告重号（2026-09-24 实际踩坑）；改为「周一~周三算上周、周四~周日本周」，新增 8 个日期边界测试

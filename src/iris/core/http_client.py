@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import random
 import socket
@@ -65,6 +66,15 @@ def http_post_json(
             continue
         except socket.timeout:
             last_exc = error_factory("请求超时")
+            continue
+        except (http.client.HTTPException, OSError) as exc:
+            # 响应读取阶段的传输层故障：IncompleteRead（响应体被截断）、
+            # RemoteDisconnected、ConnectionResetError、SSLError 等。
+            # 它们由 response.read() 直接抛出，不经过 urllib 包装成 URLError，
+            # 若不在此显式捕获会绕过全部重试直接失败——重试形同虚设。
+            # OSError 兜底 ConnectionError/ssl.SSLError 等 socket 层错误；
+            # HTTPError 与 socket.timeout 均是其子类，已在上方分支先行处理。
+            last_exc = error_factory(f"响应读取失败: {exc}")
             continue
 
         try:

@@ -1,3 +1,16 @@
+## v3.41.3 (2026-09-29) — HTTP 重试缺口修复：读取阶段异常绕过全部重试
+
+`http_post_json` 的重试循环只捕获了 `HTTPError` / `URLError` / `socket.timeout`，而**响应读取阶段的传输层故障一个都没命中**——它们由 `response.read()` 直接抛出，不经过 urllib 包装成 `URLError`。于是 `max_retries` 形同虚设：一次网络截断即整轮失败，重试次数再大也不会触发。
+
+- **发现场景**：2026-09-29 跑完 `daily-start` 后验证 `okr-evidence tag`，嵌入 KR 文本时抛 `IncompleteRead(134665 bytes read, 82817 more expected)`，整轮打标中止；原样重试立刻成功，确认是偶发的响应体截断。
+- **爆炸半径**：`http_client` 是 LLM provider 与 embedder 共用的底层传输层，`config/llm.json` 里全部 28 个模型与 embedding 段都配了 `max_retries: 2`——**配了，但对这类异常完全无效**。
+- **修复**：新增 `except (http.client.HTTPException, OSError)` 分支。分支顺序是关键——`HTTPError`（`URLError` 子类）与 `socket.timeout`（`OSError` 子类）在上方先行处理，不会被兜底分支截胡其专属错误信息。选 `OSError` 兜底而非只列 `IncompleteRead`，是因为 `RemoteDisconnected`、`ConnectionResetError`、`ssl.SSLError` 同属一类读取期故障，只钉一个会留下同类缺口。
+- **测试**：+5。`IncompleteRead` / `RemoteDisconnected` / `ConnectionResetError` / `ssl.SSLError` 各一条「失败→重试→成功」，外加 `test_incomplete_read_actually_retries`——该用例**断言 `urlopen` 调用次数等于 `max_retries+1`**，因为只断言异常类型区分不出「重试过」与「一次就抛」（旧实现两者都会抛错）。5 条均实测在旧代码下失败、修复后通过。
+- **同源排查**：异步孪生 `core/async_http.py` 走 httpx，其异常体系把传输层错误统一包装为 `RequestError` 子类（截断响应对应 `RemoteProtocolError`），**无此缺口**；该坑只存在于 urllib 路径。
+- `core/http_client.py` 覆盖率 100%（45/45 语句）。本版顺带验证了 `okr_evidence` 全链——此前本机 `config/app.json` 缺 `intelligence` 段（该段 schema 早已在 `app.json.example` 中），`okr_source` 未配置使打标与信号检测自 v3.41.0 引入起从未运行；补齐后产出 `KR_AT_RISK` 信号。该文件为 gitignored 本地配置，不入库。
+
+产品版本 3.41.2→**3.41.3**；协议版本（3.26）与数据格式不变。全量单测 3,897 通过；Ruff、mypy 基线（0 错误）通过。
+
 ## v3.41.2 (2026-09-27) — SOURCE/_INDEX.md 改版为「归档路由规则 + 数量统计」
 
 v3.41.1 的 `_INDEX.md` 逐篇列出所有文档；本版改为两段更高信号密度的结构：① **归档路由规则表**——9 个一级子目录逐一标注来源说明（含 `02-部门管理` 敏感文档不进下游、`04-讨论思考` 首要信号等提示）；② **文档数量统计表**——每目录只记篇数并追加合计行，不再展开逐篇链接。生成时机、写入路径（`safe_write_text(..., allow_existing_outside=True)`）与 `daily-start` 的 `source_index` 可观测字段均不变。

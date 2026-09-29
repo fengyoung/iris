@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import socket
+import ssl
 from unittest.mock import MagicMock, patch
 from urllib import error
 
@@ -39,6 +41,14 @@ def _mock_raw_response(raw_bytes: bytes) -> MagicMock:
     """构造返回任意 bytes 的响应。"""
     resp = MagicMock()
     resp.read.return_value = raw_bytes
+    resp.__enter__.return_value = resp
+    return resp
+
+
+def _mock_read_error(exc: Exception) -> MagicMock:
+    """构造 read() 抛异常的响应对象（模拟响应体截断 / 连接半途中断）。"""
+    resp = MagicMock()
+    resp.read.side_effect = exc
     resp.__enter__.return_value = resp
     return resp
 
@@ -106,6 +116,69 @@ def test_retry_on_timeout_then_success():
         with patch("time.sleep", return_value=None):
             result = http_post_json("http://test/api", {}, {}, max_retries=2)
     assert result == {"data": "ok"}
+
+
+def test_retry_on_incomplete_read_then_success():
+    """响应体被截断（IncompleteRead）→ 重试 → 成功。
+
+    回归：IncompleteRead 由 response.read() 直接抛出，不经过 urllib 包装成
+    URLError，曾绕过全部重试直接失败（2026-09-29 打标时实际发生）。
+    """
+    bad = _mock_read_error(http.client.IncompleteRead(b"x" * 134665, 82817))
+    resp_ok = _mock_response({"data": "ok"})
+    with patch("urllib.request.urlopen", side_effect=[bad, resp_ok]):
+        with patch("time.sleep", return_value=None):
+            result = http_post_json("http://test/api", {}, {}, max_retries=2)
+    assert result == {"data": "ok"}
+
+
+def test_retry_on_remote_disconnected_then_success():
+    """连接被对端关闭（RemoteDisconnected）→ 重试 → 成功。"""
+    bad = _mock_read_error(http.client.RemoteDisconnected("Remote end closed connection"))
+    resp_ok = _mock_response({"data": "ok"})
+    with patch("urllib.request.urlopen", side_effect=[bad, resp_ok]):
+        with patch("time.sleep", return_value=None):
+            result = http_post_json("http://test/api", {}, {}, max_retries=2)
+    assert result == {"data": "ok"}
+
+
+def test_retry_on_connection_reset_then_success():
+    """连接被重置（ConnectionResetError）→ 重试 → 成功。"""
+    bad = _mock_read_error(ConnectionResetError(54, "Connection reset by peer"))
+    resp_ok = _mock_response({"data": "ok"})
+    with patch("urllib.request.urlopen", side_effect=[bad, resp_ok]):
+        with patch("time.sleep", return_value=None):
+            result = http_post_json("http://test/api", {}, {}, max_retries=2)
+    assert result == {"data": "ok"}
+
+
+def test_retry_on_ssl_error_then_success():
+    """TLS 读取中断（ssl.SSLError，OSError 子类）→ 重试 → 成功。"""
+    bad = _mock_read_error(ssl.SSLError(ssl.SSL_ERROR_EOF, "EOF occurred in violation of protocol"))
+    resp_ok = _mock_response({"data": "ok"})
+    with patch("urllib.request.urlopen", side_effect=[bad, resp_ok]):
+        with patch("time.sleep", return_value=None):
+            result = http_post_json("http://test/api", {}, {}, max_retries=2)
+    assert result == {"data": "ok"}
+
+
+def test_incomplete_read_actually_retries():
+    """IncompleteRead 持续出现 → 确实重试满 max_retries 次后才抛出。
+
+    断言调用次数而非仅断言抛错：旧实现会一次即抛（calls == 1），
+    只断言异常类型无法区分「重试过」与「没重试」。
+    """
+    calls = [0]
+
+    def counting_side_effect(req, timeout):
+        calls[0] += 1
+        return _mock_read_error(http.client.IncompleteRead(b"partial", 100))
+
+    with patch("urllib.request.urlopen", side_effect=counting_side_effect):
+        with patch("time.sleep", return_value=None):
+            with pytest.raises(RuntimeError, match="响应读取失败"):
+                http_post_json("http://test/api", {}, {}, max_retries=3)
+    assert calls[0] == 4  # 首次 + 3 次重试
 
 
 def test_retry_on_json_decode_error_then_success():
