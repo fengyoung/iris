@@ -1,4 +1,4 @@
-# Iris 3.41.3
+# Iris 3.41.4
 
 > 主动情报体系（决策 / 备会 / 信号 / OKR 证据）设计见 [设计文档](docs/intelligence-upgrade-design.md)，用法见 [使用说明](docs/intelligence-upgrade-usage.md)；
 > 谁是卧底 Web 使用方法与恢复边界见 [Web 使用说明](docs/undercover-web-ui.md)，历史验收证据见 [验收记录](docs/undercover-beta-acceptance-20260917.md)。
@@ -7,7 +7,17 @@
 
 ## 最新动态
 
-**v3.41.3 (2026-09-29)** - HTTP 重试缺口修复：
+**v3.41.4 (2026-09-30)** - daily-start 输出可观测性重构：
+- 🐛 **关键异常被两个数字掩盖**：`daily-start` 的文本渲染此前只输出「扫描文档数」和「Chunk 数」，**七个维护子系统的状态一个都没进渲染层**——`vector_index.status == model_mismatch`（embedding 模型变更、向量索引未更新）只在 `--pretty` 的原始 JSON 里可见，文本模式下一片正常；`wiki_update` 失败、预算预警同理。管道本身是好的，坏的是「人看不到」，与 v3.40.10 向量通道静默失效同源
+- ✅ **重构**：拆为 `_fmt_daily_scan` / `_fmt_daily_maintenance` / `_fmt_daily_usage` 三段，逐行渲染向量索引、SOURCE/_INDEX.md、Wiki 发现、Wiki 更新、人物丰富、知识图谱、ASR 审计共 7 项状态 + LLM 用量段
+- ✅ **新增 `_status_icon()`**：未知/缺失状态渲染为中性圆点 `•`，**不落进 `✅` 分支**。旧写法用 `.get(status) == "ok"` 判断，子系统未返回该字段就整段消失——人读到的「没报错」其实是「没输出」；现在「未返回」会显式打印
+- ✅ **`model_mismatch` 直接给处置建议**（`build-vector-index --force-rebuild`）；**切块行补重建/复用计数**（`扫描文档数：1041（切块重建 1，复用 1040）`），此前判断「本次是否真有新内容」要翻 JSON
+- 🔧 **新增 `scripts/restore_wiki_bak.py`**：Wiki 备份还原工具。Wiki 根目录**不在 git 版本控制下**，`*.bak.N.md` 是唯一版本历史，故清理备份前必须先有回滚手段。按 `MANIFEST.json` 还原，默认**不覆盖**已存在文件，支持 `--list` / `--dry-run` / `--verify`（sha256）
+- 🧹 **配套清理**：123 个与 live 页配对的备份移出 Wiki 根目录（live 页 19/22/16/174 数量不变，未误伤）。判据是**逐页比对内容包含关系 + 扫描 live 页健康度**——36 个 live 页无截断/无思维链泄漏/无占位模板，且内容全部可由 SOURCE 重建；48 个「含独有内容」的经逐行归类实为被 live 取代的旧摘要与重复行。剩 2 个孤儿备份（`于茜哲`/`黄权营`）保留待人工确认
+- ✅ **测试 +8**（`tests/test_output_formatter.py` 共 23 项）；`.gitignore` 补 `coverage.xml`/`coverage.json`
+- ✅ 产品版本 3.41.3 → **3.41.4**；协议版本与数据格式不变
+
+**上一版 v3.41.3 (2026-09-29)** - HTTP 重试缺口修复：
 - 🐛 **读取阶段的传输层异常绕过了全部重试**：`http_post_json` 的重试循环只捕获 `HTTPError` / `URLError` / `socket.timeout`，而 `IncompleteRead`（响应体截断）、`RemoteDisconnected`、`ConnectionResetError`、`ssl.SSLError` 都由 `response.read()` 直接抛出、不经 urllib 包装成 `URLError`，**一个都没命中**。后果是 `max_retries` 形同虚设——`config/llm.json` 里 28 个模型与 embedding 全配了 `max_retries: 2`，一次网络截断仍会整轮失败
 - 🔍 **发现场景**：2026-09-29 跑完 `daily-start` 后验证 `okr-evidence tag`，嵌入 KR 文本时抛 `IncompleteRead(134665 bytes read, 82817 more expected)` 致整轮中止；原样重试立刻成功，确认为偶发截断
 - ✅ **修复**：新增 `(http.client.HTTPException, OSError)` 兜底分支。分支顺序是关键——`HTTPError`（`URLError` 子类）与 `socket.timeout`（`OSError` 子类）在上方先行处理，不会被兜底截胡专属错误信息

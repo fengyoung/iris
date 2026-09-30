@@ -410,19 +410,136 @@ def _fmt_batch_transcribe(p: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+_STATUS_ICONS = {"ok": "✅", "error": "❌", "skipped": "⏭", "empty": "⏭"}
+
+
+def _status_icon(status: Any) -> str:
+    """状态 → 图标；未知/缺失状态用中性圆点，避免把「没返回」渲染成成功。"""
+    return _STATUS_ICONS.get(str(status), "•")
+
+
 def _fmt_daily_start(p: Dict[str, Any]) -> str:
-    scan_list = p.get("scan", [])
-    chunks_list = p.get("chunks", [])
     lines = ["## 日常启动"]
-    total_docs = sum(s.get("document_count", 0) for s in (scan_list if isinstance(scan_list, list) else []))
-    total_chunks = sum(c.get("chunk_count", 0) for c in (chunks_list if isinstance(chunks_list, list) else []))
-    lines.append(f"扫描文档数：{total_docs}")
-    lines.append(f"Chunk 数：{total_chunks}")
+    lines.extend(_fmt_daily_scan(p))
+    lines.extend(_fmt_daily_maintenance(p))
+    lines.extend(_fmt_daily_usage(p.get("usage_summary")))
     reminders = p.get("reminders", {})
     if isinstance(reminders, dict) and reminders.get("signal_count", 0) > 0:
         lines.append("")
         lines.append(_fmt_reminders(reminders))
     return "\n".join(lines)
+
+
+def _fmt_daily_scan(p: Dict[str, Any]) -> List[str]:
+    # 先落局部变量再 isinstance 收窄：写成 `p.get(x) if isinstance(p.get(x), list) else []`
+    # 时 mypy 收窄不到条件表达式的取值，结果仍是 Any | list | None（union-attr 报错）。
+    raw_scan = p.get("scan")
+    raw_chunks = p.get("chunks")
+    scan_list = raw_scan if isinstance(raw_scan, list) else []
+    chunks_list = raw_chunks if isinstance(raw_chunks, list) else []
+    total_docs = sum(s.get("document_count", 0) for s in scan_list)
+    total_chunks = sum(c.get("chunk_count", 0) for c in chunks_list)
+    rebuilt = sum(c.get("rebuilt_documents", 0) for c in chunks_list)
+    reused = sum(c.get("reused_documents", 0) for c in chunks_list)
+    head = f"扫描文档数：{total_docs}"
+    if rebuilt or reused:
+        head += f"（切块重建 {rebuilt}，复用 {reused}）"
+    return [head, f"Chunk 数：{total_chunks}"]
+
+
+def _fmt_daily_maintenance(p: Dict[str, Any]) -> List[str]:
+    """各维护子系统一行状态。
+
+    逐段渲染而非只报汇总——旧实现只输出扫描/Chunk 两个数字，`vector_index.status`
+    为 `model_mismatch`、`wiki_update` 失败这类关键异常在 --pretty 下完全不可见。
+    """
+    return [
+        "",
+        "### 维护结果",
+        _fmt_daily_vector_index(p.get("vector_index")),
+        _fmt_daily_source_index(p.get("source_index")),
+        _fmt_daily_wiki_discover(p.get("wiki_discover")),
+        _fmt_daily_wiki_update(p.get("wiki_update")),
+        _fmt_daily_person_enrich(p.get("person_enrich")),
+        _fmt_daily_graph(p.get("graph")),
+        _fmt_daily_asr_audit(p.get("asr_audit")),
+    ]
+
+
+def _fmt_daily_vector_index(r: Any) -> str:
+    r = r if isinstance(r, dict) else {}
+    if r.get("status") == "ok":
+        return f"  ✅ 向量索引：索引 {r.get('indexed', 0)} 条"
+    if r.get("status") == "model_mismatch":
+        return "  ⚠️ 向量索引：embedding 模型已变更，需 build-vector-index --force-rebuild"
+    return f"  {_status_icon(r.get('status'))} 向量索引：{r.get('reason') or r.get('status') or '未返回'}"
+
+
+def _fmt_daily_source_index(r: Any) -> str:
+    r = r if isinstance(r, dict) else {}
+    if r.get("status") == "ok":
+        return f"  ✅ SOURCE/_INDEX.md：{r.get('total', 0)} 篇 / {r.get('groups', 0)} 个目录"
+    return f"  {_status_icon(r.get('status'))} SOURCE/_INDEX.md：{r.get('reason') or r.get('status') or '未返回'}"
+
+
+def _fmt_daily_wiki_discover(r: Any) -> str:
+    r = r if isinstance(r, dict) else {}
+    if r.get("triggered"):
+        return (f"  ✅ Wiki 发现：新增候选 {r.get('new_candidates', 0)} 条"
+                f"（变更 {r.get('changed_documents', 0)} 篇）")
+    return f"  ⏭ Wiki 发现：{r.get('reason') or '未触发'}"
+
+
+def _fmt_daily_wiki_update(r: Any) -> str:
+    r = r if isinstance(r, dict) else {}
+    if r.get("status") in ("error", "skipped"):
+        return f"  {_status_icon(r['status'])} Wiki 更新：{r.get('reason') or r['status']}"
+    if not r:
+        return "  • Wiki 更新：未返回"
+    return (f"  ✅ Wiki 更新：更新 {r.get('updated', 0)} / 未变 {r.get('unchanged', 0)}"
+            f" / 未找到 {r.get('not_found', 0)} / 错误 {r.get('errors', 0)}")
+
+
+def _fmt_daily_person_enrich(r: Any) -> str:
+    r = r if isinstance(r, dict) else {}
+    if r.get("status") == "ok":
+        return (f"  ✅ 人物丰富：更新 {r.get('updated', 0)} / 无变化 {r.get('no_change', 0)}"
+                f" / 未找到 {r.get('not_found', 0)}")
+    return f"  {_status_icon(r.get('status'))} 人物丰富：{r.get('reason') or r.get('status') or '未返回'}"
+
+
+def _fmt_daily_graph(r: Any) -> str:
+    r = r if isinstance(r, dict) else {}
+    if r.get("status") == "ok":
+        return f"  ✅ 知识图谱：{r.get('nodes', 0)} 节点 / {r.get('edges', 0)} 边"
+    return f"  {_status_icon(r.get('status'))} 知识图谱：{r.get('reason') or r.get('status') or '未返回'}"
+
+
+def _fmt_daily_asr_audit(r: Any) -> str:
+    r = r if isinstance(r, dict) else {}
+    if r.get("status") == "ok":
+        line = (f"  ✅ ASR 审计：热词 {r.get('hotword_count', 0)} 条，"
+                f"覆盖 人物 {r.get('persons', '-')} / 项目 {r.get('projects', '-')}"
+                f" / 概念 {r.get('concepts', '-')}")
+        if r.get("needs_update"):
+            line += f"\n     ⚠️ {r.get('suggestion', '建议更新 ASR 热词')}"
+        return line
+    return f"  {_status_icon(r.get('status'))} ASR 审计：{r.get('reason') or r.get('status') or '未返回'}"
+
+
+def _fmt_daily_usage(u: Any) -> List[str]:
+    u = u if isinstance(u, dict) else {}
+    if not u or u.get("status") == "empty":
+        return ["", "### LLM 用量", "  暂无调用记录"]
+    if u.get("status") == "error":
+        return ["", "### LLM 用量", f"  ❌ 统计失败：{u.get('reason', '')}"]
+    lines = ["", "### LLM 用量"]
+    for label, key in (("今日", "today"), ("本周", "this_week"), ("本月", "this_month")):
+        row = u.get(key) if isinstance(u.get(key), dict) else {}
+        lines.append(f"  {label}：{row.get('calls', 0)} 次 / {row.get('total_tokens', 0):,} tokens")
+    if u.get("budget_warning"):
+        lines.append(f"  ⚠️ 预算预警：{u['budget_warning']}")
+    return lines
 
 
 _REMINDER_TYPE_NAMES = {

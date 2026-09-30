@@ -71,6 +71,9 @@ PjMMbaKyroI3X4xMHJ4c0hIln3g
 .pytest_cache/
 .coverage
 htmlcov/
+# coverage 报告产物：CI 用 --cov-report=xml/json，本地跑同样会落这两个文件
+coverage.xml
+coverage.json
 .git-filter-replacements.txt
 
 # lark 工具运行时产物
