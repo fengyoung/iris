@@ -4,6 +4,8 @@
 双阶段流水线：
   Stage1: 优先直接提取 PDF 文字（文字型 PDF），降级为 adv_model 多模态理解图片（扫描件）
   Stage2: base_model (Deepseek) 合并/排序/区分差旅 → 输出报销汇总
+          条目按年份分段多次调用（思考型模型一次喂太多会烧光 max_tokens 截断正文），
+          再由 Python 合并各段表格、重算合计
 
 用法：
   python scripts/extract_travel_invoice.py <文件路径1> [文件路径2 ...]
@@ -21,7 +23,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 # ── Iris 项目路径 ──────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -103,18 +105,15 @@ STAGE2_PROMPT = """你是一个差旅报销分析专家。请根据以下所有�
 
 ## 输出格式
 
-请严格按照以下 Markdown 表格格式输出（行为字段，列为各次差旅+总计列），不要添加额外说明。
-N 为实际差旅次数，依此类推。
+请严格按照以下 Markdown 表格格式输出（每行一次差旅，按起始日期升序编号，最后一行为合计），不要添加额外说明。
+行程# 从 1 开始连续编号，N 为实际差旅次数；日期统一为 YYYY-MM-DD，金额保留两位小数。
 
-| | 差旅信息-01 | 差旅信息-02 | ... | 差旅信息-N | 总计费用 |
-|---|---|---|---|---|---|
-| 起始日期 | YYYY-MM-DD | YYYY-MM-DD | ... | YYYY-MM-DD | |
-| 完成日期 | YYYY-MM-DD | YYYY-MM-DD | ... | YYYY-MM-DD | |
-| 天数 | N | N | ... | N | |
-| 目的城市 | 城市名 | 城市名 | ... | 城市名 | |
-| 往返机场/车站费用 | XX.XX | XX.XX | ... | XX.XX | XX.XX |
-| 目的城市交通费用 | XX.XX | XX.XX | ... | XX.XX | XX.XX |
-| 单次差旅费用 | XX.XX | XX.XX | ... | XX.XX | XX.XX |
+| 行程# | 起始日期 | 完成日期 | 天数 | 目的城市 | 往返机场/车站费用 | 目的城市交通费用 | 单次差旅费用 |
+|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| 1 | YYYY-MM-DD | YYYY-MM-DD | N | 城市名 | XX.XX | XX.XX | XX.XX |
+| 2 | YYYY-MM-DD | YYYY-MM-DD | N | 城市名 | XX.XX | XX.XX | XX.XX |
+| ... | ... | ... | ... | ... | ... | ... | ... |
+| 合计 | | | | | XX.XX | XX.XX | XX.XX |
 
 以下是所有行程条目：
 
@@ -405,21 +404,59 @@ def _parse_stage1_output(text: str, source_file: str = "") -> List[TripEntry]:
 
 # ── Stage 2: base_model 整合 ─────────────────────────────────
 
+TABLE_COLUMNS = ["行程#", "起始日期", "完成日期", "天数", "目的城市",
+                 "往返机场/车站费用", "目的城市交通费用", "单次差旅费用"]
 
-def stage2_consolidate(
-    llm: LLMService,
-    entries: List[TripEntry],
-) -> str:
-    """调用 base_model 合并、排序、区分差旅并计算报销。"""
+MAX_ENTRIES_PER_CHUNK = 250  # 单次 Stage 2 调用的条目上限
+
+
+def _format_entries(entries: List[TripEntry]) -> str:
+    """把条目序列化为提示词中的编号列表。"""
     lines = []
     for i, e in enumerate(entries, 1):
         lines.append(f"{i}. [{e.date} {e.time}] {e.origin} → {e.destination}  "
                      f"¥{e.amount:.2f}  "
                      f"{'【机场/车站】' if e.is_airport_or_station else '【市内】'}  "
                      f"来源: {e.source_file}")
-    all_entries_text = "\n".join(lines)
+    return "\n".join(lines)
 
-    prompt = STAGE2_PROMPT.format(all_entries=all_entries_text)
+
+def _split_oversized(
+    label: str, chunk: List[TripEntry], max_size: int,
+) -> List[Tuple[str, List[TripEntry]]]:
+    """条目过多时对半拆，切点落在日期边界上，避免把同一天切开。"""
+    if len(chunk) <= max_size:
+        return [(label, chunk)]
+    mid = len(chunk) // 2
+    while mid < len(chunk) and chunk[mid].date == chunk[mid - 1].date:
+        mid += 1
+    if mid >= len(chunk):  # 单日条目已超上限，无法再拆
+        return [(label, chunk)]
+    return (_split_oversized(f"{label}a", chunk[:mid], max_size)
+            + _split_oversized(f"{label}b", chunk[mid:], max_size))
+
+
+def _chunk_entries(entries: List[TripEntry]) -> List[Tuple[str, List[TripEntry]]]:
+    """按年份分段；单段超过上限时继续按日期边界对半拆。
+
+    分段是为了给思考型模型留出输出预算——一次性喂入数百条时，思考会烧光
+    max_tokens 使正文表格被截断，而调用本身不报错（静默截断）。
+    """
+    by_year: Dict[str, List[TripEntry]] = {}
+    for e in entries:
+        by_year.setdefault((e.date or "")[:4] or "未知", []).append(e)
+
+    chunks: List[Tuple[str, List[TripEntry]]] = []
+    for year in sorted(by_year):
+        chunks.extend(_split_oversized(year, by_year[year], MAX_ENTRIES_PER_CHUNK))
+    return chunks
+
+
+def _consolidate_chunk(
+    llm: LLMService, entries: List[TripEntry], label: str,
+) -> str:
+    """对一批条目调用 base_model 整合，返回该段的 Markdown 表格。"""
+    prompt = STAGE2_PROMPT.format(all_entries=_format_entries(entries))
 
     backoff = [2, 4, 8]
     for attempt, wait in enumerate(backoff, 1):
@@ -439,7 +476,88 @@ def stage2_consolidate(
             if attempt < len(backoff):
                 print(f"   等待 {wait}s 后重试...", file=sys.stderr)
                 time.sleep(wait)
-    raise RuntimeError("base_model 调用失败，已重试 3 次")
+    raise RuntimeError(f"base_model 调用失败（分段 {label}），已重试 {len(backoff)} 次")
+
+
+def _parse_table_rows(text: str) -> List[List[str]]:
+    """解析 Markdown 表格中的数据行（丢弃表头、分隔行与合计行）。"""
+    rows: List[List[str]] = []
+    for line in text.splitlines():
+        s = line.strip()
+        if not s.startswith("|"):
+            continue
+        cells = [c.strip() for c in s.strip("|").split("|")]
+        if len(cells) != len(TABLE_COLUMNS):
+            continue
+        if cells[0] == TABLE_COLUMNS[0] or cells[0] == "合计" or set(cells[0]) <= set(":-"):
+            continue
+        rows.append(cells)
+    return rows
+
+
+def _assert_chunk_complete(text: str, label: str, row_count: int) -> None:
+    """守卫：分段输出必须以「合计」行收尾，否则判定为被 max_tokens 截断。
+
+    模型输出被截断时不会抛异常，落盘的会是一张缺尾的表——这里让它显式失败。
+    """
+    tail = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if not tail or "合计" not in tail[-1]:
+        last = tail[-1][:80] if tail else "<空>"
+        raise RuntimeError(
+            f"分段 {label} 输出疑似被截断（末行不是合计行，已解析 {row_count} 行）：{last!r}"
+        )
+
+
+def _to_amount(raw: str) -> float:
+    """容错解析金额单元格（容忍 ¥ / 千分位 / 空值）。"""
+    try:
+        return float(raw.replace("¥", "").replace(",", "").strip())
+    except ValueError:
+        return 0.0
+
+
+def _merge_tables(partials: List[str]) -> str:
+    """合并各分段表格：按起始日期排序、重新编号，金额由本函数重算。
+
+    各分段内部的分组与求和仍由模型完成；最后的加总不交给模型——模型加总
+    是第二次 LLM 算术，而这里只需把已分好组的行相加，Python 更可靠。
+    """
+    rows: List[List[str]] = []
+    for text in partials:
+        rows.extend(_parse_table_rows(text))
+    rows.sort(key=lambda r: r[1])
+
+    out = ["| " + " | ".join(TABLE_COLUMNS) + " |",
+           "|" + "|".join([":---:"] * len(TABLE_COLUMNS)) + "|"]
+    tot_air = tot_city = 0.0
+    for i, r in enumerate(rows, 1):
+        air, city = _to_amount(r[5]), _to_amount(r[6])
+        tot_air += air
+        tot_city += city
+        out.append(f"| {i} | {r[1]} | {r[2]} | {r[3]} | {r[4]} | "
+                   f"{air:.2f} | {city:.2f} | {air + city:.2f} |")
+    out.append(f"| 合计 | | | | | {tot_air:.2f} | {tot_city:.2f} | {tot_air + tot_city:.2f} |")
+    return "\n".join(out)
+
+
+def stage2_consolidate(
+    llm: LLMService,
+    entries: List[TripEntry],
+) -> str:
+    """分段调用 base_model 整合，再由 Python 合并为最终报销汇总表。"""
+    chunks = _chunk_entries(entries)
+    print("  分段: " + "、".join(f"{label}({len(items)}条)" for label, items in chunks),
+          file=sys.stderr)
+
+    partials: List[str] = []
+    for label, items in chunks:
+        table = _consolidate_chunk(llm, items, label)
+        rows = _parse_table_rows(table)
+        _assert_chunk_complete(table, label, len(rows))
+        print(f"  ✓ 分段 {label} → {len(rows)} 次差旅", file=sys.stderr)
+        partials.append(table)
+
+    return _merge_tables(partials)
 
 
 # ── CLI ────────────────────────────────────────────────────────
