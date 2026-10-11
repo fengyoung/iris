@@ -118,7 +118,7 @@ python3 scripts/run_cli.py --call-source skill transcribe-meeting \
 在执行前，Claude 应检查：
 
 1. **Whisper 是否安装**：`python3 -c "import whisper"` （可选依赖）
-2. **热词表是否过期**：检查 `output/` 下的 `asr-hotwords-*.txt` 是否需要更新
+2. **热词表是否过期**：检查 `output/asr-corrector-bak/` 下的 `asr-hotwords-*.txt` 是否需要更新
 3. **音频文件是否存在**：先验证路径
 
 ## 常见错误处理

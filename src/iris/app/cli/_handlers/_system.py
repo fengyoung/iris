@@ -33,46 +33,50 @@ def handle_daily_start(args, bundle, logger) -> int:
 
     with TaskReporter("daily-start", command="daily-start") as _tr:
         # 1. 记忆同步
-        _tr.report_phase("memory_sync", "第1/8阶段：记忆同步", progress=1 / 8)
+        _tr.report_phase("memory_sync", "第1/9阶段：记忆同步", progress=1 / 9)
         sync_result = _run_sync_memory(bundle)
         if sync_result.get("synced"):
             logger.log("sync_memory", {"corrections_added": sync_result.get("corrections_added", 0)})
 
         # 2. 记忆自治维护（Phase 3：自动老化归档）
-        _tr.report_phase("memory_maintenance", "第2/8阶段：记忆自治维护", progress=2 / 8)
+        _tr.report_phase("memory_maintenance", "第2/9阶段：记忆自治维护", progress=2 / 9)
         lifecycle = MemoryLifecycle(bundle)
         maintenance_report = lifecycle.maintenance()
         age_result = lifecycle.age()  # Phase 3：默认自动老化，无需 --auto-age
         maintenance_report["age_result"] = age_result
 
         # 3. 会话模式挖掘（Phase 2：daily-start 兜底，Q&A 懒触发没跑到时补上）
-        _tr.report_phase("session_mine", "第3/8阶段：会话模式挖掘", progress=3 / 8)
+        _tr.report_phase("session_mine", "第3/9阶段：会话模式挖掘", progress=3 / 9)
         try:
             session_mine_result = SessionPatternMiner(bundle).mine_and_promote()
         except Exception:
             session_mine_result = {"mined": False, "reason": "会话挖掘异常"}
 
         # 4. 扫描 + 切块 + 向量索引
-        _tr.report_phase("scan_chunk", "第4/8阶段：扫描+切块+向量索引", progress=4 / 8)
+        _tr.report_phase("scan_chunk", "第4/9阶段：扫描+切块+向量索引", progress=4 / 9)
         scan_info, chunk_summaries, vector_index_result, scan_summaries = _daily_scan_and_chunk(bundle)
         source_index_result = _build_source_index(bundle, scan_summaries)
 
         # 5. Wiki 自动发现 + 索引维护 + 增量更新
-        _tr.report_phase("wiki_maintenance", "第5/8阶段：Wiki 维护", progress=5 / 8)
+        _tr.report_phase("wiki_maintenance", "第5/9阶段：Wiki 维护", progress=5 / 9)
         wiki_update_result, person_enrich_result, graph_result = _daily_wiki_maintenance(
             bundle, chunk_summaries,
         )
 
         # 6. LLM 用量概要（今日/本周/本月 + 预算预警）
-        _tr.report_phase("usage_summary", "第6/8阶段：LLM 用量概要", progress=6 / 8)
+        _tr.report_phase("usage_summary", "第6/9阶段：LLM 用量概要", progress=6 / 9)
         usage_summary = _compute_daily_usage_summary(bundle)
 
         # 7. ASR 审计（纯本地，零 LLM 成本；无产物时静默跳过）
-        _tr.report_phase("asr_audit", "第7/8阶段：ASR 审计", progress=7 / 8)
+        _tr.report_phase("asr_audit", "第7/9阶段：ASR 审计", progress=7 / 9)
         asr_audit_result = _daily_asr_audit(bundle)
 
-        # 8. 主动提醒（栏目断供/周报缺失/项目停滞，零 LLM 成本）
-        _tr.report_phase("reminders", "第8/8阶段：主动提醒", progress=8 / 8)
+        # 8. ASR 资源更新（Wiki 有变化才重建 + 部署 + 重启 VocoType）
+        _tr.report_phase("asr_refresh", "第8/9阶段：ASR 资源更新", progress=8 / 9)
+        asr_refresh_result = _daily_asr_refresh(bundle, logger)
+
+        # 9. 主动提醒（栏目断供/周报缺失/项目停滞，零 LLM 成本）
+        _tr.report_phase("reminders", "第9/9阶段：主动提醒", progress=9 / 9)
         reminders_result = _daily_reminders(bundle)
 
         # 证据先积累，再生成信号；辅助失败不阻断原有维护。
@@ -97,6 +101,7 @@ def handle_daily_start(args, bundle, logger) -> int:
                    "graph": graph_result,
                    "usage_summary": usage_summary,
                    "asr_audit": asr_audit_result,
+                   "asr_refresh": asr_refresh_result,
                    "reminders": reminders_result,
                    "intelligence": intelligence_result}
         _emit_output(args.command, payload, pretty=args.pretty)
@@ -337,69 +342,31 @@ def _daily_wiki_maintenance(bundle, chunk_summaries) -> tuple:
 def _daily_asr_audit(bundle) -> dict:
     """ASR 热词覆盖审计 — 纯本地计算，零 LLM 成本。
 
-    仅检查上一次 build-asr-prompt 产出的热词文件是否存在且需要更新。
-    无产物时静默跳过，不影响 daily-start 主流程。
-    发现覆盖缺口时输出提醒。
+    实现复用 ``asr-audit`` 命令的同一函数（``iris.wiki.asr.audit``）：此前这里
+    另有一份实现，读的是 CWD 相对的 ``Path("output")`` 且字段不同，与 CLI 那份
+    各漂各的；无产物时返回 skipped，不影响 daily-start 主流程。
     """
     try:
-        from pathlib import Path
-        from iris.wiki.asr.coverage import analyze_coverage
-        from iris.wiki.context_loader import WikiContextLoader
+        from iris.wiki.asr.audit import run_asr_audit
 
-        if not bundle.wiki or not bundle.wiki.get("wiki_root"):
-            return {"status": "skipped", "reason": "Wiki 未配置"}
+        return run_asr_audit(bundle).payload
+    except Exception as exc:
+        # 不吞异常信息：原先只回「ASR 审计异常」六个字，等于把诊断线索丢掉。
+        return {"status": "error", "reason": f"ASR 审计异常：{exc}"}
 
-        wiki_root = bundle.wiki["wiki_root"]
-        if not Path(wiki_root).is_dir():
-            return {"status": "skipped", "reason": "Wiki 目录不存在"}
 
-        # 查找最新热词文件
-        output_dir = Path("output")
-        hotword_files = sorted(output_dir.glob("asr-hotwords-*.txt"), reverse=True)
-        if not hotword_files:
-            return {"status": "skipped", "reason": "未找到热词文件，请先运行 build-asr-prompt"}
+def _daily_asr_refresh(bundle, logger) -> dict:
+    """ASR 资源更新：Wiki 有变化时重建三件套 → 部署 → 重启 VocoType。
 
-        hotwords = [
-            line.strip() for line in hotword_files[0].read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
+    会花 LLM 调用（约 14 次），故按 Wiki 页面指纹增量触发；失败隔离在本阶段内，
+    不影响 daily-start 其余维护结果。
+    """
+    try:
+        from iris.app.cli._handlers._wiki import refresh_asr_resources
 
-        # 加载 Wiki 页面做覆盖分析
-        loader = WikiContextLoader(wiki_root)
-        pages = loader.load_pages(sort_order=["person", "concept", "project", "domain"])
-
-        report = analyze_coverage(hotwords, pages)
-
-        # 构建摘要
-        issues = []
-        if report.persons_missing:
-            issues.append(f"{len(report.persons_missing)} 人未覆盖")
-        if report.projects_missing:
-            issues.append(f"{len(report.projects_missing)} 项目未覆盖")
-        if report.noise_words:
-            issues.append(f"{len(report.noise_words)} 个噪音词")
-        if report.long_words:
-            issues.append(f"{len(report.long_words)} 个超长词")
-
-        needs_update = bool(issues)
-
-        result = {
-            "status": "ok",
-            "hotword_count": report.hotword_count,
-            "persons": f"{report.persons_covered}/{report.persons_total}",
-            "projects": f"{report.projects_covered}/{report.projects_total}",
-            "concepts": f"{report.concepts_covered}/{report.concepts_total}",
-            "slot_efficiency": f"{report.slot_efficiency:.1%}",
-            "issues": issues,
-            "needs_update": needs_update,
-        }
-
-        if needs_update:
-            result["suggestion"] = "建议运行 build-asr-prompt --deploy 更新 ASR 热词"
-
-        return result
-    except Exception:
-        return {"status": "error", "reason": "ASR 审计异常"}
+        return refresh_asr_resources(bundle, logger)
+    except Exception as exc:
+        return {"status": "error", "reason": f"ASR 资源更新失败：{exc}"}
 
 
 # ── 系统 ──────────────────────────────────────────────────

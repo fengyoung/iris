@@ -1,4 +1,4 @@
-# Iris 3.41.5
+# Iris 3.42.0
 
 > 主动情报体系（决策 / 备会 / 信号 / OKR 证据）设计见 [设计文档](docs/intelligence-upgrade-design.md)，用法见 [使用说明](docs/intelligence-upgrade-usage.md)；
 > 谁是卧底 Web 使用方法与恢复边界见 [Web 使用说明](docs/undercover-web-ui.md)，历史验收证据见 [验收记录](docs/undercover-beta-acceptance-20260917.md)。
@@ -7,7 +7,18 @@
 
 ## 最新动态
 
-**v3.41.5 (2026-10-08)** - 差旅报销 Stage 2 分段归并：
+**v3.42.0 (2026-10-11)** - ASR 资源链路系统加固：
+- 🐛 **部署了不生效**：VocoType 热词只在 App 启动时加载，`--deploy` 写完不重启等于没写。daily-start 新增第 8/9 阶段 `asr_refresh`：指纹增量（**含手动热词**，归一化摘要、改注释/调序不触发）→ 重建三件套 → 部署 → 自动重启 VocoType（AppleEvent 优雅退出、双 20s 超时）；重启失败不回滚但显式 `deploy_only` 告警
+- 🐛 **审计两份实现各读各的目录**：CLI `asr-audit` 与 daily-start 此前各有一份（2026-09-20 修目录 bug 只修了 CLI 侧），收敛到新模块 `wiki/asr/audit.py` 单一实现；「无产物」（skipped）与「产物不合格」分开报告，噪音词（人工清理）与覆盖缺口（重跑生成）拆成 warnings / issues
+- 🐛 **CGEventTap 中途失效零信号**：macOS 禁用 event tap 后 `released_at` 冻结在旧值，所有语音文本被「不在监听窗口」**静默跳过**、进程照常运行。现 run loop 每 0.5s 检测并自愈（回读确认才告警——enable 对失效 tap 是 void 空操作），corrector 门控侧两档限频告警（确定性失效建议重启 / 事件流停滞 >5min 疑似提示）
+- ✅ **部署加固**：热词超 VocoType 上限 500 条显式抛错（不静默截断）；`hotwords.txt` / 替换词典 / 提示词全部原子写（corrector 每 5s 轮询后两者，`copy2` 期间可能读到半截）；**手动热词接入敏感词过滤**（`--deploy` 曾是唯一绕过通道）；产物迁移至 `output/asr-corrector-bak/`（mtime 排序防版本号字典序错裁、每家族留 20 份、FileLock）
+- ✅ **热词提取抗截断**：`_salvage_terms` 从被截断输出捞回已写完整的 term；空产出（多为 `max_tokens` 截断）对半拆批重试
+- ✅ **长度上限唯一真相源**：审计侧 12 汉字 vs VocoType 10 汉字不一致——11–12 字的词能过审计却被拒，统一 `tokenization.MAX_HOTWORD_*`
+- ✅ **Embedding 分批收敛到 embedder**：DashScope 超 10 条直接 400；`okr_evidence` 曾整批传参致打标静默失败多日
+- ⚠️ **已知行为变化**：首次 daily-start 因指纹公式变化必然触发一次重建 + VocoType 自动重启（约 14 次 LLM 调用），此后仅 Wiki 或手动热词变化时重建
+- ✅ **测试 +101**（3,938→4,039、覆盖率 73.11%→73.99%）；产品版本 3.41.5 → **3.42.0**；协议版本与数据格式不变
+
+**上一版 v3.41.5 (2026-10-08)** - 差旅报销 Stage 2 分段归并：
 - 🐛 **截断伪装成一张正常的短表**：`scripts/extract_travel_invoice.py` 的 Stage 2 此前把**全部**行程条目一次性喂给 base_model。条目一多（数百条），思考型模型会先烧掉思考预算，正文表格被 `max_tokens` 截尾——**而调用本身不抛异常**，落盘的是一张缺尾的表，合计行照常有，看不出少了几笔差旅
 - ✅ **分段**：`_chunk_entries` 按年份分组（日期缺失归「未知」桶），单段超 `MAX_ENTRIES_PER_CHUNK = 250` 时由 `_split_oversized` 对半拆，**切点落在日期边界上**，同一天的条目不会被分到两段；一天之内就超上限时原样返回（不递归）
 - ✅ **截断守卫 `_assert_chunk_complete`**（本次核心）：每段输出必须以「合计」行收尾，否则显式抛错。实测去掉守卫后，截断表会被正常合并、产出 `| 合计 | | | | | 100.00 | 50.00 | 150.00 |`，与正常结果无从区分

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import threading
 import time
 from collections import OrderedDict
@@ -13,6 +14,12 @@ from iris.core.exceptions import IrisRuntimeError
 
 _EMBED_CACHE_MAXSIZE = 128
 _EMBED_CACHE_TTL = 600.0  # embedding 结果内容不变，使用较长 TTL
+
+# 单次 embedding 请求的输入条数上限。DashScope（text-embedding-v3）超过 10 条直接
+# 返回 400 InvalidParameter: batch size is invalid。分批由 embedder 自己负责——
+# 调用方各自记得限流是行不通的：vector_index 曾在调用侧硬编码 10 绕开，
+# 而 okr_evidence 直接整批传参，于是打标连续多日静默失败。
+EMBED_BATCH_SIZE = 10
 
 
 class EmbedderError(IrisRuntimeError):
@@ -52,7 +59,11 @@ class TextEmbedder:
         return self._model
 
     def embed(self, texts: List[str]) -> List[List[float]]:
-        """批量向量化，命中缓存的文本不重复请求 API。"""
+        """批量向量化，命中缓存的文本不重复请求 API。
+
+        未命中缓存的文本按 ``EMBED_BATCH_SIZE`` 分批请求——provider 对单次请求的
+        输入条数有硬上限，超限是请求级错误，不会因为「反正调用方会分批」而自愈。
+        """
         if not texts:
             return []
 
@@ -68,28 +79,34 @@ class TextEmbedder:
                 uncached_indices.append(i)
                 uncached_texts.append(text)
 
-        if uncached_texts:
-            endpoint = self._api_base_url + "/embeddings"
-            payload = {"model": self._model, "input": uncached_texts}
-            data = self._post_json(endpoint, payload)
-            entries = data.get("data", [])
-            expected = list(range(len(uncached_texts)))
-            if not isinstance(entries, list) or sorted(item.get("index", -1) for item in entries) != expected:
-                raise EmbedderError("Embedding 响应索引缺失、重复或越界")
-            vectors = _extract_vectors(data)
-            import math
-            if len(vectors) != len(expected) or not vectors or not vectors[0]:
-                raise EmbedderError("Embedding 响应数量不完整")
-            dim = len(vectors[0])
-            if any(len(v) != dim or any(not isinstance(x, (int, float)) or not math.isfinite(x) for x in v) for v in vectors):
-                raise EmbedderError("Embedding 响应维度或数值不合法")
-            # 记录 embedding API 用量
-            self._record_usage(data, len(uncached_texts))
+        for start in range(0, len(uncached_texts), EMBED_BATCH_SIZE):
+            batch_texts = uncached_texts[start:start + EMBED_BATCH_SIZE]
+            vectors = self._embed_batch(batch_texts)
             for j, vec in enumerate(vectors):
-                results[uncached_indices[j]] = vec
-                self._put_cache(uncached_texts[j], vec)
+                idx = uncached_indices[start + j]
+                results[idx] = vec
+                self._put_cache(batch_texts[j], vec)
 
         return [results[i] for i in range(len(texts)) if i in results]
+
+    def _embed_batch(self, texts: List[str]) -> List[List[float]]:
+        """请求单批（≤ ``EMBED_BATCH_SIZE``）向量，并校验响应完整性。"""
+        endpoint = self._api_base_url + "/embeddings"
+        payload = {"model": self._model, "input": texts}
+        data = self._post_json(endpoint, payload)
+        entries = data.get("data", [])
+        expected = list(range(len(texts)))
+        if not isinstance(entries, list) or sorted(item.get("index", -1) for item in entries) != expected:
+            raise EmbedderError("Embedding 响应索引缺失、重复或越界")
+        vectors = _extract_vectors(data)
+        if len(vectors) != len(expected) or not vectors or not vectors[0]:
+            raise EmbedderError("Embedding 响应数量不完整")
+        dim = len(vectors[0])
+        if any(len(v) != dim or any(not isinstance(x, (int, float)) or not math.isfinite(x) for x in v) for v in vectors):
+            raise EmbedderError("Embedding 响应维度或数值不合法")
+        # 记录 embedding API 用量
+        self._record_usage(data, len(texts))
+        return vectors
 
     def embed_one(self, text: str) -> List[float]:
         results = self.embed([text])

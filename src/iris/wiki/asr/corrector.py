@@ -76,6 +76,10 @@ _LISTEN_WINDOW_SEC = 3.0
 # 长语音监听窗口上限：按住说话越久，转写耗时越长，窗口按按住时长放宽至此上限
 _LISTEN_WINDOW_MAX_SEC = 120.0
 
+# tap 失效告警：事件流停滞判定阈值 + 告警限频（同一实例至多每分钟提醒一次）
+_TAP_STALE_WARN_SEC = 300.0
+_GATE_WARN_INTERVAL_SEC = 60.0
+
 
 def _listen_window_sec(hold_duration: float) -> float:
     """计算监听窗口秒数：基础 3s，长语音按热键按住时长线性放宽（上限 120s）。
@@ -192,6 +196,8 @@ class AsrCorrector:
         self._hotkey_held = False
         self._hotkey_released_at: float = 0.0
         self._last_tap_released: float = 0.0  # 去重：对比 monitor.released_at 变化
+        # tap 失效告警限频（ASR 文本因「不在监听窗口」被跳时才检查）
+        self._last_gate_warning_at: float = 0.0
 
         # 剪贴板状态
         self._last_text = ""
@@ -631,6 +637,7 @@ class AsrCorrector:
             return False
         # 热键可检测时必须在窗口内；热键不可检测时仅依赖内容特征
         if not in_listen_window:
+            self._warn_if_tap_suspect()
             # released_at=0（从未释放）时 elapsed 为巨大值，显示 — 防误导
             elapsed_txt = (
                 f"{time.monotonic() - self._hotkey_released_at:.2f}s"
@@ -638,9 +645,44 @@ class AsrCorrector:
                 else "—"
             )
             _log(f"[Iris] ⏭ 跳过：不在监听窗口 (held={self._hotkey_held}, "
-                 f"released_at={self._hotkey_released_at:.1f}, elapsed={elapsed_txt}s)")
+                 f"released_at={self._hotkey_released_at:.1f}, elapsed={elapsed_txt})")
             return False
         return True
+
+    def _warn_if_tap_suspect(self) -> None:
+        """热键 tap 疑似失效时限频告警（把静默失效变成显式信号）。
+
+        门控依赖 CGEventTap 事件流；tap 中途失效（被系统禁用 / 线程死亡 /
+        事件流停滞）时 released_at 冻结在旧值，之后所有 ASR 文本都会被
+        「不在监听窗口」静默跳过，进程照常运行没有任何失败信号。两类判定：
+
+        - 确定性：tap 线程死亡或事件流被禁用（自愈失败后仍不健康）→ 建议重启；
+        - 疑似性：tap 看似健康但长时间（>5min）无任何键盘事件，而此刻
+          ASR 特征文本正在到达 → 口述若没按热键属正常，否则监听已失效。
+
+        仅在 ASR 特征文本被窗口门控跳过时检查（正常复制文本不告警），
+        限频 _GATE_WARN_INTERVAL_SEC 防止刷屏。
+        """
+        monitor = self._hotkey_monitor
+        if monitor is None:
+            return
+        now = time.monotonic()
+        if (self._last_gate_warning_at > 0
+                and (now - self._last_gate_warning_at) < _GATE_WARN_INTERVAL_SEC):
+            return
+        last_event = monitor.last_event_at
+        # 从未收到过事件时以创建时刻为基准：tap 自启动就没送过事件同样是失效
+        last_event = last_event if last_event > 0 else monitor.started_at
+        stale = (now - last_event) > _TAP_STALE_WARN_SEC
+        if not monitor.is_healthy():
+            self._last_gate_warning_at = now
+            _log("[Iris] ⚠ 热键监听已失效（CGEventTap 线程死亡或被系统禁用且自愈失败），"
+                 "所有语音文本将被跳过；建议重启 asr-corrector 重建监听")
+        elif stale:
+            self._last_gate_warning_at = now
+            _log(f"[Iris] ⚠ 热键事件流已 {int(now - last_event)}s "
+                 "无任何键盘事件，监听疑似失效；若口述均未被校正，请检查 vocotype "
+                 "热键绑定或重启 asr-corrector")
 
     def _apply_dict(self, current_text: str) -> Tuple[str, List[str]]:
         """Step 1：词典校正。fast 模式立即写回；full 模式仅登记防重复处理。"""

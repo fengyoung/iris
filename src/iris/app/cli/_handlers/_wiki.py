@@ -8,11 +8,20 @@ import sys
 import time
 from pathlib import Path
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, Dict, List
 
 from iris.llm import LLMService
 from iris.app.cli.helpers import _emit_output
-from iris.utils.paths import resolve_data_path
+from iris.core.exceptions import IrisValueError
+from iris.utils.paths import get_project_root, resolve_data_path
+from iris.wiki.asr.artifacts import (
+    HOTWORD_LIMIT,
+    VOCOTYPE_BACKUP_DIRNAME,
+    asr_bak_dir,
+    prune_bak,
+)
+from iris.utils.shared import atomic_write_json, atomic_write_text
 
 
 # ── Wiki 命令 ────────────────────────────────────────────
@@ -176,11 +185,31 @@ def handle_enrich_persons(args, bundle, logger) -> int:
 def handle_build_asr_prompt(args, bundle, logger) -> int:
     """从 Wiki 知识库构建语音转写优化资源。
 
-    --mode 支持四种模式：
+    --mode 支持四种模式（产物统一落在 output/asr-corrector-bak/ 存档目录）：
       all          全流程（热词 + 替换词典 + 校正提示词）
       hotwords     仅热词提取 → asr-hotwords-{date}-{time}.txt
       replace-dict 仅替换词典 → asr-replace-dict-{date}-{time}.json
       prompt       仅校正提示词 → asr-prompt-v{ver}-{date}-{time}.md
+
+    存档只保留最近若干份，更早的移入同目录 legacy/（见 asr.artifacts）。
+
+    实际编排在 ``run_build_asr_prompt``（供 daily-start 复用），本函数只负责
+    参数解析与输出。
+    """
+    try:
+        payload = run_build_asr_prompt(args, bundle, logger)
+    except IrisValueError as exc:
+        _emit_output(args.command, {"error": str(exc)}, pretty=args.pretty)
+        return 1
+    _emit_output(args.command, payload, pretty=args.pretty)
+    return 0
+
+
+def run_build_asr_prompt(args, bundle, logger) -> Dict[str, Any]:
+    """构建 ASR 三件套并（可选）部署。返回输出 payload，不做任何打印。
+
+    前置校验失败抛 ``IrisValueError``——调用方（CLI handler / daily-start）
+    各自决定如何呈现，避免这里直接往 stdout 写 JSON 污染上层输出。
 
     Phase 1: LLM 热词提取（分 5 批 LLM 调用）
     Phase 2: LLM 误识别映射生成（分 8 批 LLM 调用）
@@ -196,25 +225,27 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
 
     # ── 0. 校验 Wiki ────────────────────────────────────
     if not bundle.wiki or not bundle.wiki.get("wiki_root"):
-        _emit_output(args.command, {"error": "Wiki 配置缺失"}, pretty=args.pretty)
-        return 1
+        raise IrisValueError("Wiki 配置缺失")
     wiki_root = Path(bundle.wiki["wiki_root"]).resolve()
     if not wiki_root.exists():
-        _emit_output(args.command, {"error": "Wiki 根目录不存在"}, pretty=args.pretty)
-        return 1
+        raise IrisValueError("Wiki 根目录不存在")
 
     loader = WikiContextLoader(wiki_root)
     sort_order = ["person", "concept", "project", "domain"]
     pages = loader.load_pages(sort_order=sort_order)
 
     if not pages:
-        _emit_output(args.command, {"error": "Wiki 目录为空，无页面可提取"}, pretty=args.pretty)
-        return 1
+        raise IrisValueError("Wiki 目录为空，无页面可提取")
 
     _t0 = time.monotonic()  # 全流程计时起点
     mode = getattr(args, "asr_mode", "all") or "all"
     today = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    data_dir = bundle.root / "data"
+    # 整条 ASR 链路（产物 / 存档 / 版本状态 / data 副本）统一以 bundle.root 为基准：
+    # resolve_data_path 走的是 get_project_root()，读不到 --project-root，两者
+    # 混用会在显式指定 --project-root 时把产物与生效点裂到两个根下。
+    data_dir = Path(bundle.root) / "data"
+    bak_dir = asr_bak_dir(bundle.root)
+    bak_dir.mkdir(parents=True, exist_ok=True)
     llm_service = LLMService(bundle)
 
     # 从配置构建领域背景描述（无配置时使用通用占位）
@@ -275,7 +306,7 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
             if args.output_file and mode == "replace-dict":
                 replace_path = args.output_file
             replace_dict_file = format_replace_dict(
-                terms, bundle.root / "output" / replace_path,
+                terms, str(bak_dir / replace_path),
                 max_mappings=max_mappings, max_chars=max_chars,
             )
 
@@ -286,7 +317,7 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
         if args.output_file and mode != "all":
             hotwords_path = args.output_file
         hotwords_file = format_hotwords_file(
-            hotwords, bundle.root / "output" / hotwords_path
+            hotwords, str(bak_dir / hotwords_path)
         )
 
     # ── Phase 3：LLM Prompt 优化 ────────────────────────
@@ -309,7 +340,7 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
 
         # 写入文件
         output_path = _write_asr_prompt(prompt, args.output_file, new_version.version,
-                                        bundle.root / "output" / f"asr-prompt-v{new_version.version}-{today}.md")
+                                        bak_dir / f"asr-prompt-v{new_version.version}-{today}.md")
 
         # 持久化版本
         new_version.prompt_text = prompt
@@ -322,7 +353,14 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
     deployed: List[str] = []
     if getattr(args, "deploy", False):
         deployed = _deploy_asr_to_vocotype(
-            hotwords, hotwords_file, replace_dict_file, prompt, output_path, logger)
+            hotwords, hotwords_file, replace_dict_file, prompt, output_path, logger,
+            bak_dir=bak_dir, data_dir=data_dir)
+
+    # ── 存档裁剪（保留最近 N 份，更早移入 legacy/） ──────
+    pruned = prune_bak(bak_dir)
+    if pruned:
+        print(f"[asr] 存档裁剪：{len(pruned)} 份旧产物移入 {bak_dir.name}/legacy/",
+              file=sys.stderr)
 
     # ── 总耗时汇总 ─────────────────────────────────────
     _summary_parts = [f"总耗时 {time.monotonic() - _t0:.1f}s"]
@@ -334,11 +372,81 @@ def handle_build_asr_prompt(args, bundle, logger) -> int:
     print(file=sys.stderr)
 
     # ── 输出报告 ─────────────────────────────────────────
-    payload = _asr_prompt_payload(
+    return _asr_prompt_payload(
         hotwords, hotwords_file, terms, replace_dict_file,
         prompt, output_path, new_version if prompt else None, deployed)
-    _emit_output(args.command, payload, pretty=args.pretty)
-    return 0
+
+
+# ── daily-start 用的 ASR 资源刷新 ───────────────────────
+
+
+def refresh_asr_resources(bundle, logger) -> dict:
+    """Wiki 有变化时重建 ASR 三件套 → 部署 → 重启 VocoType。
+
+    供 daily-start 自动调用。三件事按序发生，任一步失败都显式记账、不影响
+    daily-start 其余阶段：
+
+      1. **指纹增量**：Wiki 页面指纹与上次生成的版本一致则整体跳过。否则每天
+         白跑 14 次 LLM 调用，且替换词典会被逐日重写、校正行为持续漂移。
+      2. **生成 + 部署**（``--mode all --deploy``）。
+      3. **重启 VocoType**：热词表只在 App 启动时加载，不重启等于没部署。
+
+    重启失败**不回滚**：配置本身是好的，回滚反而丢掉刚生成的新产物；报告里
+    给出备份路径供人工处置。
+    """
+    from iris.wiki.asr._vocotype import restart as restart_vocotype
+    from iris.wiki.asr.version import compute_input_fingerprint, load_version
+
+    wiki_root_str = (bundle.wiki or {}).get("wiki_root", "") if bundle.wiki else ""
+    if not wiki_root_str:
+        return {"status": "skipped", "reason": "Wiki 未配置"}
+    wiki_root = Path(wiki_root_str)
+    if not wiki_root.is_dir():
+        return {"status": "skipped", "reason": "Wiki 目录不存在"}
+
+    from iris.wiki.context_loader import WikiContextLoader
+
+    data_dir = Path(bundle.root) / "data"
+    pages = WikiContextLoader(wiki_root).load_pages(
+        sort_order=["person", "concept", "project", "domain"])
+    if not pages:
+        return {"status": "skipped", "reason": "Wiki 目录为空，无页面可提取"}
+
+    # 含手动热词：改 data/asr_manual_hotwords.txt 也应触发重建（与 determine_new_version 同源）
+    fingerprint = compute_input_fingerprint(pages, data_dir)
+    stored = load_version(data_dir)
+    if stored is not None and stored.fingerprint == fingerprint:
+        return {"status": "skipped",
+                "reason": f"Wiki 未变化（指纹 {fingerprint}，{len(pages)} 页），跳过重建",
+                "fingerprint": fingerprint, "pages": len(pages)}
+
+    args = SimpleNamespace(command="build-asr-prompt", asr_mode="all", deploy=True,
+                           output_file="", bump="auto", max_hotwords=490,
+                           max_mappings=None, max_chars=20, pretty=False)
+    started = time.monotonic()
+    result = run_build_asr_prompt(args, bundle, logger)
+    elapsed = time.monotonic() - started
+
+    restart_result = restart_vocotype()
+    payload: Dict[str, Any] = {
+        "status": "ok" if restart_result["status"] in ("restarted", "not_running")
+                  else "deploy_only",
+        "fingerprint": fingerprint,
+        "pages": len(pages),
+        "previous_fingerprint": stored.fingerprint if stored else "",
+        "version": result.get("version", ""),
+        "hotword_count": result.get("hotword_count", 0),
+        "replace_mapping_count": result.get("replace_mapping_count", 0),
+        "deployed": result.get("deployed", []),
+        "vocotype": restart_result,
+        "elapsed_seconds": round(elapsed, 1),
+    }
+    if restart_result["status"] in ("quit_failed", "start_failed"):
+        # 显式告警：配置已换但 App 还开着旧热词表，用户必须知道。
+        # not_running 不告警——App 没开，下次启动自会读到新配置。
+        payload["warning"] = (f"VocoType 未重启（{restart_result['detail']}），"
+                              f"新热词表尚未生效")
+    return payload
 
 
 # ── build-asr-prompt 子步骤 ─────────────────────────────
@@ -461,47 +569,56 @@ def _resolve_max_mappings(args, logger) -> int:
     return 2000
 
 
-def _merge_manual_hotwords(hotwords: List[str], deployed: List[str], logger) -> List[str]:
-    """合并 data/asr_manual_hotwords.txt 中的手动热词（去重，保留手动词）。"""
+def _merge_manual_hotwords(hotwords: List[str], deployed: List[str], logger,
+                           *, data_dir: Path) -> List[str]:
+    """合并手动热词（去重，保留手动词）。
+
+    读法与指纹计算共用 ``version.load_manual_hotwords``——两处各读一套的话，
+    「指纹认为变了」和「实际合并进来的词」可能对不上。
+
+    手动词同样是「热词来源」，必须过敏感词过滤：`_drop_sensitive_hotwords`
+    只作用于 Phase 1 与 feedback 追加两处，而本函数在 deploy 内部、在它们之后
+    执行，且 deploy 直接写盘、绕过了 `format_hotwords_file` 的兜底过滤——
+    不在这里滤一次，手动词就是唯一能不经判定进入 VocoType 的通道。
+    """
+    from iris.wiki.asr.version import load_manual_hotwords
+
     merged = list(hotwords)
-    manual_path = resolve_data_path("data/asr_manual_hotwords.txt")
-    if not manual_path.exists():
-        return merged
-    try:
-        manual_words = [
-            line.strip() for line in manual_path.read_text(encoding="utf-8").splitlines()
-            if line.strip() and not line.strip().startswith("#")
-        ]
-        existing = set(merged)
-        added = 0
-        for w in manual_words:
-            if w not in existing:
-                merged.append(w)
-                existing.add(w)
-                added += 1
-        if added:
-            deployed.append(f"手动热词 +{added}")
-    except Exception as e:
-        logger.warning("合并手动热词失败 (%s): %s", manual_path, e)
+    manual_words = _drop_sensitive_hotwords(
+        load_manual_hotwords(data_dir), "手动热词")
+    existing = set(merged)
+    added = 0
+    for w in manual_words:
+        if w not in existing:
+            merged.append(w)
+            existing.add(w)
+            added += 1
+    if added:
+        deployed.append(f"手动热词 +{added}")
     return merged
 
 
 def _patch_json_file(path: Path, mutate, label: str, deployed: List[str], logger) -> None:
-    """读 JSON → mutate(dict) → 写回；失败只记 warning 不中断部署。"""
+    """读 JSON → mutate(dict) → 原子写回；失败只记 warning 不中断部署。"""
     if not path.exists():
         return
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         mutate(data)
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_json(path, data)
         deployed.append(label)
     except Exception as e:
         logger.warning("写入 %s 失败: %s", path.name, e)
 
 
 def _deploy_asr_to_vocotype(hotwords: List[str], hotwords_file: str, replace_dict_file: str,
-                            prompt: str, output_path: str, logger) -> List[str]:
-    """--deploy：备份 vocotype 配置 → 写热词 → 关闭 vocotype 自带 LLM/替换 → 同步到 Iris data/。"""
+                            prompt: str, output_path: str, logger, *,
+                            bak_dir: Path, data_dir: Path) -> List[str]:
+    """--deploy：备份 vocotype 配置 → 写热词 → 关闭 vocotype 自带 LLM/替换 → 同步到 Iris data/。
+
+    ``bak_dir`` / ``data_dir`` 由调用方按 ``bundle.root`` 算出后传入，本函数不再
+    自行解析路径——否则两处基准不同会在 --project-root 下分家。
+    """
     import shutil
     from datetime import datetime as _dt
 
@@ -512,8 +629,8 @@ def _deploy_asr_to_vocotype(hotwords: List[str], hotwords_file: str, replace_dic
     if not voco_path.exists():
         return [f"⚠ vocotype 目录不存在: {voco_dir}"]
 
-    # 备份
-    backup_dir = resolve_data_path("output/") / "vocotype-backup" / _dt.now().strftime("%Y%m%d-%H%M%S")
+    # 备份（与产物同处一个存档目录，见 asr.artifacts）
+    backup_dir = bak_dir / VOCOTYPE_BACKUP_DIRNAME / _dt.now().strftime("%Y%m%d-%H%M%S")
     backup_dir.mkdir(parents=True, exist_ok=True)
     for fname in ("hotwords.txt", "postprocess.json", "ai_settings.json"):
         src = voco_path / fname
@@ -523,8 +640,16 @@ def _deploy_asr_to_vocotype(hotwords: List[str], hotwords_file: str, replace_dic
 
     # 部署热词（合并手动热词）
     if hotwords_file and hotwords:
-        merged = _merge_manual_hotwords(hotwords, deployed, logger)
-        (voco_path / "hotwords.txt").write_text("\n".join(merged) + "\n", encoding="utf-8")
+        merged = _merge_manual_hotwords(hotwords, deployed, logger, data_dir=data_dir)
+        # VocoType 对热词表有硬上限，超出会被其拒绝——此处显式拦截，
+        # 不静默截断：静默截断会落一张「看起来正常」的表，与 v3.41.5 的
+        # 差旅报销截断同源（调用不抛异常，产出却少了内容）。
+        if len(merged) > HOTWORD_LIMIT:
+            raise IrisValueError(
+                f"热词 {len(merged)} 条超过 VocoType 上限 {HOTWORD_LIMIT} 条："
+                f"请调低 --max-hotwords，或精简 data/asr_manual_hotwords.txt")
+        # 原子写：VocoType 常驻运行，直接 write_text 可能让它读到半截文件。
+        atomic_write_text(voco_path / "hotwords.txt", "\n".join(merged) + "\n")
         deployed.append(f"hotwords.txt ({len(merged)} 词)")
 
     # 写入 vocotype ai_settings.json：关闭 LLM 优化；postprocess.json：清空 replace_map
@@ -537,13 +662,16 @@ def _deploy_asr_to_vocotype(hotwords: List[str], hotwords_file: str, replace_dic
                      "postprocess.json (替换词典已清空)", deployed, logger)
 
     # 部署到 Iris data/
-    data_dir = resolve_data_path("data/")
     data_dir.mkdir(parents=True, exist_ok=True)
     if replace_dict_file:
-        shutil.copy2(replace_dict_file, str(data_dir / "asr_replace_dict.json"))
+        # 原子写：asr-corrector 常驻运行且每 5 秒轮询这两个文件，copy2 期间
+        # 它可能读到半截 JSON/Prompt——与上面 hotwords.txt 是同一类风险。
+        atomic_write_text(data_dir / "asr_replace_dict.json",
+                          Path(replace_dict_file).read_text(encoding="utf-8"))
         deployed.append("data/asr_replace_dict.json")
     if prompt and output_path:
-        shutil.copy2(output_path, str(data_dir / "asr_prompt.md"))
+        atomic_write_text(data_dir / "asr_prompt.md",
+                          Path(output_path).read_text(encoding="utf-8"))
         deployed.append("data/asr_prompt.md")
     return deployed
 
@@ -652,72 +780,22 @@ def _load_history_replace_rules(data_dir: Path) -> set:
 # ── asr-audit ──────────────────────────────────────────────
 
 def handle_asr_audit(args, bundle, logger) -> int:
-    """运行 ASR 覆盖分析和替换词典质量检查。"""
-    from iris.wiki.context_loader import WikiContextLoader
-    from iris.wiki.asr.coverage import (
-        analyze_coverage, analyze_dict_quality,
-        render_coverage_text, render_dict_quality_text,
-    )
+    """运行 ASR 覆盖分析和替换词典质量检查。
 
-    wiki_root = bundle.wiki.get("wiki_root", "")
-    if not wiki_root or not os.path.isdir(wiki_root):
-        _emit_output("asr-audit", {"error": "Wiki 根目录未配置或不存在"}, pretty=args.pretty)
+    实现收敛在 ``iris.wiki.asr.audit``：daily-start 第 7 阶段调用的是同一函数，
+    历史上两份实现各读各的目录、各出一套字段，导致修一处漏一处。
+    """
+    from iris.wiki.asr.audit import run_asr_audit
+
+    result = run_asr_audit(bundle)
+    if result.payload.get("status") == "skipped":
+        _emit_output("asr-audit", {"error": result.payload.get("reason", "无产物")},
+                     pretty=args.pretty)
         return 1
 
-    loader = WikiContextLoader(wiki_root)
-    pages = loader.load_pages(sort_order=["person", "concept", "project", "domain"])
-
-    # 加载最新热词文件。
-    # 目录必须与 build-asr-prompt 的写盘点一致（bundle.root/output），否则
-    # 审计会静默读到历史遗留目录 output/asr-modify/ 下的陈旧产物——2026-09-20
-    # 实测该目录最新文件停留在 7 月 8 日，审计数字全部失真。
-    hotwords: List[str] = []
-    output_dir = bundle.root / "output"
-    hotword_files = sorted(output_dir.glob("asr-hotwords-*.txt"), reverse=True)
-    if hotword_files:
-        hotwords = [line.strip() for line in hotword_files[0].read_text(encoding="utf-8").splitlines() if line.strip()]
-
-    # 加载最新替换词典
-    terms: List = []
-    dict_files = sorted(output_dir.glob("asr-replace-dict-*.json"), reverse=True)
-    if dict_files:
-        with open(dict_files[0]) as f:
-            data = json.load(f)
-        replace_map = data.get("replace_map", {})
-        from iris.wiki.asr._types import AsrTerm
-        for wrong, right in replace_map.items():
-            terms.append(AsrTerm(term=right, category="domain_term", context="", mis_asr=[wrong]))
-
-    # 覆盖分析
-    cov_report = analyze_coverage(hotwords, pages)
-    cov_text = render_coverage_text(cov_report)
-
-    # 词典质量
-    dict_report = analyze_dict_quality(terms)
-    dict_text = render_dict_quality_text(dict_report)
-
-    result = {
-        "coverage": {
-            "hotword_count": cov_report.hotword_count,
-            "persons": f"{cov_report.persons_covered}/{cov_report.persons_total}",
-            "projects": f"{cov_report.projects_covered}/{cov_report.projects_total}",
-            "concepts": f"{cov_report.concepts_covered}/{cov_report.concepts_total}",
-            "noise_count": len(cov_report.noise_words),
-            "slot_efficiency": f"{cov_report.slot_efficiency:.1%}",
-        },
-        "dict_quality": {
-            "total_rules": dict_report.total_rules,
-            "format_errors": len(dict_report.format_errors),
-            "conflicts": len(dict_report.conflicting_pairs),
-        },
-    }
-
-    if args.pretty:
-        print(cov_text, file=sys.stderr)
-        print("", file=sys.stderr)
-        print(dict_text, file=sys.stderr)
-    _emit_output("asr-audit", result, pretty=args.pretty)
-
+    if args.pretty and result.text:
+        print(result.text, file=sys.stderr)
+    _emit_output("asr-audit", result.payload, pretty=args.pretty)
     return 0
 
 
@@ -739,6 +817,26 @@ def _load_asr_profile(profile_name: str, logger) -> dict:
     return profile_config
 
 
+def resolve_profile_path(path_str: str) -> Path:
+    """把 asr_profiles.json 里的路径归一为绝对路径（基准：项目根）。
+
+    profile 里写的是 ``data/asr_replace_dict.json`` 这类**相对路径**，直接
+    ``Path(p).exists()`` 会以 CWD 为基准——从非项目根启动 corrector 时词典会
+    「不存在」而退出，而 ``llm_prompt`` 只判 exists、不存在就静默置空，于是
+    LLM 校正悄悄降级成「仅词典校正」，没有失败信号。绝对路径原样返回。
+
+    裸相对路径（不带 ``data/`` 等前缀）也按项目根解析，而不是交给
+    ``resolve_data_path`` 抛 ValueError——那是配置写法问题，不该以异常形式
+    冒到 CLI 顶层。
+    """
+    path = Path(path_str).expanduser()
+    if path.is_absolute():
+        return path
+    if path_str.startswith(("data/", "config/", "output/")):
+        return resolve_data_path(path_str)
+    return get_project_root() / path
+
+
 def _load_asr_replace_dict(dict_path: str, args) -> tuple[dict, str | None]:
     """加载 ASR 替换词典。
 
@@ -746,17 +844,17 @@ def _load_asr_replace_dict(dict_path: str, args) -> tuple[dict, str | None]:
         (replace_dict, error_message) - 成功时 error_message 为 None
     """
     import json as _json
-    from pathlib import Path as _Path
 
-    if not _Path(dict_path).exists():
-        return {}, f"替换词典不存在: {dict_path}，请先运行 build-asr-prompt --deploy"
+    resolved = resolve_profile_path(dict_path)
+    if not resolved.exists():
+        return {}, f"替换词典不存在: {resolved}，请先运行 build-asr-prompt --deploy"
 
     try:
-        with open(dict_path) as f:
+        with open(resolved) as f:
             data = _json.load(f)
         return data.get("replace_map", {}), None
     except Exception:
-        return {}, f"替换词典加载失败: {dict_path}"
+        return {}, f"替换词典加载失败: {resolved}"
 
 
 def _init_asr_llm_provider(mode: str, llm_prompt: str, bundle, args):
@@ -780,7 +878,8 @@ def _init_asr_llm_provider(mode: str, llm_prompt: str, bundle, args):
         return None, None, "fast"
 
 
-def _configure_asr_corrector(corrector, provider, service, prompt_path: str, dict_path: str):
+def _configure_asr_corrector(corrector, provider, service,
+                             prompt_path: "str | Path | None", dict_path: str):
     """配置 ASR 校正器（注入 provider、熔断器、路径）。"""
     from pathlib import Path as _Path
 
@@ -802,14 +901,13 @@ def _configure_asr_corrector(corrector, provider, service, prompt_path: str, dic
             pass  # LLMService 不可用时降级为直接 provider 调用
 
     if prompt_path:
-        corrector.set_prompt_path(str(_Path(prompt_path)))
+        corrector.set_prompt_path(str(prompt_path))
     if dict_path:
         corrector.set_dict_path(str(_Path(dict_path)))
 
 
 def handle_asr_corrector(args, bundle, logger) -> int:
     """启动 ASR 实时校正守护进程。"""
-    from pathlib import Path as _Path
     from iris.wiki.asr.corrector import AsrCorrector
 
     mode = getattr(args, "correct_mode", "full") or "full"
@@ -819,17 +917,26 @@ def handle_asr_corrector(args, bundle, logger) -> int:
     profile_config = _load_asr_profile(profile_name, logger)
 
     # 阶段 2：加载替换词典
-    dict_path = profile_config.get("replace_dict", str(resolve_data_path("data/asr_replace_dict.json")))
+    dict_path = profile_config.get("replace_dict", "data/asr_replace_dict.json")
     replace_dict, error = _load_asr_replace_dict(dict_path, args)
     if error:
         _emit_output("asr-corrector", {"error": error}, pretty=args.pretty)
         return 1
 
     # 阶段 3：加载 LLM Prompt
-    prompt_path = profile_config.get("llm_prompt", str(resolve_data_path("data/asr_prompt.md")))
+    # profile 里 llm_prompt 显式为 null 表示「该 profile 不用提示词」（如 quick），
+    # 与「配了路径但文件缺失」是两回事，不能都渲染成同一个警告。
+    prompt_cfg = profile_config.get("llm_prompt", "data/asr_prompt.md")
+    prompt_path = resolve_profile_path(prompt_cfg) if prompt_cfg else None
     llm_prompt = ""
-    if _Path(prompt_path).exists():
-        llm_prompt = _Path(prompt_path).read_text(encoding="utf-8")
+    if prompt_path is None:
+        pass
+    elif prompt_path.exists():
+        llm_prompt = prompt_path.read_text(encoding="utf-8")
+    else:
+        # 静默置空会让 LLM 校正悄悄降级为「仅词典校正」，必须显式告警。
+        print(f"[warn] 校正提示词不存在: {prompt_path}，LLM 校正将降级为仅词典校正",
+              file=sys.stderr)
 
     # 阶段 4：初始化 LLM Provider
     provider, service, mode = _init_asr_llm_provider(mode, llm_prompt, bundle, args)

@@ -13,6 +13,7 @@ from iris.wiki.asr import (
     TermExtractor,
     bump_version,
     compute_fingerprint,
+    compute_input_fingerprint,
     determine_new_version,
     load_version,
     render_asr_prompt,
@@ -393,7 +394,7 @@ class TestDetermineNewVersion:
         save_version(data_dir, AsrPromptVersion(
             version="1.0.5", generated_at="2026-01-01T00:00:00Z",
             wiki_page_count=1, term_count=1,
-            fingerprint=compute_fingerprint(pages),
+            fingerprint=compute_input_fingerprint(pages, data_dir),
         ))
 
         v = determine_new_version(pages, data_dir, bump="auto")
@@ -423,7 +424,7 @@ class TestDetermineNewVersion:
         save_version(data_dir, AsrPromptVersion(
             version="1.0.0", generated_at="2026-01-01T00:00:00Z",
             wiki_page_count=1, term_count=1,
-            fingerprint=compute_fingerprint(pages),  # 指纹相同
+            fingerprint=compute_input_fingerprint(pages, data_dir),  # 指纹相同
         ))
 
         v = determine_new_version(pages, data_dir, bump="minor")

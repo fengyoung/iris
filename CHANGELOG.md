@@ -1,3 +1,24 @@
+## v3.42.0 (2026-10-11) — ASR 资源链路系统加固：写完不生效、指纹不含手动词、审计两份实现、tap 失效零信号
+
+ASR 三件套（热词 / 替换词典 / 校正提示词）从生成到生效的整条链路，本轮修掉四类结构性问题：**部署了不生效**（VocoType 热词只在 App 启动时加载，写完不重启等于没写）、**指纹不含手动热词**（改 `data/asr_manual_hotwords.txt` 永不触发重建，而用户改手动词的意图恰恰就是让它生效）、**审计两份实现各读各的目录**（CLI 与 daily-start 各一份，修一处漏一处）、**产物与版本状态在 `--project-root` 下裂到两个根**（`resolve_data_path` 走 `get_project_root()`、产物走 `bundle.root`）。另修 asr-corrector 热键监听的运行期静默失效（CGEventTap 被系统禁用后所有语音文本被「不在监听窗口」跳过、进程零失败信号——症状与 v3.22.5 的启动失败同族，但此次是**中途**失效：`released_at` 冻结在非零旧值）。
+
+- **daily-start 第 8/9 阶段 `asr_refresh`**（`_wiki.refresh_asr_resources`）：Wiki 或手动热词变化（`compute_input_fingerprint`）时自动「重建三件套（`--mode all --deploy`）→ 部署 → 重启 VocoType」。指纹 = Wiki 页面指纹 + 手动词**归一化摘要**（排序去重，改注释/调顺序不触发一次十几轮 LLM 调用的重建）；重建判定与 `determine_new_version` 版本落盘**两处同源**——各算各的会出现「判定要重建 → 生成认为未变化 → 存回旧指纹 → 明天又判定要重建」的死循环。重启失败**不回滚**（配置本身是好的，回滚反而丢掉新产物），状态记 `deploy_only` 并在渲染层显式告警「新热词表尚未生效」。
+- **审计收敛单一实现**（新模块 `wiki/asr/audit.py`）：CLI `asr-audit` 与 daily-start 第 7 阶段调用同一 `run_asr_audit`。历史上两份实现字段与目录基准各漂各的（CLI 读 `bundle.root/output`、daily-start 读 CWD 相对 `Path("output")`），2026-09-20 修 `output/asr-modify/` 陈旧值 bug 时只修了 CLI 侧。「没有产物」返回 `skipped` 而非渲染成「覆盖 0%」——未运行与不合格必须区分；噪音/超长词（人工清理）与覆盖缺口（重跑生成）拆成 `warnings` / `issues` 两栏，不再混进同一个 `needs_update`。
+- **产物存档目录 `output/asr-corrector-bak/`**（新模块 `wiki/asr/artifacts.py`）：三件套产物 + `vocotype-backup/` + `legacy/` 统一收口；每家族保留 20 份，更早移入 `legacy/`。按 **mtime** 排序——`asr-prompt-v4.11.4-20260719` 与 `asr-prompt-v0.0.6-20261008` 之间，版本号前缀会让字典序把**更旧**的排前面，照字典序裁剪会先把最新产物挪走。裁剪是读-改-写，放进 `FileLock` 临界区（两个 build 并发时后者 glob 到的条目可能已被前者搬走）。
+- **部署加固**（`_deploy_asr_to_vocotype`）：热词合并手动词后超 VocoType 硬上限 500 条**显式抛错**——静默截断会落一张「看起来正常」的表，与 v3.41.5 差旅报销截断同源；`hotwords.txt` / `data/asr_replace_dict.json` / `data/asr_prompt.md` 全部 `atomic_write_*`（VocoType 常驻读热词、corrector 每 5s 轮询后两者，`copy2`/`write_text` 期间可能读到半截文件）；**手动热词接入敏感词过滤**——`_drop_sensitive_hotwords` 此前只作用于 Phase 1 与 feedback 追加，`--deploy` 直接写盘绕过 `format_hotwords_file` 兜底，是唯一能不经判定进 VocoType 的通道；手动词读法与指纹计算共用 `load_manual_hotwords`，防「指纹认为变了、实际合并的词对不上」。整条链路（产物 / 存档 / 版本状态 / data 副本）统一以 `bundle.root` 为基准。
+- **VocoType 进程控制**（新模块 `wiki/asr/_vocotype.py`）：`restart()` 走 AppleEvent `quit app` 而非 `pkill`（录音/转写可能正在收尾，强杀丢段）；退出与拉起各带 20s 超时确认，等待超时不强制终止（可能正在录音）；未在运行返回 `not_running` 不告警（下次启动自会读到新配置）。
+- **热词提取抗截断**（`wiki/asr/hotwords.py`）：`_salvage_terms` 用 `"term": "..."` 配对正则从被截断或不合法的输出中捞回**已写完整**的词（值的引号未闭合的半个词宁可不救，避免把残片当热词）；`_extract_batch_outcome` 在调用成功却零产出（多为响应被 `max_tokens` 截断）时对半拆批重试——空产出在整批粒度上救不回来，拆小后 prompt 更短、通常就能拿到词；调用失败重试一次后同样拆批。`candidates`（解析出的候选数）与产出分开记账，区分「模型没输出」与「输出被质量过滤全滤掉」。
+- **长度上限唯一真相源**（`utils/tokenization.py`）：新增 `MAX_HOTWORD_TOTAL=20` / `MAX_HOTWORD_CHINESE=10` 导出。审计侧（coverage）此前自行用 **>12 汉字**判超长，比 VocoType 的 10 汉字约束松——11–12 汉字的词能过审计却被 VocoType 拒。数字统一后审计随之收紧；句子片段检测的 `len > 12` 是「够长才值得查连接词」的启发式门槛，与长度上限无关，保留并注释说明。
+- **corrector 配置解析**（`_wiki.py`）：profile 里的相对路径按项目根解析（`resolve_profile_path`）——此前以 CWD 为基准，从非项目根启动时词典「不存在」直接退出、`llm_prompt` 静默置空使 LLM 校正**悄悄降级**为仅词典校正，后者改为显式告警；profile 显式 `llm_prompt: null`（不用提示词）与「配了路径但文件缺失」是两回事，不渲染成同一个警告。
+- **CGEventTap 健康监测**（`wiki/asr/_hotkey.py` + `corrector.py`）：macOS 会在进程未及时服务事件或睡眠唤醒后**主动禁用** event tap，此前运行期失效零监测（只有启动失败的降级路径）。现 tap 线程 run loop 每 0.5s 调 `CGEventTapIsEnabled`，被禁用则 `CGEventTapEnable` 自愈，**回读确认恢复才计数并告警**——enable 对已失效（invalidated）的 tap 是 void 空操作，无条件告警会每 0.5s 打一行「已自动重新启用」永远刷屏。corrector 侧 `_warn_if_tap_suspect`：ASR 特征文本被「不在监听窗口」跳过时检查健康度，两档限频告警（60s 一次）——确定性失效（线程死亡 / 禁用且自愈未愈）直接建议重启；事件流停滞 >5min 给疑似提示，**从未收到过事件以 monitor 创建时刻兜底**（`last_event_at=0` 豁免会让「创建成功但事件流从未通起来」被两层告警同时漏掉）。顺带修跳过日志 `elapsed=1246.98ss` 双 s。
+- **Embedding 分批收敛**（`retrieval/embedder.py`）：单批上限 `EMBED_BATCH_SIZE=10` 移入 embedder 自身——DashScope（text-embedding-v3）超 10 条直接 400 `InvalidParameter: batch size is invalid`，此前靠调用方各自记得：`vector_index` 硬编码 10 绕开、`okr_evidence` 直接整批传参致打标连续多日静默失败。分批是请求级约束，职责应在 provider 侧。
+
+工程项：`docs/asr-corrector-design.md` 同步更新（存档目录 / 指纹语义 / 部署流程）；新增 `docs/vocotype-config-path.md`；`iris-daily-start` / `iris-meeting` skill 文档更新；okr 证据测试补充（`tests/test_intelligence_okr.py`）。
+
+已知行为变化：**首次 daily-start 因指纹公式变化必然触发一次重建 + VocoType 自动重启**（旧指纹仅含页面、新含手动热词，约 14 次 LLM 调用），此后仅 Wiki 或手动热词变化时重建；restart 失败只告警不重试——指纹已推进，次日不会再次尝试重启（配置已生效，等 App 下次自然重启加载）。
+
+产品版本 3.41.5→**3.42.0**；协议版本（3.26）与数据格式不变（无新 CLI 命令，`asr_refresh` 是 daily-start 内部阶段）。全量单测 3,938→4,039 通过、覆盖率 73.11%→73.99%；Ruff（`src scripts tests`）、mypy（229 文件 0 错误）通过。
+
 ## v3.41.5 (2026-10-08) — 差旅报销 Stage 2 分段归并：截断不再伪装成一张正常的短表
 
 `scripts/extract_travel_invoice.py` 的 Stage 2 此前把**全部**行程条目一次性喂给 base_model。条目一多（数百条），思考型模型会先烧掉思考预算，正文表格被 `max_tokens` 截尾——**而调用本身不抛异常**，落盘的是一张缺尾的表，合计行照常有，看不出少了几笔差旅。修法是把条目按年份分段、逐段调用，再由 Python 合并各段表格并重算合计。

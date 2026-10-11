@@ -19,7 +19,11 @@ from typing import Dict, List, Set, Tuple
 
 from ._types import AsrTerm, CoverageReport, DictQualityReport
 from .._constants import get_wiki_prefix
-from iris.utils.tokenization import count_chinese as _count_chinese
+from iris.utils.tokenization import (
+    MAX_HOTWORD_CHINESE,
+    MAX_HOTWORD_TOTAL,
+    count_chinese as _count_chinese,
+)
 
 # ── 噪音检测规则 ──────────────────────────────────────────
 
@@ -71,20 +75,21 @@ def _is_noise_word(word: str) -> Tuple[bool, str]:
     if _SHORT_ENGLISH_RE.match(word):
         return True, "超短英文（≤2 字符，ASR 准确率高）"
 
-    # 超长中文（>12 汉字）
+    # 超长中文（>MAX_HOTWORD_CHINESE 汉字，ASR 热词 bias 对长词无效）
     chinese_count = _count_chinese(word)
-    if chinese_count > 12:
+    if chinese_count > MAX_HOTWORD_CHINESE:
         return True, f"超长词（{chinese_count} 汉字，ASR 热词 bias 无效）"
 
-    # 超长字符（>20 字符）
-    if len(word) > 20:
+    # 超长字符（>MAX_HOTWORD_TOTAL 字符）
+    if len(word) > MAX_HOTWORD_TOTAL:
         return True, f"超长词（{len(word)} 字符）"
 
     # 通用高频词
     if _COMMON_NOISE_PATTERNS.match(word):
         return True, "通用高频词（非领域专有）"
 
-    # 句子片段特征
+    # 句子片段特征。此处 12 是「够长才值得查连接词」的启发式门槛，
+    # 与上面的长度上限无关（后者已由 MAX_HOTWORD_* 把关）。
     if len(word) > 12:
         fragment_count = sum(1 for ch in word if ch in _SENTENCE_FRAGMENT_WORDS)
         if fragment_count >= 2:
@@ -179,9 +184,9 @@ def analyze_coverage(
         if is_noise:
             report.noise_words.append(f"{hw}（{reason}）")
 
-    # 超长词
+    # 超长词（与 _is_noise_word 同一门槛，见 tokenization.MAX_HOTWORD_*）
     for hw in hotwords:
-        if _count_chinese(hw) > 12:
+        if _count_chinese(hw) > MAX_HOTWORD_CHINESE:
             report.long_words.append(hw)
 
     # 槽位效率（对噪音词去重，防止同一热词因多次出现导致 effective 为负）
@@ -316,7 +321,7 @@ def render_coverage_text(report: CoverageReport) -> str:
 
     if report.long_words:
         lines.append("")
-        lines.append(f"超长词 (>12 汉字): {len(report.long_words)} 个")
+        lines.append(f"超长词 (>{MAX_HOTWORD_CHINESE} 汉字): {len(report.long_words)} 个")
         for lw in report.long_words[:10]:
             lines.append(f"  · {lw}")
 

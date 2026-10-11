@@ -204,6 +204,9 @@ class _HotkeyMonitor:
         self._held = False
         self._released_at: float = 0.0
         self._pressed_at: float = 0.0  # 本次按住开始时刻（长语音窗口计算用）
+        self._last_event_at: float = 0.0  # 最近一次收到任意键盘事件（tap 健康度判据）
+        self._reenable_count: int = 0  # tap 被系统禁用后自动重新启用的次数
+        self._started_at: float = time.monotonic()  # 创建时刻（事件流从未有过事件时的停滞基准）
         self._lock = threading.Lock()
         self._tap: Any = None
         self._source: Any = None
@@ -236,6 +239,87 @@ class _HotkeyMonitor:
             if self._pressed_at <= 0:
                 return 0.0
             return max(0.0, self._released_at - self._pressed_at)
+
+    @property
+    def last_event_at(self) -> float:
+        """最近一次收到任意键盘事件的单调时刻（0 = 从未收到）。
+
+        tap 监听全部键盘事件（不只热键），正常情况下用户一敲键盘就会刷新；
+        长时间无事件 + ASR 文本持续到达 = 事件流停滞（tap 失效的主要信号之一）。
+        """
+        with self._lock:
+            return self._last_event_at
+
+    @property
+    def reenable_count(self) -> int:
+        """tap 被系统禁用后自动重新启用的累计次数。"""
+        with self._lock:
+            return self._reenable_count
+
+    @property
+    def started_at(self) -> float:
+        """monitor 创建时刻（单调钟）。
+
+        事件流从未收到过任何事件时，以本时刻作为停滞判定的兜底基准——
+        tap 自启动就没送过事件同样是失效信号（区别于「送过、后来停了」）。
+        """
+        with self._lock:
+            return self._started_at
+
+    # ---- 运行期健康监测 ----
+    #
+    # macOS 会在进程未能及时服务事件（如长时间无响应、睡眠唤醒）后主动禁用
+    # event tap；此前失效是静默的——released_at 冻结在旧值，所有 ASR 文本
+    # 被「不在监听窗口」跳过，进程照常运行没有任何失败信号。
+
+    def is_tap_enabled(self) -> bool:
+        """tap 是否处于启用状态。CG 不可用 / tap 未创建 / 查询失败均返回 False。"""
+        if _CG is None or not self._tap:
+            return False
+        try:
+            _CG.CGEventTapIsEnabled.restype = ctypes.c_bool
+            _CG.CGEventTapIsEnabled.argtypes = [ctypes.c_void_p]
+            return bool(_CG.CGEventTapIsEnabled(ctypes.c_void_p(self._tap)))
+        except Exception:
+            return False
+
+    def is_healthy(self) -> bool:
+        """tap 线程存活且事件流处于启用状态（供门控失效告警判定）。"""
+        return (
+            self._alive
+            and self._thread is not None
+            and self._thread.is_alive()
+            and self.is_tap_enabled()
+        )
+
+    def _ensure_tap_enabled(self) -> None:
+        """检查 tap 是否被系统禁用，是则重新启用（run loop 每 0.5s 调一次）。
+
+        ``CGEventTapEnable`` 对「被禁用」的 tap 立即生效；对已失效
+        （invalidated）的 tap 是无返回值的空调用——所以重新启用后必须回读
+        确认，只在确认恢复时计数并告警。否则失效 tap 会让本函数每 0.5s 打
+        一行「已自动重新启用」永远刷屏（那种场景的用户侧信号交给 corrector
+        的门控失效告警）。
+        """
+        if not self._tap or _CG is None:
+            return
+        if self.is_tap_enabled():
+            return
+        try:
+            _CG.CGEventTapEnable.restype = None
+            _CG.CGEventTapEnable.argtypes = [ctypes.c_void_p, ctypes.c_bool]
+            _CG.CGEventTapEnable(ctypes.c_void_p(self._tap), True)
+            if not self.is_tap_enabled():
+                return  # enable 未生效（tap 已失效）：静默重试，可见性交给上层告警
+            with self._lock:
+                self._reenable_count += 1
+                count = self._reenable_count
+            print(
+                f"[Iris] ⚠ CGEventTap 已被系统禁用，已自动重新启用 (第 {count} 次)",
+                file=sys.stderr,
+            )
+        except Exception:
+            pass  # 健康检查自身失败不干扰事件循环
 
     # ---- 启动 / 停止 ----
 
@@ -320,6 +404,9 @@ class _HotkeyMonitor:
 
     def _handle_event(self, event_type: int, event: Any) -> None:
         """处理键盘事件，更新热键状态（由 C 回调间接调用）。"""
+        # 任意键盘事件都刷新存活时间戳（tap 健康度判据，见 corrector 门控告警）
+        with self._lock:
+            self._last_event_at = time.monotonic()
         # 首次收到事件时输出确认（仅一次）
         if not self._first_event:
             self._first_event = True
@@ -441,8 +528,9 @@ class _HotkeyMonitor:
         self._runloop = _CF.CFRunLoopGetCurrent()
         self._ready.set()
 
-        # 事件循环（每 0.5s 检查一次 _alive 标志）
+        # 事件循环（每 0.5s 检查一次 _alive 标志 + tap 是否被系统禁用）
         while self._alive:
+            self._ensure_tap_enabled()
             _CF.CFRunLoopRunInMode(_kCFRunLoopDefaultMode, 0.5, False)
 
         # 清理

@@ -6,6 +6,7 @@ import pytest
 from pydantic import SecretStr
 
 from iris.retrieval.embedder import (
+    EMBED_BATCH_SIZE,
     TextEmbedder,
     _extract_vectors,
     build_embedder_from_config,
@@ -148,3 +149,72 @@ class TestExtractVectorsExtended:
         """非列表 data → 抛出 AttributeError（已知行为，API 约定返回列表）。"""
         with pytest.raises((AttributeError, TypeError)):
             _extract_vectors({"data": "not_a_list"})
+
+
+class TestEmbedBatching:
+    """provider 对单请求输入条数有硬上限（DashScope 为 10），embedder 必须自己分批。
+
+    回归背景：分批逻辑原先只写在 vector_index 的调用侧，okr_evidence 直接整批调用
+    embed()，超过 10 条即 400，且失败被静默吞掉，连续多日无人察觉。
+    """
+
+    @staticmethod
+    def _embedder() -> TextEmbedder:
+        return TextEmbedder(api_base_url="https://a.com/v1", api_key="k", model="m")
+
+    @staticmethod
+    def _fake_response(texts):
+        """把文本序号编进向量，便于校验返回顺序。"""
+        return {"data": [{"index": i, "embedding": [float(t[1:]), 1.0]}
+                         for i, t in enumerate(texts)],
+                "usage": {"prompt_tokens": len(texts)}}
+
+    def _record_sizes(self, emb: TextEmbedder) -> list:
+        sizes: list = []
+
+        def fake_post(url, payload):
+            sizes.append(len(payload["input"]))
+            return self._fake_response(payload["input"])
+
+        emb._post_json = fake_post
+        return sizes
+
+    def test_splits_into_batches_of_ten(self):
+        emb = self._embedder()
+        sizes = self._record_sizes(emb)
+        vectors = emb.embed([f"t{i}" for i in range(25)])
+        assert sizes == [10, 10, 5]
+        assert len(vectors) == 25
+
+    def test_single_request_when_within_limit(self):
+        emb = self._embedder()
+        sizes = self._record_sizes(emb)
+        emb.embed([f"t{i}" for i in range(10)])
+        assert sizes == [10]
+
+    def test_never_exceeds_provider_limit(self):
+        """反例钉：任何一次请求的输入条数都不得超过 EMBED_BATCH_SIZE。"""
+        emb = self._embedder()
+        sizes = self._record_sizes(emb)
+        emb.embed([f"t{i}" for i in range(37)])
+        assert max(sizes) <= EMBED_BATCH_SIZE
+
+    def test_cached_texts_do_not_count_toward_batches(self):
+        emb = self._embedder()
+        emb._post_json = lambda url, payload: self._fake_response(payload["input"])
+        emb.embed([f"t{i}" for i in range(10)])  # 预热缓存
+        sizes = self._record_sizes(emb)
+        emb.embed([f"t{i}" for i in range(15)])  # 前 10 命中缓存，只需请求 5 条
+        assert sizes == [5]
+
+    def test_result_order_matches_input(self):
+        emb = self._embedder()
+        self._record_sizes(emb)
+        vectors = emb.embed([f"t{i}" for i in range(12)])
+        assert vectors == [[float(i), 1.0] for i in range(12)]
+
+    def test_empty_input_makes_no_request(self):
+        emb = self._embedder()
+        sizes = self._record_sizes(emb)
+        assert emb.embed([]) == []
+        assert sizes == []

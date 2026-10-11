@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import pytest
+
 from iris.wiki.asr.hotwords import (
     _is_valid_hotword,
     _clean_text_term,
     _build_hotwords_prompt,
+    _extract_batch_outcome,
     _parse_hotwords_response,
+    _salvage_terms,
 )
 from iris.wiki.context_loader import WikiPageInfo
 
@@ -163,3 +167,104 @@ class TestParseHotwordsResponseExtended:
         import json
         resp = json.dumps({"term": "不是数组"})
         assert _parse_hotwords_response(resp, set()) == []
+
+
+class TestSalvageTruncatedResponse:
+    """max_tokens 截断让整个 JSON 数组缺闭合 `]`，严格解析必然失败。
+
+    修复前这类响应整批归零（日志表现为「第N批 0词」）；现改为逐条捞回完整对象。
+    """
+
+    def test_truncated_array_salvages_complete_terms(self):
+        # 尾部被截断：数组没有闭合 `]`，最后一个对象也没闭合 `}`，
+        # 但三个 term 值本身都写完了，应当全部捞回。
+        resp = '[{"term":"张三"},{"term":"Model-v2"},{"term":"李四"'
+        assert _parse_hotwords_response(resp, set()) == ["张三", "Model-v2", "李四"]
+
+    def test_salvage_handles_escaped_quotes(self):
+        resp = '[{"term":"A\\"B"},{"term":"OCR"}'
+        assert _parse_hotwords_response(resp, set()) == ['A"B', "OCR"]
+
+    def test_unterminated_term_value_is_not_salvaged(self):
+        """值的引号都没闭合 → 宁可不救，避免把半个词当热词。"""
+        assert _parse_hotwords_response('[{"term":"张', set()) == []
+        assert _salvage_terms('[{"term":"张') == []
+
+    def test_salvage_respects_existing_dedup(self):
+        resp = '[{"term":"张三"},{"term":"李四"'
+        assert _parse_hotwords_response(resp, {"张三"}) == ["李四"]
+
+    def test_salvage_ignores_non_term_objects(self):
+        resp = '[{"other":1},{"term":"有效"},{"term":'
+        assert _parse_hotwords_response(resp, set()) == ["有效"]
+
+
+class _FakeLLM:
+    """按调用顺序返回预设响应；元素为 Exception 时抛出。"""
+
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.calls = 0
+
+    def generate(self, prompt, **kwargs):
+        from types import SimpleNamespace
+        self.calls += 1
+        item = self._responses.pop(0) if self._responses else ""
+        if isinstance(item, Exception):
+            raise item
+        return SimpleNamespace(text=item)
+
+
+@pytest.fixture
+def no_sleep(monkeypatch):
+    monkeypatch.setattr("iris.wiki.asr.hotwords.time.sleep", lambda *_: None)
+
+
+class TestBatchOutcomeSplitRetry:
+    """空产出（截断/非 JSON）时对半拆批重试，避免整批归零。"""
+
+    @staticmethod
+    def _pages(n):
+        return [_make_page(f"P{i}", "person") for i in range(n)]
+
+    def test_success_needs_single_call(self):
+        outcome = _extract_batch_outcome(_FakeLLM(['[{"term":"张三"}]']), self._pages(4), "")
+        assert outcome.terms == ["张三"]
+        assert outcome.calls == 1
+        assert outcome.error is None
+
+    def test_empty_response_triggers_split_and_merges(self, no_sleep):
+        llm = _FakeLLM(["", '[{"term":"左一"}]', '[{"term":"右一"}]'])
+        outcome = _extract_batch_outcome(llm, self._pages(4), "")
+        assert outcome.terms == ["左一", "右一"]
+        assert outcome.calls == 3
+        assert outcome.error is None
+
+    def test_exception_retried_then_reported(self, no_sleep):
+        llm = _FakeLLM([RuntimeError("boom"), RuntimeError("boom")])
+        outcome = _extract_batch_outcome(llm, self._pages(1), "")  # 单页无法拆批
+        assert outcome.terms == []
+        assert isinstance(outcome.error, RuntimeError)
+        assert outcome.calls == 2
+
+    def test_exception_on_batch_still_splits(self, no_sleep):
+        """整批调用失败也要拆批救回一半，而不是直接归零。"""
+        llm = _FakeLLM([RuntimeError("boom"), RuntimeError("boom"),
+                        '[{"term":"甲一"}]', '[{"term":"乙一"}]'])
+        outcome = _extract_batch_outcome(llm, self._pages(4), "")
+        assert set(outcome.terms) == {"甲一", "乙一"}
+        assert outcome.error is None
+
+    def test_single_page_empty_response_returns_empty(self, no_sleep):
+        outcome = _extract_batch_outcome(_FakeLLM([""]), self._pages(1), "")
+        assert outcome.terms == []
+        assert outcome.error is None
+        assert outcome.calls == 1
+
+    def test_candidates_reported_for_empty_batch(self, no_sleep):
+        """模型返回了 JSON 但全被质量过滤 → 候选数 >0、词数 0，可区分两种归零。"""
+        llm = _FakeLLM(['[{"term":"123"}]'])  # 纯数字：解析得出、但质量过滤会剔除
+        outcome = _extract_batch_outcome(llm, self._pages(1), "")
+        assert outcome.terms == []
+        assert outcome.candidates == 1
+        assert outcome.calls == 1

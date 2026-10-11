@@ -463,6 +463,7 @@ def _fmt_daily_maintenance(p: Dict[str, Any]) -> List[str]:
         _fmt_daily_person_enrich(p.get("person_enrich")),
         _fmt_daily_graph(p.get("graph")),
         _fmt_daily_asr_audit(p.get("asr_audit")),
+        _fmt_daily_asr_refresh(p.get("asr_refresh")),
     ]
 
 
@@ -523,8 +524,31 @@ def _fmt_daily_asr_audit(r: Any) -> str:
                 f" / 概念 {r.get('concepts', '-')}")
         if r.get("needs_update"):
             line += f"\n     ⚠️ {r.get('suggestion', '建议更新 ASR 热词')}"
+        # 噪音/超长词与覆盖缺口是两类处置（前者手工清理、后者重跑生成），
+        # 合并渲染会让人以为只要重跑一次就都能解决。
+        warnings = r.get("warnings") or []
+        if warnings:
+            line += f"\n     ⚠️ 待清理：{'、'.join(warnings)}"
         return line
     return f"  {_status_icon(r.get('status'))} ASR 审计：{r.get('reason') or r.get('status') or '未返回'}"
+
+
+def _fmt_daily_asr_refresh(r: Any) -> str:
+    r = r if isinstance(r, dict) else {}
+    status = r.get("status")
+    if status == "ok":
+        line = (f"  ✅ ASR 资源更新：热词 {r.get('hotword_count', 0)} 条 / "
+                f"映射 {r.get('replace_mapping_count', 0)} 条，"
+                f"版本 {r.get('version', '-')}（{r.get('elapsed_seconds', 0)}s）")
+        voco = r.get("vocotype") if isinstance(r.get("vocotype"), dict) else {}
+        line += f"\n     重启 VocoType：{voco.get('detail') or voco.get('status') or '未返回'}"
+        return line
+    if status == "deploy_only":
+        # 已部署但 App 没重启 ⇒ 新热词表尚未生效，必须显眼
+        return (f"  ⚠️ ASR 资源更新：已部署但未生效 —— {r.get('warning', 'VocoType 未重启')}")
+    if status == "skipped":
+        return f"  ⏭ ASR 资源更新：{r.get('reason') or '已跳过'}"
+    return f"  {_status_icon(status)} ASR 资源更新：{r.get('reason') or status or '未返回'}"
 
 
 def _fmt_daily_usage(u: Any) -> List[str]:

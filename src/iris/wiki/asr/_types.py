@@ -61,7 +61,7 @@ class CoverageReport:
         concepts_total: Wiki 概念页面总数
         concepts_missing: 未覆盖的概念名列表
         noise_words: 疑似噪音词（通用词、超短英文、超长词）
-        long_words: 超长词条（>12 汉字，ASR 热词 bias 对长词无效）
+        long_words: 超长词条（>MAX_HOTWORD_CHINESE 汉字，ASR 热词 bias 对长词无效）
         slot_efficiency: 槽位有效利用率 = (总热词 - 噪音词) / max_slots
     """
     hotword_count: int = 0

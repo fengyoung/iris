@@ -15,6 +15,28 @@ class TestNoiseDetection:
         is_noise, reason = _is_noise_word("123")
         assert is_noise
 
+    def test_length_limit_matches_tokenization(self):
+        """长度门槛必须与 tokenization.MAX_HOTWORD_* 一致。
+
+        审计曾自行用 >12 汉字判超长，比 VocoType 的 ≤10 松，于是 11–12 汉字的词
+        能过审计、到部署时才被拒。
+        """
+        from iris.utils.tokenization import MAX_HOTWORD_CHINESE, MAX_HOTWORD_TOTAL
+
+        assert MAX_HOTWORD_CHINESE == 10 and MAX_HOTWORD_TOTAL == 20
+        assert _is_noise_word("十" * MAX_HOTWORD_CHINESE)[0] is False
+        assert _is_noise_word("十" * (MAX_HOTWORD_CHINESE + 1))[0] is True
+        assert _is_noise_word("a" * MAX_HOTWORD_TOTAL)[0] is False
+        assert _is_noise_word("a" * (MAX_HOTWORD_TOTAL + 1))[0] is True
+
+    def test_eleven_chinese_chars_reported_as_long(self):
+        """long_words 与噪音判定共用同一门槛，不能一个 10 一个 12。"""
+        from iris.wiki.asr.coverage import analyze_coverage
+
+        report = analyze_coverage(["十" * 11], [])
+        assert report.long_words == ["十" * 11]
+        assert any("超长词" in w for w in report.noise_words)
+
     def test_short_english_is_noise(self):
         is_noise, reason = _is_noise_word("AI")
         assert is_noise

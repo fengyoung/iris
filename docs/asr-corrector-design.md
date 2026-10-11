@@ -126,21 +126,28 @@ data/asr_prompt_v2.md                  iris-asr-corrector   build-asr-prompt --d
 data/asr_feedback.jsonl                build-asr-prompt     iris-asr-corrector 实时追加
                                        （Phase 1 反向优化）
                                                                
-output/asr-modify/                     人工审查 + 归档       build-asr-prompt
-  asr-hotwords-{date}.txt
-  asr-replace-dict-{date}.json
-  asr-prompt-v{ver}-{date}.md
+output/asr-corrector-bak/              人工审查 + 归档       build-asr-prompt
+  asr-hotwords-{date}-{time}.txt
+  asr-replace-dict-{date}-{time}.json
+  asr-prompt-v{ver}-{date}-{time}.md
+  vocotype-backup/{date}-{time}/       （--deploy 前的 VocoType 配置备份）
+  legacy/                              （超出保留份数的旧产物）
 ```
 
-- `output/asr-modify/` — 带日期版本的归档副本，便于对比和回滚
+- `output/asr-corrector-bak/` — 存档与回滚，**不是生效点**：整目录删掉不影响运行。
+  每类产物保留最近 20 份，更早的移入同目录 `legacy/`（见 `iris/wiki/asr/artifacts.py`）。
+  历史遗留的 `output/asr-modify/` 已于 2026-10-10 清理，其陈旧产物曾让审计读到 7 月数据。
 - `data/` — 固定路径，`iris-asr-corrector` 启动时直接读取，无需指定参数
-- vocotype 配置目录 — 仅 `hotwords.txt` 部署到这里
+- vocotype 配置目录 — 仅 `hotwords.txt` 部署到这里（上限 500 条，超出会被拒绝）。
+  **热词只在 App 启动时加载**，所以 `--deploy` 之后必须重启 VocoType 才生效；
+  daily-start 第 8 阶段会自动完成「指纹增量重建 → 部署 → 重启」，重启失败不回滚但显式告警。
+  增量判定的指纹覆盖**全部输入**：Wiki 页面 + `data/asr_manual_hotwords.txt`（归一化，改注释/顺序不算变化）。
 
 ### 3.3 build-asr-prompt --deploy 完整流程
 
 ```
 1. 生成三件套（同现有逻辑）
-2. 备份旧配置到 output/vocotype-backup-{date}/
+2. 备份旧配置到 output/asr-corrector-bak/vocotype-backup/{date}-{time}/
 3. 写入 vocotype 配置目录：
    hotwords.txt     → 覆盖（热词在 ASR 层面生效）
 4. 写入 Iris data/：
@@ -403,7 +410,7 @@ class AsrCorrector:
 
 #### 3.1 数据来源
 
-分析对象是 `build-asr-prompt` 已产出的文件（`output/asr-modify/`）。纯本地计算，无 LLM 调用。
+分析对象是 `build-asr-prompt` 已产出的文件（`output/asr-corrector-bak/`）。纯本地计算，无 LLM 调用。
 
 #### 3.2 检查项
 
@@ -423,7 +430,7 @@ class CoverageReport:
     concepts_total: int
     concepts_missing: List[str]
     noise_words: List[str]      # 噪音词
-    long_words: List[str]       # 超长词（>12字，ASR 热词 bias 无效）
+    long_words: List[str]       # 超长词（>10 汉字，ASR 热词 bias 无效）
     slot_efficiency: float      # 槽位利用率
 
 @dataclass
@@ -543,7 +550,7 @@ iris3 build-asr-prompt --deploy
 
 ```
 1. 生成三件套（同现有流程）
-2. 备份旧配置到 output/vocotype-backup-{date}/
+2. 备份旧配置到 output/asr-corrector-bak/vocotype-backup/{date}-{time}/
 3. 写入 vocotype 配置目录：
    hotwords.txt     → ~/Library/.../VocoType/hotwords.txt（覆盖）
    ai_settings.json → global.enabled = false（关闭 vocotype LLM 优化）
@@ -554,7 +561,7 @@ iris3 build-asr-prompt --deploy
 5. 输出部署摘要
 ```
 
-不指定 `--deploy` 时行为保持不变（输出到 `output/asr-modify/`）。
+不指定 `--deploy` 时行为保持不变（输出到 `output/asr-corrector-bak/`）。
 
 ---
 
@@ -716,9 +723,9 @@ iris3 其他所有命令         → 无影响，完全不依赖 vocotype
 |--------|---------|:---:|
 | `data/asr_replace_dict.json` | 团队成员姓名、项目名、内部术语 | 🔴 高 |
 | `data/asr_feedback.jsonl` | 实际语音转写文本，可能含敏感讨论内容 | 🔴 高 |
-| `output/asr-modify/*.json` | 同上 | 🔴 高 |
+| `output/asr-corrector-bak/*.json` | 同上 | 🔴 高 |
 | `data/asr_prompt_v2.md` | 领域上下文、人名列表 | 🟡 中 |
-| `output/asr-modify/asr-prompt-*.md` | 同上 | 🟡 中 |
+| `output/asr-corrector-bak/asr-prompt-*.md` | 同上 | 🟡 中 |
 | `config/asr_profiles.json` | LLM 配置（无密钥），路径信息 | 🟢 低 |
 | 源代码 | vocotype 配置路径硬编码 | 🟢 低 |
 
@@ -727,7 +734,7 @@ iris3 其他所有命令         → 无影响，完全不依赖 vocotype
 ```
 防护层 1：.gitignore（已覆盖）
   data/                         ← 已在 .gitignore 中全量忽略
-  output/asr-modify/            ← 需确认已在 .gitignore 中
+  output/asr-corrector-bak/     ← 已在 .gitignore 中（/output/ 全量忽略）
   *.jsonl                       ← 需确认已在 .gitignore 中
 
 防护层 2：.example 文件模式（遵循 Iris 现有约定）
@@ -792,7 +799,7 @@ data/                    ✓ 已忽略     ✓              运行时数据，�
   asr_replace_dict.json                         build-asr-prompt 生成
   asr_prompt_v2.md                              build-asr-prompt 生成
   asr_feedback.jsonl                            iris-asr-corrector 写入
-output/asr-modify/       ✓ 需确认    ✓             归档副本，不提交
+output/asr-corrector-bak/  ✓          ✓             归档副本，不提交
 config/
   asr_profiles.json      ✓ 需新增    ✗（仅LLM参数） LLM使用参数
   asr_profiles.json.example ✓ 版本控制 ✗          脱敏示例

@@ -24,7 +24,7 @@ python3 scripts/run_cli.py --call-source skill daily-start
 python3 scripts/run_cli.py --call-source skill daily-start --pretty
 ```
 
-## 管道流程（6 步）
+## 管道流程（9 步）
 
 ```
 1. 记忆同步与维护
@@ -52,10 +52,21 @@ python3 scripts/run_cli.py --call-source skill daily-start --pretty
    ├── 今日 / 本周 / 本月调用次数与 token 汇总
    └── 预算预警（超过 monthly_token_limit 时告警）
 
-6. 主动提醒（零 LLM 成本）
+6. ASR 审计（零 LLM 成本）
+   └── 读 output/asr-corrector-bak/ 最新产物，比对当前 Wiki 覆盖情况
+
+7. ASR 资源更新（按需，约 14+ 次 LLM 调用）
+   ├── 指纹增量：输入指纹（Wiki 页面 + data/asr_manual_hotwords.txt）与上次
+   │   生成一致 → 整体跳过；只改注释/顺序不算变化
+   ├── build-asr-prompt --mode all --deploy（重建热词/替换词典/提示词并部署）
+   └── 重启 VocoType（热词表只在 App 启动时加载，不重启等于没部署）
+
+8. 主动提醒（零 LLM 成本）
    ├── 栏目断供：SOURCE 分类目录超阈值无更新（默认 30 天，周报/会议类 10-14 天）
    ├── 周报缺失：活跃成员周报断档 ≥14 天
    └── 项目停滞：项目 Wiki 引用的源文档全部 ≥21 天未更新
+
+（另有一个 OKR 证据积累与主动信号阶段，在提醒之后执行，进度不参与 9 段编号。）
 ```
 
 ## 使用场景
@@ -91,6 +102,14 @@ python3 scripts/run_cli.py --call-source skill daily-start --pretty
   需手动执行 `build-vector-index --force-rebuild` 全量重建
 - `reminders.signals` — 主动提醒信号列表（栏目断供/周报缺失/项目停滞），
   有信号时应向用户逐条汇报
+- `asr_audit.status` — ASR 热词覆盖审计；`needs_update` 为 true 时 `issues`
+  列出覆盖缺口，`warnings` 列出待手工清理的噪音/超长词（两者处置方式不同）
+- `asr_refresh.status` — ASR 资源更新结果，四种取值：
+  - `skipped` — 输入指纹未变（Wiki 页面与手动热词都没动），未重建（**这是常态，不是异常**）
+  - `ok` — 已重建、已部署、VocoType 已重启（或未在运行，下次启动生效）
+  - `deploy_only` — 已部署但 **VocoType 未重启，新热词表尚未生效**；
+    必须向用户显式报告 `warning`，并给出备份路径
+  - `error` — 生成/部署失败，`reason` 说明原因；不影响其余维护结果
 
 ## 关键路径
 

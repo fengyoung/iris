@@ -34,7 +34,8 @@ from .feedback import (
 )
 from .version import (
     load_version, save_version, bump_version,
-    determine_new_version, compute_fingerprint,
+    determine_new_version, compute_fingerprint, compute_input_fingerprint,
+    load_manual_hotwords, MANUAL_HOTWORDS_FILE,
 )
 
 __all__ = [
@@ -60,5 +61,6 @@ __all__ = [
     "correct_text_static",
     # 版本管理
     "determine_new_version", "load_version", "save_version",
-    "bump_version", "compute_fingerprint",
+    "bump_version", "compute_fingerprint", "compute_input_fingerprint",
+    "load_manual_hotwords", "MANUAL_HOTWORDS_FILE",
 ]

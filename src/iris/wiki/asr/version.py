@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, TYPE_CHECKING
@@ -15,10 +16,15 @@ from typing import List, Optional, TYPE_CHECKING
 # term_extractor 的重导出在文件末尾，不会形成循环导入。
 from ._types import AsrPromptVersion  # noqa: E402
 
+logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     from ..context_loader import WikiPageInfo
 
 _VERSION_FILE = "asr_prompt_version.json"
+
+#: 手动热词文件（与 LLM 生成的热词合并后部署）
+MANUAL_HOTWORDS_FILE = "asr_manual_hotwords.txt"
 
 
 def _now_iso() -> str:
@@ -26,8 +32,51 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def load_manual_hotwords(data_dir: Path) -> List[str]:
+    """读手动热词（去注释、去空行）。文件缺失或不可读返回空列表。
+
+    与 ``_merge_manual_hotwords`` 共用同一读法，避免「指纹算一套、合并用另一套」。
+    """
+    path = Path(data_dir) / MANUAL_HOTWORDS_FILE
+    if not path.exists():
+        return []
+    try:
+        return [
+            line.strip() for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+    except OSError as exc:
+        logger.warning("读取手动热词失败 (%s): %s", path, exc)
+        return []
+
+
+def _manual_hotwords_digest(data_dir: Path) -> str:
+    """手动热词的归一化摘要（排序 + 去重，忽略注释与空行）。
+
+    刻意不直接哈希文件：加一行注释或调整顺序不该触发一次十几轮 LLM 调用的重建。
+    """
+    words = sorted(set(load_manual_hotwords(data_dir)))
+    return hashlib.sha256("\n".join(words).encode("utf-8")).hexdigest()[:16]
+
+
+def compute_input_fingerprint(pages: List[WikiPageInfo], data_dir: Path) -> str:
+    """生成 ASR 三件套的**全部输入**指纹 = Wiki 页面 + 手动热词。
+
+    手动热词是热词表的第二个来源（``--deploy`` 时与生成结果合并）。它不进指纹
+    的话，改完手动词 daily-start 看不出输入有变化、不会重建——而用户改手动词
+    的意图恰恰就是「让它生效」。
+
+    ⚠️ 本函数必须同时被 ``determine_new_version`` 与 daily-start 的重建判定使用。
+    若两处各算各的（一处含手动词、一处不含），会出现「判定要重建 → 生成时认为
+    未变化 → 存回旧指纹 → 下次又判定要重建」的每日重建死循环。
+    """
+    return hashlib.sha256(
+        f"{compute_fingerprint(pages)}|{_manual_hotwords_digest(data_dir)}".encode("utf-8")
+    ).hexdigest()[:16]
+
+
 def compute_fingerprint(pages: List[WikiPageInfo]) -> str:
-    """计算 Wiki 页面内容指纹。
+    """计算 Wiki 页面内容指纹（**不含**手动热词，见 compute_input_fingerprint）。
 
     对每页 (title, type, body[:500]) 拼接后计算 SHA-256，返回前 16 位 hex。
     使用 body[:500] 而非完整正文，避免微小文字改动频繁触发版本变化。
@@ -129,7 +178,8 @@ def determine_new_version(
     Returns:
         新版本信息（auto 且指纹不变时返回旧版本）
     """
-    fingerprint = compute_fingerprint(pages)
+    # 必须与 daily-start 的重建判定用同一个指纹（含手动热词），否则会每日重建
+    fingerprint = compute_input_fingerprint(pages, data_dir)
     now = _now_iso()
     old = load_version(data_dir)
 

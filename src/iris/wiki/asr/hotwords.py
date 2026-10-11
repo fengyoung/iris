@@ -10,7 +10,7 @@ import os
 import re
 import sys
 import time
-from typing import List, TYPE_CHECKING
+from typing import List, NamedTuple, Optional, TYPE_CHECKING, Tuple
 
 if TYPE_CHECKING:
     from iris.llm import LLMService
@@ -36,6 +36,8 @@ _HOTWORD_BATCH_SIZE = 20
 _BATCH_DEADLINE_SEC = 90.0
 # LLM 并发上限：避免全量批次并发打爆 provider
 _MAX_CONCURRENCY = 4
+# 空产出时对半拆批的最大层数：1 批最多拆成 4 个子批
+_MAX_BATCH_SPLIT_DEPTH = 1
 
 def _build_page_batches(pages: List[WikiPageInfo]) -> List[List[WikiPageInfo]]:
     """按类型分组，每批不超过 _HOTWORD_BATCH_SIZE 个页面。
@@ -150,6 +152,22 @@ def _is_valid_hotword(term: str) -> bool:
     return True
 
 
+# 截断可能落在对象中间，连闭合的 `}` 都没有，所以只认 `"term": "..."` 这一对；
+# 值的引号必须是闭合的——没闭合的半个词宁可不救，避免把残片当热词。
+_TERM_PAIR_RE = re.compile(r'"term"\s*:\s*"((?:[^"\\]|\\.)*)"')
+
+
+def _salvage_terms(text: str) -> List[dict]:
+    """从被截断或不合法的输出中捞回已经写完整的 term 值。"""
+    salvaged = []
+    for m in _TERM_PAIR_RE.finditer(text):
+        try:
+            salvaged.append({"term": json.loads('"' + m.group(1) + '"')})
+        except json.JSONDecodeError:
+            continue
+    return salvaged
+
+
 def _parse_hotwords_response(response_text: str, existing: set) -> List[str]:
     """解析 LLM 返回的热词 JSON，去重后返回。"""
     text = response_text.strip()
@@ -165,13 +183,14 @@ def _parse_hotwords_response(response_text: str, existing: set) -> List[str]:
         data = json.loads(text)
     except json.JSONDecodeError:
         m = re.search(r"\[(?:[^\[\]]|\[[^\]]*\])*\]", text, re.DOTALL)
+        data = None
         if m:
             try:
                 data = json.loads(m.group(0))
             except json.JSONDecodeError:
-                return []
-        else:
-            return []
+                data = None
+        if data is None:
+            data = _salvage_terms(text)
     if not isinstance(data, list):
         return []
     result = []
@@ -186,6 +205,74 @@ def _parse_hotwords_response(response_text: str, existing: set) -> List[str]:
             existing.add(key)
             result.append(term)
     return result
+
+
+class _BatchOutcome(NamedTuple):
+    """单批热词提取结果（含拆批重试后的累计值）。"""
+    terms: List[str]
+    candidates: int  # 解析出的候选数（过滤前）：区分「模型没输出」与「输出被全过滤」
+    calls: int       # 实际 LLM 调用次数，>1 表示发生过重试或拆批
+    error: Optional[BaseException]  # 非空表示最后一次调用异常
+
+
+def _call_llm_for_terms(llm: "LLMService", batch: List[WikiPageInfo],
+                        domain_context: str) -> Tuple[List[str], int]:
+    """调用一次 LLM 提取单批热词，返回（通过质量过滤的热词, 解析出的候选数）。"""
+    prompt = _build_hotwords_prompt(batch, domain_context)
+    response = llm.generate(
+        prompt,
+        route_context={
+            "task_type": "asr_hotword",
+            "input_type": "text",
+        },
+        temperature=0.3,
+        max_tokens=8192,
+        _deadline=time.monotonic() + _BATCH_DEADLINE_SEC,
+    )
+    batch_terms = _parse_hotwords_response(response.text, set())
+    clean = []
+    for t in batch_terms:
+        cleaned = _clean_text_term(t)
+        if _is_valid_hotword(cleaned):
+            clean.append(cleaned)
+    return clean, len(batch_terms)
+
+
+def _extract_batch_outcome(llm: "LLMService", batch: List[WikiPageInfo],
+                           domain_context: str, *, depth: int = 0) -> _BatchOutcome:
+    """提取一批热词；调用失败或空产出时对半拆批重试。
+
+    空产出（响应被 max_tokens 截断、模型没按 JSON 返回）在整批粒度上救不回来，
+    但拆成两半后 prompt 更短、所需输出更少，通常就能拿到词。
+    """
+    last_exc: Optional[BaseException] = None
+    candidates = 0
+    calls = 0
+    for attempt in range(2):  # 同一批次最多重试一次
+        calls += 1
+        try:
+            terms, candidates = _call_llm_for_terms(llm, batch, domain_context)
+        except Exception as exc:
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
+            last_exc = exc
+            if attempt == 0:
+                time.sleep(2)  # 短暂退避后重试
+            continue
+        last_exc = None  # 本次调用成功，清掉上一轮的异常，避免误报「失败」
+        if terms:
+            return _BatchOutcome(terms, candidates, calls, None)
+        break  # 调用成功却一条没提到：原地重试无意义，改为拆批
+
+    if depth < _MAX_BATCH_SPLIT_DEPTH and len(batch) > 1:
+        mid = len(batch) // 2
+        head = _extract_batch_outcome(llm, batch[:mid], domain_context, depth=depth + 1)
+        tail = _extract_batch_outcome(llm, batch[mid:], domain_context, depth=depth + 1)
+        return _BatchOutcome(head.terms + tail.terms,
+                             head.candidates + tail.candidates,
+                             calls + head.calls + tail.calls,
+                             head.error or tail.error)
+    return _BatchOutcome([], candidates, calls, last_exc)
 
 
 class LLMHotwordExtractor:
@@ -226,44 +313,19 @@ class LLMHotwordExtractor:
             """处理单批页面：LLM 提取 → 清理 → 质量过滤。
 
             每批使用独立的局部去重集，跨批去重统一交由末尾的最终去重完成，
-            从而消除并发下的共享状态竞争。失败时自动重试一次。
+            从而消除并发下的共享状态竞争。调用失败自动重试一次；若调用成功却
+            一条词都没提到（多为响应被 max_tokens 截断），则由
+            ``_extract_batch_outcome`` 拆小批次再试。
             """
             idx, batch = idx_batch
-            prompt = _build_hotwords_prompt(batch, domain_context)
-            last_exc = None
-            for attempt in range(2):  # 最多一次重试
-                try:
-                    response = llm.generate(
-                        prompt,
-                        route_context={
-                            "task_type": "asr_hotword",
-                            "input_type": "text",
-                        },
-                        temperature=0.3,
-                        max_tokens=8192,
-                        _deadline=time.monotonic() + _BATCH_DEADLINE_SEC,
-                    )
-                    local_seen: set = set()
-                    batch_terms = _parse_hotwords_response(response.text, local_seen)
-                    # 后处理：质量过滤 + 文本清理
-                    clean_batch = []
-                    for t in batch_terms:
-                        cleaned = _clean_text_term(t)
-                        if not _is_valid_hotword(cleaned):
-                            continue
-                        clean_batch.append(cleaned)
-                    tag = f"第{idx+1}批" if attempt == 0 else f"第{idx+1}批(重试成功)"
-                    tracker.increment(detail=f"{tag} {len(clean_batch)}词 (候选{len(batch_terms)})")
-                    return clean_batch
-                except Exception as exc:
-                    if isinstance(exc, (KeyboardInterrupt, SystemExit)):
-                        raise
-                    last_exc = exc
-                    if attempt == 0:
-                        time.sleep(2)  # 短暂退避后重试
-            # 两次均失败
-            tracker.increment_error(detail=f"第{idx+1}批失败(已重试): {last_exc}")
-            return []
+            outcome = _extract_batch_outcome(llm, batch, domain_context)
+            if not outcome.terms and outcome.error is not None:
+                tracker.increment_error(detail=f"第{idx+1}批失败(已重试): {outcome.error}")
+                return []
+            retry_note = f"（{outcome.calls} 次调用）" if outcome.calls > 1 else ""
+            tracker.increment(
+                detail=f"第{idx+1}批 {len(outcome.terms)}词 (候选{outcome.candidates}){retry_note}")
+            return outcome.terms
 
         # 并发执行，使用 as_completed 支持超时 + 部分结果保留
         from concurrent.futures import as_completed

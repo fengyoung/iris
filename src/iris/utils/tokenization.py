@@ -27,10 +27,18 @@ def count_chinese(text: str) -> int:
     return sum(1 for c in text if '一' <= c <= '鿿' or '㐀' <= c <= '䶿')
 
 
-def exceeds_char_limit(text: str, max_total: int = 20, max_chinese: int = 10) -> bool:
+# ASR 热词/替换映射的长度上限（VocoType 约束：每条 ≤20 字符或 ≤10 中文字）。
+# 作为唯一真相源导出：审计侧（coverage）曾自行用 >12 汉字判超长，比这里松，
+# 于是 11–12 汉字的词能过审计却被 VocoType 拒——数字必须只有一处。
+MAX_HOTWORD_TOTAL = 20
+MAX_HOTWORD_CHINESE = 10
+
+
+def exceeds_char_limit(text: str, max_total: int = MAX_HOTWORD_TOTAL,
+                       max_chinese: int = MAX_HOTWORD_CHINESE) -> bool:
     """检查文本是否超过字符限制（总长度或中文字数）。
 
-    ASR 热词/替换映射的通用长度校验，asr_hotwords / asr_formatter 共用。
+    ASR 热词/替换映射的通用长度校验，asr_hotwords / asr_formatter / coverage 共用。
     """
     if not text:
         return False

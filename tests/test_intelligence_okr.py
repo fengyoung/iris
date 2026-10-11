@@ -69,6 +69,40 @@ def test_cycle_isolation(env):
     assert len(env[1].get('Q3', 'KR1')) == len(env[1].get('Q4', 'KR1')) == 1
 
 
+def test_long_document_does_not_trip_provider_batch_limit(tmp_path):
+    """反例钉：打标把文档的全部片段一次性交给 embed()，而 provider 单请求上限 10 条。
+
+    修复前 embed() 自己不分批（分批只写在 vector_index 调用侧），片段 >10 条即 400，
+    okr_evidence 连续多日静默失败。
+    """
+    from iris.retrieval.embedder import TextEmbedder
+
+    source = tmp_path / 'SOURCE'
+    source.mkdir()
+    # 每 1800 字符切一段，2.7 万字符 → 15 段，超过单请求上限
+    (source / '20260921-长文.md').write_text('巡检召回率76%。' * 3000)
+
+    embedder = TextEmbedder(api_base_url='https://a.com/v1', api_key='k', model='test-v1')
+    sizes = []
+
+    def fake_post(url, payload):
+        sizes.append(len(payload['input']))
+        if len(payload['input']) > 10:
+            raise AssertionError(f'单请求 {len(payload["input"])} 条，超过 provider 上限')
+        return {'data': [{'index': i, 'embedding': [1.0, 0.0]}
+                         for i in range(len(payload['input']))],
+                'usage': {'prompt_tokens': len(payload['input'])}}
+
+    embedder._post_json = fake_post
+    store = OKREvidenceStore(tmp_path / 'evidence')
+    vectors = KRVectorIndex(tmp_path / 'vectors')
+    result = OKREvidenceTagger(store, vectors, embedder).run_incremental(
+        source, 'Q3', {'KR1': '巡检召回率80%'})
+
+    assert result['processed'] == 1
+    assert sizes and max(sizes) <= 10
+
+
 def test_kr_changed_invalidates_old(env):
     run(env)
     run(env, krs={'KR1': '客服满意度'})

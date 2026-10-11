@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 import numpy as np
 
 from iris.core.exceptions import IrisRuntimeError
+from iris.retrieval.embedder import EMBED_BATCH_SIZE
 
 _VECTORS_NPY = "vectors.npy"
 _IDS_JSON = "ids.json"
@@ -342,7 +343,9 @@ def build_vector_index(source_name: str, chunks: list, embedder, index_path: Pat
         if force_rebuild or stale_ids:
             index.save()  # 无新 chunk 也需落盘：强制重建覆盖旧文件 / 残留清理生效
         return index
-    batch_size = 10
+    # 这里的分批只为控制内存与逐批落盘；请求级的条数上限由 embedder 自己兜底，
+    # 故复用同一个常量而非另写一个数字。
+    batch_size = EMBED_BATCH_SIZE
     for i in range(0, len(to_embed), batch_size):
         batch = to_embed[i:i + batch_size]
         ids = [item[0] for item in batch]

@@ -480,3 +480,121 @@ class TestPidAlive:
         pid_file = tmp_path / "meeting-live-assistant.pid"
         pid_file.write_text("not-a-pid")
         assert self._mod()._pid_alive(pid_file) is False
+
+
+class TestGateFailureWarning:
+    """tap 失效门控告警：ASR 文本被「不在监听窗口」跳过时检查 tap 健康度。
+
+    背景：CGEventTap 中途失效（被系统禁用/线程死亡/事件流停滞）时
+    released_at 冻结在旧值，所有 ASR 文本被静默跳过且进程没有任何
+    失败信号——告警把该静默失效变成显式提示。
+    """
+
+    TEXT = "嗯就是那个然后我们继续做下去"
+
+    def _make_corrector(self):
+        from iris.wiki.asr.corrector import AsrCorrector
+        return AsrCorrector({}, mode="fast")
+
+    def _setup(self, monkeypatch, monitor):
+        import iris.wiki.asr.corrector as corrector_mod
+        c = self._make_corrector()
+        c._hotkey_mask = 0x20000
+        c._hotkey_monitor = monitor
+        monkeypatch.setattr(corrector_mod, "_looks_like_written_chinese", lambda t: False)
+        return c
+
+    def test_warns_when_monitor_unhealthy(self, monkeypatch, capsys):
+        """确定性失效：tap 线程死亡/被禁用（未启动的 monitor）→ 显式告警。"""
+        from iris.wiki.asr.corrector import _HotkeyMonitor
+        monitor = _HotkeyMonitor(0x20000, 0)  # 未 start → 不健康
+        c = self._setup(monkeypatch, monitor)
+        c._should_correct(self.TEXT, in_listen_window=False)
+        err = capsys.readouterr().err
+        assert "热键监听已失效" in err
+        assert c._last_gate_warning_at > 0
+
+    def test_warns_stale_event_stream_when_healthy(self, monkeypatch, capsys):
+        """疑似失效：tap 看似健康但 >5min 无任何键盘事件，ASR 文本却在到达。"""
+        import iris.wiki.asr.corrector as corrector_mod
+        from iris.wiki.asr.corrector import _HotkeyMonitor
+        monitor = _HotkeyMonitor(0x20000, 0)
+        with monitor._lock:
+            monitor._last_event_at = 100.0
+        monkeypatch.setattr(monitor, "is_healthy", lambda: True)
+        monkeypatch.setattr(corrector_mod.time, "monotonic", lambda: 1000.0)
+        c = self._setup(monkeypatch, monitor)
+        c._should_correct(self.TEXT, in_listen_window=False)
+        err = capsys.readouterr().err
+        assert "监听疑似失效" in err
+        assert "900s" in err  # 停滞时长随告警输出
+
+    def test_no_warn_when_event_stream_fresh(self, monkeypatch, capsys):
+        """事件流新鲜（用户刚敲过键盘）→ 不告警，正常跳过即可。"""
+        import iris.wiki.asr.corrector as corrector_mod
+        from iris.wiki.asr.corrector import _HotkeyMonitor
+        monitor = _HotkeyMonitor(0x20000, 0)
+        with monitor._lock:
+            monitor._last_event_at = 995.0  # 距今 5s
+        monkeypatch.setattr(monitor, "is_healthy", lambda: True)
+        monkeypatch.setattr(corrector_mod.time, "monotonic", lambda: 1000.0)
+        c = self._setup(monkeypatch, monitor)
+        c._should_correct(self.TEXT, in_listen_window=False)
+        err = capsys.readouterr().err
+        assert "⚠" not in err
+        assert "跳过：不在监听窗口" in err  # 门控本身不被废掉
+
+    def test_warns_stale_when_no_event_ever_received(self, monkeypatch, capsys):
+        """tap 从启动就没送过事件（last_event_at=0）→ 以创建时刻为停滞基准。
+
+        回归：此前 last_event_at==0 直接豁免停滞判定，「创建成功但事件流
+        从未通起来」的失效会被两层告警同时漏掉。
+        """
+        import iris.wiki.asr.corrector as corrector_mod
+        from iris.wiki.asr.corrector import _HotkeyMonitor
+        monitor = _HotkeyMonitor(0x20000, 0)
+        with monitor._lock:
+            monitor._started_at = 50.0  # 距今 950s，从未收到任何事件
+        monkeypatch.setattr(monitor, "is_healthy", lambda: True)
+        monkeypatch.setattr(corrector_mod.time, "monotonic", lambda: 1000.0)
+        c = self._setup(monkeypatch, monitor)
+        c._should_correct(self.TEXT, in_listen_window=False)
+        err = capsys.readouterr().err
+        assert "监听疑似失效" in err
+        assert "950s" in err
+
+    def test_rate_limited_to_once_per_interval(self, monkeypatch, capsys):
+        """限频：同一时段重复跳过只告警一次，防刷屏。"""
+        import iris.wiki.asr.corrector as corrector_mod
+        from iris.wiki.asr.corrector import _HotkeyMonitor
+        monitor = _HotkeyMonitor(0x20000, 0)
+        monkeypatch.setattr(corrector_mod.time, "monotonic", lambda: 1000.0)
+        c = self._setup(monkeypatch, monitor)
+        c._should_correct(self.TEXT, in_listen_window=False)
+        c._should_correct(self.TEXT, in_listen_window=False)
+        c._should_correct(self.TEXT, in_listen_window=False)
+        err = capsys.readouterr().err
+        assert err.count("热键监听已失效") == 1
+
+    def test_monitor_none_no_warning(self, monkeypatch, capsys):
+        """monitor 为 None（启动失败已降级内容判定）→ 无 tap 告警。"""
+        c = self._setup(monkeypatch, None)
+        c._should_correct(self.TEXT, in_listen_window=False)
+        err = capsys.readouterr().err
+        assert "⚠" not in err
+
+    def test_elapsed_format_no_double_s(self, monkeypatch, capsys):
+        """回归：elapsed 单位只出现一次——此前内层 f-string 与外层各拼一个 s，
+        日志显示 elapsed=1246.98ss。"""
+        import iris.wiki.asr.corrector as corrector_mod
+        from iris.wiki.asr.corrector import _HotkeyMonitor
+        monitor = _HotkeyMonitor(0x20000, 0)
+        with monitor._lock:
+            monitor._released_at = 100.0
+        monkeypatch.setattr(corrector_mod.time, "monotonic", lambda: 1000.0)
+        c = self._setup(monkeypatch, monitor)
+        c._hotkey_released_at = 100.0
+        c._should_correct(self.TEXT, in_listen_window=False)
+        err = capsys.readouterr().err
+        assert "elapsed=900.00s)" in err
+        assert "ss)" not in err

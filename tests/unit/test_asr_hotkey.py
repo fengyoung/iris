@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import threading
 
 import pytest
 
@@ -164,6 +165,157 @@ class TestHotkeyMonitorStateMachine:
         assert err.count("已收到首个事件") == 1
         assert m._first_event is True
         assert m.held is False
+
+
+class _StubCG:
+    """CGEventTapIsEnabled / CGEventTapEnable 的最小桩。
+
+    方法用实例属性（普通函数对象）而非 def 绑定方法——生产代码会给它们
+    赋 restype/argtypes，绑定方法对象不可赋属性。
+
+    ``enable_effective=False`` 模拟已失效（invalidated）的 tap：
+    ``CGEventTapEnable`` 是 void 调用，对其无效果也不报错。
+    """
+
+    def __init__(self, enabled: bool, enable_effective: bool = True):
+        self.enabled = enabled
+        self.enable_calls: list = []
+
+        def _enable(tap, enable):
+            self.enable_calls.append(enable)
+            if self.enable_effective:
+                self.enabled = bool(enable)
+
+        self.enable_effective = enable_effective
+        self.CGEventTapIsEnabled = lambda tap: self.enabled
+        self.CGEventTapEnable = _enable
+
+
+class TestTapHealth:
+    """tap 运行期健康监测：事件时间戳 / enabled 查询 / 被禁用自愈 / 健康判定。
+
+    背景：macOS 会在进程未及时服务事件或睡眠唤醒后主动禁用 event tap，
+    此前失效是静默的——released_at 冻结在旧值，所有 ASR 文本被
+    「不在监听窗口」跳过，进程照常运行没有任何失败信号。
+    """
+
+    def test_last_event_at_initial_zero(self):
+        m = _HotkeyMonitor(mask=2048, keycode=0)
+        assert m.last_event_at == 0.0
+
+    def test_last_event_at_updated_on_any_event(self):
+        """任意事件（含未知类型）都刷新时间戳；时间来源为 monotonic。"""
+        m = _HotkeyMonitor(mask=2048, keycode=0)
+        m._handle_event(99, None)
+        assert m.last_event_at > 0
+
+    def test_reenable_count_initial_zero(self):
+        assert _HotkeyMonitor(mask=2048, keycode=0).reenable_count == 0
+
+    def test_started_at_records_creation_time(self):
+        """创建时刻有值且与 last_event_at 独立（后者初始为 0=从未收到事件）。"""
+        m = _HotkeyMonitor(mask=2048, keycode=0)
+        assert m.started_at > 0
+        assert m.last_event_at == 0
+
+    def test_is_tap_enabled_false_without_cg(self, monkeypatch):
+        monkeypatch.setattr(hk, "_CG", None)
+        m = _HotkeyMonitor(mask=2048, keycode=0)
+        m._tap = 12345
+        assert m.is_tap_enabled() is False
+
+    def test_is_tap_enabled_false_without_tap(self, monkeypatch):
+        monkeypatch.setattr(hk, "_CG", _StubCG(enabled=True))
+        m = _HotkeyMonitor(mask=2048, keycode=0)
+        assert m.is_tap_enabled() is False  # _tap 未创建
+
+    def test_is_tap_enabled_reflects_cg_state(self, monkeypatch):
+        monkeypatch.setattr(hk, "_CG", _StubCG(enabled=False))
+        m = _HotkeyMonitor(mask=2048, keycode=0)
+        m._tap = 12345
+        assert m.is_tap_enabled() is False
+        monkeypatch.setattr(hk, "_CG", _StubCG(enabled=True))
+        assert m.is_tap_enabled() is True
+
+    def test_ensure_tap_enabled_reenables_and_counts(self, monkeypatch, capsys):
+        """tap 被禁用 → 重新启用 → 回读确认 → 计数 + 告警；恢复后不再重试。"""
+        stub = _StubCG(enabled=False)
+        monkeypatch.setattr(hk, "_CG", stub)
+        m = _HotkeyMonitor(mask=2048, keycode=0)
+        m._tap = 12345
+        m._ensure_tap_enabled()
+        m._ensure_tap_enabled()  # 已恢复 → 顶部短路，不再发 enable
+        assert stub.enable_calls == [True]
+        assert m.reenable_count == 1
+        err = capsys.readouterr().err
+        assert err.count("已自动重新启用") == 1
+
+    def test_ensure_tap_enabled_ineffective_no_spam(self, monkeypatch, capsys):
+        """enable 对已失效的 tap 无效果（void 调用不报错）→ 不计数不打日志。
+
+        回归：此前无条件计数+打印，失效 tap 会让 run loop 每 0.5s 打一行
+        「已自动重新启用」永远刷屏——错误的成功信号。
+        """
+        stub = _StubCG(enabled=False, enable_effective=False)
+        monkeypatch.setattr(hk, "_CG", stub)
+        m = _HotkeyMonitor(mask=2048, keycode=0)
+        m._tap = 12345
+        for _ in range(10):  # 模拟 run loop 连续多个 0.5s 周期
+            m._ensure_tap_enabled()
+        assert len(stub.enable_calls) == 10
+        assert m.reenable_count == 0
+        assert "已自动重新启用" not in capsys.readouterr().err
+
+    def test_ensure_tap_enabled_noop_when_enabled(self, monkeypatch):
+        stub = _StubCG(enabled=True)
+        monkeypatch.setattr(hk, "_CG", stub)
+        m = _HotkeyMonitor(mask=2048, keycode=0)
+        m._tap = 12345
+        m._ensure_tap_enabled()
+        assert stub.enable_calls == []
+        assert m.reenable_count == 0
+
+    def test_ensure_tap_enabled_noop_without_tap(self, monkeypatch):
+        stub = _StubCG(enabled=False)
+        monkeypatch.setattr(hk, "_CG", stub)
+        m = _HotkeyMonitor(mask=2048, keycode=0)
+        m._ensure_tap_enabled()  # 不抛异常即通过
+        assert stub.enable_calls == []
+
+    def test_is_healthy_requires_alive_thread_and_enabled_tap(self, monkeypatch):
+        """健康 = 线程存活 且 tap 启用；任一不满足即 False。"""
+        stub = _StubCG(enabled=True)
+        monkeypatch.setattr(hk, "_CG", stub)
+        m = _HotkeyMonitor(mask=2048, keycode=0)
+        m._tap = 12345
+        # 线程未启动
+        assert m.is_healthy() is False
+        done = threading.Event()
+        m._alive = True
+        m._thread = threading.Thread(target=done.wait, args=(0.5,))
+        m._thread.start()
+        try:
+            assert m.is_healthy() is True
+        finally:
+            done.set()
+            m._thread.join()
+        # 线程结束后不再健康
+        assert m.is_healthy() is False
+
+    def test_is_healthy_false_when_tap_disabled(self, monkeypatch):
+        """线程存活但 tap 被系统禁用（自愈恰好失败的窗口期）→ 不健康。"""
+        monkeypatch.setattr(hk, "_CG", _StubCG(enabled=False))
+        m = _HotkeyMonitor(mask=2048, keycode=0)
+        m._tap = 12345
+        m._alive = True
+        done = threading.Event()
+        m._thread = threading.Thread(target=done.wait, args=(0.5,))
+        m._thread.start()
+        try:
+            assert m.is_healthy() is False
+        finally:
+            done.set()
+            m._thread.join()
 
 
 class TestLoadVocotypeHotkey:
