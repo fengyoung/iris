@@ -1,4 +1,4 @@
-.PHONY: test test-unit test-integration test-cov lint lint-fix format typecheck clean audit install-dev all
+.PHONY: test test-unit test-integration test-cov lint lint-fix format typecheck clean audit install-dev push pull all
 
 # 运行全部测试
 test: test-unit test-integration
@@ -38,6 +38,19 @@ audit:
 # 安装开发依赖（使用约束文件确保可复现构建）
 install-dev:
 	pip install -e ".[dev]" -c constraints.txt
+
+# 双远端同步（origin=github / gitee，两者互为镜像）
+# 推/拉当前分支；`&&` 串联失败即停，避免只同步了一边而另一边悄悄落后
+push:
+	@b=$$(git rev-parse --abbrev-ref HEAD); \
+	if [ "$$b" = "HEAD" ]; then echo "detached HEAD：请先切到分支"; exit 1; fi; \
+	git push origin $$b && git push gitee $$b
+
+# --ff-only：只允许快进，绝不自动造 merge 提交；镜像分叉时明确失败而非掩盖
+pull:
+	@b=$$(git rev-parse --abbrev-ref HEAD); \
+	if [ "$$b" = "HEAD" ]; then echo "detached HEAD：请先切到分支"; exit 1; fi; \
+	git pull --ff-only origin $$b && git pull --ff-only gitee $$b
 
 # 清理缓存
 clean:
