@@ -145,6 +145,7 @@ Python 3.11+ · LLM API 双协议（OpenAI 兼容 / Anthropic Messages，经 zz_
 - **复杂度规则（v3.30.0 起）**：ruff C901 门禁 `max-complexity = 20`，新增/修改函数超限 CI 直接失败；拆分手法优先「分阶段私有方法」「表驱动分派」「状态对象」，不要靠 `# noqa: C901` 绕过。
 - **导入规则（v3.30.0 起）**：F401 已启用；仅包 `__init__.py` 与 `app/cli/handlers.py`（facade）允许 re-export 未使用导入；其余模块需要保留给外部导入的符号必须显式 `__all__` 或在真正的定义处导入。`iris.core.exceptions` 零依赖，底层模块（config/utils）只从它导入，不得 `from iris.core import ...`（会经 `core/__init__` 触发循环导入）。
 - **敏感文档规则（v3.40.7 起）**：调薪方案、人员盘点/评估过程记录、绩效评价、Leader 盘点类文档**只保留 SOURCE 原件**，不得进入任何下游衍生制品（Wiki 页面、检索结果、ASR 热词与替换词典）。判定唯一真相源为 `src/iris/wiki/_sensitive.py`（零依赖，仅匹配文件名/标题，**绝不匹配正文**——裸词「盘点」「定级」「校准」误伤率高，只能以组合词使用）。新增下游消费者必须接入该模块的谓词；修改词表须同步更新 `tests/unit/test_wiki_sensitive.py` 的真实语料反例。存量清理用 `scripts/purge_sensitive_wiki.py`（默认 dry-run）。
+- **发版版本号同步规则（v3.42.1 起）**：产品版本递增时同步 **5 个文件**——`pyproject.toml`（唯一真相源）· `CHANGELOG.md`（顶部新条目，末尾收口句含「产品版本 A→**B**」与测试/覆盖率结论）· `CLAUDE.md` **5 个位置**（首行标题 / 「当前规模」数字 / 「近期新增能力」前置条目 / ⚠️「版本体系」表产品版本行 / ⚠️「项目结构」`tests/` 用例数——后两处最易漏，**漏改没有任何失败信号**，只会让文档间数字互相矛盾）· `README.md`（首行标题 + 「最新动态」前置新块，原最新块改标 `**上一版 vX.Y.Z (日期)**`）· `AGENTS.md`（`CLAUDE.md` 软链，勿单独编辑）。**「本版（vX.Y.Z）」叙述段跟随最近一次特性版、补丁版不追**（v3.42.1 发版时该段仍写 v3.42.0），勿照版本号全局替换。收口用 `git ls-files -z | xargs -0 grep -n "<旧版本号>"`——`CHANGELOG.md` 历史条目与 `README.md` 的「上一版」/「A → B」迁移行属**合法历史表述**。协议版本（`src/iris/__init__.py`）与数据版本（`config/*.json`）只在真正变化时递增，纯文档/独立脚本改动不涉及。
 
 ---
 
