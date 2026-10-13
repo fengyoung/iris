@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+# 记忆条目多行值的续行缩进（对齐到 "  · " 之后，使其视觉上归属该条目）。
+_MEM_CONT_INDENT = "      "
+
 
 def format_payload(command: str, payload: Dict[str, Any]) -> str:
     """将命令输出 payload 格式化为人类可读文本。"""
@@ -74,6 +77,18 @@ def _fmt_agent_spec(p: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _indent_continuation(text: str, indent: str = _MEM_CONT_INDENT) -> str:
+    """多行值（如 Markdown 表格）的续行补缩进。
+
+    纠正规则的值可能带整张表格（如 ASR 人名对照表）。不补缩进时续行会顶格，
+    看起来像与「最近纠正」同级的顶层条目，读者无法判断表格属于哪一条。
+    """
+    lines = text.splitlines()
+    if not lines:
+        return ""
+    return "\n".join([lines[0]] + [f"{indent}{line}" for line in lines[1:]])
+
+
 def _fmt_memory_status(p: Dict[str, Any]) -> str:
     lines = ["## 记忆状态"]
     _add_kv(lines, "画像更新", p.get("profile_updated_at", "无"))
@@ -85,7 +100,8 @@ def _fmt_memory_status(p: Dict[str, Any]) -> str:
     if p.get("sample_corrections"):
         lines.append("最近纠正：")
         for item in p["sample_corrections"]:
-            lines.append(f"  · {item.get('concept', '')} => {item.get('preferred', '')}")
+            value = _indent_continuation(str(item.get("preferred", "")))
+            lines.append(f"  · {item.get('concept', '')} => {value}")
     return "\n".join(lines)
 
 
@@ -105,7 +121,8 @@ def _fmt_memory_list(p: Dict[str, Any]) -> str:
         if items:
             lines.append(f"\n### 纠正规则（{corrections.get('correction_count', len(items))} 条）")
             for item in items[:10]:
-                lines.append(f"  · {item.get('concept', '')} → {item.get('preferred', '')}（{item.get('update_count', 0)} 次）")
+                value = _indent_continuation(str(item.get("preferred", "")))
+                lines.append(f"  · {item.get('concept', '')} → {value}（{item.get('update_count', 0)} 次）")
     return "\n".join(lines)
 
 

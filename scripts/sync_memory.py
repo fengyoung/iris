@@ -35,6 +35,13 @@ _CORRECTION_RE = re.compile(
     r"(?:纠正|(?P<concept>\S{1,40})\s*(?:不是|应该|应|指))\S*\s*(?P<value>.+?)(?:[。\n]|$)"
 )
 
+# 纠正规则值的内容上限（v3.42.1）。表格是规则的主体——如 ASR 人名对照表
+# 承载「误识别→正确名称」的可执行映射；此前提取只认 Why/How 段落，整张表
+# 被静默丢弃，Iris 侧只剩「有这么一个名单」的概述、拿不到具体映射。
+_MAX_RULE_TABLE_CHARS = 1200
+_MAX_RULE_SECTION_CHARS = 500
+_MAX_PREFERRED_CHARS = 2000
+
 
 # ── 系统记忆路径 ──────────────────────────────────────────
 
@@ -109,23 +116,51 @@ def _extract_body(text: str) -> str:
     return _split_frontmatter(text)[1]
 
 
-def _extract_why_and_how(body: str) -> str:
-    """从正文中提取 Why + How to apply 区段，用于纠正规则的值。"""
-    result_parts = []
-    for section in ("**Why:**", "**How to apply:**"):
-        idx = body.find(section)
-        if idx >= 0:
-            segment = body[idx + len(section):]
-            # 截断到下一个 ** 标题或文末
-            next_section = re.search(r"\*\*[A-Z]", segment)
-            if next_section:
-                segment = segment[:next_section.start()]
-            result_parts.append(segment.strip())
-    if result_parts:
-        return "；".join(result_parts)[:500]
+def _extract_markdown_tables(body: str) -> str:
+    """提取正文中的 Markdown 表格（连续 `|` 行成块），块间以空行分隔。"""
+    blocks: List[str] = []
+    current: List[str] = []
+    for line in body.splitlines():
+        if line.lstrip().startswith("|"):
+            current.append(line.rstrip())
+        elif current:
+            blocks.append("\n".join(current))
+            current = []
+    if current:
+        blocks.append("\n".join(current))
+    return "\n\n".join(blocks)[:_MAX_RULE_TABLE_CHARS]
+
+
+def _extract_section(body: str, marker: str) -> str:
+    """取 marker 起、至下一个 `**大写` 标题或文末的区段。"""
+    idx = body.find(marker)
+    if idx < 0:
+        return ""
+    segment = body[idx + len(marker):]
+    next_section = re.search(r"\*\*[A-Z]", segment)
+    if next_section:
+        segment = segment[:next_section.start()]
+    return segment.strip()
+
+
+def _extract_rule_value(body: str) -> str:
+    """提取纠正规则的值：Markdown 表格（规则主体）+ Why + How to apply。
+
+    表格优先且置于最前——它承载「误识别→正确名称」这类可执行映射，是规则的
+    值本身；Why / How 是理由与用法，仍以 `；` 连接以保持既有格式与去重语义。
+    """
+    sections = [
+        seg for seg in (_extract_section(body, m) for m in ("**Why:**", "**How to apply:**")) if seg
+    ]
+    why_how = "；".join(sections)[:_MAX_RULE_SECTION_CHARS]
+    table = _extract_markdown_tables(body)
+    if table:
+        return f"{table}\n{why_how}" if why_how else table
+    if why_how:
+        return why_how
     # 回退：取第一段实质内容
     lines = [line.strip() for line in body.splitlines() if line.strip() and not line.strip().startswith("#")]
-    return lines[0][:500] if lines else body.strip()[:500]
+    return lines[0][:_MAX_RULE_SECTION_CHARS] if lines else body.strip()[:_MAX_RULE_SECTION_CHARS]
 
 
 # ── 分类规则 ──────────────────────────────────────────────
@@ -178,14 +213,14 @@ def _extract_correction_entry(fm: Dict[str, Any], body: str) -> Tuple[str, Dict[
     if len(concept) > 40:
         concept = fm.get("description", concept[:40])
 
-    preferred = _extract_why_and_how(body)
+    preferred = _extract_rule_value(body)
     # 如果 description 更精确就用它作为 preferred 的前缀
     desc = fm.get("description", "")
     if desc and desc not in preferred:
         preferred = desc + "：" + preferred
 
     return concept, {
-        "preferred": preferred[:800],
+        "preferred": preferred[:_MAX_PREFERRED_CHARS],
         "update_count": 1,
         "updated_at": datetime.now().isoformat(timespec="seconds"),
         "last_source": fm.get("name", ""),

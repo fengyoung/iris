@@ -147,6 +147,19 @@ class TestFmtMemoryStatus:
         assert "C1" in result
         assert "P1" in result
 
+    def test_multiline_value_continuation_indented(self):
+        """回归：表格型 preferred 的续行必须缩进，否则看起来像顶层条目。"""
+        result = _fmt_memory_status({
+            "sample_corrections": [
+                {"concept": "asr corrections", "preferred": "人名纠错：\n| a | b |\n| 1 | 2 |"},
+            ],
+        })
+        lines = result.splitlines()
+        bullet = next(i for i, ln in enumerate(lines) if "asr corrections" in ln)
+        assert lines[bullet].startswith("  · ")
+        assert lines[bullet + 1] == "      | a | b |"
+        assert lines[bullet + 2] == "      | 1 | 2 |"
+
 
 class TestFmtMemoryList:
     def test_with_profile(self):

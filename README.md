@@ -1,4 +1,4 @@
-# Iris 3.42.0
+# Iris 3.42.1
 
 > 主动情报体系（决策 / 备会 / 信号 / OKR 证据）设计见 [设计文档](docs/intelligence-upgrade-design.md)，用法见 [使用说明](docs/intelligence-upgrade-usage.md)；
 > 谁是卧底 Web 使用方法与恢复边界见 [Web 使用说明](docs/undercover-web-ui.md)，历史验收证据见 [验收记录](docs/undercover-beta-acceptance-20260917.md)。
@@ -7,7 +7,14 @@
 
 ## 最新动态
 
-**v3.42.0 (2026-10-11)** - ASR 资源链路系统加固：
+**v3.42.1 (2026-10-13)** - 记忆同步丢表格：ASR 人名对照表只到了 CC、没进 Iris：
+- 🐛 **静默丢内容**：`sync-memory` 的 CC→Iris 前向通道提取「纠正规则的值」时只认 `**Why:**` / `**How to apply:**` 两个段落，正文里的 Markdown 表格被整块丢弃。ASR 人名对照表（小溪→小汐、陈峰→邹晨风、陈伟→陈维…）恰恰写成表格，于是 Iris 侧 `corrections.json` 只剩一句「ASR 常见误识别纠正——人名纠错」的概述——**知道有这么个名单，拿不到名单本身**。同步统计照常报「纠正规则 Δ1 条」，`memory-list` 也照常显示该条目，只是内容是空的；真正可用的映射此前只存在于 CC 侧 Markdown，凡只走 Iris 通道的消费方（`iris ask`、决策/情报链路的 `render_for_prompt`）都拿不到
+- ✅ **提取改为「表格优先」**：`_extract_why_and_how` → `_extract_rule_value`，新增 `_extract_markdown_tables`（连续 `|` 行成块、块间以空行分隔）与 `_extract_section`；表格置于最前（它承载可执行映射，是规则的值本身），Why / How 仍以 `；` 连接保持既有格式与去重语义。截断上限从 `[:500]` / `[:800]` 改为具名常量 `_MAX_RULE_TABLE_CHARS` / `_MAX_RULE_SECTION_CHARS` / `_MAX_PREFERRED_CHARS`——原内层 500 字上限单独就能把 529 字的表切掉一半
+- ✅ **多行值渲染**：`_fmt_memory_status` / `_fmt_memory_list` 的 `· concept => value` 此前假定值是单行，表格型值的续行会顶格、看起来像与「最近纠正」同级的顶层条目。新增 `_indent_continuation()` 给续行补缩进
+- ✅ **回灌生效**：`iris sync-memory` 后 `asr corrections` 由 638 字带全表，`iris memory-list` / `memory-status --pretty` 可直接读到 6 条映射；反向通道 9 条仍「已覆盖跳过」，未产生重复 CC 文件
+- ✅ **测试 +6**（4,039→4,045、覆盖率 73.99% 持平）；产品版本 3.42.0 → **3.42.1**；协议版本与数据格式不变
+
+**上一版 v3.42.0 (2026-10-11)** - ASR 资源链路系统加固：
 - 🐛 **部署了不生效**：VocoType 热词只在 App 启动时加载，`--deploy` 写完不重启等于没写。daily-start 新增第 8/9 阶段 `asr_refresh`：指纹增量（**含手动热词**，归一化摘要、改注释/调序不触发）→ 重建三件套 → 部署 → 自动重启 VocoType（AppleEvent 优雅退出、双 20s 超时）；重启失败不回滚但显式 `deploy_only` 告警
 - 🐛 **审计两份实现各读各的目录**：CLI `asr-audit` 与 daily-start 此前各有一份（2026-09-20 修目录 bug 只修了 CLI 侧），收敛到新模块 `wiki/asr/audit.py` 单一实现；「无产物」（skipped）与「产物不合格」分开报告，噪音词（人工清理）与覆盖缺口（重跑生成）拆成 warnings / issues
 - 🐛 **CGEventTap 中途失效零信号**：macOS 禁用 event tap 后 `released_at` 冻结在旧值，所有语音文本被「不在监听窗口」**静默跳过**、进程照常运行。现 run loop 每 0.5s 检测并自愈（回读确认才告警——enable 对失效 tap 是 void 空操作），corrector 门控侧两档限频告警（确定性失效建议重启 / 事件流停滞 >5min 疑似提示）

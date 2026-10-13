@@ -328,16 +328,40 @@ class TestExtractPersona:
         assert sm._extract_persona({"description": "描述文字"}, "普通正文") == "描述文字"
 
 
-class TestExtractWhyAndHow:
+class TestExtractRuleValue:
     def test_joins_why_and_how(self):
         body = "**Why:**\n原因A\n\n**How to apply:**\n做法B\n"
-        assert sm._extract_why_and_how(body) == "原因A；做法B"
+        assert sm._extract_rule_value(body) == "原因A；做法B"
 
     def test_only_why(self):
-        assert sm._extract_why_and_how("**Why:**\n仅原因\n") == "仅原因"
+        assert sm._extract_rule_value("**Why:**\n仅原因\n") == "仅原因"
 
     def test_fallback_first_content_line(self):
-        assert sm._extract_why_and_how("# 标题\n\n实质内容\n更多\n") == "实质内容"
+        assert sm._extract_rule_value("# 标题\n\n实质内容\n更多\n") == "实质内容"
+
+    def test_table_preserved_before_why_how(self):
+        """回归：表格是规则主体，旧实现只取 Why/How，整张表被静默丢弃。"""
+        body = (
+            "# ASR 误识别纠正\n\n"
+            "| 误识别 | 正确名称 |\n|--------|---------|\n| 小溪 | 小汐 |\n\n"
+            "**Why:**\n用户纠正过。\n"
+        )
+        value = sm._extract_rule_value(body)
+        assert value.startswith("| 误识别 | 正确名称 |")
+        assert "| 小溪 | 小汐 |" in value
+        assert value.endswith("用户纠正过。")
+
+    def test_table_only_body(self):
+        """旧实现回退只取第一行 `| a | b |`，这里要求整块保留。"""
+        body = "# 标题\n\n| a | b |\n|---|---|\n| 1 | 2 |\n"
+        assert sm._extract_rule_value(body) == "| a | b |\n|---|---|\n| 1 | 2 |"
+
+    def test_multiple_tables_kept_as_separate_blocks(self):
+        body = "| a |\n|---|\n| 1 |\n\n说明文字\n\n| b |\n|---|\n| 2 |\n"
+        value = sm._extract_rule_value(body)
+        assert "| a |\n|---|\n| 1 |" in value
+        assert "| b |\n|---|\n| 2 |" in value
+        assert "说明文字" not in value  # 表格块之间的散段不混入
 
 
 class TestExtractCorrectionEntry:
@@ -360,6 +384,20 @@ class TestExtractCorrectionEntry:
         fm = {"name": "n", "description": "核心"}
         _, entry = sm._extract_correction_entry(fm, "核心内容说明")
         assert entry["preferred"] == "核心内容说明"
+
+    def test_table_body_reaches_preferred(self):
+        """回归：ASR 人名对照表必须真正落到 corrections.json 的 preferred 里。"""
+        fm = {"name": "asr-corrections", "description": "ASR 人名纠错"}
+        body = "# ASR\n\n| 误识别 | 正确名称 |\n|---|---|\n| 陈伟 | 陈维 |\n"
+        _, entry = sm._extract_correction_entry(fm, body)
+        assert entry["preferred"].startswith("ASR 人名纠错：")
+        assert "| 陈伟 | 陈维 |" in entry["preferred"]
+
+    def test_preferred_length_capped(self):
+        fm = {"name": "big", "description": "d"}
+        body = "| a | b |\n|---|---|\n" + "\n".join(f"| {i} | {i} |" for i in range(500))
+        _, entry = sm._extract_correction_entry(fm, body)
+        assert len(entry["preferred"]) <= sm._MAX_PREFERRED_CHARS
 
 
 # ── 去重匹配 ────────────────────────────────────────────────

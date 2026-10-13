@@ -1,3 +1,15 @@
+## v3.42.1 (2026-10-13) — 记忆同步丢表格：ASR 人名对照表只到了 CC、没进 Iris
+
+`sync-memory` 的 CC→Iris 前向通道从反馈记忆里提取「纠正规则的值」时，只认 `**Why:**` / `**How to apply:**` 两个段落（`_extract_why_and_how`），正文里的 Markdown 表格被整块丢弃。ASR 人名对照表（`asr-corrections.md`）恰恰把「误识别→正确名称」写成表格，于是 Iris 侧的 `corrections.json` 只剩一句「ASR 常见误识别纠正——人名纠错」的概述——**知道有这么个名单，拿不到名单本身**。这类失效没有报错：同步统计照常报「纠正规则 Δ1 条」，`iris memory-list` 也照常显示该条目，只是内容是空的。真正可用的映射此前只存在于 CC 侧 Markdown，凡只走 Iris 通道的消费方（`iris ask`、决策/情报链路的 `render_for_prompt`）都拿不到。
+
+- **提取改为「表格优先」**（`scripts/sync_memory.py`）：`_extract_why_and_how` → `_extract_rule_value`，新增 `_extract_markdown_tables`（连续 `|` 行成块，块间以空行分隔）与 `_extract_section`；表格置于最前——它承载可执行映射，是规则的值本身；Why / How 仍以 `；` 连接以保持既有格式与去重语义。截断上限从 `[:500]` / `[:800]` 改为具名常量 `_MAX_RULE_TABLE_CHARS=1200` / `_MAX_RULE_SECTION_CHARS=500` / `_MAX_PREFERRED_CHARS=2000`——原内层 500 字上限**单独就能把 529 字的表切掉一半**。影响面实测很小：9 个纠正类记忆里只有 `asr-corrections.md` 含表格。
+- **多行值的渲染**（`src/iris/output/formatter.py`）：`_fmt_memory_status` / `_fmt_memory_list` 的 `· concept => value` 此前假定值是单行，表格型值的续行会顶格，看起来像与「最近纠正」同级的顶层条目、无法判断表格属于哪一条。新增 `_indent_continuation()` 给续行补 `_MEM_CONT_INDENT` 缩进。
+- **回灌**：`iris sync-memory` 后 `corrections.json` 的 `asr corrections` 由 638 字带全表（`update_count` 2），`iris memory-list` / `memory-status --pretty` 可直接读到 6 条映射（小溪→小汐、陈峰→邹晨风、赵善明→赵善民、视频集合→视频稽查、陈伟→陈维、夏宝根→夏保根）；反向通道 9 条仍为「已覆盖跳过」，未产生重复 CC 文件。
+
+工程项：新增 6 项测试（`test_sync_memory.py` 表格保留 / 单表 / 多表块 / 入口落库 / 长度上限 5 项 + `test_formatter_extended.py` 续行缩进 1 项），其中「表格整块保留」与「续行缩进」实测在旧代码下失败——旧实现回退只取第一行 `| a | b |`。
+
+产品版本 3.42.0→**3.42.1**；协议版本（3.26）与数据格式不变（无新 CLI 命令，`corrections.json` schema 未变，仅 `preferred` 允许更长/多行）。全量单测 4,039→4,045 通过、覆盖率 73.99% 持平；Ruff（`src scripts tests`）、mypy 通过。
+
 ## v3.42.0 (2026-10-11) — ASR 资源链路系统加固：写完不生效、指纹不含手动词、审计两份实现、tap 失效零信号
 
 ASR 三件套（热词 / 替换词典 / 校正提示词）从生成到生效的整条链路，本轮修掉四类结构性问题：**部署了不生效**（VocoType 热词只在 App 启动时加载，写完不重启等于没写）、**指纹不含手动热词**（改 `data/asr_manual_hotwords.txt` 永不触发重建，而用户改手动词的意图恰恰就是让它生效）、**审计两份实现各读各的目录**（CLI 与 daily-start 各一份，修一处漏一处）、**产物与版本状态在 `--project-root` 下裂到两个根**（`resolve_data_path` 走 `get_project_root()`、产物走 `bundle.root`）。另修 asr-corrector 热键监听的运行期静默失效（CGEventTap 被系统禁用后所有语音文本被「不在监听窗口」跳过、进程零失败信号——症状与 v3.22.5 的启动失败同族，但此次是**中途**失效：`released_at` 冻结在非零旧值）。
