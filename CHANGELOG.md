@@ -1,3 +1,15 @@
+## v3.42.2 (2026-10-14) — ASR 校正实际走的是 zz 中转：force_model 按非唯一的 model 字段匹配
+
+ASR-Corrector 的 LLM 校正声称「强制指定 deepseek 官方 flash、跳过路由」，启动 banner 也照此打印，但 `force_model="deepseek-flash"` 实际命中的是 **`deepseek-flash-zz`（zz_tokenhub 中转）**。`ModelManager.find_model_by_name` 把**非唯一**的 `model` 字段与**唯一**的 `model_id` 按同等优先级匹配（`cfg_model == name or model_id == name`），而 `deepseek-flash-zz` 的 `model` 字段**就是** `"deepseek-flash"`（上游模型名），且它在 `llm.json` 里排在前面，于是先命中。这类失效没有任何信号：两条通道都可用、都能返回正确文本，只有 endpoint、密钥与耗时不同（官方 733ms / zz 2290ms），从输出上看不出差别。
+
+- **匹配优先级修复**（`src/iris/llm/model_manager.py`）：`find_model_by_name` 改为两遍匹配——先精确 `model_id`，未命中再回退 `model` 字段；顺手把三处重复的 SecretStr 解包收敛为 `_build_entry`，并更新 `get_model_config` 中已过时的对照说明。全配置同型碰撞共 3 组（`deepseek-flash` / `qwen3.8-flash` / `qwen3.8-max`），其中 `-zz` 排在前面会误命中的是 `deepseek-flash` 与 `qwen3.8-max`。**代码库其实早就知道这个歧义**：`service.py` 的 `generate_as(role, model_id)` docstring 明确写着「force_model 按 model 字段做字符串匹配，当多个 model_id 复用同一 model 字段时存在歧义」，并为此造了精确 API——但 `AsrCorrector` 一直没切过去，因为它依赖 `_deadline` 做实时超时预算，而 `generate_as` 不支持该参数。
+- **profile 清理**（`config/asr_profiles.json`）：`llm` 块下的 `model` / `max_tokens` / `temperature` **无任何代码读取**（只有 `timeout_ms` 被消费），其中 `model: "deepseek-v4-flash"` 还是不存在的模型名——形同虚设且误导，已移除并加 `_llm_note` 说明「模型为代码内固定、不可在此配置」。实际生效的一直是硬编码的 `deepseek-flash` / `512` / `0.1`；`docs/asr-corrector-usage.md` 的配置示例同步更新。
+- **凭证**：Keychain 的 `IRIS_DEEPSEEK_API_KEY` 已更新（base_url `IRIS_DEEPSEEK_BASE_URL=https://api.deepseek.com/v1` 本就正确）。⚠️ 运行中的 corrector 在启动时解析凭证并导入模块，**需重启才生效**；`daily-start` 的 `asr_refresh` 只重启 VocoType，不重启 asr-corrector。
+
+工程项：新增 4 项测试（`tests/test_provider_fallback.py::TestFindModelByNamePrecedence`）。复现关键：`-zz` 条目的 `model` 字段必须**等于基名**——第一版测试用「共享名」构造，**在旧代码下也通过**、测不出问题；改成真实形态后 `test_zz_first_order_prefers_exact_model_id` 才在旧代码下失败（`assert 'name-zz' == 'name'`）。
+
+产品版本 3.42.1→**3.42.2**；协议版本（3.26）与数据格式不变。全量单测 4,045→4,049 通过、覆盖率 73.99%→74.00%；Ruff（`src scripts tests`）、mypy 通过。
+
 ## v3.42.1 (2026-10-13) — 记忆同步丢表格：ASR 人名对照表只到了 CC、没进 Iris
 
 `sync-memory` 的 CC→Iris 前向通道从反馈记忆里提取「纠正规则的值」时，只认 `**Why:**` / `**How to apply:**` 两个段落（`_extract_why_and_how`），正文里的 Markdown 表格被整块丢弃。ASR 人名对照表（`asr-corrections.md`）恰恰把「误识别→正确名称」写成表格，于是 Iris 侧的 `corrections.json` 只剩一句「ASR 常见误识别纠正——人名纠错」的概述——**知道有这么个名单，拿不到名单本身**。这类失效没有报错：同步统计照常报「纠正规则 Δ1 条」，`iris memory-list` 也照常显示该条目，只是内容是空的。真正可用的映射此前只存在于 CC 侧 Markdown，凡只走 Iris 通道的消费方（`iris ask`、决策/情报链路的 `render_for_prompt`）都拿不到。

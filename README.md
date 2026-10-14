@@ -1,4 +1,4 @@
-# Iris 3.42.1
+# Iris 3.42.2
 
 > 主动情报体系（决策 / 备会 / 信号 / OKR 证据）设计见 [设计文档](docs/intelligence-upgrade-design.md)，用法见 [使用说明](docs/intelligence-upgrade-usage.md)；
 > 谁是卧底 Web 使用方法与恢复边界见 [Web 使用说明](docs/undercover-web-ui.md)，历史验收证据见 [验收记录](docs/undercover-beta-acceptance-20260917.md)。
@@ -7,7 +7,13 @@
 
 ## 最新动态
 
-**v3.42.1 (2026-10-13)** - 记忆同步丢表格：ASR 人名对照表只到了 CC、没进 Iris：
+**v3.42.2 (2026-10-14)** - ASR 校正实际走的是 zz 中转：force_model 按非唯一的 model 字段匹配：
+- 🐛 **静默走错通道**：ASR-Corrector 的 LLM 校正声称「强制指定 deepseek 官方 flash、跳过路由」，启动 banner 也照此打印，但 `force_model="deepseek-flash"` 实际命中的是 **`deepseek-flash-zz`（zz_tokenhub 中转）**。`ModelManager.find_model_by_name` 把**非唯一**的 `model` 字段与**唯一**的 `model_id` 按同级匹配，而 `-zz` 条目的 `model` 字段**就是** `deepseek-flash`（上游模型名）且排在前面，于是先命中。**两条通道都能返回正确文本**，只有 endpoint / 密钥 / 耗时不同（官方 733ms vs zz 2290ms）——从输出上看不出差别
+- ✅ **匹配优先级修复**：`find_model_by_name` 改为两遍匹配——先精确 `model_id`、未命中再回退 `model` 字段；顺手把三处重复的 SecretStr 解包收敛为 `_build_entry`。全配置同型碰撞 3 组，其中 `deepseek-flash` 与 `qwen3.8-max` 属 `-zz` 排前面会误命中。代码库早知此歧义（`service.py` 的 `generate_as(role, model_id)` docstring 白纸黑字写着），但 `AsrCorrector` 依赖 `_deadline` 做实时超时预算、而 `generate_as` 不支持该参数，一直没切过去
+- ✅ **profile 清理**：`asr_profiles.json` 的 `llm.model` / `max_tokens` / `temperature` **无任何代码读取**（只有 `timeout_ms` 被消费），其中 `model: "deepseek-v4-flash"` 还是不存在的模型名——已移除并加说明；实际生效的一直是硬编码 `deepseek-flash` / `512` / `0.1`
+- ✅ **测试 +4**（4,045→4,049、覆盖率 73.99%→74.00%）；产品版本 3.42.1 → **3.42.2**；协议版本与数据格式不变。⚠️ 运行中的 corrector 需重启才生效（凭证与模块均在启动时解析，`daily-start` 的 `asr_refresh` 不重启它）
+
+**上一版 v3.42.1 (2026-10-13)** - 记忆同步丢表格：ASR 人名对照表只到了 CC、没进 Iris：
 - 🐛 **静默丢内容**：`sync-memory` 的 CC→Iris 前向通道提取「纠正规则的值」时只认 `**Why:**` / `**How to apply:**` 两个段落，正文里的 Markdown 表格被整块丢弃。ASR 人名对照表（小溪→小汐、陈峰→邹晨风、陈伟→陈维…）恰恰写成表格，于是 Iris 侧 `corrections.json` 只剩一句「ASR 常见误识别纠正——人名纠错」的概述——**知道有这么个名单，拿不到名单本身**。同步统计照常报「纠正规则 Δ1 条」，`memory-list` 也照常显示该条目，只是内容是空的；真正可用的映射此前只存在于 CC 侧 Markdown，凡只走 Iris 通道的消费方（`iris ask`、决策/情报链路的 `render_for_prompt`）都拿不到
 - ✅ **提取改为「表格优先」**：`_extract_why_and_how` → `_extract_rule_value`，新增 `_extract_markdown_tables`（连续 `|` 行成块、块间以空行分隔）与 `_extract_section`；表格置于最前（它承载可执行映射，是规则的值本身），Why / How 仍以 `；` 连接保持既有格式与去重语义。截断上限从 `[:500]` / `[:800]` 改为具名常量 `_MAX_RULE_TABLE_CHARS` / `_MAX_RULE_SECTION_CHARS` / `_MAX_PREFERRED_CHARS`——原内层 500 字上限单独就能把 529 字的表切掉一半
 - ✅ **多行值渲染**：`_fmt_memory_status` / `_fmt_memory_list` 的 `· concept => value` 此前假定值是单行，表格型值的续行会顶格、看起来像与「最近纠正」同级的顶层条目。新增 `_indent_continuation()` 给续行补缩进

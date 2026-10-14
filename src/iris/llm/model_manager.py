@@ -148,11 +148,10 @@ class ModelManager:
     def get_model_config(self, role: str, model_id: str) -> Dict[str, Any]:
         """按 (role, model_id) 精确获取模型完整配置（含 api_key）。
 
-        与 find_model_by_name() 不同：后者按 model 字段做字符串匹配，
-        当同一 model 字段被多个 model_id 复用时（如 base_model 下
-        deepseek-flash-zz 与 deepseek-flash 的 model 字段都是
-        "deepseek-flash"）会误中字典顺序中排在前面的那个。
-        本方法按精确的 (role, model_id) 二元键查找，不存在歧义。
+        与 find_model_by_name() 的区别：后者按名称查找、跨角色搜索，
+        先精确匹配 model_id、再回退 model 字段；本方法要求同时给出
+        role 与 model_id，不跨角色、不做回退，适用于需要点名调用
+        具体模型的场景（如多模型对抗游戏）。
 
         Returns:
             包含 api_key 的完整配置（附 _model_id 字段）。
@@ -168,12 +167,7 @@ class ModelManager:
         if model_id not in models:
             raise ModelManagerError(f"角色 {role} 下未找到模型: {model_id}")
 
-        cfg = models[model_id]
-        result = dict(cfg, _model_id=model_id)
-        from pydantic import SecretStr as _SecretStr
-        if "api_key" in result and isinstance(result["api_key"], _SecretStr):
-            result["api_key"] = result["api_key"].get_secret_value()
-        return result
+        return self._build_entry(models[model_id], model_id)
 
     def get_active_model_info(self, role: str) -> Dict[str, Any]:
         """获取指定角色当前活跃模型的摘要信息。
@@ -198,7 +192,19 @@ class ModelManager:
         }
 
     def find_model_by_name(self, model_name: str) -> Optional[Dict[str, Any]]:
-        """在所有角色中按 model 字段或 model_id 查找模型配置（含 api_key）。
+        """在所有角色中查找模型配置（含 api_key）。
+
+        匹配分两遍，优先级明确：
+
+        1. 精确 ``model_id``——配置里的唯一键；
+        2. 回退 ``model`` 字段——上游模型名，**并不唯一**（如
+           ``deepseek-flash-zz`` 与 ``deepseek-flash`` 的 model 字段同为
+           ``"deepseek-flash"``）。
+
+        两遍的顺序是关键：若同级匹配，命中谁就取决于配置里的书写顺序，
+        ``force_model="deepseek-flash"`` 会静默落到 zz 中转条目上（注释与
+        启动 banner 却声称「官方直连」）。配置中 ``deepseek-flash`` /
+        ``qwen3.8-max`` 均属此类重名。
 
         兼容两种配置形态：raw dict（测试/直载）与 Pydantic 配置模型
         （BaseConfigModel 提供 dict 风格 get 访问，dict() 构造时
@@ -207,19 +213,26 @@ class ModelManager:
         Returns:
             包含 api_key 的完整配置（附 _model_id 字段），未找到返回 None。
         """
+        fallback: Optional[tuple] = None
         for role, role_container in self._models.items():
             models = role_container.get("models", {}) if hasattr(role_container, "get") else {}
             for model_id, cfg in models.items():
-                cfg_model = cfg.get("model") if hasattr(cfg, "get") else None
-                if cfg_model == model_name or model_id == model_name:
-                    result = dict(cfg, _model_id=model_id)
-                    # 与 get_active_model_config 同款处理：dict() 迭代
-                    # Pydantic 模型时 api_key 为 SecretStr，需显式解包
-                    from pydantic import SecretStr as _SecretStr
-                    if "api_key" in result and isinstance(result["api_key"], _SecretStr):
-                        result["api_key"] = result["api_key"].get_secret_value()
-                    return result
-        return None
+                if model_id == model_name:
+                    return self._build_entry(cfg, model_id)
+                if fallback is None:
+                    cfg_model = cfg.get("model") if hasattr(cfg, "get") else None
+                    if cfg_model == model_name:
+                        fallback = (cfg, model_id)
+        return self._build_entry(*fallback) if fallback else None
+
+    @staticmethod
+    def _build_entry(cfg: Any, model_id: str) -> Dict[str, Any]:
+        """由模型配置构造查找结果：附加 _model_id 并解包 SecretStr 形式的 api_key。"""
+        result = dict(cfg, _model_id=model_id)
+        from pydantic import SecretStr as _SecretStr
+        if "api_key" in result and isinstance(result["api_key"], _SecretStr):
+            result["api_key"] = result["api_key"].get_secret_value()
+        return result
 
     # -- 内部方法 -----------------------------------------------------------
 

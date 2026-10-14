@@ -40,8 +40,6 @@ iris3 asr-corrector --correct-mode full
     "mode": "full",
     "max_mappings": 2000,
     "llm": {
-      "provider": "deepseek",
-      "model": "deepseek-v4-flash",
       "timeout_ms": 4000
     }
   }
@@ -49,6 +47,8 @@ iris3 asr-corrector --correct-mode full
 ```
 
 `max_mappings` 控制替换词典生成的映射条数上限（默认 2000），可通过 profile 按需调整。
+
+`llm` 块下**只有 `timeout_ms` 会被读取**（降级链总超时预算）。校正所用模型不可在此配置：`AsrCorrector` 固定以 `force_model="deepseek-flash"` 直连官方 DeepSeek，`temperature=0.1` / `max_tokens=512` 亦为代码内固定值。
 
 ## 工作链路
 

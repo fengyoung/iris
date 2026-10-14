@@ -1,5 +1,6 @@
 {
   "_comment": "ASR 校正策略配置示例。复制此文件为 asr_profiles.json 并根据需要修改。replace_dict 和 llm_prompt 由 build-asr-prompt --deploy 自动生成。",
+  "_llm_note": "llm 块下当前只有 timeout_ms 会被读取（asr-corrector 的降级链总超时预算）。校正所用模型**不可在此配置**：AsrCorrector 固定以 force_model=\"deepseek-flash\" 直连官方 DeepSeek（base_url/api_key 由 llm.json 的 deepseek 通道解析，即 IRIS_DEEPSEEK_BASE_URL / IRIS_DEEPSEEK_API_KEY），temperature=0.1、max_tokens=512 亦为代码内固定值。曾在此声明 model/max_tokens/temperature 三个字段，但无任何代码读取，且 model 值 \"deepseek-v4-flash\" 并不存在——形同虚设且误导，已移除。",
   "default": {
     "replace_dict": "data/asr_replace_dict.json",
     "llm_prompt": "data/asr_prompt.md",
@@ -8,11 +9,7 @@
     "context_window_size": 5,
     "context_expire_minutes": 10,
     "llm": {
-      "provider": "deepseek",
-      "model": "deepseek-v4-flash",
-      "timeout_ms": 4000,
-      "max_tokens": 2048,
-      "temperature": 0.1
+      "timeout_ms": 4000
     }
   },
   "meeting": {
@@ -23,11 +20,7 @@
     "context_window_size": 5,
     "context_expire_minutes": 10,
     "llm": {
-      "provider": "deepseek",
-      "model": "deepseek-v4-flash",
-      "timeout_ms": 5000,
-      "max_tokens": 2048,
-      "temperature": 0.1
+      "timeout_ms": 5000
     }
   },
   "quick": {

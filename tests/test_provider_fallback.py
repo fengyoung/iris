@@ -402,6 +402,81 @@ class TestFindModelByName:
             assert cfg["_model_id"] == "m2"
 
 
+class TestFindModelByNamePrecedence:
+    """同名 model 字段下，find_model_by_name 必须按 model_id 精确命中。
+
+    回归背景：该方法原先把**非唯一**的 ``model`` 字段与**唯一**的
+    ``model_id`` 同级匹配（``cfg_model == name or model_id == name``），
+    命中谁取决于配置书写顺序。真实配置里 ``deepseek-flash-zz``（zz 中转）
+    的 ``model`` 字段**就是** ``"deepseek-flash"``（上游模型名与另一条目的
+    model_id 同名），且它排在 ``deepseek-flash``（官方直连）前面——于是
+    AsrCorrector 的 ``force_model="deepseek-flash"`` 实际打到了 zz 中转，
+    而代码注释与启动 banner 都声称「官方直连」，全程没有任何失败信号。
+    ``qwen3.8-max`` 同属此类。
+
+    注意复现关键：``-zz`` 条目的 ``model`` 字段必须等于基名（不是随便一个
+    共享名），否则旧实现里 ``model_id == model_name`` 那一半会先命中正确
+    条目，测不出问题。
+    """
+
+    def _make_manager(self, models, default_id="name"):
+        from pathlib import Path
+        import tempfile
+        from iris.llm.model_manager import ModelManager
+
+        cfg = {
+            "base_model": {
+                "enabled": True,
+                "default_model_id": default_id,
+                "models": models,
+            }
+        }
+        with tempfile.TemporaryDirectory() as d:
+            return ModelManager(cfg, Path(d))
+
+    @staticmethod
+    def _entry(model):
+        return {"model": model, "provider": "openai",
+                "api_key": "sk-x", "api_base_url": "https://api.x.com/v1"}
+
+    def test_zz_first_order_prefers_exact_model_id(self):
+        """-zz 条目排前面且 model 字段同名时，查基名必须命中基名条目。"""
+        mgr = self._make_manager({
+            "name-zz": self._entry("name"),   # 上游模型名 == 另一条的 model_id
+            "name": self._entry("name"),
+        })
+        cfg = mgr.find_model_by_name("name")
+        assert cfg is not None
+        assert cfg["_model_id"] == "name"
+
+    def test_exact_model_id_wins_regardless_of_order(self):
+        """顺序颠倒同样命中基名条目（结果不依赖配置书写顺序）。"""
+        mgr = self._make_manager({
+            "name": self._entry("name"),
+            "name-zz": self._entry("name"),
+        })
+        cfg = mgr.find_model_by_name("name")
+        assert cfg["_model_id"] == "name"
+
+    def test_zz_variant_still_reachable_by_its_model_id(self):
+        """-zz 条目仍可通过自身 model_id 命中，不受优先级修复影响。"""
+        mgr = self._make_manager({
+            "name-zz": self._entry("name"),
+            "name": self._entry("name"),
+        })
+        cfg = mgr.find_model_by_name("name-zz")
+        assert cfg["_model_id"] == "name-zz"
+
+    def test_falls_back_to_model_field_when_no_model_id_matches(self):
+        """无 model_id 命中时回退按 model 字段匹配，保留既有查找能力。"""
+        mgr = self._make_manager({
+            "id-x": self._entry("upstream-only"),
+        }, default_id="id-x")
+        cfg = mgr.find_model_by_name("upstream-only")
+        assert cfg is not None
+        assert cfg["model"] == "upstream-only"
+        assert cfg["_model_id"] == "id-x"
+
 
 # ── 响应文本提取（_extract_chat_completions_text）────────────────
 
