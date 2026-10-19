@@ -101,7 +101,7 @@ def _fmt_memory_status(p: Dict[str, Any]) -> str:
         lines.append("最近纠正：")
         for item in p["sample_corrections"]:
             value = _indent_continuation(str(item.get("preferred", "")))
-            lines.append(f"  · {item.get('concept', '')} => {value}")
+            lines.append(f"  · {'[置顶] ' if item.get('pinned') else ''}{item.get('concept', '')} => {value}")
     return "\n".join(lines)
 
 
@@ -115,14 +115,16 @@ def _fmt_memory_list(p: Dict[str, Any]) -> str:
             items = prefs.get(key, [])
             if items:
                 lines.append(f"  {key}：{' | '.join(str(i) for i in items[:5])}")
-    corrections = p.get("corrections", {})
+    corrections = p.get("corrections", p)
     if isinstance(corrections, dict):
         items = corrections.get("items", [])
         if items:
             lines.append(f"\n### 纠正规则（{corrections.get('correction_count', len(items))} 条）")
-            for item in items[:10]:
+            selected = [item for item in items if item.get("pinned")]
+            selected += [item for item in items if not item.get("pinned")][:10]
+            for item in selected:
                 value = _indent_continuation(str(item.get("preferred", "")))
-                lines.append(f"  · {item.get('concept', '')} → {value}（{item.get('update_count', 0)} 次）")
+                lines.append(f"  · {'[置顶] ' if item.get('pinned') else ''}{item.get('concept', '')} → {value}（{item.get('update_count', 0)} 次）")
     return "\n".join(lines)
 
 
@@ -135,6 +137,12 @@ def _fmt_memory_confirm(p: Dict[str, Any]) -> str:
     verb = "确认" if p.get("value", True) else "取消确认"
     ok = "成功" if p.get("confirmed") else "未找到"
     return f"{verb}纠正规则「{p.get('concept', '')}」：{ok}"
+
+
+def _fmt_memory_pin(p: Dict[str, Any]) -> str:
+    verb = "置顶" if p.get("pinned") else "取消置顶"
+    status = "成功" if p.get("updated") else "未找到"
+    return f"{verb}纠正规则「{p.get('concept', '')}」：{status}"
 
 
 def _fmt_memory_export(p: Dict[str, Any]) -> str:
@@ -653,6 +661,7 @@ _FORMATTERS: Dict[str, Any] = {
     "memory-list": _fmt_memory_list,
     "memory-delete": _fmt_memory_delete,
     "memory-confirm": _fmt_memory_confirm,
+    "memory-pin": _fmt_memory_pin,
     "memory-export": _fmt_memory_export,
     "memory-import": _fmt_memory_import,
     "working-set": _fmt_working,

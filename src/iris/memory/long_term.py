@@ -189,6 +189,35 @@ class CorrectionMemoryStore:
                 self._save(state)
         return updates
 
+    def select_for_prompt(self, *, limit: int = 10) -> List[Dict[str, Any]]:
+        """置顶全部在前、不占限额；普通项保持原顺序，最多 limit 条。
+
+        这是提示词选取上限，不是持久化存储容量。limit=0 仍返回置顶项。
+        """
+        rows = [{**item, "concept": concept}
+                for concept, item in self.load().get("items", {}).items()]
+        pinned = [row for row in rows if row.get("pinned")]
+        normal = [row for row in rows if not row.get("pinned")]
+        return pinned + normal[:max(0, limit)]
+
+    def pin(self, concept: str, *, pinned: bool = True) -> bool:
+        """人工置顶/取消置顶；不修改内容、纠正次数或内容更新时间。"""
+        concept = _clean_term(concept)
+        if not concept:
+            return False
+        with FileLock(self._path):
+            state = self._load_unlocked()
+            item = state.get("items", {}).get(concept)
+            if item is None:
+                return False
+            if bool(item.get("pinned")) == pinned:
+                return True
+            item["pinned"] = pinned
+            item["pinned_at"] = _now_iso() if pinned else ""
+            state["updated_at"] = _now_iso()
+            self._save(state)
+        return True
+
     def get_relevant(self, query: str, *, top_k: int = 5) -> List[Dict[str, str]]:
         state = self.load()
         items = state.get("items", {})
@@ -197,21 +226,24 @@ class CorrectionMemoryStore:
         query_lower = query.lower()
         matched = []
         unmatched = []
+        pinned = []
         for concept, item in items.items():
             payload = {
                 "concept": concept,
                 "preferred": str(item.get("preferred", "")),
                 "updated_at": str(item.get("updated_at", "")),
             }
-            if concept.lower() in query_lower or str(item.get("preferred", "")).lower() in query_lower:
+            if item.get("pinned"):
+                pinned.append(payload)
+            elif concept.lower() in query_lower or str(item.get("preferred", "")).lower() in query_lower:
                 matched.append(payload)
             else:
                 unmatched.append(payload)
         if matched:
             matched.sort(key=lambda item: item["concept"])
-            return matched[:top_k]
+            return pinned + matched[:max(0, top_k)]
         unmatched.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
-        return unmatched[:top_k]
+        return pinned + unmatched[:max(0, top_k)]
 
     def get_frequent_corrections(self, *, min_count: int = 3) -> List[Dict[str, Any]]:
         """获取反复纠正次数超过阈值的记录，用于自动摘要。"""

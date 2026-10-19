@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from iris.config.loader import ConfigBundle
+from iris.core.locks import FileLock
 from iris.memory.long_term import CorrectionMemoryStore, UserProfileMemoryStore
 
 
@@ -48,7 +49,9 @@ class MemoryLifecycle:
 
     @staticmethod
     def _is_item_stale(item: dict, cutoff: datetime) -> bool:
-        """判断记录是否已超期（updated_at < cutoff）。"""
+        """判断记录是否已超期；置顶项豁免自动老化。"""
+        if item.get("pinned"):
+            return False
         updated_str = item.get("updated_at", "")
         if not updated_str:
             return False
@@ -62,34 +65,35 @@ class MemoryLifecycle:
 
     def age(self, *, days: int = DEFAULT_CORRECTION_AGE_DAYS) -> Dict[str, Any]:
         """将超过 N 天未更新的纠正记录移至归档文件。"""
-        state = self._corrections.load()
-        items = state.get("items", {})
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        with FileLock(self._corrections._path), FileLock(self._archive_path):
+            state = self._corrections._load_unlocked()
+            items = state.get("items", {})
+            cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
-        archive = self._load_archive()
-        archived: List[str] = []
-        kept: Dict[str, Any] = {}
+            archive = self._load_archive()
+            archived: List[str] = []
+            kept: Dict[str, Any] = {}
 
-        for concept, item in items.items():
-            if self._is_item_stale(item, cutoff):
-                archive.setdefault("items", {})[concept] = item
-                archived.append(concept)
-            else:
-                kept[concept] = item
+            for concept, item in items.items():
+                if self._is_item_stale(item, cutoff):
+                    archive.setdefault("items", {})[concept] = item
+                    archived.append(concept)
+                else:
+                    kept[concept] = item
 
-        if archived:
-            archive["items"] = archive.get("items", {})
-            archive["updated_at"] = _now_iso()
-            self._save_archive(archive)
-            state["items"] = kept
-            state["updated_at"] = _now_iso()
-            self._corrections._save(state)
+            if archived:
+                archive["items"] = archive.get("items", {})
+                archive["updated_at"] = _now_iso()
+                self._save_archive(archive)
+                state["items"] = kept
+                state["updated_at"] = _now_iso()
+                self._corrections._save(state)
 
-        return {
-            "aged_count": len(archived),
-            "kept_count": len(kept),
-            "archived_concepts": archived,
-        }
+            return {
+                "aged_count": len(archived),
+                "kept_count": len(kept),
+                "archived_concepts": archived,
+            }
 
     def list_stale(self, *, days: int = DEFAULT_CORRECTION_AGE_DAYS) -> List[Dict[str, Any]]:
         """列出超期的纠正记录（不执行操作），供审核。"""
@@ -203,41 +207,42 @@ class MemoryLifecycle:
 
         incoming_corrections = incoming.get("corrections", {}).get("items", {})
         if incoming_corrections:
-            base = self._corrections.load()
-            base_items = base.setdefault("items", {})
+            with FileLock(self._corrections._path):
+                base = self._corrections._load_unlocked()
+                base_items = base.setdefault("items", {})
 
-            for concept, item in incoming_corrections.items():
-                concept_clean = concept.strip()
-                if not concept_clean:
-                    continue
+                for concept, item in incoming_corrections.items():
+                    concept_clean = concept.strip()
+                    if not concept_clean:
+                        continue
 
-                incoming_value = str(item.get("preferred", ""))
-                existing = base_items.get(concept_clean)
+                    incoming_value = str(item.get("preferred", ""))
+                    existing = base_items.get(concept_clean)
 
-                if existing:
-                    existing_value = str(existing.get("preferred", ""))
-                    if existing_value != incoming_value:
-                        if strategy in ("auto", "latest"):
-                            # auto 当前等价于 latest（时间戳优先）；后续可扩展为 LLM 辅助合并
-                            # 时间相等时新值优先，允许重新导入来纠正错误记录
-                            inc_time = _parse_iso(item.get("updated_at", ""))
-                            ext_time = _parse_iso(existing.get("updated_at", ""))
-                            if inc_time and ext_time and inc_time >= ext_time:
-                                base_items[concept_clean] = item
-                            elif inc_time and not ext_time:
-                                # 旧记录无时间戳时，新记录优先
-                                base_items[concept_clean] = item
-                        elif strategy == "keep_both":
-                            result.setdefault("conflicts", []).append({
-                                "concept": concept_clean,
-                                "existing": existing_value,
-                                "incoming": incoming_value,
-                            })
-                else:
-                    base_items[concept_clean] = item
-                    result["merged_concepts"] += 1
+                    if existing:
+                        existing_value = str(existing.get("preferred", ""))
+                        if existing_value != incoming_value:
+                            if strategy in ("auto", "latest"):
+                                # auto 当前等价于 latest（时间戳优先）；后续可扩展为 LLM 辅助合并
+                                # 时间相等时新值优先，允许重新导入来纠正错误记录
+                                inc_time = _parse_iso(item.get("updated_at", ""))
+                                ext_time = _parse_iso(existing.get("updated_at", ""))
+                                if inc_time and ext_time and inc_time >= ext_time:
+                                    base_items[concept_clean] = {**existing, **item}
+                                elif inc_time and not ext_time:
+                                    # 旧记录无时间戳时，新记录优先
+                                    base_items[concept_clean] = {**existing, **item}
+                            elif strategy == "keep_both":
+                                result.setdefault("conflicts", []).append({
+                                    "concept": concept_clean,
+                                    "existing": existing_value,
+                                    "incoming": incoming_value,
+                                })
+                    else:
+                        base_items[concept_clean] = item
+                        result["merged_concepts"] += 1
 
-            self._corrections._save(base)
+                self._corrections._save(base)
 
         incoming_profile = incoming.get("profile", {})
         if incoming_profile:
@@ -280,30 +285,30 @@ class MemoryLifecycle:
     # ── 归档管理 ──────────────────────────────────────────────────
 
     def restore_archived(self, concept: Optional[str] = None) -> int:
-        """从归档恢复纠正记录。"""
-        archive = self._load_archive()
-        if not archive.get("items"):
-            return 0
-
-        state = self._corrections.load()
-        items = state.setdefault("items", {})
-        count = 0
-
-        if concept:
-            if concept in archive.get("items", {}):
-                items[concept] = archive["items"].pop(concept)
-                count = 1
-        else:
-            for key, val in archive.get("items", {}).items():
-                items[key] = val
-            count = len(archive["items"])
-            archive["items"] = {}
-
-        if count:
-            self._corrections._save(state)
-            self._save_archive(archive)
-
-        return count
+        """从归档恢复内容，但保留当前记录的人工置顶/确认状态。"""
+        with FileLock(self._corrections._path), FileLock(self._archive_path):
+            archive = self._load_archive()
+            archived_items = archive.get("items", {})
+            if not archived_items:
+                return 0
+            state = self._corrections._load_unlocked()
+            items = state.setdefault("items", {})
+            keys = [concept] if concept else list(archived_items)
+            count = 0
+            for key in keys:
+                if key not in archived_items:
+                    continue
+                restored = dict(archived_items.pop(key))
+                existing = items.get(key, {})
+                for field in ("pinned", "pinned_at", "confirmed", "confirmed_at"):
+                    if field in existing:
+                        restored[field] = existing[field]
+                items[key] = restored
+                count += 1
+            if count:
+                self._corrections._save(state)
+                self._save_archive(archive)
+            return count
 
     def clear_archive(self) -> int:
         """清空归档。"""

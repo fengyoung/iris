@@ -18,9 +18,18 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+# 兼容直接运行脚本（未安装包、未设置 PYTHONPATH）。
+_SRC = Path(__file__).resolve().parent.parent / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
+
+from iris.core.locks import FileLock
+from iris.utils.shared import atomic_write_json
 
 
 # ── 常量 ────────────────────────────────────────────────────
@@ -424,7 +433,8 @@ def _sync_correction(state: _SyncState, fm: Dict[str, Any], body: str) -> None:
         return
 
     entry["update_count"] = existing.get("update_count", 0) + 1
-    state.correction_items[concept] = entry
+    # CC 只负责内容字段；pin/确认等人工元数据以 Iris 为准，不能由普通文本改写。
+    state.correction_items[concept] = {**existing, **entry}
     if existing:
         state.stats["corrections_updated"] += 1
         state.stats["details"].append(f"更新纠正: {concept}")
@@ -603,10 +613,28 @@ def run_sync(
     if not system_memory_dir.exists():
         return {"error": f"系统记忆目录不存在: {system_memory_dir}"}
 
-    # 加载 Iris 当前记忆
     profile_path = iris_memory_dir / "long_term" / "profile.json"
     corrections_path = iris_memory_dir / "long_term" / "corrections.json"
+    if dry_run:
+        # 只预览快照，不创建目录或锁文件，更不回写内容。
+        return _run_sync_snapshot(system_memory_dir, profile_path, corrections_path,
+                                  dry_run=True, reverse=reverse)
 
+    # 与 store 的锁路径相同，固定顺序获取；不能在读完快照后才加锁。
+    with FileLock(profile_path), FileLock(corrections_path):
+        return _run_sync_snapshot(system_memory_dir, profile_path, corrections_path,
+                                  dry_run=False, reverse=reverse)
+
+
+def _run_sync_snapshot(
+    system_memory_dir: Path,
+    profile_path: Path,
+    corrections_path: Path,
+    *,
+    dry_run: bool,
+    reverse: bool,
+) -> Dict[str, Any]:
+    """加载、合并并发布快照；实际写入时调用方须持有两个 Iris 文件锁。"""
     iris_profile = _load_json(profile_path, default={
         "iris_persona": {},
         "user_preferences": {"likes": [], "dislikes": [], "style_preferences": [], "notes": []},
@@ -642,8 +670,7 @@ def run_sync(
         state.finalize()
         if not dry_run:
             for path, payload in ((profile_path, iris_profile), (corrections_path, iris_corrections)):
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+                atomic_write_json(path, payload)
 
     stats = state.stats
     stats.update(reverse_stats)

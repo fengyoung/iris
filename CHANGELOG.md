@@ -1,3 +1,16 @@
+## v3.43.0 (2026-10-19) — 记忆置顶：长期规则免于自动老化，且不会被内容更新洗掉
+
+`daily-start` 每天执行记忆自治维护，把 `updated_at` 超过 90 天的纠正记录移入 `corrections_archive.json`。这条规则本意是清理一次性/临时性纠正，但无法区分「已经过期」与「本来就长期有效」——「双周报沉淀与发布规则」这类年度口径不会每天更新，到期后会在**没有任何告警**的情况下从 `iris ask` 的纠正召回与 `MemoryUpdater` 的记忆提取提示词中消失。触发改动的是一个具体场景：2026-10-18 把双周报的沉淀与发布规则沉淀进 Iris 长期记忆后，发现它约 2027-01-16 就会被静默归档。
+
+- **置顶模型**（`src/iris/memory/long_term.py`）：`corrections.json` 新增可选 `pinned` / `pinned_at`（旧记录无字段视为普通项）；新增 `memory-pin --concept <概念> [--unpin]`，置顶幂等、不增加 `update_count`、不改正文与内容更新时间；`memory-list` / `memory-status` 标注 `[置顶]`。
+- **老化豁免**（`src/iris/memory/lifecycle.py`）：`_is_item_stale()` 对置顶项直接返回 False，`age()` 不归档、`list_stale()` 不报告；取消置顶后按**内容更新时间**恢复原有老化计算——置顶操作不重置年龄，不会因置顶 90 天后再取消而额外续命。
+- **提示词与召回不占名额**：`select_for_prompt(limit)` 返回全部置顶项 + 最多 `limit` 条普通项；`get_relevant()` 置顶项无论是否命中查询都在前，普通项仍按原相关性逻辑取 `top_k`。避免一条长期规则把普通纠正挤出提示词。
+- **人工标记不会被内容更新洗掉**：正则 `apply_text_update`、LLM `MemoryUpdater._apply_corrections`、CC→Iris `sync_memory._sync_correction` 与 `MemoryLifecycle.merge` 都保留已有 `pinned` / `confirmed` 元数据；LLM 与普通 CC 文本不能自行置顶/取消置顶（显式导入元数据时以输入为准）。`restore_archived()` 用归档内容回填正文但保留当前记录的人工元数据；`memory-import --replace` 仍是完整替换，输入必须携带要保留的标记。
+- **同步并发加固**（`scripts/sync_memory.py`）：此前先读快照、再分别回写 profile 与 corrections，读到合并完成之间没有锁；dry-run 还会创建目录/锁文件。现读取、合并与两个文件的发布共用一组 `FileLock`（固定顺序），写回改 `atomic_write_json`，dry-run 只读快照、零写入。`age()` / `merge()` / `restore_archived()` 的读-改-写同样收进临界区。
+- **文档与测试**：新增 `docs/memory-pinning.md`（行为、操作与边界——置顶不等于确认，不屏蔽真实冲突）；新增 `tests/unit/test_memory_pinning.py` / `test_memory_pin_cli.py` / `test_sync_memory_pinning.py` 并补充既有测试，覆盖置顶持久化/幂等/老化/召回/提示词/导入元数据/同步并发/dry-run 零副作用。
+
+产品版本 3.42.2→**3.43.0**；协议版本 3.26→**3.27**（新增 `memory-pin` 命令）；数据版本不变（`config/*.json` schema 未变；`corrections.json` 仅新增可选字段，向后兼容）。全量单测 4,049→4,096 通过、覆盖率 74.00%→74.16%；Ruff（`src scripts tests`）、mypy（229 文件 0 错误）通过。
+
 ## v3.42.2 (2026-10-14) — ASR 校正实际走的是 zz 中转：force_model 按非唯一的 model 字段匹配
 
 ASR-Corrector 的 LLM 校正声称「强制指定 deepseek 官方 flash、跳过路由」，启动 banner 也照此打印，但 `force_model="deepseek-flash"` 实际命中的是 **`deepseek-flash-zz`（zz_tokenhub 中转）**。`ModelManager.find_model_by_name` 把**非唯一**的 `model` 字段与**唯一**的 `model_id` 按同等优先级匹配（`cfg_model == name or model_id == name`），而 `deepseek-flash-zz` 的 `model` 字段**就是** `"deepseek-flash"`（上游模型名），且它在 `llm.json` 里排在前面，于是先命中。这类失效没有任何信号：两条通道都可用、都能返回正确文本，只有 endpoint、密钥与耗时不同（官方 733ms / zz 2290ms），从输出上看不出差别。

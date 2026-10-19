@@ -86,13 +86,13 @@
 
 ③ 记忆自治维护                  daily-start /   按需        ❌ 手动
   MemoryLifecycle.maintenance()  memory-maintenance
-  └─ 老化检查（>90天未更新的纠正 → 归档）
+  └─ 老化检查（>90天未更新且未置顶的纠正 → 归档）
   └─ 摘要压缩（偏好列表 >10条 → 裁剪）
   └─ 冲突检测（同一概念纠正 ≥3次 → 标注）
   └─ 仅报告，不自动执行（除 --auto-age）
 
 ④ 手动管理                      CLI 命令        按需        ❌ 手动
-  memory-list / memory-delete / memory-export / memory-import
+  memory-list / memory-delete / memory-pin / memory-export / memory-import
 ```
 
 ### 1.3 核心差距

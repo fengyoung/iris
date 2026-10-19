@@ -51,6 +51,7 @@ def lifecycle(temp_memory_dir):
         mock_corrections = MagicMock()
         mock_corrections._path = corrections_path
         mock_corrections.load.return_value = correction_state
+        mock_corrections._load_unlocked.side_effect = lambda: mock_corrections.load.return_value
         MockCorrections.return_value = mock_corrections
 
         mock_profile = MagicMock()

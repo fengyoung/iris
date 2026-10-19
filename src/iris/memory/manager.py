@@ -7,8 +7,9 @@ from pathlib import Path
 from typing import Any, Dict
 
 from iris.config.loader import ConfigBundle
+from iris.core.locks import FileLock
 
-from .long_term import CorrectionMemoryStore, UserProfileMemoryStore, _atomic_write_json
+from .long_term import CorrectionMemoryStore, UserProfileMemoryStore, _atomic_write_json, _now_iso
 
 
 class LongTermMemoryManager:
@@ -24,11 +25,12 @@ class LongTermMemoryManager:
             items = [
                 {
                     "concept": concept,
+                    "pinned": bool(item.get("pinned")),
                     "preferred": str(item.get("preferred", "")),
                     "update_count": int(item.get("update_count", 0)),
                     "updated_at": str(item.get("updated_at", "")),
                 }
-                for concept, item in sorted(corrections.get("items", {}).items(), key=lambda pair: pair[0])
+                for concept, item in sorted(corrections.get("items", {}).items(), key=lambda pair: (not bool(pair[1].get("pinned")), pair[0]))
             ]
             return {"correction_count": len(items), "items": items}
         return {
@@ -44,6 +46,10 @@ class LongTermMemoryManager:
         """标记纠正记录为已人工确认，使其不再出现在冲突告警中。"""
         ok = self._corrections.confirm(concept, confirmed=confirmed)
         return {"concept": concept, "confirmed": ok, "value": confirmed}
+
+    def pin_correction(self, concept: str, *, pinned: bool = True) -> Dict[str, Any]:
+        ok = self._corrections.pin(concept, pinned=pinned)
+        return {"concept": concept, "updated": ok, "pinned": pinned}
 
     def export_to_file(self, output_path: Path) -> Path:
         payload = {
@@ -93,16 +99,20 @@ class LongTermMemoryManager:
     def _merge_corrections(self, incoming: Dict[str, Any]) -> None:
         if not incoming:
             return
-        base = self._corrections.load()
-        base_items = base.setdefault("items", {})
-        for concept, item in incoming.get("items", {}).items():
-            concept_text = str(concept).strip()
-            if not concept_text:
-                continue
-            base_items[concept_text] = {
-                "preferred": str(item.get("preferred", "")),
-                "update_count": int(item.get("update_count", 1)),
-                "updated_at": str(item.get("updated_at", "")),
-                "last_source": str(item.get("last_source", "")),
-            }
-        self._corrections.save(base)
+        with FileLock(self._corrections._path):
+            base = self._corrections._load_unlocked()
+            base_items = base.setdefault("items", {})
+            for concept, item in incoming.get("items", {}).items():
+                concept_text = str(concept).strip()
+                if not concept_text:
+                    continue
+                base_items[concept_text] = {
+                    **base_items.get(concept_text, {}),
+                    **item,
+                    "preferred": str(item.get("preferred", "")),
+                    "update_count": int(item.get("update_count", 1)),
+                    "updated_at": str(item.get("updated_at", "")),
+                    "last_source": str(item.get("last_source", "")),
+                }
+            base["updated_at"] = base.get("updated_at") or _now_iso()
+            self._corrections._save(base)

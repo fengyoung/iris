@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from iris.config.loader import ConfigBundle
+from iris.core.locks import FileLock
 from iris.memory import CorrectionMemoryStore, UserProfileMemoryStore
 from iris.qa.helpers import EXPLICIT_MEMORY_RE
 from iris.utils.llm_parsing import extract_json_object
@@ -153,7 +154,7 @@ class MemoryUpdater:
         """构建记忆提取 prompt。"""
         profile = self._profile_memory.load()
         prefs = profile.get("user_preferences", {})
-        corrections = self._correction_memory.load()
+        corrections = self._correction_memory.select_for_prompt()
 
         # 已有偏好
         existing_likes = "、".join(prefs.get("likes", [])[:10]) or "无"
@@ -162,14 +163,10 @@ class MemoryUpdater:
         existing_notes = "、".join(prefs.get("notes", [])[:5]) or "无"
 
         # 已有纠正规则
-        corrections_items = corrections.get("items", {})
-        if corrections_items:
-            correction_lines = []
-            for concept, item in list(corrections_items.items())[:10]:
-                correction_lines.append(f"  {concept} => {item.get('preferred', '')}")
-            existing_corrections = "\n".join(correction_lines)
-        else:
-            existing_corrections = "无"
+        existing_corrections = "\n".join(
+            f"  {item['concept']} => {item.get('preferred', '')}"
+            for item in corrections
+        ) or "无"
 
         # 从模板渲染
         from iris.utils.prompting import PromptTemplateLoader
@@ -295,31 +292,33 @@ class MemoryUpdater:
     def _apply_corrections(self, new_corrections: List[Dict[str, Any]]) -> List[str]:
         """写入纠正规则；update_count ≥ 3 触发 Phase 3 自动裁决。"""
         updates: List[str] = []
-        corrections = self._correction_memory.load()
-        items = corrections.setdefault("items", {})
-        for corr in new_corrections:
-            concept = str(corr.get("concept", "")).strip()
-            preferred = str(corr.get("preferred", "")).strip()
-            if not concept or not preferred or len(concept) > 40:
-                continue
-            existing = items.get(concept, {})
-            entry: Dict[str, Any] = {
-                "preferred": preferred,
-                "update_count": int(existing.get("update_count", 0)) + 1,
-                "updated_at": _now_iso(),
-                "last_source": f"[LLM] {corr.get('context', 'from conversation')}"
-            }
-            items[concept] = entry
+        with FileLock(self._correction_memory._path):
+            corrections = self._correction_memory._load_unlocked()
+            items = corrections.setdefault("items", {})
+            for corr in new_corrections:
+                concept = str(corr.get("concept", "")).strip()
+                preferred = str(corr.get("preferred", "")).strip()
+                if not concept or not preferred or len(concept) > 40:
+                    continue
+                existing = items.get(concept, {})
+                entry: Dict[str, Any] = {
+                    **existing,
+                    "preferred": preferred,
+                    "update_count": int(existing.get("update_count", 0)) + 1,
+                    "updated_at": _now_iso(),
+                    "last_source": f"[LLM] {corr.get('context', 'from conversation')}"
+                }
+                items[concept] = entry
 
-            # Phase 3：冲突自动解决 — 纠正 ≥ 3 次触发
-            update_count = int(entry["update_count"])
-            if update_count >= 3 and self._auto_resolve_conflict(concept, entry, items):
-                updates.append(f"LLM 提取纠正 + 自动裁决: {concept} => {preferred}")
-                continue
-            updates.append(f"LLM 提取纠正规则: {concept} => {preferred}")
+                # Phase 3：冲突自动解决 — 纠正 ≥ 3 次触发
+                update_count = int(entry["update_count"])
+                if update_count >= 3 and self._auto_resolve_conflict(concept, entry, items):
+                    updates.append(f"LLM 提取纠正 + 自动裁决: {concept} => {preferred}")
+                    continue
+                updates.append(f"LLM 提取纠正规则: {concept} => {preferred}")
 
-        corrections["updated_at"] = _now_iso()
-        self._correction_memory.save(corrections)
+            corrections["updated_at"] = _now_iso()
+            self._correction_memory._save(corrections)
         return updates
 
     # ── Phase 3：冲突自动解决 ──────────────────────────────────

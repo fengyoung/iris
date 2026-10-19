@@ -1,13 +1,21 @@
-# Iris 3.42.2
+# Iris 3.43.0
 
 > 主动情报体系（决策 / 备会 / 信号 / OKR 证据）设计见 [设计文档](docs/intelligence-upgrade-design.md)，用法见 [使用说明](docs/intelligence-upgrade-usage.md)；
-> 谁是卧底 Web 使用方法与恢复边界见 [Web 使用说明](docs/undercover-web-ui.md)，历史验收证据见 [验收记录](docs/undercover-beta-acceptance-20260917.md)。
+> 谁是卧底 Web 使用方法与恢复边界见 [Web 使用说明](docs/undercover-web-ui.md)，历史验收证据见 [验收记录](docs/undercover-beta-acceptance-20260917.md)；
+> 记忆置顶与老化豁免见 [记忆置顶说明](docs/memory-pinning.md)。
 
 工作知识助手 — 个人知识库（Obsidian Wiki）与飞书知识库集成。
 
 ## 最新动态
 
-**v3.42.2 (2026-10-14)** - ASR 校正实际走的是 zz 中转：force_model 按非唯一的 model 字段匹配：
+**v3.43.0 (2026-10-19)** - 记忆置顶：长期规则免于自动老化：
+- 🐛 **长期规则会被静默归档**：`daily-start` 每天把 `updated_at` 超过 90 天的纠正记录移入 `corrections_archive.json`。像「双周报沉淀与发布规则」这类长期口径不会每天更新，到期后会在**没有任何告警**的情况下从 `iris ask` 召回与记忆提取提示词中消失
+- ✅ **新增 `pinned` 置顶机制**：纠正记录支持 `pinned` / `pinned_at`，`memory-pin --concept <概念> [--unpin]` 人工置顶。置顶项免于自动老化、不出现在 `list_stale`，并在问答召回与记忆提取提示词中**不占普通名额**（置顶全部在前，普通项仍按原上限 5 / 10 条选取）
+- ✅ **人工标记不会被内容更新洗掉**：正则 / LLM 内容更新、CC→Iris 同步、普通合并导入都保留已有置顶与确认元数据；LLM 与普通 CC 文本不能自行置顶/取消置顶；`restore_archived` 以当前记录的人工元数据为准；`memory-import --replace` 仍是完整替换，输入须自带标记
+- ✅ **同步并发加固**：`sync-memory` 的读取、合并与两个文件的回写收进同一组 `FileLock`（profile + corrections），改用原子写；`dry-run` 不再创建目录或锁文件
+- ✅ **文档与测试**：新增 `docs/memory-pinning.md`；+47 测试（4,049→4,096、覆盖率 74.00%→74.16%）；产品版本 3.42.2 → **3.43.0**；协议版本 3.26 → **3.27**（新增 `memory-pin` 命令）；`corrections.json` 新增可选字段，向后兼容
+
+**上一版 v3.42.2 (2026-10-14)** - ASR 校正实际走的是 zz 中转：force_model 按非唯一的 model 字段匹配：
 - 🐛 **静默走错通道**：ASR-Corrector 的 LLM 校正声称「强制指定 deepseek 官方 flash、跳过路由」，启动 banner 也照此打印，但 `force_model="deepseek-flash"` 实际命中的是 **`deepseek-flash-zz`（zz_tokenhub 中转）**。`ModelManager.find_model_by_name` 把**非唯一**的 `model` 字段与**唯一**的 `model_id` 按同级匹配，而 `-zz` 条目的 `model` 字段**就是** `deepseek-flash`（上游模型名）且排在前面，于是先命中。**两条通道都能返回正确文本**，只有 endpoint / 密钥 / 耗时不同（官方 733ms vs zz 2290ms）——从输出上看不出差别
 - ✅ **匹配优先级修复**：`find_model_by_name` 改为两遍匹配——先精确 `model_id`、未命中再回退 `model` 字段；顺手把三处重复的 SecretStr 解包收敛为 `_build_entry`。全配置同型碰撞 3 组，其中 `deepseek-flash` 与 `qwen3.8-max` 属 `-zz` 排前面会误命中。代码库早知此歧义（`service.py` 的 `generate_as(role, model_id)` docstring 白纸黑字写着），但 `AsrCorrector` 依赖 `_deadline` 做实时超时预算、而 `generate_as` 不支持该参数，一直没切过去
 - ✅ **profile 清理**：`asr_profiles.json` 的 `llm.model` / `max_tokens` / `temperature` **无任何代码读取**（只有 `timeout_ms` 被消费），其中 `model: "deepseek-v4-flash"` 还是不存在的模型名——已移除并加说明；实际生效的一直是硬编码 `deepseek-flash` / `512` / `0.1`

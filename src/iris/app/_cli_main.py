@@ -25,7 +25,7 @@ COMMANDS = [
     "build-asr-prompt", "asr-corrector", "asr-audit", "asr-report",
     "meeting-live-assistant",
     "enrich-persons", "deep-eval",
-    "memory-status", "memory-list", "memory-delete", "memory-confirm",
+    "memory-status", "memory-list", "memory-delete", "memory-confirm", "memory-pin",
     "memory-maintenance",
     "memory-export", "memory-import", "working-set", "working-show",
     "working-clear", "process", "transcribe-meeting", "batch-transcribe", "daily-start",
@@ -93,7 +93,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="build-vector-index 全量重建向量索引（丢弃旧向量重新嵌入，embedding 模型变更后必须执行）")
     # 记忆系统
     parser.add_argument("--memory-type", default="all", choices=["all", "profile", "corrections"], help="memory-list 类型")
-    parser.add_argument("--concept", default="", help="memory-delete / memory-confirm 概念名")
+    parser.add_argument("--concept", default="", help="memory-delete / memory-confirm / memory-pin 概念名")
+    parser.add_argument("--unpin", action="store_true", help="memory-pin 取消置顶与豁免")
     parser.add_argument("--unconfirm", action="store_true",
                         help="memory-confirm 取消已确认标记")
     parser.add_argument("--replace", action="store_true", help="memory-import 覆盖模式")

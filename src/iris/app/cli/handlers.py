@@ -82,6 +82,7 @@ from iris.app.cli._handlers._system import (
     handle_memory_list,
     handle_memory_delete,
     handle_memory_confirm,
+    handle_memory_pin,
     handle_memory_maintenance,
     handle_memory_export,
     handle_memory_import,

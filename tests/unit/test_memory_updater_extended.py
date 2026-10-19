@@ -214,8 +214,10 @@ class TestApplyExtracted:
         updates = u._apply_extracted(extracted)
         assert any("备注" in upd for upd in updates)
 
-    def test_extracts_corrections(self):
+    def test_extracts_corrections(self, tmp_path):
         u, profile, correction = self._make_updater_with_mocks()
+        correction._path = tmp_path / "corrections.json"
+        correction._load_unlocked.return_value = {"items": {}}
         extracted = {
             "confidence": 0.85,
             "new_corrections": [
@@ -233,9 +235,11 @@ class TestApplyExtracted:
         assert updates == []
         profile.save.assert_not_called()
 
-    def test_empty_concept_skipped(self):
+    def test_empty_concept_skipped(self, tmp_path):
         """空白概念名被静默跳过。"""
         u, profile, correction = self._make_updater_with_mocks()
+        correction._path = tmp_path / "corrections.json"
+        correction._load_unlocked.return_value = {"items": {}}
         extracted = {
             "confidence": 0.8,
             "new_corrections": [

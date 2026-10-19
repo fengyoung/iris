@@ -403,8 +403,7 @@ def handle_memory_status(args, bundle, logger) -> int:
                "notes_count": len(profile.get("user_preferences", {}).get("notes", [])),
                "correction_count": len(corrections.get("items", {})),
                "correction_updated_at": corrections.get("updated_at"),
-               "sample_corrections": [{"concept": c, "preferred": str(v.get("preferred", ""))}
-                                       for c, v in list(corrections.get("items", {}).items())[:5]]}
+               "sample_corrections": correction_store.select_for_prompt(limit=5)}
     _emit_output(args.command, payload, pretty=args.pretty)
     return 0
 
@@ -431,6 +430,18 @@ def handle_memory_confirm(args, bundle, logger) -> int:
     confirmed = not getattr(args, "unconfirm", False)
     result = manager.confirm_correction(args.concept, confirmed=confirmed)
     if not result.get("confirmed"):
+        raise ValueError(f"未找到纠正记录: {args.concept}")
+    _emit_output(args.command, result, pretty=args.pretty)
+    return 0
+
+
+def handle_memory_pin(args, bundle, logger) -> int:
+    """人工置顶或取消置顶一条纠正规则。"""
+    if not args.concept.strip():
+        raise ValueError("memory-pin 需要 --concept")
+    result = LongTermMemoryManager(bundle).pin_correction(
+        args.concept, pinned=not getattr(args, "unpin", False))
+    if not result["updated"]:
         raise ValueError(f"未找到纠正记录: {args.concept}")
     _emit_output(args.command, result, pretty=args.pretty)
     return 0
@@ -683,6 +694,7 @@ SYSTEM_HANDLERS = {
     "memory-list": handle_memory_list,
     "memory-delete": handle_memory_delete,
     "memory-confirm": handle_memory_confirm,
+    "memory-pin": handle_memory_pin,
     "memory-maintenance": handle_memory_maintenance,
     "memory-export": handle_memory_export,
     "memory-import": handle_memory_import,
