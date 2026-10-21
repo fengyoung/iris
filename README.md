@@ -1,4 +1,4 @@
-# Iris 3.43.0
+# Iris 3.43.1
 
 > 主动情报体系（决策 / 备会 / 信号 / OKR 证据）设计见 [设计文档](docs/intelligence-upgrade-design.md)，用法见 [使用说明](docs/intelligence-upgrade-usage.md)；
 > 谁是卧底 Web 使用方法与恢复边界见 [Web 使用说明](docs/undercover-web-ui.md)，历史验收证据见 [验收记录](docs/undercover-beta-acceptance-20260917.md)；
@@ -8,7 +8,14 @@
 
 ## 最新动态
 
-**v3.43.0 (2026-10-19)** - 记忆置顶：长期规则免于自动老化：
+**v3.43.1 (2026-10-21)** - 独立缺陷修复：Anthropic 缓存 token 漏计与 SOURCE/_INDEX.md 自引用：
+- 🐛 **Anthropic 输入 token 漏计**：`input_tokens` 只是**未缓存余量**，缓存读写另计在 `cache_read_input_tokens` / `cache_creation_input_tokens`；OpenAI 的 `prompt_tokens` 则已含缓存命中。此前直接把前者当总输入写入用量库，经 zz 中转的 claude-opus-5-5 单次 cache_read 实测可达 5.7 万 token，**漏记约 95%**。现求和补齐，与 OpenAI 口径对齐
+- 🐛 **llm-bench 同名模型结果覆盖**：结果字典以 `model_id` 为键，同名模型出现在两个 role 时后跑结果会覆盖前者，最终行可能张冠李戴。改为 `(role, model_id)`；`ttft_cache` 仍按 `model_id` 输出以保持格式兼容
+- 🐛 **SOURCE/_INDEX.md 被当作用户文档**：自动生成的索引含时间戳，此前会被切块/嵌入并成为 Wiki 自引用证据，每次维护都被判为「已变更」而重切重嵌；`reminders` 又会因它 mtime 新而把项目永远判为活跃、**停滞提醒静默失效**。现统一按 `SOURCE_INDEX_FILENAME` / `is_generated_source_file()` 在扫描、监听、提醒与索引写出中排除（只匹配 SOURCE 根目录固定文件名）
+- ✅ **配套修复**：连通性测试改用 `generate_as` 精确路由；`list_secrets()` 补 `IRIS_*` 通道化密钥名；`llm.json.example` 清理与通道默认值重复的 `api_base_url`
+- ✅ **测试 +17**（4,096→4,113、覆盖率 74.16%→74.20%）；产品版本 3.43.0 → **3.43.1**；协议版本与数据格式不变
+
+**上一版 v3.43.0 (2026-10-19)** - 记忆置顶：长期规则免于自动老化：
 - 🐛 **长期规则会被静默归档**：`daily-start` 每天把 `updated_at` 超过 90 天的纠正记录移入 `corrections_archive.json`。像「双周报沉淀与发布规则」这类长期口径不会每天更新，到期后会在**没有任何告警**的情况下从 `iris ask` 召回与记忆提取提示词中消失
 - ✅ **新增 `pinned` 置顶机制**：纠正记录支持 `pinned` / `pinned_at`，`memory-pin --concept <概念> [--unpin]` 人工置顶。置顶项免于自动老化、不出现在 `list_stale`，并在问答召回与记忆提取提示词中**不占普通名额**（置顶全部在前，普通项仍按原上限 5 / 10 条选取）
 - ✅ **人工标记不会被内容更新洗掉**：正则 / LLM 内容更新、CC→Iris 同步、普通合并导入都保留已有置顶与确认元数据；LLM 与普通 CC 文本不能自行置顶/取消置顶；`restore_archived` 以当前记录的人工元数据为准；`memory-import --replace` 仍是完整替换，输入须自带标记

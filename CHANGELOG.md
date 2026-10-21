@@ -1,3 +1,17 @@
+## v3.43.1 (2026-10-21) — 独立缺陷修复：Anthropic 缓存 token 漏计与 SOURCE/_INDEX.md 自引用
+
+本版为独立缺陷修复，不新增功能。两条主线：**跨协议用量统计口径不一致**与**自动生成文件混入用户文档语料**。
+
+- **Anthropic 输入 token 漏计**（`src/iris/llm/provider.py`）：`input_tokens` **仅为未缓存余量**，缓存部分另计在 `cache_read_input_tokens` / `cache_creation_input_tokens`；而 OpenAI 的 `prompt_tokens` **已含**缓存命中（`cached_tokens` 是其子集）。此前直接把 Anthropic `input_tokens` 当作总输入写入用量库，两种语义混存同一列。经 zz_tokenhub 中转的 claude-opus-5-5 单次调用 cache_read 实测可达 5.7 万 token，漏计约 95%。现统一求和补齐，与 OpenAI 口径对齐。注意：若后续引入缓存分级单价（读 ~0.1x / 写 ~1.25x），不能直接复用该合计列，需分别记录三类 token。
+- **llm-bench 同名模型结果覆盖**（`src/iris/llm/benchmark.py`）：结果字典此前以 `model_id` 为键，同一 `model_id` 出现在两个 role 时，后跑的结果会覆盖前一个，最终行可能张冠李戴。改为 `(role, model_id)`；`ttft_cache` 仍按 `model_id` 输出以保持外部格式兼容（同名取最新值）。
+- **连通性测试精确路由**（`scripts/test_llm_connectivity.py`）：改用 `generate_as(role, model_id)`，不再依赖 `force_model` 按非唯一 `model` 字段匹配（与 v3.42.2 同源问题）。
+- **自动生成索引混入文档语料**（`src/iris/ingest/scanner.py`）：`SOURCE/_INDEX.md` 由 daily-start 自动维护、正文含生成时间戳，此前会被扫描/切块/嵌入，带来三个问题——① 成为检索证据，Wiki 可能生成「索引文件规定了目录」这类自引用内容；② 每次维护都判为「已变更」，导致每天重新切块、重新嵌入；③ `reminders` 对无日期文档回退取 mtime，项目关键词一旦命中其正文，项目会被永远判为「刚刚活跃」，停滞提醒静默失效；`watch` 也会把自身写入报成用户文档变更。现新增唯一判定 `SOURCE_INDEX_FILENAME` / `is_generated_source_file()`，只匹配 SOURCE 根目录下的固定文件名（子目录同名文件仍视为用户文档），接入 scanner / watcher / reminders / daily-start 索引写出点。
+- **密钥清单补全**（`src/iris/config/secrets.py`）：`list_secrets()` 补充 v3.37+ 通道化命名 `IRIS_DEEPSEEK_API_KEY` / `IRIS_BAILIAN_API_KEY` / `IRIS_ZZ_TOKENHUB_API_KEY`，保留旧名兼容。
+- **配置示例清理**（`config/llm.json.example`）：移除 zz_tokenhub 条目中与通道默认值重复的 `api_base_url`。
+- **测试**：补充 Anthropic 缓存 token 口径、`_INDEX.md` 排除（扫描/监听/提醒）与 benchmark 键冲突等回归用例，+17 测试；其中 `_INDEX.md` 排除与 token 口径用例实测在旧代码下失败。
+
+产品版本 3.43.0→**3.43.1**；协议版本保持 **3.27**，数据版本不变。全量单测 4,096→4,113 通过、覆盖率 74.16%→74.20%；Ruff（`src scripts tests`）与 mypy（229 文件 0 错误）通过。
+
 ## v3.43.0 (2026-10-19) — 记忆置顶：长期规则免于自动老化，且不会被内容更新洗掉
 
 `daily-start` 每天执行记忆自治维护，把 `updated_at` 超过 90 天的纠正记录移入 `corrections_archive.json`。这条规则本意是清理一次性/临时性纠正，但无法区分「已经过期」与「本来就长期有效」——「双周报沉淀与发布规则」这类年度口径不会每天更新，到期后会在**没有任何告警**的情况下从 `iris ask` 的纠正召回与 `MemoryUpdater` 的记忆提取提示词中消失。触发改动的是一个具体场景：2026-10-18 把双周报的沉淀与发布规则沉淀进 Iris 长期记忆后，发现它约 2027-01-16 就会被静默归档。
