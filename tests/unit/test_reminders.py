@@ -344,3 +344,24 @@ class TestParseYyyymmdd:
     def test_invalid(self):
         assert _parse_yyyymmdd("2026072") is None
         assert _parse_yyyymmdd("abcdefgh") is None
+
+
+# ─────────────────────────────────────────────────────────────
+# 生成制品不参与项目活跃度判定
+# ─────────────────────────────────────────────────────────────
+
+class TestGeneratedIndexNotProjectActivity:
+    def test_generated_index_does_not_mask_project_stall(self, tmp_path):
+        """_INDEX.md 每天被重写、日期回退取 mtime，不能作为项目活跃证据。
+
+        若它参与判定，命中的项目会被永远算成「今天刚活跃」，停滞提醒静默失效。
+        """
+        config, source_root = _make_config(tmp_path)
+        _write(source_root / "_INDEX.md", "# SOURCE 文档索引\n软硬一体项目说明")
+        _write(source_root / "05-会议纪要" / "20260101-软硬一体项目周会.md")
+
+        engine = ReminderEngine(config)
+        freshest = engine._source_dir_freshest(source_root, "项目-软硬一体")
+
+        assert freshest is not None
+        assert freshest.date() == datetime(2026, 1, 1).date()

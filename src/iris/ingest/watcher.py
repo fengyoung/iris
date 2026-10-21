@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Set
 
 from iris.config.loader import ConfigBundle
+from iris.ingest.scanner import is_generated_source_file
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,10 @@ class SourceWatcher:
                 if md_file.is_file():
                     try:
                         rel = str(md_file.relative_to(source_root))
+                        # Iris 自己生成的 SOURCE/_INDEX.md 每次维护都会被重写，
+                        # 若计入快照，`iris watch` 会把自身写入报成「用户文档变更」。
+                        if is_generated_source_file(rel):
+                            continue
                         files[rel] = md_file.stat().st_mtime
                     except OSError:
                         continue

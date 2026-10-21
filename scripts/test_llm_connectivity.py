@@ -55,10 +55,11 @@ class ModelTester:
 
             start_time = time.time()
 
-            # 使用 force_model 强制使用特定模型
-            response = self.llm_service.generate(
+            # 使用 generate_as 精确路由到 model_id，避免 force_model 按 model 字段歧义匹配
+            response = self.llm_service.generate_as(
+                role=role,
+                model_id=model_id,
                 prompt=self.test_prompt,
-                force_model=model_config.get("model"),
                 temperature=0.0,
                 max_tokens=100,
             )

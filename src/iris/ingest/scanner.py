@@ -14,6 +14,20 @@ from iris.config.loader import ConfigBundle
 
 logger = logging.getLogger(__name__)
 
+# Iris 在 SOURCE 根目录自动生成的索引文件（由 _build_source_index 写出）。
+# 它不是用户文档，若计入文档语料会带来两个问题：
+#   ① 被切块/嵌入后成为检索证据，Wiki 会据此生成「索引文件规定了目录…」这类自引用内容；
+#   ② 每次维护都会重写它（正文含生成时间戳），于是每次运行都被判定为「已变更」，
+#      导致每天都要重新切块、重新嵌入。
+# 只匹配 SOURCE 根目录下的固定文件名；子目录中的同名文件仍视为用户文档。
+SOURCE_INDEX_FILENAME = "_INDEX.md"
+GENERATED_SOURCE_FILES = frozenset({SOURCE_INDEX_FILENAME})
+
+
+def is_generated_source_file(relative_path: str | Path) -> bool:
+    """判断相对 SOURCE 根目录的路径是否为 Iris 自动生成的制品。"""
+    return Path(relative_path).as_posix() in GENERATED_SOURCE_FILES
+
 
 @dataclass(frozen=True)
 class DocumentRecord:
@@ -230,14 +244,17 @@ class MarkdownScanner:
                     continue
                 if _matches_any_pattern(candidate, source_root, exclude_patterns):
                     continue
+                relative_path = str(resolved.relative_to(source_root))
+                if is_generated_source_file(relative_path):
+                    continue
                 seen_paths.add(resolved)
                 stat = candidate.stat()
                 if stat.st_size > max_size_bytes:
                     continue
                 title = _extract_pdf_title(candidate) if file_format == "pdf" else _extract_markdown_title(candidate)
                 file_hash = _compute_sha256(candidate) if extract_hash else ""
-                records.append(DocumentRecord(source_name=source_name, path=str(candidate.resolve()),
-                                              relative_path=str(candidate.resolve().relative_to(source_root)),
+                records.append(DocumentRecord(source_name=source_name, path=str(resolved),
+                                              relative_path=relative_path,
                                               size_bytes=stat.st_size,
                                               modified_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
                                               file_hash=file_hash, title=title))

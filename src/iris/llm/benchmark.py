@@ -343,8 +343,12 @@ def run_benchmark(bundle, *, channel: str = "", model_ids: Optional[List[str]] =
     if not specs:
         raise ValueError("没有匹配的模型配置（检查 --channel / --bench-model）")
 
-    results: Dict[str, BenchResult] = {}
+    # 用 (role, model_id) 作为 key，避免同一 model_id 出现在两个 role 时互相覆盖
+    results: Dict[tuple, BenchResult] = {}
     cache = dict(ttft_cache) if ttft_cache else {}
+
+    def _spec_key(spec: ModelSpec) -> tuple:
+        return (spec.role, spec.model_id)
 
     # Phase1 连接速度（逐个顺序执行，无并发争抢，数据干净）
     if not phase2_only:
@@ -352,21 +356,22 @@ def run_benchmark(bundle, *, channel: str = "", model_ids: Optional[List[str]] =
             if progress:
                 progress(f"[连接] {spec.channel}/{spec.model_id}")
             r = run_ttft(spec)
-            results[spec.model_id] = r
+            results[_spec_key(spec)] = r
+            # ttft_cache 仍按 model_id 索引以保持外部格式兼容，同名取最新值
             cache[spec.model_id] = r.ttft_s if r.ok else None
         if phase1_only:
-            return {"rows": [row_to_dict(results[s.model_id]) for s in specs],
+            return {"rows": [row_to_dict(results[_spec_key(s)]) for s in specs],
                     "phase": "ttft", "ttft_cache": cache}
     else:
         for spec in specs:
             r = BenchResult(spec=spec)
             r.ttft_s = cache.get(spec.model_id)
-            results[spec.model_id] = r
+            results[_spec_key(spec)] = r
 
     # Phase2 吞吐（并行）
     def _one(spec: ModelSpec) -> BenchResult:
         prev = None
-        pr = results.get(spec.model_id)
+        pr = results.get(_spec_key(spec))
         if pr is not None and (pr.ok or pr.ttft_s is not None):
             prev = pr.ttft_s
         return run_tpm(spec, max_tokens=max_tokens, prev_ttft=prev)
@@ -375,12 +380,12 @@ def run_benchmark(bundle, *, channel: str = "", model_ids: Optional[List[str]] =
         futs = {ex.submit(_one, spec): spec for spec in specs}
         for idx, fut in enumerate(as_completed(futs), 1):
             spec = futs[fut]
-            results[spec.model_id] = fut.result()
+            results[_spec_key(spec)] = fut.result()
             if progress:
-                ok = results[spec.model_id].ok
+                ok = results[_spec_key(spec)].ok
                 progress(f"[吞吐 {idx}/{len(specs)}] {spec.channel}/{spec.model_id} "
-                         + ("完成" if ok else f"失败 {results[spec.model_id].error}"))
+                         + ("完成" if ok else f"失败 {results[_spec_key(spec)].error}"))
 
-    return {"rows": [row_to_dict(results[s.model_id]) for s in specs],
+    return {"rows": [row_to_dict(results[_spec_key(s)]) for s in specs],
             "phase": "full", "ttft_cache": cache,
             "concurrency": concurrency, "max_tokens": max_tokens}

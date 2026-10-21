@@ -9,11 +9,14 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+from iris.ingest.chunker import MarkdownChunker
 from iris.ingest.scanner import (
+    SOURCE_INDEX_FILENAME,
     MarkdownScanner,
     _compute_sha256,
     _extract_markdown_title,
     _matches_any_pattern,
+    is_generated_source_file,
 )
 
 
@@ -129,6 +132,31 @@ class TestScanSourceByName:
         summary = scanner.scan_source_by_name("test")
         assert summary.document_count == 0
 
+    def test_skips_generated_source_index(self, tmp_path):
+        """Iris 生成的 _INDEX.md 不计入文档语料（否则会被切块、嵌入成检索证据）。"""
+        source = tmp_path / "src"
+        source.mkdir()
+        (source / "_INDEX.md").write_text("# SOURCE 文档索引\n> 自动生成", encoding="utf-8")
+        (source / "doc.md").write_text("# 文档\n正文", encoding="utf-8")
+
+        scanner = MarkdownScanner(_make_config(source, tmp_path))
+        summary = scanner.scan_source_by_name("test")
+
+        assert [d.relative_path for d in summary.documents] == ["doc.md"]
+        assert summary.document_count == 1
+
+    def test_keeps_nested_index_like_file(self, tmp_path):
+        """子目录中的同名文件属于用户文档，不能被误删。"""
+        source = tmp_path / "src"
+        source.mkdir()
+        (source / "08-参考资料").mkdir()
+        (source / "08-参考资料" / "_INDEX.md").write_text("# 用户自己的索引", encoding="utf-8")
+
+        scanner = MarkdownScanner(_make_config(source, tmp_path))
+        summary = scanner.scan_source_by_name("test")
+
+        assert [d.relative_path for d in summary.documents] == ["08-参考资料/_INDEX.md"]
+
     def test_scan_all_enabled_sources(self, tmp_path):
         source = tmp_path / "src"
         source.mkdir()
@@ -151,3 +179,40 @@ class TestScanSummaryToDict:
         assert d["document_count"] == 1
         assert isinstance(d["documents"], list)
         assert d["documents"][0]["title"] == "A"
+
+
+# ── 生成制品判定 ────────────────────────────────────────────────
+
+class TestIsGeneratedSourceFile:
+    def test_matches_root_source_index(self):
+        assert is_generated_source_file(SOURCE_INDEX_FILENAME) is True
+
+    def test_matches_path_object(self):
+        assert is_generated_source_file(Path("_INDEX.md")) is True
+
+    def test_nested_same_name_is_user_document(self):
+        assert is_generated_source_file("08-参考资料/_INDEX.md") is False
+
+    def test_ordinary_document_unaffected(self):
+        assert is_generated_source_file("01-目标管理/20261009-Q3全面总结.md") is False
+
+
+# ── 端到端：生成制品不进入检索语料 ──────────────────────────────
+
+class TestGeneratedIndexNotChunked:
+    def test_generated_index_produces_no_chunks(self, tmp_path):
+        """_INDEX.md 不产生任何 chunk：检索语料里没有它。"""
+        source = tmp_path / "src"
+        source.mkdir()
+        (source / "_INDEX.md").write_text(
+            "# SOURCE 文档索引\n\n## 文档数量统计\n\n"
+            "| 目录 | 文档数 |\n|------|-------:|\n| 01-目标管理 | 12 |\n",
+            encoding="utf-8",
+        )
+        (source / "doc.md").write_text("# 文档\n正文内容", encoding="utf-8")
+
+        chunker = MarkdownChunker(_make_config(source, tmp_path))
+        summary = chunker.build_source_chunks("test")
+
+        assert {c.relative_path for c in summary.chunks} == {"doc.md"}
+        assert summary.document_count == 1

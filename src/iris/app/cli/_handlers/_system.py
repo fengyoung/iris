@@ -207,6 +207,7 @@ def _build_source_index(bundle, scan_summaries) -> dict:
     try:
         from iris.utils.paths import resolve_source_root
         from iris.core.write_guard import safe_write_text
+        from iris.ingest.scanner import SOURCE_INDEX_FILENAME
         from datetime import datetime, timezone
 
         source_root = resolve_source_root(bundle)
@@ -268,7 +269,7 @@ def _build_source_index(bundle, scan_summaries) -> dict:
             "",
         ]
 
-        index_path = source_root / "_INDEX.md"
+        index_path = source_root / SOURCE_INDEX_FILENAME
         safe_write_text(index_path, "\n".join(lines), bundle, allow_existing_outside=True)
         return {"status": "ok", "total": total, "groups": len(groups), "path": str(index_path)}
     except Exception as exc:

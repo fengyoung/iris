@@ -36,8 +36,7 @@
             "analysis_basic"
           ],
           "notes": "推理型：温度链吃额度，实测 16384 不出正文，32768 可用",
-          "provider": "openai",
-          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
+          "provider": "openai"
         },
         "deepseek-flash": {
           "channel": "deepseek",
@@ -140,8 +139,7 @@
             "analysis_basic"
           ],
           "notes": "openai 协议路径延迟偏高",
-          "provider": "openai",
-          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
+          "provider": "openai"
         },
         "glm-5.3-flash-zz": {
           "channel": "zz_tokenhub",
@@ -167,8 +165,7 @@
             "analysis_basic"
           ],
           "notes": "实测文本 1.9s / 图像 3.3s；额度过小(64)会陷入推理链",
-          "provider": "openai",
-          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
+          "provider": "openai"
         },
         "gpt-5.6-terra-zz": {
           "channel": "zz_tokenhub",
@@ -194,8 +191,7 @@
             "analysis_basic"
           ],
           "notes": "延迟波动大（实测 4.7s~100.1s，冷启动），timeout 需 300s",
-          "provider": "openai",
-          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
+          "provider": "openai"
         },
         "gpt-5.6-luna-zz": {
           "channel": "zz_tokenhub",
@@ -221,8 +217,7 @@
             "analysis_basic"
           ],
           "notes": "实测延迟可达 213.6s（两字回答），timeout 需 600s",
-          "provider": "openai",
-          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
+          "provider": "openai"
         },
         "claude-haiku-4-5-20251001-zz": {
           "channel": "zz_tokenhub",
@@ -302,8 +297,7 @@
             "analysis_basic"
           ],
           "notes": "2026-09-15 探测多次均 502（Upstream access forbidden / temporarily unavailable）；同批 gpt-5.6-terra 首测 502、复测成功 → 属上游间歇性波动，非模型名错误",
-          "provider": "openai",
-          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
+          "provider": "openai"
         },
         "deepseek-v4-pro-zz": {
           "channel": "zz_tokenhub",
@@ -327,8 +321,7 @@
             "analysis_complex"
           ],
           "notes": "【不支持图片】2026-09-15 实测图像能力不稳定（纯红偶答对，纯蓝/纯绿多次答「无法确定」），不参与图像链路；文本 1.7s；推理型，图像请求在 max_tokens=2048 下会被思考链耗尽预算",
-          "provider": "openai",
-          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
+          "provider": "openai"
         },
         "glm-5.3-zz": {
           "channel": "zz_tokenhub",
@@ -352,8 +345,7 @@
             "analysis_complex"
           ],
           "notes": "【不支持图片】2026-09-15 实测文本 2.9s；图像请求 HTTP 400（content.type 仅接受 text）→ multimodal=false",
-          "provider": "openai",
-          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
+          "provider": "openai"
         }
       }
     },
@@ -413,8 +405,7 @@
             "wiki_rebuild"
           ],
           "notes": "历史输出 p95=12878 / max=14604，max_tokens 需 ≥24576",
-          "provider": "openai",
-          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
+          "provider": "openai"
         },
         "qwen3.7-plus-zz": {
           "channel": "zz_tokenhub",
@@ -440,8 +431,7 @@
             "image_understanding"
           ],
           "notes": "跨通道合并样本历史输出 max=6615",
-          "provider": "openai",
-          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
+          "provider": "openai"
         },
         "qwen3.6-plus-zz": {
           "channel": "zz_tokenhub",
@@ -467,8 +457,7 @@
             "image_understanding"
           ],
           "notes": "样本少（历史 2 次），按同族保守取值",
-          "provider": "openai",
-          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
+          "provider": "openai"
         },
         "claude-fable-5-zz": {
           "channel": "zz_tokenhub",
@@ -549,8 +538,7 @@
             "conflict_resolution"
           ],
           "notes": "TTFT 极高：5 token 回答耗时 49s；评审类任务实测 80.7s",
-          "provider": "openai",
-          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
+          "provider": "openai"
         },
         "gpt-6-astra-zz": {
           "channel": "zz_tokenhub",
@@ -576,8 +564,7 @@
             "image_understanding"
           ],
           "notes": "实测文本 71.5s / 图像 52.9s，慢但可用",
-          "provider": "openai",
-          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
+          "provider": "openai"
         },
         "qwen3.8-max": {
           "channel": "bailian",
@@ -710,8 +697,7 @@
             "image_understanding"
           ],
           "notes": "2026-09-15 实测文本 9.8s / 图像 7.4s；同族 GPT 在 zz 上延迟方差大，timeout 取 300",
-          "provider": "openai",
-          "api_base_url": "https://your-tokenhub.example.com/codex/v1"
+          "provider": "openai"
         },
         "kimi-k2.6-zz": {
           "channel": "zz_tokenhub",

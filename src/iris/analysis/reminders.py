@@ -21,6 +21,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from iris.ingest.scanner import is_generated_source_file
+
 logger = logging.getLogger(__name__)
 
 # 文件名日期前缀：20260721-周报-w30-某人.md / 20260715-方案-xxx.md
@@ -244,6 +246,11 @@ class ReminderEngine:
         try:
             for path in source_root.rglob("*.md"):
                 if ".bak." in path.name:
+                    continue
+                # Iris 生成的 SOURCE/_INDEX.md 必须排除：它没有文件名日期，
+                # 日期回退取 mtime，而它每次维护都被重写——一旦某个项目关键词
+                # 命中其正文，该项目会被永远判为「刚刚活跃」，停滞提醒静默失效。
+                if is_generated_source_file(path.relative_to(source_root)):
                     continue
                 if not self._doc_matches(path, keywords):
                     continue

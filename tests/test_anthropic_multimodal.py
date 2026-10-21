@@ -171,3 +171,112 @@ class TestAnthropicMultimodal:
                 content_parts,
                 max_tokens=8192,
             )
+
+
+class TestAnthropicInputTokenAccounting:
+    """Anthropic usage 的输入 token 口径：须含缓存读写，与 OpenAI prompt_tokens 对齐。
+
+    Anthropic 的 input_tokens 只是「未缓存余量」，缓存部分另计。漏计不会报错，
+    只会让用量库少记——实测经中转的 claude-opus-5-5 单次 cache_read 可达 5.7 万。
+    """
+
+    def test_sums_cache_read_into_input_tokens(self):
+        from iris.llm.provider import _anthropic_input_tokens
+
+        # 真实抓包形态：input 2961 + cache_read 57672 = 60633
+        usage = {
+            "input_tokens": 2961,
+            "output_tokens": 3,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 57672,
+        }
+        assert _anthropic_input_tokens(usage) == 60633
+
+    def test_sums_cache_creation_into_input_tokens(self):
+        from iris.llm.provider import _anthropic_input_tokens
+
+        usage = {
+            "input_tokens": 100,
+            "cache_creation_input_tokens": 2048,
+            "cache_read_input_tokens": 0,
+        }
+        assert _anthropic_input_tokens(usage) == 2148
+
+    def test_plain_usage_without_cache_fields_unchanged(self):
+        """无缓存字段时须与旧行为一致，不能因求和引入偏差。"""
+        from iris.llm.provider import _anthropic_input_tokens
+
+        assert _anthropic_input_tokens({"input_tokens": 16, "output_tokens": 28}) == 16
+
+    def test_null_cache_fields_treated_as_zero(self):
+        """中转可能回传 null —— int(None) 会抛 TypeError，须按 0 处理。"""
+        from iris.llm.provider import _anthropic_input_tokens
+
+        usage = {
+            "input_tokens": 19,
+            "cache_read_input_tokens": None,
+            "cache_creation_input_tokens": None,
+        }
+        assert _anthropic_input_tokens(usage) == 19
+
+    def test_empty_usage_returns_zero(self):
+        from iris.llm.provider import _anthropic_input_tokens
+
+        assert _anthropic_input_tokens({}) == 0
+
+    def test_call_anthropic_reports_cache_inclusive_tokens(self, tmp_path):
+        """端到端：_call_anthropic 返回的 prompt_tokens 须为含缓存的总输入。"""
+        from iris.config.loader import make_config_bundle
+        from iris.llm.provider import EnvironmentConfiguredLLMProvider
+
+        bundle = make_config_bundle(
+            root=tmp_path,
+            app={"logging": {"log_to_file": False}, "paths": {"log_dir": "logs"}},
+            data_source={},
+            llm={
+                "version": "3.6",
+                "default_strategy": {
+                    "default_model_role": "adv_model",
+                    "fallback_model_role": "adv_model",
+                    "allow_auto_upgrade": True,
+                    "allow_auto_downgrade": True,
+                },
+                "models": {
+                    "adv_model": {
+                        "enabled": True,
+                        "default_model_id": "claude-test",
+                        "models": {
+                            "claude-test": {
+                                "channel": "test",
+                                "model": "claude-test-model",
+                                "provider": "anthropic",
+                                "api_base_url": "https://example.invalid",
+                                "api_key": "k",
+                                "max_tokens": 1024,
+                                "priority": 100,
+                            }
+                        },
+                    }
+                },
+                "routing": {"rules": []},
+            },
+        )
+        provider = EnvironmentConfiguredLLMProvider(bundle)
+
+        fake_response = {
+            "content": [{"type": "text", "text": "收到"}],
+            "usage": {
+                "input_tokens": 2961,
+                "output_tokens": 3,
+                "cache_read_input_tokens": 57672,
+                "cache_creation_input_tokens": 0,
+            },
+        }
+        with patch.object(provider, "_post_json", return_value=fake_response):
+            text, pt, ct = provider._call_anthropic(
+                "https://example.invalid", "k", "claude-test-model", "hi",
+                max_tokens=1024,
+            )
+        assert text == "收到"
+        assert pt == 60633, "prompt_tokens 必须含 cache_read，否则用量少记 95%"
+        assert ct == 3

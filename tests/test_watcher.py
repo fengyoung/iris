@@ -122,3 +122,46 @@ class TestSourceWatcher:
         watcher.poll()  # 首次
         events = watcher.poll()  # 无变更
         assert events == []
+
+
+class TestSourceWatcherGeneratedArtifacts:
+    """Iris 自己生成的 SOURCE/_INDEX.md 不应被当作「用户文档变更」。"""
+
+    def test_snapshot_excludes_generated_index(self, temp_project):
+        source_dir = temp_project / "SOURCE"
+        source_dir.mkdir()
+        (source_dir / "_INDEX.md").write_text("# SOURCE 文档索引", encoding="utf-8")
+        (source_dir / "doc.md").write_text("# 文档", encoding="utf-8")
+        bundle = _make_minimal_bundle(temp_project, source_dir)
+
+        snap = SourceWatcher(bundle).snapshot()
+
+        assert "doc.md" in snap["test"]
+        assert "_INDEX.md" not in snap["test"]
+
+    def test_generated_index_rewrite_produces_no_event(self, temp_project):
+        """每次维护都会重写 _INDEX.md，这不应产生任何事件。"""
+        source_dir = temp_project / "SOURCE"
+        source_dir.mkdir()
+        index = source_dir / "_INDEX.md"
+        index.write_text("# SOURCE 文档索引\n> 自动生成于 A", encoding="utf-8")
+        bundle = _make_minimal_bundle(temp_project, source_dir)
+
+        watcher = SourceWatcher(bundle)
+        watcher.poll()  # 建立快照
+
+        time.sleep(0.15)  # 确保 mtime 变化超过 0.1s 容差
+        index.write_text("# SOURCE 文档索引\n> 自动生成于 B", encoding="utf-8")
+
+        assert watcher.poll() == []
+
+    def test_nested_index_like_file_still_watched(self, temp_project):
+        """子目录中的同名文件属于用户文档，仍应被监听。"""
+        source_dir = temp_project / "SOURCE"
+        (source_dir / "08-参考资料").mkdir(parents=True)
+        (source_dir / "08-参考资料" / "_INDEX.md").write_text("# 用户自己的索引", encoding="utf-8")
+        bundle = _make_minimal_bundle(temp_project, source_dir)
+
+        snap = SourceWatcher(bundle).snapshot()
+
+        assert "08-参考资料/_INDEX.md" in snap["test"]

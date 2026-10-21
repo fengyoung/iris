@@ -183,7 +183,12 @@ def list_secrets() -> List[str]:
 
 # 常见 Iris 密钥名列表，按 .env.example 和环境变量约定同步维护
 _COMMON_SECRET_NAMES = [
+    # LLM API Keys (v3.37+ 通道化命名)
+    "IRIS_DEEPSEEK_API_KEY", "IRIS_BAILIAN_API_KEY", "IRIS_ZZ_TOKENHUB_API_KEY",
+    # 兼容旧名（遗留环境可能仍在使用）
     "DEEPSEEK_API_KEY", "BAILIAN_API_KEY",
-    "TRELLO_API_KEY", "TRELLO_TOKEN",
+    # 飞书
     "LARK_APP_ID", "LARK_APP_SECRET",
+    # Trello
+    "TRELLO_API_KEY", "TRELLO_TOKEN",
 ]

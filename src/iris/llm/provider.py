@@ -681,9 +681,8 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
             },
             max_retries=max_retries,
         )
-        # Anthropic API 用 input_tokens / output_tokens
         usage = data.get("usage", {})
-        pt = int(usage.get("input_tokens", 0))
+        pt = _anthropic_input_tokens(usage)
         ct = int(usage.get("output_tokens", 0))
         return _extract_anthropic_text(data), pt, ct
 
@@ -765,7 +764,7 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
         )
 
         usage = data.get("usage", {})
-        pt = int(usage.get("input_tokens", 0))
+        pt = _anthropic_input_tokens(usage)
         ct = int(usage.get("output_tokens", 0))
         return _extract_anthropic_text(data), pt, ct
 
@@ -834,3 +833,27 @@ def _extract_anthropic_text(payload: Dict[str, Any]) -> str:
     if text:
         return text
     raise LLMProviderError("Anthropic 响应中未找到可用文本输出")
+
+
+def _anthropic_input_tokens(usage: Dict[str, Any]) -> int:
+    """Anthropic usage → 总输入 token（含缓存读写），与 OpenAI 的 prompt_tokens 对齐口径。
+
+    两套协议的输入口径本不相同，若直接取各自的「主字段」会把两种语义混存进
+    用量库的同一列，使跨 provider 统计失真：
+
+    - OpenAI   ``prompt_tokens`` **已含**缓存命中（``prompt_tokens_details.cached_tokens``
+      是其子集），故直接取用即为总输入。
+    - Anthropic ``input_tokens`` **仅为未缓存余量**，缓存部分另计在
+      ``cache_read_input_tokens`` / ``cache_creation_input_tokens``。
+
+    因此这里求和补齐。实测经 zz_tokenhub 中转的 claude-opus-5-5 单次调用
+    cache_read 可达 5.7 万 token（上游注入前缀），若漏计则用量库少记约 95%。
+
+    注意：成本估算若引入缓存分级单价（读 ~0.1x / 写 ~1.25x），不能直接复用本列，
+    需改为分别记录三类 token。当前价格表为按 1k 的平铺单价、无缓存分级，故按总量计。
+    """
+    return (
+        int(usage.get("input_tokens", 0) or 0)
+        + int(usage.get("cache_read_input_tokens", 0) or 0)
+        + int(usage.get("cache_creation_input_tokens", 0) or 0)
+    )
