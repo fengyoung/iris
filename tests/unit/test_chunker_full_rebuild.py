@@ -107,7 +107,10 @@ class TestFullRebuildDropsDeadChunks:
         assert ALIVE_A in paths          # hash 相同 → 复用
         assert ALIVE_B in paths          # hash 变化 → 重建
         assert DEAD not in paths         # 死路径不得出现（回归核心断言）
-        assert result.build_stats["cleaned_documents"] == 0  # 全量 scan 无 deleted 概念
+        # 全量重建同样要统计被删文档：daily-start 据此触发 Wiki 发现。
+        # 旧实现只在增量分支算 cleaned_documents，全量模式恒为 0，
+        # 于是「只删不增」的一轮会被判成「无文档变更」而跳过发现。
+        assert result.build_stats["cleaned_documents"] == 1
 
     def test_incremental_keeps_unchanged_and_cleans_deleted(self, tmp_path):
         chunker = _make_chunker(tmp_path)
@@ -157,3 +160,101 @@ class TestFullRebuildDropsDeadChunks:
         b_hashes = {c.document_hash for c in result.chunks if c.relative_path == ALIVE_B}
         assert b_hashes == {"h2-new"}
         assert result.build_stats["rebuilt_documents"] == 1
+
+
+class TestCleanedDocumentsCounting:
+    """动机场景：只删不增也要产出 cleaned_documents（daily-start 据此触发发现）。"""
+
+    def test_full_rebuild_only_deletions(self, tmp_path):
+        chunker = _make_chunker(tmp_path)
+        _write_old_summary(chunker, [_chunk(ALIVE_A, "h1", 1), _chunk(DEAD, "h3", 1)])
+
+        summary = _scan_summary([_make_doc(tmp_path, ALIVE_A, "h1")])
+        result = chunker._build_chunks_from_scan(summary, incremental=False)
+
+        assert result.build_stats["rebuilt_documents"] == 0
+        assert result.build_stats["cleaned_documents"] == 1
+
+    def test_deleted_paths_and_removed_paths_not_double_counted(self, tmp_path):
+        chunker = _make_chunker(tmp_path)
+        _write_old_summary(chunker, [_chunk(ALIVE_A, "h1", 1), _chunk(ALIVE_B, "h2", 1)])
+
+        summary = _scan_summary([_make_doc(tmp_path, ALIVE_A, "h1")])
+        object.__setattr__(summary, "_deleted_paths", [ALIVE_B])
+        object.__setattr__(summary, "_full_snapshot", True)
+
+        result = chunker._build_chunks_from_scan(summary, incremental=True)
+
+        # B 先被 deleted_paths 从 previous 弹出，不会再被 removed_paths 统计一次
+        assert result.build_stats["cleaned_documents"] == 1
+        assert {c.relative_path for c in result.chunks} == {ALIVE_A}
+
+
+class TestHashIndexCleanup:
+    """已删文档的 hash 索引条目必须清除，否则 is_wiki_stale 永远判页面新鲜。"""
+
+    @staticmethod
+    def _seed_index(chunker: MarkdownChunker, entries: dict) -> Path:
+        path = chunker._metadata_dir / "chunk_hash_index.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(entries, ensure_ascii=False), encoding="utf-8")
+        return path
+
+    @staticmethod
+    def _build_and_write(chunker: MarkdownChunker, tmp_path: Path) -> None:
+        summary = _scan_summary([_make_doc(tmp_path, ALIVE_A, "h1")])
+        result = chunker._build_chunks_from_scan(summary, incremental=False)
+        chunker.write_summary(result)
+
+    def test_removed_document_purged(self, tmp_path):
+        chunker = _make_chunker(tmp_path)
+        _write_old_summary(chunker, [_chunk(ALIVE_A, "h1", 1), _chunk(DEAD, "h3", 1)])
+        index_path = self._seed_index(chunker, {
+            ALIVE_A: {"hash": "h1", "modified_at": "2026-08-01"},
+            DEAD: {"hash": "h3", "modified_at": "2026-08-01"},
+            "其他源/同名.md": {"hash": "other", "modified_at": "2026-08-01"},
+        })
+
+        self._build_and_write(chunker, tmp_path)
+
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        assert DEAD not in index, "已删文档的 hash 索引条目必须清除"
+        assert ALIVE_A in index
+        assert "其他源/同名.md" in index
+
+    def test_entry_owned_by_other_source_preserved(self, tmp_path):
+        """同 relative_path 的条目已被其他数据源写入（hash 不同）→ 不得误删。"""
+        chunker = _make_chunker(tmp_path)
+        _write_old_summary(chunker, [_chunk(ALIVE_A, "h1", 1), _chunk(DEAD, "h3", 1)])
+        index_path = self._seed_index(chunker, {
+            DEAD: {"hash": "other-source-hash", "modified_at": "2026-08-01"},
+        })
+
+        self._build_and_write(chunker, tmp_path)
+
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        assert index[DEAD]["hash"] == "other-source-hash"
+
+    def test_deleted_document_makes_page_stale(self, tmp_path):
+        """端到端语义：删除源文档 → 引用它的 Wiki 页面必须判过时。"""
+        from iris.wiki.discovery_utils import inject_source_fingerprint, is_wiki_stale
+
+        chunker = _make_chunker(tmp_path)
+        _write_old_summary(chunker, [_chunk(ALIVE_A, "h1", 1), _chunk(DEAD, "h3", 1)])
+        index_path = self._seed_index(chunker, {
+            ALIVE_A: {"hash": "h1", "modified_at": "2026-08-01"},
+            DEAD: {"hash": "h3", "modified_at": "2026-08-01"},
+        })
+        page = tmp_path / "概念-废弃.md"
+        page.write_text(
+            inject_source_fingerprint("---\ntitle: 概念-废弃\n---\n正文",
+                                      {ALIVE_A: "h1", DEAD: "h3"}),
+            encoding="utf-8",
+        )
+        before = json.loads(index_path.read_text(encoding="utf-8"))
+        assert is_wiki_stale(page, hash_index=before) is False
+
+        self._build_and_write(chunker, tmp_path)
+
+        after = json.loads(index_path.read_text(encoding="utf-8"))
+        assert is_wiki_stale(page, hash_index=after) is True

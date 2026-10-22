@@ -227,8 +227,9 @@ def _auto_discover_wiki(bundle, *, changed_count: int = 0) -> Dict[str, Any]:
         new_count = len([c for c in candidates if not c.has_wiki])
         if candidates:
             discovery.export_jsonl(candidates, auto_candidates_path)
+        # 口径是「发生变更的文档数」（重建 + 删除），不是数据源个数
         state = {"last_discover_at": dt.datetime.now().isoformat(),
-                 "changed_source_count": changed_count, "new_candidates": new_count}
+                 "changed_document_count": changed_count, "new_candidates": new_count}
         state_path.parent.mkdir(parents=True, exist_ok=True)
         state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
         return {"triggered": True, "changed_documents": changed_count, "new_candidates": new_count,

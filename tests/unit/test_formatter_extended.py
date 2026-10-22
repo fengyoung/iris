@@ -403,6 +403,18 @@ class TestFmtBuildChunks:
         assert "切块摘要" in result
         assert "主源" in result
         assert "100" in result
+        assert "清理已删" not in result
+
+    def test_shows_cleaned_documents(self):
+        """删除必须可见——「只删不增」不能与「没有变化」输出相同。"""
+        result = _fmt_build_chunks({
+            "sources": [{
+                "source_name": "主源",
+                "build_stats": {"reused_documents": 10, "rebuilt_documents": 0,
+                                "cleaned_documents": 3},
+            }],
+        })
+        assert "清理已删：3" in result
 
     def test_with_summary_path(self):
         result = _fmt_build_chunks({

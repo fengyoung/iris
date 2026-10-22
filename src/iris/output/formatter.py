@@ -273,7 +273,11 @@ def _fmt_build_chunks(p: Dict[str, Any]) -> str:
     for s in sources:
         stats = s.get("build_stats", {})
         lines.append(f"数据源：{s.get('source_name', '')} | 文档数：{s.get('document_count', 0)} | Chunk 数：{s.get('chunk_count', 0)}")
-        lines.append(f"  复用：{stats.get('reused_documents', 0)} | 重建：{stats.get('rebuilt_documents', 0)}")
+        stats_line = f"  复用：{stats.get('reused_documents', 0)} | 重建：{stats.get('rebuilt_documents', 0)}"
+        # 删除与「没变化」在输出上必须可区分（与 daily-start 扫描行口径一致）
+        if stats.get("cleaned_documents", 0):
+            stats_line += f" | 清理已删：{stats['cleaned_documents']}"
+        lines.append(stats_line)
         if s.get("summary_path"):
             lines.append(f"  摘要文件：{s['summary_path']}")
     return "\n".join(lines)
@@ -466,9 +470,14 @@ def _fmt_daily_scan(p: Dict[str, Any]) -> List[str]:
     total_chunks = sum(c.get("chunk_count", 0) for c in chunks_list)
     rebuilt = sum(c.get("rebuilt_documents", 0) for c in chunks_list)
     reused = sum(c.get("reused_documents", 0) for c in chunks_list)
+    cleaned = sum(c.get("cleaned_documents", 0) for c in chunks_list)
     head = f"扫描文档数：{total_docs}"
-    if rebuilt or reused:
-        head += f"（切块重建 {rebuilt}，复用 {reused}）"
+    if rebuilt or reused or cleaned:
+        parts = [f"切块重建 {rebuilt}", f"复用 {reused}"]
+        if cleaned:
+            # 删除必须可见：否则「只删不增」的一轮与「今天没变化」在输出上完全一样
+            parts.append(f"清理已删 {cleaned}")
+        head += "（" + "，".join(parts) + "）"
     return [head, f"Chunk 数：{total_chunks}"]
 
 

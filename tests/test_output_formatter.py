@@ -188,6 +188,15 @@ class TestDailyStartFormat:
         result = format_payload("daily-start", _daily_payload())
         assert "扫描文档数：1039（切块重建 15，复用 1024）" in result
 
+    def test_scan_line_shows_removed_documents(self):
+        """删除必须在扫描行可见——否则「只删不增」与「今天没变化」输出完全相同。"""
+        from iris.output.formatter import format_payload
+        payload = _daily_payload(chunks=[{"source_name": "main_source", "chunk_count": 7600,
+                                          "reused_documents": 1036, "rebuilt_documents": 0,
+                                          "cleaned_documents": 3}])
+        result = format_payload("daily-start", payload)
+        assert "扫描文档数：1039（切块重建 0，复用 1036，清理已删 3）" in result
+
     def test_vector_index_model_mismatch_is_visible(self):
         """model_mismatch 必须显式告警——旧实现下这条信息在 --pretty 里丢失。"""
         from iris.output.formatter import format_payload

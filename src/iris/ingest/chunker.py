@@ -88,6 +88,10 @@ class ChunkSummary:
     build_stats: Dict[str, int] = field(default_factory=dict)
     base_revision: Optional[str] = None
     generation: str = field(default_factory=lambda: uuid.uuid4().hex)
+    # 本次构建中被删除文档的旧 chunk hash（relative_path → hash 列表）。
+    # 不写入 to_dict：只在同一次 write_summary 的 write_hash_index 中消费，
+    # 用于清理 chunk_hash_index.json 里指向已删文档的死条目。
+    removed_path_hashes: Dict[str, List[str]] = field(default_factory=dict, repr=False)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"schema_version": 2, "generation": self.generation, "source_name": self.source_name, "scanned_at": self.scanned_at,
@@ -149,10 +153,14 @@ class MarkdownChunker:
 
         # 处理已删除文件（增量扫描时检测到的）
         deleted_paths = getattr(scan_summary, "_deleted_paths", [])
+        removed_path_hashes: Dict[str, List[str]] = {}
         if deleted_paths:
             cleaned_documents = len(deleted_paths)
             for rp in deleted_paths:
-                previous.pop(rp, None)
+                dropped = previous.pop(rp, None) or []
+                hashes = sorted({chunk.document_hash for chunk in dropped})
+                if hashes:
+                    removed_path_hashes[rp] = hashes
 
         for idx, document in enumerate(scan_summary.documents):
             if progress_callback:
@@ -179,17 +187,30 @@ class MarkdownChunker:
             for rp, cached_chunks in previous.items():
                 if rp not in changed_paths:
                     all_chunks.extend(cached_chunks)
-        elif incremental:
+        else:
+            # 全量快照（全量重建，或增量 + 完整源快照）：这两条路径里
+            # scan_summary.documents 都覆盖全部文档，因此 previous 中不在本次
+            # scan 的路径就是**已被删除**的文档，其 chunk 一并丢弃。
+            # 同时记入 cleaned_documents —— daily-start 据此触发 Wiki 发现：
+            # 若只按 rebuilt_documents 判定，「只删不增」的一轮会被判成
+            # 「无文档变更」而跳过发现，被删文档相关的候选无人复核。
             current_paths = {doc.relative_path for doc in scan_summary.documents}
-            cleaned_documents = len(set(previous) - current_paths)
+            removed_paths = sorted(set(previous) - current_paths)
+            cleaned_documents = len(removed_paths) + len(deleted_paths)
+            for rp in removed_paths:
+                removed_path_hashes[rp] = sorted({chunk.document_hash for chunk in previous[rp]})
+            if removed_paths:
+                logger.info("全量快照清理已删除文档的 chunk：%d 篇", len(removed_paths))
 
         all_chunks.sort(key=lambda item: (item.relative_path, item.line_start, item.segment_index))
         return ChunkSummary(source_name=scan_summary.source_name, scanned_at=scan_summary.scanned_at,
                             document_count=scan_summary.document_count, chunk_count=len(all_chunks),
-                            chunks=all_chunks, base_revision=base_revision, build_stats={"reused_documents": reused_documents,
-                                                            "rebuilt_documents": rebuilt_documents,
-                                                            "cleaned_documents": cleaned_documents,
-                                                            "rebuilt_paths": len(rebuilt_paths)})
+                            chunks=all_chunks, base_revision=base_revision,
+                            build_stats={"reused_documents": reused_documents,
+                                         "rebuilt_documents": rebuilt_documents,
+                                         "cleaned_documents": cleaned_documents,
+                                         "rebuilt_paths": len(rebuilt_paths)},
+                            removed_path_hashes=removed_path_hashes)
 
     def write_summary(self, summary: ChunkSummary) -> Path:
         self._metadata_dir.mkdir(parents=True, exist_ok=True)
@@ -232,6 +253,15 @@ class MarkdownChunker:
                 # 供 Wiki source_fingerprint 过时判定使用
                 if entry is None or entry.get("hash") != chunk.document_hash:
                     index[rp] = {"hash": chunk.document_hash, "modified_at": scan_modified.get(rp, summary.scanned_at)}
+            # 清理已删文档的条目：只 upsert 不删除的话，条目会永久留在索引里，
+            # is_wiki_stale 见条目仍在且 hash 与页面 source_fingerprint 一致，
+            # 就把页面判成「新鲜」——源文档删除后页面永远不会被重审。
+            # 索引跨数据源共享且仅以 relative_path 为键，故只在条目 hash 确实
+            # 对得上被删文档时才删，避免误删另一数据源同相对路径的条目。
+            for rp, hashes in summary.removed_path_hashes.items():
+                entry = index.get(rp)
+                if entry is not None and entry.get("hash") in hashes:
+                    del index[rp]
             from iris.utils.shared import atomic_write_json
             atomic_write_json(index_path, index)
         return index_path

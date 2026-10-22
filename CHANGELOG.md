@@ -1,3 +1,16 @@
+## v3.43.2 (2026-10-22) — 删除源文档不再静默跳过 Wiki 复审
+
+本版为独立缺陷修复，不新增功能。背景是一处**只在删除时发作**的静默跳过：`daily-start` 的自动 Wiki 发现只按 `rebuilt_documents` 判定「有无文档变更」，清理废弃 / 已合并文档时重建数为 0，整轮被当成「今天没变化」；而 `chunk_hash_index.json` 只做 upsert、从不清理，已删文档条目永久残留，`is_wiki_stale` 见条目仍在且 hash 与页面 `source_fingerprint` 一致，就一直判页面「新鲜」。结果是删除在**发现、过时判定、页面更新**三层上都没有任何失败信号。
+
+- **删除计入变更数**（`src/iris/ingest/chunker.py`）：全量快照路径（全量重建，或增量 + 完整源快照）统一计算 `removed_paths` 并计入 `cleaned_documents`；与增量扫描的 `_deleted_paths` 相加前先弹出 `previous`，避免重复计数。
+- **触发 Wiki 发现**（`src/iris/app/cli/_handlers/_system.py`）：`_auto_discover_wiki_for_daily` 的 `changed_count` 改为「重建 + 删除」，只删不增的一轮也会重跑候选发现。
+- **清理 hash 索引死条目**（`src/iris/ingest/chunker.py`）：`ChunkSummary` 携带 `removed_path_hashes`（不写入 `to_dict`），`write_hash_index` 在原有 `FileLock` 临界区内删除已删文档条目——只在条目 hash 与被删文档旧 hash 一致时删除，避免误删另一数据源同相对路径的条目。页面由此真正判过时，`update_all_pages` 与增量发现不再跳过复审。
+- **删除可见**（`src/iris/output/formatter.py`）：daily-start 扫描行显示「清理已删 N」，`build-chunks` 摘要同步显示；`wiki_discover_state.json` 的 `changed_source_count` 更名为 `changed_document_count`（口径一直是文档数）。
+- **同版工程项**：项目级 Skill 共享（Claude Code + DSH）——`.claude/skills/` 为唯一真身，新增 `.agents/skills -> ../.claude/skills` 软链；约定只允许目录包 `<name>/SKILL.md`、frontmatter 只写交集、正文路径以项目根为基准；`.dockerignore` 排除 `.agents/`，各 `SKILL.md` 补「命令在项目根目录执行」。
+- **测试**：新增只删不增、`_deleted_paths` 与全量快照去重、hash 索引清理（死条目 / 跨数据源保留 / 页面变 stale）、格式化显示等回归用例；关键断言实测在旧代码下失败。
+
+产品版本 3.43.1→**3.43.2**；协议版本保持 **3.27**，数据版本不变。全量单测 4,113→4,124 通过、覆盖率 74.20%→74.23%；Ruff（`src scripts tests`）与 mypy 通过。
+
 ## v3.43.1 (2026-10-21) — 独立缺陷修复：Anthropic 缓存 token 漏计与 SOURCE/_INDEX.md 自引用
 
 本版为独立缺陷修复，不新增功能。两条主线：**跨协议用量统计口径不一致**与**自动生成文件混入用户文档语料**。

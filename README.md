@@ -1,4 +1,4 @@
-# Iris 3.43.1
+# Iris 3.43.2
 
 > 主动情报体系（决策 / 备会 / 信号 / OKR 证据）设计见 [设计文档](docs/intelligence-upgrade-design.md)，用法见 [使用说明](docs/intelligence-upgrade-usage.md)；
 > 谁是卧底 Web 使用方法与恢复边界见 [Web 使用说明](docs/undercover-web-ui.md)，历史验收证据见 [验收记录](docs/undercover-beta-acceptance-20260917.md)；
@@ -8,7 +8,14 @@
 
 ## 最新动态
 
-**v3.43.1 (2026-10-21)** - 独立缺陷修复：Anthropic 缓存 token 漏计与 SOURCE/_INDEX.md 自引用：
+**v3.43.2 (2026-10-22)** - 删除源文档不再静默跳过 Wiki 复审：
+- 🐛 **只删不增被判成「无变化」**：`daily-start` 的自动 Wiki 发现此前只按 `rebuilt_documents` 判断，清理废弃 / 已合并文档时重建数为 0，整轮被当成「今天没变化」而跳过发现。现在删除也计入 `cleaned_documents`，并作为变更数触发候选发现
+- 🐛 **hash 索引死条目让页面永远「新鲜」**：`chunk_hash_index.json` 只 upsert、从不清理，`is_wiki_stale` 见条目仍在且 hash 与页面 `source_fingerprint` 一致就一直跳过复审。现在 `write_hash_index` 在同一 `FileLock` 临界区删除已删文档条目（仅当条目 hash 与被删文档旧 hash 一致时删除，避免误删其他数据源同相对路径的条目）
+- ✅ **删除可见**：daily-start 扫描行与 `build-chunks` 摘要显示「清理已删 N」；`wiki_discover_state.json` 的字段更名为 `changed_document_count`
+- 🔧 **同版工程项**：项目级 Skill 由 Claude Code + DSH 共用——`.claude/skills/` 为唯一真身、新增 `.agents/skills` 软链，frontmatter 只写双方交集
+- ✅ **测试 +11**（4,113→4,124、覆盖率 74.20%→74.23%）；产品版本 3.43.1 → **3.43.2**；协议版本与数据格式不变
+
+**上一版 v3.43.1 (2026-10-21)** - 独立缺陷修复：Anthropic 缓存 token 漏计与 SOURCE/_INDEX.md 自引用：
 - 🐛 **Anthropic 输入 token 漏计**：`input_tokens` 只是**未缓存余量**，缓存读写另计在 `cache_read_input_tokens` / `cache_creation_input_tokens`；OpenAI 的 `prompt_tokens` 则已含缓存命中。此前直接把前者当总输入写入用量库，经 zz 中转的 claude-opus-5-5 单次 cache_read 实测可达 5.7 万 token，**漏记约 95%**。现求和补齐，与 OpenAI 口径对齐
 - 🐛 **llm-bench 同名模型结果覆盖**：结果字典以 `model_id` 为键，同名模型出现在两个 role 时后跑结果会覆盖前者，最终行可能张冠李戴。改为 `(role, model_id)`；`ttft_cache` 仍按 `model_id` 输出以保持格式兼容
 - 🐛 **SOURCE/_INDEX.md 被当作用户文档**：自动生成的索引含时间戳，此前会被切块/嵌入并成为 Wiki 自引用证据，每次维护都被判为「已变更」而重切重嵌；`reminders` 又会因它 mtime 新而把项目永远判为活跃、**停滞提醒静默失效**。现统一按 `SOURCE_INDEX_FILENAME` / `is_generated_source_file()` 在扫描、监听、提醒与索引写出中排除（只匹配 SOURCE 根目录固定文件名）
@@ -390,11 +397,15 @@ iris3/
 │   ├── integration/    #   集成测试（248 用例）
 │   └── （顶层）        #   按模块组织的端到端/回归测试；全项目 integration 1,202 项
 ├── config/             # *.json gitignored，*.example 版本控制
+├── .claude/skills/     # 项目级 Skill 真身（10 个，CC 原生读取）
+├── .agents/skills      # → ../.claude/skills（软链，DSH 入口）
 ├── .github/workflows/  # CI 流水线（Python 3.11-3.13 矩阵）
 ├── Makefile            # 常用开发命令
 ├── Dockerfile          # 非 root CLI 运行镜像
 └── pyproject.toml      # 项目配置 + pytest/coverage/ruff 设置
 ```
+
+> **项目级 Skill 共享**：`.claude/skills/` 是唯一真身（Claude Code 原生读取）；DSH 通过 `.agents/skills -> ../.claude/skills` 软链读取同一目录，两个工具共用同一份 `SKILL.md`。只允许目录包 `<name>/SKILL.md`，禁止扁平 `<name>.md`；frontmatter 只写双方交集。详见 [CLAUDE.md](CLAUDE.md) 的「项目级 Skill 共享（Claude Code + DSH）」。
 
 ## 版本历史
 

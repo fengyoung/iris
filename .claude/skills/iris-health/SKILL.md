@@ -12,6 +12,8 @@ metadata:
 
 定期巡检知识库质量，包含三个维度：结构健康（lint）、内容质量（deep-eval）、人物完整度（enrich-persons）。
 
+> 所有命令均在 iris3 项目根目录执行（cwd = 仓库根目录）。
+
 ## 检查维度
 
 ### 1. 结构健康 (`wiki-lint`)

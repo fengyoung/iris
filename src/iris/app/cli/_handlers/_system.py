@@ -92,7 +92,9 @@ def handle_daily_start(args, bundle, logger) -> int:
                    "scan": scan_info,
                    "chunks": [{"source_name": cs.source_name, "chunk_count": cs.chunk_count,
                                 "reused_documents": cs.build_stats.get("reused_documents", 0),
-                                "rebuilt_documents": cs.build_stats.get("rebuilt_documents", 0)} for cs in chunk_summaries],
+                                "rebuilt_documents": cs.build_stats.get("rebuilt_documents", 0),
+                                "cleaned_documents": cs.build_stats.get("cleaned_documents", 0)}
+                               for cs in chunk_summaries],
                    "vector_index": vector_index_result,
                    "source_index": source_index_result,
                    "wiki_discover": _auto_discover_wiki_for_daily(bundle, chunk_summaries),
@@ -277,10 +279,15 @@ def _build_source_index(bundle, scan_summaries) -> dict:
 
 
 def _auto_discover_wiki_for_daily(bundle, chunk_summaries) -> dict:
-    """Wiki 自动发现（封装 helpers 调用）。"""
+    """Wiki 自动发现（封装 helpers 调用）。
+
+    变更计数合并「重建」与「删除」两类：只删不增的一轮（例如清理废弃或已合并的
+    文档）同样要让发现链路重跑，否则被删文档相关的候选与页面无人复核。
+    """
     from iris.app.cli.helpers import _auto_discover_wiki
     total_rebuilt = sum(cs.build_stats.get("rebuilt_documents", 0) for cs in chunk_summaries)
-    return _auto_discover_wiki(bundle, changed_count=total_rebuilt)
+    total_removed = sum(cs.build_stats.get("cleaned_documents", 0) for cs in chunk_summaries)
+    return _auto_discover_wiki(bundle, changed_count=total_rebuilt + total_removed)
 
 
 def _daily_wiki_maintenance(bundle, chunk_summaries) -> tuple:

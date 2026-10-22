@@ -12,6 +12,8 @@ metadata:
 
 一键执行 Iris 知识库的完整日常维护管道，涵盖记忆、索引、Wiki、图谱、用量、提醒六大模块。
 
+> 所有命令均在 iris3 项目根目录执行（cwd = 仓库根目录）。
+
 ## 执行命令
 
 ```bash
@@ -95,6 +97,7 @@ python3 scripts/run_cli.py --call-source skill daily-start --pretty
 
 - `scan[N].document_count` — 各数据源扫描到的文档数
 - `chunks[N].rebuilt_documents` — 有变更需重新切块的文档数（>0 意味着有新内容）
+- `chunks[N].cleaned_documents` — 被删除的源文档数（>0 同样触发 Wiki 发现，即使没有任何重建）
 - `wiki_discover.candidates` — 自动发现的 Wiki 候选数（有候选时建议后续跑 iris-wiki）
 - `wiki_update.status` — Wiki 增量更新是否成功
 - `usage_summary.budget_warning` — 如果出现，说明本月 token 已超预算
