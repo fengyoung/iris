@@ -26,7 +26,14 @@ def gen(tmp_path):
     g._llm = Mock()
     g._llm.generate.return_value = SimpleNamespace(text=page())
     g._retriever = Mock()
-    g._retriever.search.return_value = SimpleNamespace(hits=[])
+    # 有证据是增量更新的正常前提：零证据时生成器会早退为 no_evidence（不调 LLM），
+    # 这些用例要覆盖的是「写入 + 备份 + 无效更新拒绝 + 批量隔离」，故给一条命中。
+    g._retriever.search.return_value = SimpleNamespace(hits=[SimpleNamespace(
+        relative_path="05-会议纪要/2026-09/质量周会.md",
+        title="质量周会",
+        content_preview="质量相关事实内容",
+    )])
+    g._enhanced_retriever = None
     g._retriever.latest_documents.return_value = []
     return g
 

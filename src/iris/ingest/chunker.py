@@ -262,6 +262,12 @@ class MarkdownChunker:
                 entry = index.get(rp)
                 if entry is not None and entry.get("hash") in hashes:
                     del index[rp]
+            # 死条目清理（历史目录重排 / 改名留下的旧键）：判据是文件在任一
+            # 启用源根下都不存在，且不是 iCloud 逐出占位符；任一根不可见时整体
+            # 跳过，避免外接盘未挂载时把整库条目清空。
+            index, prune_report = self.filter_dead_entries(index, self._source_roots(self._config))
+            if prune_report.get("pruned"):
+                logger.info("chunk_hash_index 清理死条目：%d 条", prune_report["pruned"])
             from iris.utils.shared import atomic_write_json
             atomic_write_json(index_path, index)
         return index_path
@@ -272,6 +278,104 @@ class MarkdownChunker:
         if not index_path.exists():
             return {}
         return json.loads(index_path.read_text(encoding="utf-8"))
+
+    # ── 死条目清理 ────────────────────────────────────────────────
+    # 索引键是「相对某个源根」的路径，只会 upsert，因此历史上因目录重排
+    # （如 `01-目标管理/xxx.md` → `01-目标管理/2026/xxx.md`）留下的旧键永远
+    # 不会消失。这些死键本身不产生错误，但会让索引规模偏离真实文档量，也让
+    # 「文档被删除」与「路径变了」这两件事在索引里无法区分。
+    # 清理判据只能是「文件确实不存在于任何一个启用的源根」——不能按本次扫描
+    # 路径判断（索引跨数据源共享，按扫描路径会误删其它数据源的条目）。
+
+    @staticmethod
+    def _source_roots(config: Any) -> List[Path]:
+        # 单测常用 object.__new__ + _config=None 构造 chunker，这里必须容错。
+        # 拿不到源根时 filter_dead_entries 会整体跳过（不做任何删除）。
+        data_source = getattr(config, "data_source", None)
+        if not isinstance(data_source, dict):
+            return []
+        roots: List[Path] = []
+        for cfg in (data_source.get("sources") or {}).values():
+            if not cfg.get("enabled", True):
+                continue
+            raw = cfg.get("path")
+            if not raw:
+                continue
+            root = Path(raw).expanduser()
+            if root not in roots:
+                roots.append(root)
+        return roots
+
+    @staticmethod
+    def _is_icloud_evicted(roots: List[Path], rel_path: str) -> bool:
+        """iCloud 逐出文件的占位符（`.name.icloud`）不是删除，不能清理。"""
+        try:
+            path = Path(rel_path)
+            placeholder = f".{path.name}.icloud"
+            return any((root / path.parent / placeholder).exists() for root in roots)
+        except (OSError, ValueError):
+            return False
+
+    @classmethod
+    def filter_dead_entries(cls, index: Dict[str, Dict[str, str]],
+                            roots: List[Path]) -> tuple[Dict[str, Dict[str, str]], Dict[str, Any]]:
+        """过滤掉指向不存在文件的条目；纯计算，不落盘。"""
+        report: Dict[str, Any] = {
+            "status": "ok",
+            "total": len(index),
+            "pruned": 0,
+            "kept": len(index),
+            "evicted_kept": 0,
+            "samples": [],
+        }
+        existing_roots = [root for root in roots if root.is_dir()]
+        if not roots or len(existing_roots) != len(roots):
+            # 任一源根不可见时全量判「文件不存在」会把整库条目清空
+            # （外接盘未挂载 / iCloud 未下载），宁可不动。
+            report["status"] = "skipped_missing_roots"
+            report["missing_roots"] = [str(r) for r in roots if not r.is_dir()]
+            return index, report
+
+        surviving: Dict[str, Dict[str, str]] = {}
+        samples: List[str] = []
+        for rel_path, entry in index.items():
+            if any((root / rel_path).exists() for root in existing_roots):
+                surviving[rel_path] = entry
+                continue
+            if cls._is_icloud_evicted(existing_roots, rel_path):
+                surviving[rel_path] = entry
+                report["evicted_kept"] += 1
+                continue
+            report["pruned"] += 1
+            if len(samples) < 5:
+                samples.append(rel_path)
+        report["kept"] = len(surviving)
+        report["samples"] = samples
+        return surviving, report
+
+    @classmethod
+    def prune_dead_entries(cls, config: ConfigBundle, *, dry_run: bool = True) -> Dict[str, Any]:
+        """一次性清理 chunk_hash_index 里指向不存在文件的条目。"""
+        index_path = config.root / "data" / "metadata" / "chunk_hash_index.json"
+        if not index_path.exists():
+            return {"status": "missing_index", "path": str(index_path)}
+        from iris.core.locks import FileLock
+        from iris.utils.shared import atomic_write_json
+
+        roots = cls._source_roots(config)
+        with FileLock(index_path):
+            try:
+                index = json.loads(index_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError) as exc:
+                return {"status": "error", "reason": f"索引读取失败: {exc}"}
+            surviving, report = cls.filter_dead_entries(index, roots)
+            report["dry_run"] = dry_run
+            report["path"] = str(index_path)
+            report["roots"] = [str(r) for r in roots]
+            if report["status"] == "ok" and report["pruned"] and not dry_run:
+                atomic_write_json(index_path, surviving)
+                logger.info("chunk_hash_index 清理死条目：%d 条", report["pruned"])
+        return report
 
     def _load_previous_chunks_for_source(self, source_name: str) -> Dict[str, List[ChunkRecord]]:
         summary_path = self._metadata_dir / f"{source_name}_chunk_summary.json"

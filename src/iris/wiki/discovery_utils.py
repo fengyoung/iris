@@ -308,8 +308,14 @@ def parse_wiki_generated_at(wiki_path: str) -> Optional[datetime]:
     match = re.search(r"^updated:\s*(.+)$", content, re.MULTILINE)
     if not match:
         return None
+    # frontmatter 的日期可能被 YAML 引号包裹（模板与 LLM 都会生成
+    # `updated: "2026-10-22"`）。不剥引号时 fromisoformat 直接抛 ValueError，
+    # 返回 None；而 is_wiki_stale 对人物页（detect_new_sources=True）把
+    # generated_at is None 视为「过期」，于是这些页面**每一轮都被判过期**并
+    # 白白消耗一次 LLM 调用——实测 21 个页面长期如此，且没有任何失败信号。
+    value = match.group(1).strip().strip("\"'").strip()
     try:
-        return datetime.fromisoformat(match.group(1).strip())
+        return datetime.fromisoformat(value)
     except (ValueError, TypeError):
         return None
 

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from iris.wiki.discovery_utils import (
     inject_source_fingerprint,
     is_wiki_stale,
+    parse_wiki_generated_at,
     parse_wiki_source_fingerprint,
     render_source_fingerprint,
     strip_source_fingerprint,
@@ -179,3 +180,49 @@ class TestIsWikiStaleFingerprint:
         }
         assert is_wiki_stale(page, hash_index=hash_index,
                              detect_new_sources=True) is False
+
+
+class TestQuotedUpdatedDate:
+    """frontmatter 的日期常被 YAML 引号包裹（模板与 LLM 都会生成）。
+
+    不剥引号时 ``fromisoformat`` 抛 ValueError → ``generated_at`` 为 None，
+    而人物页走 ``detect_new_sources=True`` 分支，把「解析不出日期」当成
+    「过期」，于是这些页面每一轮都被判过期、白白消耗一次 LLM 调用，
+    且没有任何失败信号。这里锁定「引号不影响解析」这条契约。
+    """
+
+    def test_double_quoted_date_parsed(self, tmp_path):
+        page = _make_page(tmp_path, updated='"2026-07-01"')
+        assert parse_wiki_generated_at(str(page)) == datetime(2026, 7, 1)
+
+    def test_single_quoted_date_parsed(self, tmp_path):
+        page = _make_page(tmp_path, updated="'2026-07-01'")
+        assert parse_wiki_generated_at(str(page)) == datetime(2026, 7, 1)
+
+    def test_garbage_date_returns_none(self, tmp_path):
+        page = _make_page(tmp_path, updated='"not-a-date"')
+        assert parse_wiki_generated_at(str(page)) is None
+
+    def test_quoted_date_keeps_page_fresh(self, tmp_path):
+        # 关键回归：指纹全部命中 + 无新增源文档时，带引号的日期不得判过期
+        page = _make_page(tmp_path, updated='"2026-07-10"',
+                          fingerprint={"a.md": "abc123"})
+        hash_index = {
+            "a.md": {"hash": "abc123456", "modified_at": "2026-07-01"},
+            "old.md": {"hash": "old", "modified_at": "2026-06-30"},
+        }
+        assert is_wiki_stale(page, hash_index=hash_index,
+                             detect_new_sources=True,
+                             new_source_suffix="-测试.md") is False
+
+    def test_quoted_date_still_detects_newer_source(self, tmp_path):
+        # 剥引号不能让「新增源文档」检测失效
+        page = _make_page(tmp_path, updated='"2026-07-10"',
+                          fingerprint={"a.md": "abc123"})
+        hash_index = {
+            "a.md": {"hash": "abc123456", "modified_at": "2026-07-01"},
+            "20260711-测试.md": {"hash": "new", "modified_at": "2026-07-11"},
+        }
+        assert is_wiki_stale(page, hash_index=hash_index,
+                             detect_new_sources=True,
+                             new_source_suffix="-测试.md") is True

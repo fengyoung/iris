@@ -1,4 +1,4 @@
-# Iris 3.43.2
+# Iris 3.43.3
 
 > 主动情报体系（决策 / 备会 / 信号 / OKR 证据）设计见 [设计文档](docs/intelligence-upgrade-design.md)，用法见 [使用说明](docs/intelligence-upgrade-usage.md)；
 > 谁是卧底 Web 使用方法与恢复边界见 [Web 使用说明](docs/undercover-web-ui.md)，历史验收证据见 [验收记录](docs/undercover-beta-acceptance-20260917.md)；
@@ -8,7 +8,13 @@
 
 ## 最新动态
 
-**v3.43.2 (2026-10-22)** - 删除源文档不再静默跳过 Wiki 复审：
+**v3.43.3 (2026-10-22)** - Wiki 证据检索增强兜底与 chunk 索引死条目自动清理：
+- ✨ **Wiki 证据检索增强兜底**：词法检索（BM25）对整串标题是全部词命中判定，标题里只要有一个词在语料中不存在（如「干冰机压力表点检流程」里的「压力表」），该页面永远拿不到证据。现在零命中时用增强检索（查询改写+向量）兜底；懒建实例复用，正常页面零成本；兜底失败静默降级并留日志信号；新增 `no_evidence` 状态统计
+- 🔧 **chunk_hash_index 死条目自动清理**：索引键只 upsert 从不清理，历史目录重排（如 `01-目标管理/xxx.md` → `01-目标管理/2026/xxx.md`）留下的旧键永不消失。现 `write_hash_index` 在 `FileLock` 临界区内自动清理：判据是文件在任一启用源根下都不存在且非 iCloud 逐出占位符；任一源根不可见时整体跳过防误删；新增 `build-chunks --prune-stale [--dry-run]` 独立命令
+- 📊 **输出格式化**：新增死条目清理结果格式化（状态/总数/清理数/占位符保留/样本）；Wiki 更新摘要追加「无证据」计数
+- ✅ **测试 +21**（4,124→4,145、覆盖率 74.23%→74.35%）；产品版本 3.43.2 → **3.43.3**；协议版本与数据格式不变
+
+**上一版 v3.43.2 (2026-10-22)** - 删除源文档不再静默跳过 Wiki 复审：
 - 🐛 **只删不增被判成「无变化」**：`daily-start` 的自动 Wiki 发现此前只按 `rebuilt_documents` 判断，清理废弃 / 已合并文档时重建数为 0，整轮被当成「今天没变化」而跳过发现。现在删除也计入 `cleaned_documents`，并作为变更数触发候选发现
 - 🐛 **hash 索引死条目让页面永远「新鲜」**：`chunk_hash_index.json` 只 upsert、从不清理，`is_wiki_stale` 见条目仍在且 hash 与页面 `source_fingerprint` 一致就一直跳过复审。现在 `write_hash_index` 在同一 `FileLock` 临界区删除已删文档条目（仅当条目 hash 与被删文档旧 hash 一致时删除，避免误删其他数据源同相对路径的条目）
 - ✅ **删除可见**：daily-start 扫描行与 `build-chunks` 摘要显示「清理已删 N」；`wiki_discover_state.json` 的字段更名为 `changed_document_count`

@@ -268,6 +268,8 @@ def _fmt_scan_source(p: Dict[str, Any]) -> str:
 
 
 def _fmt_build_chunks(p: Dict[str, Any]) -> str:
+    if isinstance(p, dict) and isinstance(p.get("prune_stale"), dict):
+        return _fmt_prune_stale(p["prune_stale"])
     sources = p.get("sources", [p])
     lines = ["## 切块摘要"]
     for s in sources:
@@ -481,6 +483,29 @@ def _fmt_daily_scan(p: Dict[str, Any]) -> List[str]:
     return [head, f"Chunk 数：{total_chunks}"]
 
 
+def _fmt_prune_stale(r: Dict[str, Any]) -> str:
+    """chunk_hash_index 死条目清理结果（`build-chunks --prune-stale`）。"""
+    status = r.get("status")
+    if status != "ok":
+        if status == "skipped_missing_roots":
+            missing = "、".join(r.get("missing_roots") or []) or "（未知）"
+            return f"## chunk_hash_index 死条目清理\n  ⏭ 跳过：源根不可见 {missing}"
+        return (f"## chunk_hash_index 死条目清理\n"
+                f"  {_status_icon(status)} {r.get('reason') or status or '未返回'}")
+    total = r.get("total", 0)
+    pruned = r.get("pruned", 0)
+    mode = "（预览，未写入）" if r.get("dry_run") else ""
+    lines = [
+        "## chunk_hash_index 死条目清理" + mode,
+        f"  条目：{total} → {r.get('kept', 0)}（清理 {pruned}）",
+    ]
+    if r.get("evicted_kept"):
+        lines.append(f"  iCloud 逐出占位保留：{r['evicted_kept']}")
+    for sample in (r.get("samples") or [])[:5]:
+        lines.append(f"    - {sample}")
+    return "\n".join(lines)
+
+
 def _fmt_daily_maintenance(p: Dict[str, Any]) -> List[str]:
     """各维护子系统一行状态。
 
@@ -531,8 +556,13 @@ def _fmt_daily_wiki_update(r: Any) -> str:
         return f"  {_status_icon(r['status'])} Wiki 更新：{r.get('reason') or r['status']}"
     if not r:
         return "  • Wiki 更新：未返回"
-    return (f"  ✅ Wiki 更新：更新 {r.get('updated', 0)} / 未变 {r.get('unchanged', 0)}"
+    line = (f"  ✅ Wiki 更新：更新 {r.get('updated', 0)} / 未变 {r.get('unchanged', 0)}"
             f" / 未找到 {r.get('not_found', 0)} / 错误 {r.get('errors', 0)}")
+    # 无证据页：检索拿不到任何 chunk，更新永远 no_changes、指纹永不推进。
+    # 只在这种页存在时才追加，保持旧输出的稳定性（与「清理已删 N」同口径）。
+    if r.get("no_evidence"):
+        line += f" / 无证据 {r['no_evidence']}"
+    return line
 
 
 def _fmt_daily_person_enrich(r: Any) -> str:

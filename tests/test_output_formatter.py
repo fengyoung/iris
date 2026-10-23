@@ -197,6 +197,37 @@ class TestDailyStartFormat:
         result = format_payload("daily-start", payload)
         assert "扫描文档数：1039（切块重建 0，复用 1036，清理已删 3）" in result
 
+    def test_wiki_update_line_shows_no_evidence(self):
+        """检索不到证据的页面会永远「未变」，必须单独可见（否则等于静默卡死）。"""
+        from iris.output.formatter import format_payload
+        payload = _daily_payload(wiki_update={"total": 232, "updated": 1, "unchanged": 229,
+                                              "not_found": 0, "no_evidence": 2, "errors": 0})
+        result = format_payload("daily-start", payload)
+        assert "未变 229 / 未找到 0 / 错误 0 / 无证据 2" in result
+
+    def test_wiki_update_line_stable_without_no_evidence(self):
+        """无证据为 0 时不追加字段，保持既有输出逐字不变。"""
+        from iris.output.formatter import format_payload
+        result = format_payload("daily-start", _daily_payload())
+        assert "未变 220 / 未找到 0 / 错误 0\n" in result
+        assert "无证据" not in result
+
+    def test_prune_stale_preview_renders(self):
+        """--prune-stale 的结果必须走自己的渲染，不能落进「切块摘要」。"""
+        from iris.output.formatter import format_payload
+        result = format_payload("build-chunks", {"prune_stale": {
+            "status": "ok", "total": 1876, "kept": 1097, "pruned": 779,
+            "evicted_kept": 0, "samples": ["01-目标管理/a.md"], "dry_run": True}})
+        assert "条目：1876 → 1097（清理 779）" in result
+        assert "预览，未写入" in result
+        assert "切块摘要" not in result
+
+    def test_prune_stale_missing_root_renders_skip(self):
+        from iris.output.formatter import format_payload
+        result = format_payload("build-chunks", {"prune_stale": {
+            "status": "skipped_missing_roots", "missing_roots": ["/mnt/外接盘"]}})
+        assert "跳过" in result and "外接盘" in result
+
     def test_vector_index_model_mismatch_is_visible(self):
         """model_mismatch 必须显式告警——旧实现下这条信息在 --pretty 里丢失。"""
         from iris.output.formatter import format_payload

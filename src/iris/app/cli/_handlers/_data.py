@@ -62,6 +62,14 @@ def handle_build_chunks(args, bundle, logger) -> int:
                          progress=done / max(total, 1))
 
     with TaskReporter("build-chunks", command="build-chunks") as _tr:
+        # --prune-stale：只做死条目清理（不重建 chunk），用于一次性收口历史
+        # 目录重排留下的旧键；配合 --dry-run 可先看会删哪些。
+        if getattr(args, "prune_stale", False):
+            _tr.report_phase("prune", "清理 chunk_hash_index 死条目")
+            report = chunker.prune_dead_entries(bundle, dry_run=getattr(args, "dry_run", False))
+            logger.log("prune_hash_index", report)
+            _emit_output(args.command, {"prune_stale": report}, pretty=args.pretty)
+            return 0
         if args.source:
             summaries = [chunker.build_source_chunks(
                 args.source, incremental=incremental, progress_callback=_on_doc)]

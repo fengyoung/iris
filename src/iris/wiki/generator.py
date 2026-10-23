@@ -82,6 +82,8 @@ class WikiGenerator:
         self._wiki_root = Path(config.wiki["wiki_root"]).resolve()
         self._wiki_searcher = WikiSearcher(config) if config.wiki else None
         self._logger = IrisLogger(config)
+        # 增强检索兜底实例（懒建）：仅在词法检索零命中时使用，正常页面零成本。
+        self._enhanced_retriever: Any = None
 
     def build_page(self, *, query: str, page_type: str, title: str, top_k: int = 5) -> WikiPageDraft:
         self._ensure_page_type(page_type)
@@ -187,6 +189,13 @@ class WikiGenerator:
         通道无匹配时静默降级（返回空），不影响主检索。
         """
         hits = list(self._retriever.search(query, top_k=top_k).hits)
+        if not hits:
+            # 词法检索对「整串标题」是全部词命中判定：标题里只要有一个词在语料
+            # 中不存在（例如「干冰机压力表点检流程」里的「压力表」），该页面就
+            # 永远拿不到证据 → 更新恒为 no_changes → 指纹永不推进 → 每轮判过期，
+            # 白白消耗一次 LLM 调用且没有任何失败信号。零命中时用增强检索
+            # （查询改写 + 向量）兜一次；正常有命中的页面不受影响。
+            hits = self._fallback_evidence(query, top_k)
         if page_type == "person":
             hits = self._retriever.latest_documents(
                 f"-{title}.md",
@@ -194,6 +203,22 @@ class WikiGenerator:
                 chunks_per_doc=_PERSON_WEEKLY_CHUNKS,
             ) + hits
         return hits[:_EVIDENCE_LIMIT]
+
+    def _fallback_evidence(self, query: str, top_k: int) -> List[Any]:
+        """零命中兜底：增强检索（含查询改写）。失败静默降级为空。"""
+        try:
+            if self._enhanced_retriever is None:
+                from iris.retrieval import EnhancedRetriever
+                self._enhanced_retriever = EnhancedRetriever(self._config)
+            fallback = list(self._enhanced_retriever.search(query, top_k=top_k).hits)
+        except Exception as exc:  # 兜底通道失败不影响主流程，但必须留信号
+            logging.getLogger("iris.wiki.generator").warning(
+                "增强检索兜底失败 [%s]: %s", query, exc)
+            return []
+        if fallback:
+            logging.getLogger("iris.wiki.generator").info(
+                "词法检索零命中，已用增强检索兜底 [%s]：%d 条", query, len(fallback))
+        return fallback[:_EVIDENCE_LIMIT]
 
     def _format_evidence(self, hits) -> str:
         # 上游 _collect_evidence 已裁到 _EVIDENCE_LIMIT，此处的 [:8] 只是安全上限
@@ -714,11 +739,13 @@ sources:
         unchanged = [r for r in results if r.get("status") == "no_changes"]
         not_found = [r for r in results if r.get("status") == "not_found"]
         errors = [r for r in results if r.get("status") == "error"]
+        no_evidence = [r for r in results if r.get("status") == "no_evidence"]
         return {
             "total": len(results),
             "updated": len(updated),
             "unchanged": len(unchanged),
             "not_found": len(not_found),
+            "no_evidence": len(no_evidence),
             "errors": len(errors),
             "details": results,
         }
@@ -817,6 +844,15 @@ sources:
 
         evidence_hits = self._collect_evidence(query=title, title=title,
                                                page_type=page_type, top_k=top_k)
+        if not evidence_hits:
+            # 无证据时 LLM 只会把页面原样吐回（no_changes），指纹也不会刷新，
+            # 于是该页每轮都被判过期、每轮烧一次 LLM 调用却毫无进展。直接
+            # 早退并给出明确状态，让「检索不到证据」这件事可见。
+            logging.getLogger("iris.wiki.generator").warning(
+                "无检索证据，跳过增量更新 [%s] %s（源文档变更需重新检索）", page_type, title)
+            self._logger.log("wiki_update_no_evidence", {"title": title, "path": str(path)})
+            return {"status": "no_evidence", "title": title, "path": str(path),
+                    "reason": "检索无证据，跳过 LLM 更新且不推进指纹"}
         evidence_text = self._format_evidence(evidence_hits)
 
         slug = _slugify_title(title)

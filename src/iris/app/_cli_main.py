@@ -89,6 +89,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--summary-only", action="store_true", help="仅输出摘要")
     parser.add_argument("--write-summary", action="store_true", help="写入摘要到 data/metadata")
     parser.add_argument("--incremental", action="store_true", help="增量扫描/构建（仅处理变更文件）")
+    parser.add_argument("--prune-stale", action="store_true", dest="prune_stale",
+                        help="build-chunks 只清理 chunk_hash_index 中指向不存在文件的死条目（配合 --dry-run 预览）")
     parser.add_argument("--force-rebuild", action="store_true",
                         help="build-vector-index 全量重建向量索引（丢弃旧向量重新嵌入，embedding 模型变更后必须执行）")
     # 记忆系统
