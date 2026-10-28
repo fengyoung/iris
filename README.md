@@ -1,4 +1,4 @@
-# Iris 3.44.0
+# Iris 3.44.1
 
 > 主动情报体系（决策 / 备会 / 信号 / OKR 证据）设计见 [设计文档](docs/intelligence-upgrade-design.md)，用法见 [使用说明](docs/intelligence-upgrade-usage.md)；
 > 谁是卧底 Web 使用方法与恢复边界见 [Web 使用说明](docs/undercover-web-ui.md)，历史验收证据见 [验收记录](docs/undercover-beta-acceptance-20260917.md)；
@@ -8,7 +8,12 @@
 
 ## 最新动态
 
-**v3.44.0 (2026-10-28)** - 飞书日报全面优化 + iris-release 发版 Skill：
+**v3.44.1 (2026-10-28)** - iris-release pip-audit 门禁修正：
+- 🛠 **发版工具链**：`iris-release` 的 pip-audit 门禁不再被本地 conda 无关包误停；依赖未变化时采用最近一次 main 绿色 CI 的依赖审计结果
+- 🔒 **依赖变更仍严格**：`pyproject.toml` / `constraints.txt` 真正变化时，必须 clean venv / CI 重新审计
+- ✅ **产品版本 3.44.0 → 3.44.1**；协议版本与数据格式不变
+
+**上一版 v3.44.0 (2026-10-28)** - 飞书日报全面优化 + iris-release 发版 Skill：
 - 🚩 **信号可行动**：KR 风险从关键词命中改为风险句抽取，过滤「风险/问题：」模板标题与「风险可控 / 不大」误报；同一风险合并多 KR 引用，同一文档最多两条并按严重度排序
 - 📊 **日报不再霸榜**：信号按类型配额排序（每类最多 2 条），栏目断供 / 周报缺失 / 项目停滞并入日报；新增「新增 / 持续 N 天」与维护回执
 - 🧾 **决策待审修正**：修复 `rationale` 等说明性字段导致的 approved-but-pending；不再把复核通过理由显示成待确认原因；显示挂起天数、AI 已通过数量与断链孤儿候选
