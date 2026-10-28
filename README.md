@@ -409,7 +409,7 @@ iris3/
 │   ├── integration/    #   集成测试（248 用例）
 │   └── （顶层）        #   按模块组织的端到端/回归测试；全项目 integration 1,202 项
 ├── config/             # *.json gitignored，*.example 版本控制
-├── .claude/skills/     # 项目级 Skill 真身（10 个，CC 原生读取）
+├── .claude/skills/     # 项目级 Skill 真身（11 个，CC 原生读取）
 ├── .agents/skills      # → ../.claude/skills（软链，DSH 入口）
 ├── .github/workflows/  # CI 流水线（Python 3.11-3.13 矩阵）
 ├── Makefile            # 常用开发命令

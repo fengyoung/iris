@@ -7,7 +7,7 @@
 
 ## 项目概览
 
-**当前规模**：~49,600 行 / 229 个源码文件 / 30 模块 · CLI 77 命令 · 测试 4,145（pytest 全量）· 覆盖率 74.35%（`fail_under` 65，13 个关键模块另有独立门禁）· Ruff、mypy（含显式兼容边界）、AST 安全扫描与 SPDX SBOM 门禁通过 · 10 个项目级 Skill · Wiki 231 页 · 知识图谱节点 231 / 关系边 2,766 · 数据源 1,041 文档 / 7,979 Chunk（text-embedding-v3 / 1,024 维）
+**当前规模**：~49,600 行 / 229 个源码文件 / 30 模块 · CLI 77 命令 · 测试 4,145（pytest 全量）· 覆盖率 74.35%（`fail_under` 65，13 个关键模块另有独立门禁）· Ruff、mypy（含显式兼容边界）、AST 安全扫描与 SPDX SBOM 门禁通过 · 11 个项目级 Skill · Wiki 231 页 · 知识图谱节点 231 / 关系边 2,766 · 数据源 1,041 文档 / 7,979 Chunk（text-embedding-v3 / 1,024 维）
 
 **最新版本**（v3.43.4）：CLAUDE.md 简化重构（历史版本信息归档到 CHANGELOG，压缩至 155 行）。详细变更历史见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -116,7 +116,7 @@ Python 3.11+ · LLM API 双协议（OpenAI 兼容 / Anthropic Messages，经 zz_
 - **复杂度规则**：ruff C901 门禁 `max-complexity = 20`，超限 CI 直接失败；拆分手法优先「分阶段私有方法」「表驱动分派」「状态对象」
 - **导入规则**：F401 已启用；仅包 `__init__.py` 与 `app/cli/handlers.py` 允许 re-export 未使用导入；`iris.core.exceptions` 零依赖
 - **敏感文档规则**：调薪方案、人员盘点/评估过程、绩效评价、Leader 盘点类文档**只保留 SOURCE 原件**，不得进入任何下游衍生制品。判定唯一真相源为 `src/iris/wiki/_sensitive.py`（零依赖，仅匹配文件名/标题，**绝不匹配正文**）。存量清理用 `scripts/purge_sensitive_wiki.py`
-- **发版版本号同步规则**：产品版本递增时同步 **5 个文件**——`pyproject.toml` · `CHANGELOG.md` · `CLAUDE.md`（5 个位置：标题/规模/近期能力/版本体系表/项目结构用例数）· `README.md` · `AGENTS.md`。**「本版（vX.Y.Z）」叙述段跟随最近一次特性版、补丁版不追**
+- **发版版本号同步规则**：产品版本递增时同步 **5 个文件**——`pyproject.toml` · `CHANGELOG.md` · `CLAUDE.md`（5 个位置：标题/规模/最新版本行/版本体系表/项目结构用例数）· `README.md` · `AGENTS.md`。**「本版（vX.Y.Z）」叙述段跟随最近一次特性版、补丁版不追**
 
 ### 项目级 Skill 共享（Claude Code + DSH）
 
@@ -140,7 +140,7 @@ iris3/
 ├── tests/             # 4,145 用例（pytest 全量）
 ├── config/            # *.json gitignored，*.example 版本控制
 ├── data/              # 运行时数据（全 gitignore）
-├── .claude/skills/    # 项目级 Skill 真身（10 个，CC 原生读取）
+├── .claude/skills/    # 项目级 Skill 真身（11 个，CC 原生读取）
 ├── .agents/skills     # → ../.claude/skills（软链，DSH 据此发现）
 ├── .github/workflows/ # CI 流水线（Python 3.11-3.13）
 └── memory/            # Claude 工作记忆
@@ -150,6 +150,6 @@ iris3/
 
 ---
 
-## 项目级 Skill（10 个，CC + DSH 共用）
+## 项目级 Skill（11 个，CC + DSH 共用）
 
-`iris-daily-start` · `iris-wiki` · `iris-feishu-import` · `iris-feed` · `iris-meeting` · `iris-ask` · `iris-process` · `iris-report` · `iris-health` · `iris-okr-check`
+`iris-daily-start` · `iris-wiki` · `iris-feishu-import` · `iris-feed` · `iris-meeting` · `iris-ask` · `iris-process` · `iris-report` · `iris-health` · `iris-okr-check` · `iris-release`
