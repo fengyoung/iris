@@ -1,6 +1,6 @@
 ---
 name: iris-release
-version: 1.0.0
+version: 1.0.1
 description: Iris 发版与提交 — 自动完成提交、版本号同步、门禁检查、打 tag、双远端推送与 GitHub Release。当用户说「发版」「发布版本」「发布并提交」「提交并推送」「合并分支」或指定 /iris-release 时使用。
 user-invocable: true
 metadata:
@@ -214,7 +214,6 @@ echo "版本推断：$CURRENT → $NEW（$BUMP）"
 "$PY" scripts/security_scan.py
 "$PY" -m pip wheel . --no-deps --no-build-isolation -w dist
 "$PY" scripts/generate_sbom.py --output dist/iris.spdx.json
-"$PY" -m pip_audit
 "$PY" -m pytest tests/ -q --cov=src/iris --cov-report=term --cov-report=json:coverage.json \
   > /tmp/iris-release-tests.log 2>&1
 cat /tmp/iris-release-tests.log
@@ -222,11 +221,38 @@ cat /tmp/iris-release-tests.log
 "$PY" scripts/run_cli.py --help >/dev/null
 ```
 
-`pip-audit` 缺失时安装后重跑，不要静默跳过：
+### pip-audit 门禁：区分项目依赖与本地环境
+
+本机 miniforge/conda 环境会扫描到大量与项目无关的包（aiohttp / pillow / yt-dlp 等），
+直接 `pip_audit` 会误报。依赖未变化时，以最近一次 main 绿色 CI 的依赖审计为准；
+依赖变化时必须在 clean venv / CI 中重新审计：
 
 ```bash
-"$PY" -m pip install pip-audit
+if [ -z "$LAST_RELEASE" ]; then
+  echo "无历史 release 基线，无法判断依赖是否变化；请在 clean venv/CI 中审计"; exit 1
+fi
+
+DEPS_DIFF=$(git diff "$LAST_RELEASE"..HEAD -- pyproject.toml constraints.txt \
+  | grep -E '^[+-]' | grep -vE '^[+-]{3}|^[+-]version =|^[+-]$' || true)
+
+if [ -n "$DEPS_DIFF" ]; then
+  echo "检测到依赖变更，必须在 clean venv / CI 中完成 pip-audit："
+  echo "$DEPS_DIFF"
+  exit 1
+fi
+
+if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  CI_CONCLUSION=$(gh run list --branch main --limit 1 --json conclusion --jq '.[0].conclusion')
+  [ "$CI_CONCLUSION" = "success" ] || {
+    echo "依赖未变化，但最近一次 main CI 非绿（${CI_CONCLUSION:-未完成}）；停止"; exit 1; }
+  echo "pip-audit：依赖未变化，采用最近一次绿色 CI 的依赖审计结果"
+else
+  echo "gh 不可用，无法确认 CI 依赖审计；请先在 clean venv 中运行 pip-audit 或等待 CI"; exit 1
+fi
 ```
+
+> 只有依赖文件（`pyproject.toml` 的 dependencies/extras、`constraints.txt`）真正变化时
+> 才需要重新审计；单纯版本号变更会被上面的过滤排除。
 
 解析测试数与覆盖率，后续写文档必须用真实值：
 
@@ -250,7 +276,7 @@ echo "tests=$TESTS coverage=$COVERAGE%"
 - <要点 1>
 - <要点 2>
 
-测试：全量 TESTS 通过，覆盖率 COVERAGE%；Ruff / mypy / 安全扫描 / SBOM / pip-audit 通过。
+测试：全量 TESTS 通过，覆盖率 COVERAGE%；Ruff / mypy / 安全扫描 / SBOM 通过；pip-audit 采用最近绿色 CI 结果。
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 ```
 
@@ -258,7 +284,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 git commit -m "<type>: <中文摘要>" -m "- <要点 1>
 - <要点 2>
 
-测试：全量 $TESTS 通过，覆盖率 $COVERAGE%；Ruff / mypy / 安全扫描 / SBOM / pip-audit 通过。
+测试：全量 $TESTS 通过，覆盖率 $COVERAGE%；Ruff / mypy / 安全扫描 / SBOM 通过；pip-audit 采用最近绿色 CI 结果。
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ```
@@ -348,7 +374,7 @@ git add pyproject.toml CHANGELOG.md CLAUDE.md README.md
 git status --short
 git commit -m "release: v$NEW — <标题>" -m "- 产品版本 $CURRENT → $NEW
 - 协议版本保持 $PROTO（或 $PROTO → $PROTO_NEXT）；数据版本不变
-- 门禁：全量单测 $TESTS 通过 / 覆盖率 $COVERAGE% / Ruff / mypy / 安全扫描 / SBOM / pip-audit
+- 门禁：全量单测 $TESTS 通过 / 覆盖率 $COVERAGE% / Ruff / mypy / 安全扫描 / SBOM / pip-audit（CI 证据）
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ```
@@ -408,7 +434,7 @@ fi
 | 提交 | 代码提交 hash + release 提交 hash |
 | Tag | `vNEW`，origin / gitee 是否已推送 |
 | Release | URL，或「未创建 + 手工链接」 |
-| 门禁 | `TESTS` tests / `COVERAGE%` / Ruff / mypy / 安全扫描 / SBOM / pip-audit |
+| 门禁 | `TESTS` tests / `COVERAGE%` / Ruff / mypy / 安全扫描 / SBOM / pip-audit（CI 证据；依赖变更时 clean venv） |
 | 未覆盖 | CI 3.11/3.12/3.13 矩阵与 macOS smoke（已推送，等待 CI） |
 
 最后运行：
@@ -455,6 +481,7 @@ git merge --no-ff "<分支>" -m "merge: 合并 <分支>（<摘要>）"
 
 - 不 `git push --force`，不改写已发布历史，不删除远端分支。
 - 不跳过失败的门禁，不伪造 Release 成功。
+- 不把本地 conda/无关包的漏洞当成项目漏洞，也不因此跳过依赖变更时的重新审计。
 - 不把 `.env`、`config/*.json`、`data/`、`dist/`、`build/` 加入版本控制。
 - 不自动把 major 版本发出去（除非用户明确授权）。
 - 不单独编辑 `AGENTS.md`。
