@@ -6,11 +6,40 @@ from datetime import datetime
 from uuid import uuid4
 from iris.core.exceptions import IrisValueError
 from iris.intelligence.storage import SnapshotStore
-from .schema import Decision, now
+from .schema import CRITICAL_FIELDS, MINOR_FIELDS, Decision, field_labels, now
 
 
 def identity(record: dict) -> str:
     return re.sub(r'\s+', '', record['outcome']).casefold() + '|' + record['decided_at']
+
+
+def pending_reason(row: dict) -> str:
+    """人类可读的待确认原因；绝不再把 AI 的「通过理由」当成待确认原因。
+
+    兼容历史候选：早期版本把复核模型的 reason 原样写入 review_details.reason，
+    verdict=approved 的候选会显示「明确拍板决策，数据完整无矛盾」这种自相矛盾文案。
+    """
+    decision = row.get('decision', row)
+    details = decision.get('review_details', {}) or {}
+    if details.get('pending_cause'):
+        return str(details['pending_cause'])
+    if details.get('person_ambiguous'):
+        names = details.get('ambiguous_names') or {}
+        who = '、'.join(names) if isinstance(names, dict) and names else ''
+        return f'责任人同名歧义{("：" + who) if who else ""}，需人工确认'
+    review = details.get('review', {}) or {}
+    supported = review.get('supported_fields', [])
+    supported_set = {str(item) for item in supported} if isinstance(supported, list) else set()
+    if review.get('verdict') == 'approved':
+        missing = [k for k in CRITICAL_FIELDS if decision.get(k) and k not in supported_set]
+        if missing:
+            return 'AI 已复核通过，待补原文依据：' + field_labels(missing)
+        minor = [k for k in MINOR_FIELDS if decision.get(k) and k not in supported_set]
+        if minor:
+            return 'AI 已复核通过，待补说明性字段：' + field_labels(minor)
+        return 'AI 已复核通过，待人工确认'
+    reason = details.get('reason')
+    return str(reason) if reason else '复核不完整或字段依据不足'
 
 
 class DecisionStore(SnapshotStore):

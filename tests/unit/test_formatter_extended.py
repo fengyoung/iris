@@ -30,6 +30,7 @@ from iris.output.formatter import (
     _fmt_transcribe_meeting,
     _fmt_batch_transcribe,
     _fmt_daily_start,
+    _fmt_daily_intelligence,
     _fmt_reminders,
     _fmt_build_asr_prompt,
     format_payload,
@@ -691,6 +692,48 @@ class TestFmtDailyStart:
             "reminders": {"signal_count": 0},
         })
         assert "日常启动" in result
+
+    def test_intelligence_delivery_visible(self):
+        result = _fmt_daily_start({
+            "scan": [{"document_count": 5}],
+            "chunks": [{"chunk_count": 20}],
+            "intelligence": {
+                "signals": {
+                    "counts": {"signals": 5, "pending": 15},
+                    "delivery": {"status": "sent"},
+                    "errors": [],
+                },
+            },
+        })
+        assert "飞书通知" in result
+        assert "已发送" in result
+        assert "5 条信号 / 15 条待审" in result
+
+
+class TestFmtDailyIntelligence:
+    def test_duplicate(self):
+        result = "\n".join(_fmt_daily_intelligence({"signals": {"delivery": {
+            "status": "sent", "duplicate": True, "reason": "当日已发送，未重复推送"}}}))
+        assert "未重复" in result
+
+    def test_uncertain(self):
+        result = "\n".join(_fmt_daily_intelligence({"signals": {"delivery": {
+            "status": "uncertain", "reason": "timeout"}}}))
+        assert "不确定" in result and "timeout" in result
+
+    def test_uncertain_duplicate_still_shows_uncertain(self):
+        result = "\n".join(_fmt_daily_intelligence({"signals": {"delivery": {
+            "status": "uncertain", "duplicate": True,
+            "reason": "当日已有投递记录（uncertain），未重复推送"}}}))
+        assert "不确定" in result
+        assert "已发送" not in result
+
+    def test_signal_error(self):
+        result = "\n".join(_fmt_daily_intelligence({"signals": {"status": "error", "reason": "boom"}}))
+        assert "信号生成失败" in result and "boom" in result
+
+    def test_disabled(self):
+        assert "已禁用" in "\n".join(_fmt_daily_intelligence({"status": "disabled"}))
 
 
 class TestFmtReminders:

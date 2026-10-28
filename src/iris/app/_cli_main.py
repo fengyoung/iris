@@ -175,7 +175,8 @@ def build_parser() -> argparse.ArgumentParser:
     # 飞书文档转换
     parser.add_argument("--url", default="", help="feishu-doc-convert 飞书文档 URL（逗号分隔多文档）")
     parser.add_argument("--from-config", action="store_true", help="feishu-doc-convert / chat-digest 从配置文件读取目标列表")
-    parser.add_argument("--dry-run", action="store_true", help="预览模式不写入文件（feishu-doc-convert/chat-digest/build-biweekly-report）")
+    parser.add_argument("--dry-run", action="store_true", help="预览模式（feishu-doc-convert/chat-digest/build-biweekly-report 不写入；daily-start/signals 仅预览通知，不发送）")
+    parser.add_argument("--no-notify", action="store_true", help="daily-start 不发送飞书通知（仍生成并归档日报正文）")
     # 知识图谱
     parser.add_argument("--full", action="store_true", help="build-graph 全量重建 LLM 关系")
     parser.add_argument("--page", default="", help="build-graph 单页重建")

@@ -1,4 +1,5 @@
 """情报引用、鲜度、信号边界和交付幂等性。"""
+import json
 from datetime import date, timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -7,9 +8,12 @@ from iris.core.exceptions import IrisValueError
 from iris.intelligence.context import SourceDoc, read_document
 from iris.briefing.open_issue_detector import OpenIssueDetector
 from iris.briefing.synthesizer import BriefingSynthesizer
-from iris.signals.detector import SignalDetector, Signal
+from iris.decisions.store import pending_reason
+from iris.signals.delivery import SignalDelivery, build_title, render
+from iris.signals.detector import Signal, SignalDetector, reminder_signals
+from iris.signals.history import SignalHistory, signal_key
 from iris.signals.ranker import rank
-from iris.signals.delivery import SignalDelivery
+from iris.signals.service import _annotate_pending
 from iris.wiki.freshness import compute_freshness_score
 
 TODAY = date(2026, 9, 21)
@@ -91,7 +95,10 @@ def test_delivery_uncertain_no_blind_retry(tmp_path):
     sender = Mock(side_effect=OSError('offline'))
     delivery = SignalDelivery(tmp_path, sender)
     assert delivery.deliver('摘要', day='2026-09-21', user_id='ou_1')['status'] == 'uncertain'
-    delivery.deliver('摘要', day='2026-09-21', user_id='ou_1')
+    result = delivery.deliver('摘要', day='2026-09-21', user_id='ou_1')
+    assert result['status'] == 'uncertain'
+    assert result['duplicate'] is True
+    assert 'uncertain' in result['reason']
     sender.assert_called_once()
 
 
@@ -103,3 +110,227 @@ def test_delivery_dry_run(tmp_path):
 
 def test_no_credentials_visible_failure(tmp_path):
     assert SignalDelivery(tmp_path).deliver('摘要', day='2026-09-21')['status'] == 'not_configured'
+
+
+# ── KR 风险句抽取 ──────────────────────────────────────────
+
+def _risk_row(path, snippet, doc_date=None):
+    return {'doc_path': path, 'doc_date': doc_date or TODAY.isoformat(),
+            'evidence_snippet': snippet}
+
+
+def test_kr_signals_ignore_template_headers_and_negated_risks():
+    snippet = ('### 3. 遇到的问题与风险\n\n'
+               '- 验真C端上线风险可控，先加企微免费提供结果。\n'
+               '- 10月内可完成剩余核心问题治理，风险不大。\n'
+               '- 原文未明确提及：具体上线时间、资源投入及其他外部阻塞项。\n'
+               '- **其他阻塞项与资源问题**：原文未明确提及\n'
+               '- 来源：20261015-项目讨论-在线审核项目进度与风险对焦.txt\n'
+               '- | KP3 | 139 款安卓小内配模型上线（解除工艺复核阻塞） |\n'
+               '- 本次为在线审核项目正式启动后的进度与风险对焦会。\n')
+    row = _risk_row('07-成员周报/202610/20261017-周报-w42-甲.md', snippet)
+    assert SignalDetector(today=TODAY).kr_signals({'O1-KR1': 'x'}, {'O1-KR1': [row]}) == []
+
+
+def test_kr_signals_surface_risk_sentence_and_merge_krs():
+    snippet = ('### 3. 遇到的问题与风险\n\n'
+               '- **爬虫批量返回“序列号无效”**：已做紧急处理，需调研备用渠道兜底，属于外部依赖风险。\n')
+    row = _risk_row('07-成员周报/202610/20261017-周报-w42-甲.md', snippet)
+    krs = {'O1-KR1': 'x', 'O1-KR2': 'x'}
+    signals = SignalDetector(today=TODAY).kr_signals(krs, {k: [row] for k in krs})
+    assert len(signals) == 1
+    assert '爬虫' in signals[0].title
+    assert 'O1-KR1' in signals[0].detail and 'O1-KR2' in signals[0].detail
+    assert signals[0].sources == ['周报-w42-甲 · 09-21']
+
+
+def test_kr_signals_dedupe_similar_sentences_in_same_document():
+    snippet = ('### 风险\n\n'
+               '- 共享目录回写存在风险。\n'
+               '- 病毒问题：共享目录回写存在风险，需限制写入。\n')
+    row = _risk_row('05-会议纪要/202610/20261019-部门周会.md', snippet)
+    signals = SignalDetector(today=TODAY).kr_signals({'O1-KR2': 'x'}, {'O1-KR2': [row]})
+    assert len(signals) == 1
+    assert '病毒问题' in signals[0].title
+
+
+def test_kr_signals_cap_two_risks_per_document():
+    snippet = ('### 风险\n\n'
+               '- 风险一：交付延期两周。\n'
+               '- 风险二：接口联调受阻。\n'
+               '- 风险三：资源不足导致阻塞。\n')
+    row = _risk_row('05-会议纪要/202610/20261017-项目周会.md', snippet)
+    signals = SignalDetector(today=TODAY).kr_signals({'O1-KR1': 'x'}, {'O1-KR1': [row]})
+    assert len(signals) == 2
+
+
+# ── 排序配额与跨日新鲜度 ────────────────────────────────────
+
+def test_rank_keeps_kind_diversity():
+    rows = [Signal('KR_AT_RISK', f'风险 {n}', [], '', 7, 4) for n in range(5)]
+    rows.append(Signal('WEEKLY_MISSING', '张三 周报断档 15 天', [], '', 6, 3))
+    picked = rank(rows)
+    assert len(picked) == 5
+    assert any(signal.kind == 'WEEKLY_MISSING' for signal in picked)
+
+
+def test_history_marks_persistent_across_days(tmp_path):
+    history = SignalHistory(tmp_path)
+    signal = Signal('KR_AT_RISK', '风险', ['a.md'], '', 7, 4, stable_key='a.md|风险')
+    history.record([signal], today=TODAY, pushed=True)
+    annotations = history.annotate([signal], today=TODAY + timedelta(days=2))
+    row = annotations[signal_key(signal)]
+    assert row['new'] is False
+    assert row['days'] == 3
+    assert row['last_pushed'] == TODAY.isoformat()
+
+
+def test_reminder_signals_mapped():
+    rows = reminder_signals({'signals': [
+        {'type': 'weekly_report_missing', 'target': '张三', 'days': 15, 'detail': '张三 最近一份周报是 9-06'},
+        {'type': 'category_inactive', 'target': '01-目标管理', 'days': 69, 'detail': '栏目 69 天无更新'},
+        {'type': 'unknown', 'target': 'x', 'days': 1},
+    ]})
+    assert [row.kind for row in rows] == ['WEEKLY_MISSING', 'SUPPLY_GAP']
+    assert '15' in rows[0].title
+    assert rows[0].stable_key == 'WEEKLY_MISSING|张三'
+
+
+# ── 渲染 ──────────────────────────────────────────────────
+
+def _render_signal():
+    return Signal('KR_AT_RISK', '爬虫批量返回“序列号无效”',
+                  ['07-成员周报/202610/20261017-周报-w42-甲.md'],
+                  '确认风险与应对责任人', 7, 4,
+                  detail='关联 KR：O1-KR1',
+                  sources=['周报-w42-甲 · 10-17'],
+                  stable_key='risk-1')
+
+
+def test_render_groups_compacts_sources_and_shows_maintenance():
+    signal = _render_signal()
+    pending = [{
+        'candidate_id': 'CAN-2cf17df11aa04615b7417e37da61c76f',
+        'decision': {'title': '少拆机与少质检推进'},
+        '_pending_days': 30, '_reason': '混合非拍板内容',
+        '_ai_approved': False, '_orphan': False,
+    }]
+    text = render([signal], pending, day=TODAY,
+                  annotations={signal_key(signal): {'new': False, 'days': 7}},
+                  maintenance={'documents': 1041, 'rebuilt': 12, 'wiki_updated': 3,
+                               'graph': '231 节点 / 2766 边', 'usage_calls': 82, 'issues': []})
+    assert 'KR 风险' in text
+    assert '周报-w42-甲 · 10-17' in text
+    assert '持续 7 天' in text
+    assert 'CAN-2cf17d' in text
+    assert '07-成员周报' not in text
+    assert '维护回执' in text
+    assert '9月21日' in build_title(TODAY)
+
+
+def test_render_surfaces_orphan_pending():
+    pending = [
+        {'candidate_id': 'CAN-aaaaaaaa', 'decision': {'title': 'A'},
+         '_pending_days': 1, '_reason': 'r', '_ai_approved': False, '_orphan': True},
+        {'candidate_id': 'CAN-bbbbbbbb', 'decision': {'title': 'B'},
+         '_pending_days': 2, '_reason': 'r', '_ai_approved': False, '_orphan': False},
+    ]
+    text = render([], pending, day=TODAY)
+    assert '1 条来源文档已不存在' in text
+    assert 'CAN-aaaaaaaa' not in text
+
+
+# ── 交付策略 ──────────────────────────────────────────────
+
+def test_delivery_daily_policy_blocks_same_day_content_change(tmp_path):
+    sender = Mock(return_value={'message_id': 'om_1'})
+    delivery = SignalDelivery(tmp_path, sender)
+    assert delivery.deliver('v1', day='2026-09-21', user_id='ou_1')['status'] == 'sent'
+    result = delivery.deliver('v2', day='2026-09-21', user_id='ou_1')
+    assert result['duplicate'] is True
+    sender.assert_called_once()
+
+
+def test_delivery_daily_policy_sends_next_day(tmp_path):
+    sender = Mock(return_value={'message_id': 'om_1'})
+    delivery = SignalDelivery(tmp_path, sender)
+    delivery.deliver('v1', day='2026-09-21', user_id='ou_1')
+    assert delivery.deliver('v1', day='2026-09-22', user_id='ou_1')['status'] == 'sent'
+    assert sender.call_count == 2
+
+
+def test_delivery_passes_post_title(tmp_path):
+    sender = Mock(return_value={'message_id': 'om_1'})
+    delivery = SignalDelivery(tmp_path, sender)
+    delivery.deliver('正文', day='2026-09-21', user_id='ou_1', title='Iris 日报 · 9月21日（周一）')
+    assert sender.call_args.kwargs['title'] == 'Iris 日报 · 9月21日（周一）'
+
+
+def test_send_lark_builds_post_payload_with_title(monkeypatch):
+    from iris.signals import delivery as delivery_module
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = '{"ok": true, "identity": "bot", "data": {}}'
+        stderr = ''
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return Result()
+
+    monkeypatch.setattr(delivery_module.subprocess, 'run', fake_run)
+    delivery_module.send_lark('ou_1', '正文', 'key', title='Iris 日报 · 9月21日（周一）')
+    args = calls[0]
+    assert '--msg-type' in args and args[args.index('--msg-type') + 1] == 'post'
+    content = json.loads(args[args.index('--content') + 1])
+    assert content['zh_cn']['title'] == 'Iris 日报 · 9月21日（周一）'
+    assert content['zh_cn']['content'][0][0]['tag'] == 'md'
+    assert content['zh_cn']['content'][0][0]['text'] == '正文'
+
+
+# ── 决策待审原因 ────────────────────────────────────────────
+
+def test_pending_reason_does_not_reuse_approval_reason():
+    row = {'candidate_id': 'CAN-x', 'status': 'pending', 'decision': {
+        'title': '明确决策', 'outcome': 'o', 'decided_at': '2026-09-21',
+        'review_details': {
+            'reason': '明确拍板决策，数据完整无矛盾。',
+            'review': {'verdict': 'approved', 'supported_fields': ['outcome', 'decided_at']},
+        },
+    }}
+    assert pending_reason(row) == 'AI 已复核通过，待人工确认'
+
+
+def test_annotate_pending_marks_ai_approved_age_and_orphan(tmp_path):
+    src = tmp_path / 'SOURCE'
+    (src / 'docs').mkdir(parents=True)
+    (src / 'docs' / 'ok.md').write_text('x', encoding='utf-8')
+    base = {
+        'created_at': '2026-09-01T10:00:00+08:00',
+        'review_details': {'review': {'verdict': 'approved',
+                                      'supported_fields': ['outcome', 'decided_at']}},
+    }
+    rows = [
+        {'candidate_id': 'CAN-ok', 'decision': {
+            **base, 'title': 'A', 'outcome': 'o', 'decided_at': '2026-09-01',
+            'sources': [{'path': 'docs/ok.md'}]}},
+        {'candidate_id': 'CAN-orphan', 'decision': {
+            **base, 'title': 'B', 'outcome': 'o', 'decided_at': '2026-09-01',
+            'sources': [{'path': 'docs/missing.md'}]}},
+    ]
+    out = {row['candidate_id']: row for row in _annotate_pending(rows, src, TODAY)}
+    assert out['CAN-ok']['_ai_approved'] is True
+    assert out['CAN-ok']['_pending_days'] == 20
+    assert out['CAN-ok']['_orphan'] is False
+    assert out['CAN-orphan']['_orphan'] is True
+
+
+def test_pending_reason_reports_missing_critical_field():
+    row = {'candidate_id': 'CAN-x', 'status': 'pending', 'decision': {
+        'title': '决策', 'outcome': 'o', 'decided_at': '2026-09-21', 'owners': ['张三'],
+        'review_details': {
+            'review': {'verdict': 'approved', 'supported_fields': ['outcome', 'decided_at']},
+        },
+    }}
+    assert pending_reason(row) == 'AI 已复核通过，待补原文依据：责任人'

@@ -80,8 +80,16 @@ def handle_daily_start(args, bundle, logger) -> int:
         reminders_result = _daily_reminders(bundle)
 
         # 证据先积累，再生成信号；辅助失败不阻断原有维护。
-        _tr.report_phase("intelligence", "OKR 证据积累与主动信号", progress=0.95)
-        intelligence_result = _daily_intelligence(bundle)
+        _tr.report_phase("intelligence", "OKR 证据积累与主动信号", progress=1.0)
+        maintenance = _daily_maintenance_digest(
+            scan_info, chunk_summaries, vector_index_result,
+            wiki_update_result, graph_result, usage_summary, asr_refresh_result,
+        )
+        intelligence_result = _daily_intelligence(
+            bundle, reminders=reminders_result, maintenance=maintenance,
+            dry_run=bool(getattr(args, "dry_run", False)),
+            notify=not bool(getattr(args, "no_notify", False)),
+        )
 
         payload = {"memory_sync": {"scanned": sync_result.get("scanned", 0), "skipped": sync_result.get("skipped", 0),
                                     "corrections_added": sync_result.get("corrections_added", 0),
@@ -718,19 +726,64 @@ SYSTEM_HANDLERS = {
 }
 
 
-def _daily_intelligence(bundle):
+def _daily_intelligence(bundle, *, reminders=None, maintenance=None,
+                        dry_run=False, notify=True):
     """独立失败显式记录，不影响既有维护结果。"""
     from iris.intelligence.context import settings
     cfg = settings(bundle)
     if not cfg.get('enabled', True):
         return {'status': 'disabled'}
     result = {}
-    for name, module, method in [('okr_evidence', 'iris.okr_evidence.service', 'tag'),
-                                  ('signals', 'iris.signals.service', 'run')]:
-        try:
-            from importlib import import_module
-            result[name] = getattr(import_module(module), method)(bundle)
-        except Exception as exc:
-            logging.getLogger(__name__).warning('daily-start %s 失败：%s', name, exc)
-            result[name] = {'status': 'error', 'reason': str(exc)}
+    try:
+        from iris.okr_evidence.service import tag
+        result['okr_evidence'] = tag(bundle)
+    except Exception as exc:
+        logging.getLogger(__name__).warning('daily-start okr_evidence 失败：%s', exc)
+        result['okr_evidence'] = {'status': 'error', 'reason': str(exc)}
+    try:
+        from iris.signals.service import run as run_signals
+        result['signals'] = run_signals(
+            bundle, dry_run=dry_run, reminders=reminders,
+            maintenance=maintenance, notify=notify,
+        )
+    except Exception as exc:
+        logging.getLogger(__name__).warning('daily-start signals 失败：%s', exc)
+        result['signals'] = {'status': 'error', 'reason': str(exc)}
     return result
+
+
+def _daily_maintenance_digest(scan_info, chunk_summaries, vector_index_result,
+                              wiki_update_result, graph_result, usage_summary,
+                              asr_refresh_result) -> dict:
+    """给飞书日报的一行维护回执；异常项逐条列出，避免通知只报信号。"""
+    docs = sum(int(row.get("document_count", 0) or 0)
+               for row in (scan_info or []) if isinstance(row, dict))
+    rebuilt = sum(int((cs.build_stats or {}).get("rebuilt_documents", 0) or 0)
+                  for cs in (chunk_summaries or []))
+    wiki_updated = 0
+    if isinstance(wiki_update_result, dict):
+        wiki_updated = int(wiki_update_result.get("updated", 0) or 0)
+    graph = ""
+    if isinstance(graph_result, dict) and graph_result.get("status") == "ok":
+        graph = f'{graph_result.get("nodes", 0)} 节点 / {graph_result.get("edges", 0)} 边'
+    usage_calls = 0
+    if isinstance(usage_summary, dict) and usage_summary.get("status") == "ok":
+        usage_calls = int((usage_summary.get("today") or {}).get("calls", 0) or 0)
+    issues = []
+    if isinstance(vector_index_result, dict) and vector_index_result.get("status") not in (None, "ok", "skipped"):
+        issues.append("向量索引 " + str(vector_index_result.get("status", "")) + "："
+                      + str(vector_index_result.get("reason", "")))
+    if isinstance(wiki_update_result, dict) and wiki_update_result.get("status") in ("error", "skipped"):
+        issues.append("Wiki 更新 " + str(wiki_update_result.get("status", "")) + "："
+                      + str(wiki_update_result.get("reason", "")))
+    if isinstance(wiki_update_result, dict) and int(wiki_update_result.get("errors", 0) or 0) > 0:
+        issues.append(f"Wiki 更新错误 {int(wiki_update_result['errors'])} 页")
+    if isinstance(graph_result, dict) and graph_result.get("status") == "error":
+        issues.append("知识图谱刷新失败：" + str(graph_result.get("reason", "")))
+    if isinstance(asr_refresh_result, dict) and asr_refresh_result.get("status") in ("deploy_only", "error"):
+        detail = asr_refresh_result.get("warning") or asr_refresh_result.get("reason", "")
+        issues.append("ASR " + str(asr_refresh_result.get("status", "")) + "：" + str(detail))
+    if isinstance(usage_summary, dict) and usage_summary.get("budget_warning"):
+        issues.append(str(usage_summary["budget_warning"]))
+    return {"documents": docs, "rebuilt": rebuilt, "wiki_updated": wiki_updated,
+            "graph": graph, "usage_calls": usage_calls, "issues": issues}

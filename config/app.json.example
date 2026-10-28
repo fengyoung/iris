@@ -147,6 +147,7 @@
     "okr_cycle_id": "",
     "feishu_user_id": "",
     "feishu_profile": "",
-    "feishu_app_id": ""
+    "feishu_app_id": "",
+    "notify_policy": "daily"
   }
 }

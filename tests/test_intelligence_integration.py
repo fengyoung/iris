@@ -178,7 +178,7 @@ def test_daily_intelligence_order_and_failure(bundle, monkeypatch):
     def tagging(b):
         calls.append('tag')
         raise OSError('offline')
-    def signalling(b):
+    def signalling(b, **kwargs):
         calls.append('signal')
         return {'status':'ok'}
     monkeypatch.setattr('iris.okr_evidence.service.tag', tagging)
@@ -187,3 +187,22 @@ def test_daily_intelligence_order_and_failure(bundle, monkeypatch):
     assert calls == ['tag', 'signal']
     assert result['okr_evidence']['status'] == 'error'
     assert result['signals']['status'] == 'ok'
+
+
+def test_daily_maintenance_digest_carries_counts_and_issues():
+    from iris.app.cli._handlers._system import _daily_maintenance_digest
+    digest = _daily_maintenance_digest(
+        [{'document_count': 10}],
+        [],
+        {'status': 'model_mismatch', 'reason': 'model changed'},
+        {'status': 'ok', 'updated': 3},
+        {'status': 'ok', 'nodes': 2, 'edges': 5},
+        {'status': 'ok', 'today': {'calls': 9}},
+        {'status': 'deploy_only', 'warning': 'VocoType 未重启'},
+    )
+    assert digest['documents'] == 10
+    assert digest['wiki_updated'] == 3
+    assert digest['graph'] == '2 节点 / 5 边'
+    assert digest['usage_calls'] == 9
+    assert any('向量索引' in issue for issue in digest['issues'])
+    assert any('ASR' in issue for issue in digest['issues'])

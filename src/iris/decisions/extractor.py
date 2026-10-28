@@ -5,7 +5,7 @@ import logging
 from iris.core.exceptions import IrisError, IrisValueError
 from iris.intelligence.context import generate_json
 from iris.wiki._sensitive import is_sensitive_path, is_sensitive_title
-from .schema import Decision
+from .schema import CRITICAL_FIELDS, MINOR_FIELDS, Decision, field_labels
 
 logger = logging.getLogger(__name__)
 
@@ -104,14 +104,29 @@ class DecisionExtractor:
         except (IrisValueError, TypeError, AttributeError):
             result['discarded'] += 1
             return
-        supported = review.get('supported_fields', [])
-        required = ['outcome', 'decided_at'] + [k for k in ('owners', 'review_at', 'related_krs', 'context', 'rationale') if getattr(decision, k)]
+        raw_supported = review.get('supported_fields', [])
+        supported = {str(item) for item in raw_supported} if isinstance(raw_supported, list) else set()
+        critical = [k for k in CRITICAL_FIELDS if getattr(decision, k)]
+        minor = [k for k in MINOR_FIELDS if getattr(decision, k)]
+        missing_critical = [k for k in critical if k not in supported]
+        missing_minor = [k for k in minor if k not in supported]
         conflicts = [r for r in self.store.list() if r['title'] == decision.title and r['outcome'] != decision.outcome]
-        approved = review.get('verdict') == 'approved' and all(k in supported for k in required)
+        verdict = review.get('verdict')
+        approved = verdict == 'approved' and not missing_critical
         if approved and not ambiguous and not conflicts:
+            # 非关键字段缺依据不阻塞入库，但留下审计痕迹供后续核对。
+            decision.review_details['unsupported_minor_fields'] = missing_minor
             decision.review_status = 'auto_approved'
             result['saved'].append(self.store.save(decision))
         else:
-            reason = '与已有决策结论不同，需确认修订关系' if conflicts else review.get('reason', '复核不完整或字段依据不足')
+            if conflicts:
+                reason = '与已有决策结论不同，需确认修订关系'
+            elif verdict == 'approved' and missing_critical:
+                reason = 'AI 复核通过，但 ' + field_labels(missing_critical) + ' 缺少原文依据'
+            elif verdict == 'approved' and ambiguous:
+                reason = 'AI 复核通过，但责任人存在同名歧义，需人工确认'
+            else:
+                reason = review.get('reason') or '复核不完整或字段依据不足'
+            decision.review_details['pending_cause'] = reason
             decision.related_decisions = [r['decision_id'] for r in conflicts]
             result['pending'].append(self.store.stage(decision, reason))

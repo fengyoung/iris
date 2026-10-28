@@ -26,7 +26,7 @@ python3 scripts/run_cli.py --call-source skill daily-start
 python3 scripts/run_cli.py --call-source skill daily-start --pretty
 ```
 
-## 管道流程（9 步）
+## 管道流程（9 步 + 情报阶段）
 
 ```
 1. 记忆同步与维护
@@ -68,8 +68,24 @@ python3 scripts/run_cli.py --call-source skill daily-start --pretty
    ├── 周报缺失：活跃成员周报断档 ≥14 天
    └── 项目停滞：项目 Wiki 引用的源文档全部 ≥21 天未更新
 
-（另有一个 OKR 证据积累与主动信号阶段，在提醒之后执行，进度不参与 9 段编号。）
+10. 情报阶段（OKR 证据 + 主动信号 + 飞书日报）
+   ├── OKR 证据打标（增量，独立失败不阻断维护）
+   ├── 信号检测：KR 风险句 / OKR 证据缺口 / 决策复盘与停滞 /
+   │   Wiki 脱节 / 未落文档话题 / 缺失实体 / 栏目断供 / 周报缺失 / 项目停滞
+   ├── 按 kind 配额排序（避免单一类型霸榜）+ 跨日新鲜度（新增 / 持续 N 天）
+   ├── 生成飞书日报：post 标题 + 分区正文 + 决策待审 + 维护回执
+   └── 默认按天幂等发送（同日不重复）；`--dry-run` 只预览归档，
+       `--no-notify` 关闭发送
 ```
+
+### 通知开关与发送策略
+
+| 参数 / 配置 | 作用 |
+|------|------|
+| `--dry-run` | 仅通知阶段：预览正文并归档，不发送；不更新跨日信号历史（其余维护照常执行） |
+| `--no-notify` | 生成并归档日报正文，但不发送飞书 |
+| `intelligence.notify_policy` | `daily`（默认，一天一张卡）或 `every_run`（内容变化即发） |
+| `intelligence.enabled=false` | 同时关闭 OKR 证据积累与信号阶段 |
 
 ## 使用场景
 
@@ -104,7 +120,14 @@ python3 scripts/run_cli.py --call-source skill daily-start --pretty
 - `vector_index.status` — 为 `model_mismatch` 时表示 embedding 模型已变更，
   需手动执行 `build-vector-index --force-rebuild` 全量重建
 - `reminders.signals` — 主动提醒信号列表（栏目断供/周报缺失/项目停滞），
-  有信号时应向用户逐条汇报
+  有信号时应向用户逐条汇报（这些信号现在也会并入飞书日报）
+- `intelligence.signals.counts` — 本次日报的信号数 / 待审决策数 / AI 已通过数 / 孤儿候选数
+- `intelligence.signals.delivery.status` — 飞书发送结果：
+  - `sent` — 已发送；`duplicate` — 当日已发送，未重复
+  - `uncertain` — 发送结果不确定（网络超时等），不会盲目重发，需人工核验
+  - `not_configured` — 未配置 `intelligence.feishu_user_id`
+  - `dry_run` — `--dry-run` 预览；`disabled` — `--no-notify` 关闭
+- `intelligence.signals.errors` — 独立检测器失败原因（Wiki 鲜度 / OKR / 提醒采集）
 - `asr_audit.status` — ASR 热词覆盖审计；`needs_update` 为 true 时 `issues`
   列出覆盖缺口，`warnings` 列出待手工清理的噪音/超长词（两者处置方式不同）
 - `asr_refresh.status` — ASR 资源更新结果，四种取值：

@@ -123,6 +123,24 @@ def test_high_confidence_auto(store):
     assert len(extract(store, llm)['saved']) == 1
 
 
+def test_minor_field_without_support_does_not_block_auto(store):
+    """rationale/context 属解释性字段，缺原文依据不应把明确拍板卡成 pending。"""
+    item = {**candidate(), 'rationale': '因为线上问题需要双路兜底'}
+    llm = llm_responses([item], [{'index': 0, 'verdict': 'approved',
+                                  'supported_fields': ['outcome', 'decided_at']}])
+    result = extract(store, llm)
+    assert len(result['saved']) == 1
+    assert result['saved'][0]['review_details']['unsupported_minor_fields'] == ['rationale']
+
+
+def test_missing_critical_field_pending_cause_is_specific(store):
+    llm = llm_responses([candidate()], [{'index': 0, 'verdict': 'approved',
+                                         'supported_fields': ['decided_at']}])
+    result = extract(store, llm)
+    cause = result['pending'][0]['decision']['review_details']['pending_cause']
+    assert cause.startswith('AI 复核通过，但 结论')
+
+
 def test_uncertain_pending(store):
     assert len(extract(store, llm_responses([candidate()], []))['pending']) == 1
     assert not store.list()

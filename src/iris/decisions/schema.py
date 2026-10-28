@@ -11,6 +11,23 @@ def now() -> str:
     return datetime.now().astimezone().isoformat()
 
 
+# 复核门槛：关键字段缺原文依据才阻塞自动入库；context/rationale/summary
+# 属解释性内容，缺失时记录审计信息但不再把明确拍板的决策卡在 pending。
+CRITICAL_FIELDS = ('outcome', 'decided_at', 'owners', 'review_at', 'related_krs')
+MINOR_FIELDS = ('context', 'rationale', 'summary')
+
+_FIELD_LABELS = {
+    'outcome': '结论', 'decided_at': '决策日期', 'owners': '责任人',
+    'review_at': '复盘日期', 'related_krs': '关联 KR',
+    'context': '背景', 'rationale': '决策依据', 'summary': '摘要',
+}
+
+
+def field_labels(fields: list[str]) -> str:
+    """把内部字段名转成通知里可读的中文标签。"""
+    return '、'.join(_FIELD_LABELS.get(name, name) for name in fields)
+
+
 @dataclass
 class DecisionSource:
     path: str

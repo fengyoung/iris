@@ -13,7 +13,8 @@
     "max_prompt_chars": 48000,
     "okr_source": "01-目标管理/2026/当前周期个人OKR.md",
     "okr_cycle_id": "",
-    "feishu_user_id": "ou_实际收件人标识"
+    "feishu_user_id": "ou_实际收件人标识",
+    "notify_policy": "daily"
   }
 }
 ```
@@ -21,9 +22,26 @@
 - `okr_source` 是 SOURCE 相对路径，必须显式指定，避免把个人 OKR 与部门 OKR 混淆。也可以设置飞书 `okr_cycle_id`，优先读取该周期。原生飞书周期通过 `lark-cli okr +cycle-detail --as user` 读取。
 - 本地 OKR 支持现有标题格式 `## O1：目标`、`### KR1：关键结果`，沿用 `O1-KR1` 标识。路径隔离周期，变更 KR 全文、向量模型或阈值会重打标。
 - `feishu_user_id` 支持回退环境变量 `IRIS_BOT_USER_ID`。发送使用当前 lark-cli 配置的机器人身份，因此部署前必须核对当前 profile 对应 Iris 应用。
+- `notify_policy` 控制日报发送节奏：`daily`（默认，一天一张卡，同日内容变化不重复推送）或 `every_run`（内容变化即发）。临时关闭用 `daily-start --no-notify`，预览用 `daily-start --dry-run`。
 - `max_documents` 限制每天增量处理量，未处理文档留待下一次执行，不会被游标跳过。正文超过 180,000 字的文档保留为待处理，不截断后冒充处理成功。
 - 决策提取及情报包有 `max_prompt_chars` 预算，超过预算明确拒绝或跳过。未配置 SOURCE、Embedding 或飞书时会报告对应缺项，不影响已经完成的 daily-start 维护。
 - 新增 LLM 路由写入实际使用的 `config/llm.json.example` 的 `routing.rules`，不是设计稿中的独立 `llm_routes.json`。调用同时携带角色选择，兼容现有配置中的角色路由。
+
+## 每日信号日报
+
+`daily-start` 最后的情报阶段会生成并发出一张飞书日报（`build_title` 负责 post 标题）：
+
+- **信号选择**：KR 风险按「文档 + 风险句」抽取并合并多 KR，过滤「风险/问题：」模板标题、「风险可控/不大」「未明确提及」等非风险表述；同类信号按配额排序，避免单一类型霸榜。
+- **跨日新鲜度**：`data/signals/history.json` 记录首见与最近推送，正文标注「新增」或「持续 N 天」；稳定指纹避免措辞微变被误判为新增，持续项可快速识别为待跟进而非新问题。需要重置时删除该文件即可（下一轮全部按新增处理）。
+- **决策待审**：展示 AI 已通过数量、挂起天数与真实待确认原因；来源文档缺失的孤儿候选单独计数，不再混在正文里。
+- **维护回执**：附带扫描/重建/Wiki/图谱/用量一行摘要，异常项（向量索引、ASR 部署等）逐条列出。
+- **发送状态**：`sent` 已发送 · `duplicate` 当日已发送 · `uncertain` 结果不确定（不盲目重发，需人工核验）· `not_configured` 未配置收件人 · `dry_run` 预览 · `disabled` 已关闭。
+
+```bash
+iris signals --dry-run          # 预览日报正文与 JSON，不发送
+iris daily-start --dry-run      # 预览并归档日报，不发送
+iris daily-start --no-notify    # 生成日报但不发送
+```
 
 ## 决策库
 
@@ -74,9 +92,9 @@ iris signals
 iris daily-start
 ```
 
-`daily-start` 先积累 OKR 证据，再生成最多五条排序后的信号。信号同时展示在终端、保存到 `data/signals/`，发送给配置的飞书收件人。`signals --dry-run` 只显示与落盘，不发送。
+`daily-start` 先积累 OKR 证据，再生成最多五条排序后的信号（含栏目断供/周报缺失/项目停滞），合并为带 post 标题的飞书日报并保存到 `data/signals/`。`signals --dry-run` 只显示与落盘，不发送。
 
-相同日期、内容和收件人的摘要只发送一次。网络超时可能已经送达，因此记为 `uncertain`，不会盲目重发；在 `data/signals/delivery` 当前 generation 的索引中核验状态和错误后处理。通知失败不会丢失本地摘要。
+默认按天幂等：同一日期、收件人只发送一张日报，内容变化不重复推送（`notify_policy=daily`；改为 `every_run` 则内容变化即发）。网络超时可能已经送达，因此记为 `uncertain`，不会盲目重发；在 `data/signals/delivery` 当前 generation 的索引中核验状态和错误后处理。通知失败不会丢失本地摘要。
 
 feed 在正常收集时写入最小话题缓存，dry-run 不写。多群话题缺少标题匹配只表示候选文档缺口，不等于确认没有资料。新人名检测使用明确的 `[[人物-姓名]]` 引用，概念缺页要求至少两份文档引用，避免从普通中文段落猜姓名。
 

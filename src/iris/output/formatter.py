@@ -458,7 +458,54 @@ def _fmt_daily_start(p: Dict[str, Any]) -> str:
     if isinstance(reminders, dict) and reminders.get("signal_count", 0) > 0:
         lines.append("")
         lines.append(_fmt_reminders(reminders))
+    lines.extend(_fmt_daily_intelligence(p.get("intelligence")))
     return "\n".join(lines)
+
+
+def _fmt_daily_intelligence(r: Any) -> List[str]:
+    """飞书通知状态：发送失败/当日去重/关闭必须在 --pretty 输出里可见。"""
+    r = r if isinstance(r, dict) else {}
+    if not r:
+        return []
+    lines = ["", "### 飞书通知"]
+    if r.get("status") == "disabled":
+        lines.append("  ⏭ 情报阶段已禁用")
+        return lines
+    raw_signals = r.get("signals")
+    signals = raw_signals if isinstance(raw_signals, dict) else {}
+    if signals.get("status") == "error":
+        lines.append(f"  ❌ 信号生成失败：{signals.get('reason', '')}")
+        return lines
+    raw_delivery = signals.get("delivery")
+    delivery = raw_delivery if isinstance(raw_delivery, dict) else {}
+    raw_counts = signals.get("counts")
+    counts = raw_counts if isinstance(raw_counts, dict) else {}
+    status = delivery.get("status", "")
+    if status == "uncertain":
+        lines.append(f"  ⚠️ 发送结果不确定：{delivery.get('reason', '')}（请人工核验）")
+    elif status == "sending":
+        lines.append(f"  ⏳ 当日已有正在发送的记录：{delivery.get('reason', '')}")
+    elif delivery.get("duplicate"):
+        lines.append(f"  ⏭ 当日已发送，未重复：{delivery.get('reason', '')}")
+    elif status == "sent":
+        line = "  ✅ 已发送"
+        if counts:
+            line += f"（{counts.get('signals', 0)} 条信号 / {counts.get('pending', 0)} 条待审）"
+        lines.append(line)
+    elif status == "dry_run":
+        lines.append("  ⏭ 预览模式，未发送")
+    elif status == "disabled":
+        lines.append("  ⏭ 飞书通知已关闭（正文已归档）")
+    elif status == "not_configured":
+        lines.append(f"  ⚠️ 未配置收件人：{delivery.get('reason', '')}")
+    else:
+        lines.append(f"  {_status_icon(status)} 通知状态：{status or '未返回'}")
+    for error in signals.get("errors", []) if isinstance(signals.get("errors"), list) else []:
+        lines.append(f"  ⚠️ {error}")
+    okr = r.get("okr_evidence")
+    if isinstance(okr, dict) and okr.get("status") == "error":
+        lines.append(f"  ⚠️ OKR 证据积累失败：{okr.get('reason', '')}")
+    return lines
 
 
 def _fmt_daily_scan(p: Dict[str, Any]) -> List[str]:
