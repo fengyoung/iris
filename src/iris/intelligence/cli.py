@@ -27,7 +27,8 @@ def handle_signals(args, bundle, logger):
     from iris.taskpanel.reporter import TaskReporter
     with TaskReporter('signals', command='signals'):
         result = run(bundle, dry_run=args.dry_run,
-                     notify=not bool(getattr(args, 'no_notify', False)))
+                     notify=not bool(getattr(args, 'no_notify', False)),
+                     force_notify=bool(getattr(args, 'force_notify', False)))
     _emit_output('signals', result, pretty=args.pretty)
     return 0 if not result['errors'] and result['delivery']['status'] in {'sent', 'dry_run', 'disabled'} else 1
 

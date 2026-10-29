@@ -482,9 +482,11 @@ def _fmt_daily_intelligence(r: Any) -> List[str]:
     counts = raw_counts if isinstance(raw_counts, dict) else {}
     status = delivery.get("status", "")
     if status == "uncertain":
-        lines.append(f"  ⚠️ 发送结果不确定：{delivery.get('reason', '')}（请人工核验）")
+        reason = str(delivery.get("reason", "") or "")
+        suffix = "" if "人工核验" in reason else "（请人工核验）"
+        lines.append(f"  ⚠️ 发送结果不确定：{reason}{suffix}")
     elif status == "sending":
-        lines.append(f"  ⏳ 当日已有正在发送的记录：{delivery.get('reason', '')}")
+        lines.append(f"  ⏳ {delivery.get('reason', '正在发送，未重复推送')}")
     elif delivery.get("duplicate"):
         lines.append(f"  ⏭ 当日已发送，未重复：{delivery.get('reason', '')}")
     elif status == "sent":

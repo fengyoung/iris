@@ -89,6 +89,7 @@ def handle_daily_start(args, bundle, logger) -> int:
             bundle, reminders=reminders_result, maintenance=maintenance,
             dry_run=bool(getattr(args, "dry_run", False)),
             notify=not bool(getattr(args, "no_notify", False)),
+            force_notify=bool(getattr(args, "force_notify", False)),
         )
 
         payload = {"memory_sync": {"scanned": sync_result.get("scanned", 0), "skipped": sync_result.get("skipped", 0),
@@ -727,7 +728,7 @@ SYSTEM_HANDLERS = {
 
 
 def _daily_intelligence(bundle, *, reminders=None, maintenance=None,
-                        dry_run=False, notify=True):
+                        dry_run=False, notify=True, force_notify=False):
     """独立失败显式记录，不影响既有维护结果。"""
     from iris.intelligence.context import settings
     cfg = settings(bundle)
@@ -745,6 +746,7 @@ def _daily_intelligence(bundle, *, reminders=None, maintenance=None,
         result['signals'] = run_signals(
             bundle, dry_run=dry_run, reminders=reminders,
             maintenance=maintenance, notify=notify,
+            force_notify=force_notify,
         )
     except Exception as exc:
         logging.getLogger(__name__).warning('daily-start signals 失败：%s', exc)

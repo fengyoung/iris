@@ -728,6 +728,18 @@ class TestFmtDailyIntelligence:
         assert "不确定" in result
         assert "已发送" not in result
 
+    def test_uncertain_reason_with_manual_check_not_duplicated(self):
+        result = "\n".join(_fmt_daily_intelligence({"signals": {"delivery": {
+            "status": "uncertain", "reason": "上次发送进程中断，结果未知，请人工核验"}}}))
+        assert result.count("人工核验") == 1
+
+    def test_sending_reason_visible(self):
+        result = "\n".join(_fmt_daily_intelligence({"signals": {"delivery": {
+            "status": "sending", "duplicate": True,
+            "reason": "当日正在发送，未重复推送；超过 10 分钟无结果将转为不确定"}}}))
+        assert "正在发送" in result
+        assert "10 分钟" in result
+
     def test_signal_error(self):
         result = "\n".join(_fmt_daily_intelligence({"signals": {"status": "error", "reason": "boom"}}))
         assert "信号生成失败" in result and "boom" in result

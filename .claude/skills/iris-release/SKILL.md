@@ -1,6 +1,6 @@
 ---
 name: iris-release
-version: 1.0.1
+version: 1.0.2
 description: Iris 发版与提交 — 自动完成提交、版本号同步、门禁检查、打 tag、双远端推送与 GitHub Release。当用户说「发版」「发布版本」「发布并提交」「提交并推送」「合并分支」或指定 /iris-release 时使用。
 user-invocable: true
 metadata:
@@ -228,11 +228,13 @@ cat /tmp/iris-release-tests.log
 依赖变化时必须在 clean venv / CI 中重新审计：
 
 ```bash
+# commit / commit-push 跳过第 3 步时也要能独立判断基线。
+[ -n "$LAST_RELEASE" ] || LAST_RELEASE=$(git log --grep='^release: v[0-9]' --format='%H' -1)
 if [ -z "$LAST_RELEASE" ]; then
   echo "无历史 release 基线，无法判断依赖是否变化；请在 clean venv/CI 中审计"; exit 1
 fi
 
-DEPS_DIFF=$(git diff "$LAST_RELEASE"..HEAD -- pyproject.toml constraints.txt \
+DEPS_DIFF=$(git diff "$LAST_RELEASE" -- pyproject.toml constraints.txt \
   | grep -E '^[+-]' | grep -vE '^[+-]{3}|^[+-]version =|^[+-]$' || true)
 
 if [ -n "$DEPS_DIFF" ]; then
@@ -242,7 +244,7 @@ if [ -n "$DEPS_DIFF" ]; then
 fi
 
 if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-  CI_CONCLUSION=$(gh run list --branch main --limit 1 --json conclusion --jq '.[0].conclusion')
+  CI_CONCLUSION=$(gh run list --branch main --workflow ci.yml --limit 1 --json conclusion --jq '.[0].conclusion')
   [ "$CI_CONCLUSION" = "success" ] || {
     echo "依赖未变化，但最近一次 main CI 非绿（${CI_CONCLUSION:-未完成}）；停止"; exit 1; }
   echo "pip-audit：依赖未变化，采用最近一次绿色 CI 的依赖审计结果"
@@ -253,6 +255,8 @@ fi
 
 > 只有依赖文件（`pyproject.toml` 的 dependencies/extras、`constraints.txt`）真正变化时
 > 才需要重新审计；单纯版本号变更会被上面的过滤排除。
+> `git diff <基线提交>` 对比的是工作区，能看见已暂存和未暂存的依赖改动——依赖门禁
+> 跑在第 5 步提交之前，不能写成 `..HEAD`（那样会漏掉本次待提交的依赖变更）。
 
 解析测试数与覆盖率，后续写文档必须用真实值：
 

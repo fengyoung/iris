@@ -1,6 +1,6 @@
 ---
 name: iris-daily-start
-version: 1.1.0
+version: 1.1.1
 description: Iris 每日启动维护 — 记忆同步、扫描切块、向量索引、Wiki 自动更新、知识图谱刷新、LLM 用量概要、主动提醒。当用户需要执行日常维护、启动知识库更新、查看 LLM 用量、检查知识库异常信号时使用。
 metadata:
   requires:
@@ -75,7 +75,7 @@ python3 scripts/run_cli.py --call-source skill daily-start --pretty
    ├── 按 kind 配额排序（避免单一类型霸榜）+ 跨日新鲜度（新增 / 持续 N 天）
    ├── 生成飞书日报：post 标题 + 分区正文 + 决策待审 + 维护回执
    └── 默认按天幂等发送（同日不重复）；`--dry-run` 只预览归档，
-       `--no-notify` 关闭发送
+       `--no-notify` 关闭发送，`--force-notify` 人工核验后强制重发
 ```
 
 ### 通知开关与发送策略
@@ -84,6 +84,7 @@ python3 scripts/run_cli.py --call-source skill daily-start --pretty
 |------|------|
 | `--dry-run` | 仅通知阶段：预览正文并归档，不发送；不更新跨日信号历史（其余维护照常执行） |
 | `--no-notify` | 生成并归档日报正文，但不发送飞书 |
+| `--force-notify` | 忽略当日/同内容幂等强制重发；`--no-notify` 与 `--dry-run` 优先 |
 | `intelligence.notify_policy` | `daily`（默认，一天一张卡）或 `every_run`（内容变化即发） |
 | `intelligence.enabled=false` | 同时关闭 OKR 证据积累与信号阶段 |
 
@@ -123,10 +124,13 @@ python3 scripts/run_cli.py --call-source skill daily-start --pretty
   有信号时应向用户逐条汇报（这些信号现在也会并入飞书日报）
 - `intelligence.signals.counts` — 本次日报的信号数 / 待审决策数 / AI 已通过数 / 孤儿候选数
 - `intelligence.signals.delivery.status` — 飞书发送结果：
-  - `sent` — 已发送；`duplicate` — 当日已发送，未重复
-  - `uncertain` — 发送结果不确定（网络超时等），不会盲目重发，需人工核验
+  - `sent` — 已发送；`duplicate` — 当日/同内容已发送，未重复且不新增归档
+  - `sending` — 正在发送；超过 10 分钟无结果自动降级为 `uncertain`
+  - `uncertain` — 发送结果不确定（网络超时/进程中断），不会盲目重发，需人工核验；
+    确认未送达后可用 `--force-notify` 重发
   - `not_configured` — 未配置 `intelligence.feishu_user_id`
   - `dry_run` — `--dry-run` 预览；`disabled` — `--no-notify` 关闭
+  - 归档：实际发送写 `{day}-{digest12}.md`；预览/关闭/未配置写 `-preview.md`
 - `intelligence.signals.errors` — 独立检测器失败原因（Wiki 鲜度 / OKR / 提醒采集）
 - `asr_audit.status` — ASR 热词覆盖审计；`needs_update` 为 true 时 `issues`
   列出覆盖缺口，`warnings` 列出待手工清理的噪音/超长词（两者处置方式不同）

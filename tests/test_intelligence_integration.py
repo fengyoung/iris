@@ -189,6 +189,96 @@ def test_daily_intelligence_order_and_failure(bundle, monkeypatch):
     assert result['signals']['status'] == 'ok'
 
 
+def test_daily_intelligence_forwards_force_notify(bundle, monkeypatch):
+    from iris.app.cli._handlers._system import _daily_intelligence
+    captured = {}
+
+    def signalling(b, **kwargs):
+        captured.update(kwargs)
+        return {'status': 'ok'}
+
+    monkeypatch.setattr('iris.okr_evidence.service.tag', lambda b: {'status': 'ok'})
+    monkeypatch.setattr('iris.signals.service.run', signalling)
+    _daily_intelligence(bundle, force_notify=True)
+    assert captured['force_notify'] is True
+    captured.clear()
+    _daily_intelligence(bundle)
+    assert captured['force_notify'] is False
+
+
+def test_run_forwards_force_notify(bundle, monkeypatch):
+    from iris.signals import service
+    from iris.wiki.freshness import WikiFreshnessChecker
+    record(bundle)
+    monkeypatch.setattr(WikiFreshnessChecker, 'run', lambda *a, **k: [])
+    monkeypatch.setattr('iris.okr_evidence.service.evidence_context',
+                        lambda b: ({'KR1': '巡检'}, {'KR1': []}))
+    captured = {}
+
+    def fake_deliver(root, cfg, summary, **kwargs):
+        captured.update(kwargs)
+        return {'file': 'x', 'status': 'dry_run'}
+
+    monkeypatch.setattr(service, '_deliver', fake_deliver)
+    result = service.run(bundle, dry_run=True, force_notify=True)
+    assert captured['force_notify'] is True
+    assert result['delivery']['status'] == 'dry_run'
+
+
+def test_deliver_notify_false_wins_over_force(tmp_path, monkeypatch):
+    from iris.signals import service
+    captured = {}
+
+    class FakeDelivery:
+        def __init__(self, root, sender):
+            pass
+
+        def deliver(self, text, **kwargs):
+            captured.update(kwargs)
+            return {'file': 'x', 'status': 'dry_run'}
+
+    monkeypatch.setattr(service, 'SignalDelivery', FakeDelivery)
+    result = service._deliver(tmp_path, {}, '正文', day=date(2026, 9, 21),
+                              dry_run=False, notify=False, force_notify=True)
+    assert result['status'] == 'disabled'
+    assert captured['dry_run'] is True
+    assert captured['user_id'] == ''
+    assert 'force' not in captured
+
+
+def test_parser_exposes_force_notify():
+    parser = build_parser()
+    assert parser.parse_args(['daily-start', '--force-notify']).force_notify is True
+    assert parser.parse_args(['signals']).force_notify is False
+
+
+def test_handle_signals_forwards_flags(monkeypatch):
+    import iris.signals.service as service
+    import iris.taskpanel.reporter as reporter
+    from iris.intelligence.cli import handle_signals
+    captured = {}
+
+    class DummyReporter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def fake_run(bundle, **kwargs):
+        captured.update(kwargs)
+        return {'errors': [], 'delivery': {'status': 'dry_run'}, 'signals': []}
+
+    monkeypatch.setattr(reporter, 'TaskReporter', DummyReporter)
+    monkeypatch.setattr(service, 'run', fake_run)
+    args = SimpleNamespace(dry_run=True, no_notify=False, force_notify=True, pretty=False)
+    assert handle_signals(args, object(), None) == 0
+    assert captured == {'dry_run': True, 'notify': True, 'force_notify': True}
+
+
 def test_daily_maintenance_digest_carries_counts_and_issues():
     from iris.app.cli._handlers._system import _daily_maintenance_digest
     digest = _daily_maintenance_digest(

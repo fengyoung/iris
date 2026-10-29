@@ -1,6 +1,8 @@
 """情报引用、鲜度、信号边界和交付幂等性。"""
+import hashlib
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 import pytest
@@ -264,6 +266,165 @@ def test_delivery_passes_post_title(tmp_path):
     delivery = SignalDelivery(tmp_path, sender)
     delivery.deliver('正文', day='2026-09-21', user_id='ou_1', title='Iris 日报 · 9月21日（周一）')
     assert sender.call_args.kwargs['title'] == 'Iris 日报 · 9月21日（周一）'
+
+
+def _seed_delivery_record(delivery, *, day, user_id='ou_1', text='摘要',
+                          policy='daily', **fields):
+    digest = hashlib.sha256((day + user_id + text).encode()).hexdigest()
+    key = delivery._delivery_key(day, user_id, digest, policy)
+    record = {'status': 'sending', 'file': str(delivery.root / f'{day}-{digest[:12]}.md'),
+              'day': day, 'digest': digest, 'title': '', 'user_id': user_id}
+    record.update(fields)
+    delivery._record(key, record)
+    return key
+
+
+def test_delivery_preview_archive_naming(tmp_path):
+    sender = Mock()
+    delivery = SignalDelivery(tmp_path, sender)
+    result = delivery.deliver('摘要', day='2026-09-21', user_id='ou_1', dry_run=True)
+    assert result['file'].endswith('-preview.md')
+    assert Path(result['file']).exists()
+    sender.assert_not_called()
+
+
+def test_delivery_not_configured_writes_preview_only(tmp_path):
+    result = SignalDelivery(tmp_path).deliver('摘要', day='2026-09-21')
+    assert result['status'] == 'not_configured'
+    files = list(tmp_path.glob('*.md'))
+    assert len(files) == 1 and files[0].name.endswith('-preview.md')
+
+
+def test_delivery_records_started_at(tmp_path):
+    sender = Mock(return_value={'message_id': 'om_1'})
+    delivery = SignalDelivery(tmp_path, sender)
+    delivery.deliver('摘要', day='2026-09-21', user_id='ou_1')
+    record = next(iter(delivery.store.read()['records'].values()))
+    started = datetime.fromisoformat(record['started_at'])
+    assert started.tzinfo is not None
+
+
+def test_delivery_duplicate_reuses_previous_archive(tmp_path):
+    sender = Mock(return_value={'message_id': 'om_1'})
+    delivery = SignalDelivery(tmp_path, sender)
+    first = delivery.deliver('v1', day='2026-09-21', user_id='ou_1')
+    second = delivery.deliver('v2', day='2026-09-21', user_id='ou_1')
+    assert second['duplicate'] is True
+    assert second['file'] == first['file']
+    assert len(list(tmp_path.glob('*.md'))) == 1
+    sender.assert_called_once()
+
+
+def test_delivery_stale_sending_becomes_uncertain(tmp_path):
+    sender = Mock()
+    delivery = SignalDelivery(tmp_path, sender)
+    started_at = (datetime.now().astimezone() - timedelta(minutes=11)).isoformat()
+    key = _seed_delivery_record(delivery, day='2026-09-21', started_at=started_at)
+    result = delivery.deliver('摘要', day='2026-09-21', user_id='ou_1')
+    assert result['status'] == 'uncertain'
+    assert result['duplicate'] is True
+    assert '中断' in result['reason']
+    sender.assert_not_called()
+    assert delivery.store.read()['records'][key]['status'] == 'uncertain'
+
+
+def test_delivery_fresh_sending_stays_sending(tmp_path):
+    sender = Mock()
+    delivery = SignalDelivery(tmp_path, sender)
+    key = _seed_delivery_record(
+        delivery, day='2026-09-21',
+        started_at=datetime.now().astimezone().isoformat())
+    result = delivery.deliver('摘要', day='2026-09-21', user_id='ou_1')
+    assert result['status'] == 'sending'
+    assert result['duplicate'] is True
+    sender.assert_not_called()
+    assert delivery.store.read()['records'][key]['status'] == 'sending'
+
+
+def test_delivery_legacy_sending_without_started_at_becomes_uncertain(tmp_path):
+    sender = Mock()
+    delivery = SignalDelivery(tmp_path, sender)
+    _seed_delivery_record(delivery, day='2026-09-21')
+    result = delivery.deliver('摘要', day='2026-09-21', user_id='ou_1')
+    assert result['status'] == 'uncertain'
+    assert '中断' in result['reason']
+    sender.assert_not_called()
+
+
+def test_delivery_invalid_started_at_becomes_uncertain(tmp_path):
+    sender = Mock()
+    delivery = SignalDelivery(tmp_path, sender)
+    _seed_delivery_record(delivery, day='2026-09-21', started_at='not-a-date')
+    result = delivery.deliver('摘要', day='2026-09-21', user_id='ou_1')
+    assert result['status'] == 'uncertain'
+    sender.assert_not_called()
+
+
+def test_delivery_force_resends_after_sent(tmp_path):
+    sender = Mock(return_value={'message_id': 'om_1'})
+    delivery = SignalDelivery(tmp_path, sender)
+    delivery.deliver('摘要', day='2026-09-21', user_id='ou_1')
+    result = delivery.deliver('摘要', day='2026-09-21', user_id='ou_1', force=True)
+    assert result['status'] == 'sent'
+    assert sender.call_count == 2
+
+
+def test_delivery_force_resends_after_uncertain(tmp_path):
+    sender = Mock(side_effect=[OSError('offline'), {'message_id': 'om_2'}])
+    delivery = SignalDelivery(tmp_path, sender)
+    assert delivery.deliver('摘要', day='2026-09-21', user_id='ou_1')['status'] == 'uncertain'
+    assert delivery.deliver('摘要', day='2026-09-21', user_id='ou_1', force=True)['status'] == 'sent'
+    assert sender.call_count == 2
+
+
+def test_delivery_force_every_run_same_content(tmp_path):
+    sender = Mock(return_value={'message_id': 'om_1'})
+    delivery = SignalDelivery(tmp_path, sender)
+    delivery.deliver('摘要', day='2026-09-21', user_id='ou_1', policy='every_run')
+    result = delivery.deliver('摘要', day='2026-09-21', user_id='ou_1',
+                              policy='every_run', force=True)
+    assert result['status'] == 'sent'
+    assert sender.call_count == 2
+
+
+def test_delivery_force_dry_run_previews_only(tmp_path):
+    sender = Mock(return_value={'message_id': 'om_1'})
+    delivery = SignalDelivery(tmp_path, sender)
+    delivery.deliver('摘要', day='2026-09-21', user_id='ou_1')
+    result = delivery.deliver('摘要', day='2026-09-21', user_id='ou_1',
+                              dry_run=True, force=True)
+    assert result['status'] == 'dry_run'
+    assert sender.call_count == 1
+
+
+def test_delivery_force_without_user_is_not_configured(tmp_path):
+    sender = Mock()
+    delivery = SignalDelivery(tmp_path, sender)
+    result = delivery.deliver('摘要', day='2026-09-21', user_id='', force=True)
+    assert result['status'] == 'not_configured'
+    sender.assert_not_called()
+
+
+def test_delivery_every_run_stale_sending_becomes_uncertain(tmp_path):
+    sender = Mock()
+    delivery = SignalDelivery(tmp_path, sender)
+    started_at = (datetime.now().astimezone() - timedelta(minutes=11)).isoformat()
+    key = _seed_delivery_record(delivery, day='2026-09-21', policy='every_run',
+                                started_at=started_at)
+    result = delivery.deliver('摘要', day='2026-09-21', user_id='ou_1', policy='every_run')
+    assert result['status'] == 'uncertain'
+    assert result['duplicate'] is True
+    sender.assert_not_called()
+    assert delivery.store.read()['records'][key]['status'] == 'uncertain'
+
+
+def test_delivery_uncertain_keeps_attempted_archive(tmp_path):
+    sender = Mock(side_effect=OSError('offline'))
+    delivery = SignalDelivery(tmp_path, sender)
+    result = delivery.deliver('摘要', day='2026-09-21', user_id='ou_1')
+    assert result['status'] == 'uncertain'
+    archive = Path(result['file'])
+    assert archive.exists() and not archive.name.endswith('-preview.md')
 
 
 def test_send_lark_builds_post_payload_with_title(monkeypatch):

@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +37,12 @@ _KIND_LABELS = {
 }
 _MAX_PER_SECTION = 3
 _DECISION_ID_KINDS = {'DECISION_REVIEW_DUE', 'OPEN_DECISION_STALE'}
+# 会阻止同一日期/同一内容重复投递的状态。
+_BLOCKING_STATUSES = ('sent', 'sending', 'uncertain')
+# 发送锁覆盖整个 send 过程：取得锁后仍看到 sending，说明上一次进程已中断。
+# TTL 只是跨机器 / NFS 场景的保险，避免把真正在途的发送误判成残留。
+_SENDING_TTL = timedelta(minutes=10)
+_STALE_SENDING_REASON = '上次发送进程中断，结果未知，请人工核验'
 
 
 def build_title(day: date) -> str:
@@ -181,8 +187,6 @@ def _render_maintenance(maintenance: dict[str, Any] | None) -> list[str]:
     if not maintenance:
         return []
     parts: list[str] = []
-    if maintenance.get('text'):
-        parts.append(str(maintenance['text']))
     if maintenance.get('documents') is not None:
         parts.append(f'文档 {int(maintenance["documents"]):,}')
     if maintenance.get('rebuilt') is not None:
@@ -234,44 +238,87 @@ class SignalDelivery:
         self.root, self.sender = root, sender
         self.store = SnapshotStore(root / 'delivery')
 
-    def deliver(self, text, *, day, user_id='', dry_run=False, title='', policy='daily'):
+    def deliver(self, text, *, day, user_id='', dry_run=False, title='',
+                policy='daily', force: bool = False) -> dict:
         print(text)
         digest = hashlib.sha256((day + user_id + text).encode()).hexdigest()
         # 存储 key 与幂等键统一使用同一截断值，避免两者不一致。
-        path = self.root / f'{day}-{digest[:12]}.md'
-        atomic_write_text(path, text)
+        real_path = self.root / f'{day}-{digest[:12]}.md'
+        preview_path = self.root / f'{day}-{digest[:12]}-preview.md'
         if dry_run:
-            return {'file': str(path), 'status': 'dry_run'}
+            atomic_write_text(preview_path, text)
+            return {'file': str(preview_path), 'status': 'dry_run'}
         if not user_id:
-            return {'file': str(path), 'status': 'not_configured',
+            atomic_write_text(preview_path, text)
+            return {'file': str(preview_path), 'status': 'not_configured',
                     'reason': '未配置飞书收件人（feishu_user_id）'}
         policy = policy if policy in {'daily', 'every_run'} else 'daily'
         key = self._delivery_key(day, user_id, digest, policy)
         # 发送全过程用独立锁，避免两个 daily-start 同时投递。
         with FileLock(self.root / 'send'):
             records = self.store.read().get('records', {})
-            if policy == 'daily':
-                prior = self._find_day_record(records, day)
-                if prior.get('status') in {'sent', 'sending', 'uncertain'}:
-                    prior_status = str(prior.get('status'))
-                    reason = ('当日已发送，未重复推送' if prior_status == 'sent'
-                              else f'当日已有投递记录（{prior_status}），未重复推送')
-                    return {'file': str(path), 'status': prior_status, 'duplicate': True,
-                            'reason': reason, 'previous_file': prior.get('file', '')}
-            old = records.get(key, {})
-            if old.get('status') in {'sent', 'sending', 'uncertain'}:
-                return {'file': str(path), 'status': old['status'], 'duplicate': True}
-            record = {'status': 'sending', 'file': str(path), 'day': day,
-                      'digest': digest, 'title': title, 'user_id': user_id}
+            if not force:
+                duplicate = self._check_duplicates(records, day, key, policy)
+                if duplicate:
+                    return duplicate
+            record = {'status': 'sending', 'file': str(real_path), 'day': day,
+                      'digest': digest, 'title': title, 'user_id': user_id,
+                      'started_at': datetime.now().astimezone().isoformat()}
+            # 先落归档再记状态：崩溃只会留下孤立文件，不会造成重复发送。
+            atomic_write_text(real_path, text)
             self._record(key, record)
             try:
                 receipt = self.sender(user_id, text, key, title=title)
             except (OSError, subprocess.SubprocessError, ValueError, IrisRuntimeError) as exc:
                 # 网络超时可能已送达，不盲目重发；记录不确定状态供人工核验。
                 self._record(key, {**record, 'status': 'uncertain', 'error': str(exc)})
-                return {'file': str(path), 'status': 'uncertain', 'reason': str(exc)}
+                return {'file': str(real_path), 'status': 'uncertain', 'reason': str(exc)}
             self._record(key, {**record, 'status': 'sent', 'receipt': receipt})
-            return {'file': str(path), 'status': 'sent'}
+            return {'file': str(real_path), 'status': 'sent'}
+
+    def _check_duplicates(self, records: dict, day: str, key: str, policy: str) -> dict | None:
+        """返回幂等响应；发现发送进程残留时顺带把 sending 降级为 uncertain。"""
+        if policy == 'daily':
+            prior_key, prior = self._find_day_record(records, day)
+            if prior.get('status') in _BLOCKING_STATUSES:
+                return self._duplicate_response(prior_key, prior, scope='day')
+        old = records.get(key, {})
+        if old.get('status') in _BLOCKING_STATUSES:
+            return self._duplicate_response(key, old, scope='content')
+        return None
+
+    def _duplicate_response(self, record_key: str | None, record: dict, *, scope: str) -> dict:
+        status = str(record.get('status'))
+        previous_file = str(record.get('file', '') or '')
+        if status == 'sending' and self._sending_stale(record):
+            reason = _STALE_SENDING_REASON
+            if record_key:
+                self._record(record_key, {**record, 'status': 'uncertain', 'error': reason})
+            return {'file': previous_file, 'status': 'uncertain', 'duplicate': True,
+                    'reason': reason, 'previous_file': previous_file}
+        scope_label = '当日' if scope == 'day' else '该内容'
+        if status == 'sent':
+            reason = f'{scope_label}已发送，未重复推送'
+        elif status == 'sending':
+            reason = f'{scope_label}正在发送，未重复推送；超过 10 分钟无结果将转为不确定'
+        else:
+            reason = f'{scope_label}已有投递记录（uncertain），未重复推送'
+        return {'file': previous_file, 'status': status, 'duplicate': True,
+                'reason': reason, 'previous_file': previous_file}
+
+    @staticmethod
+    def _sending_stale(record: dict) -> bool:
+        """sending 记录是否来自已中断的进程；缺时间戳/解析失败一律按残留处理。"""
+        raw = str(record.get('started_at', '') or '')
+        if not raw:
+            return True
+        try:
+            started = datetime.fromisoformat(raw)
+        except ValueError:
+            return True
+        if started.tzinfo is None:
+            started = started.astimezone()
+        return datetime.now().astimezone() - started >= _SENDING_TTL
 
     @staticmethod
     def _delivery_key(day: str, user_id: str, digest: str, policy: str) -> str:
@@ -280,20 +327,20 @@ class SignalDelivery:
         return digest[:40]
 
     @staticmethod
-    def _find_day_record(records: dict, day: str) -> dict:
+    def _find_day_record(records: dict, day: str) -> tuple[str | None, dict]:
         """找出当天已有的投递记录（兼容旧版只按内容哈希存、无 day 字段的记录）。"""
-        matches = []
-        for value in records.values():
+        matches: list[tuple[str, dict]] = []
+        for record_key, value in records.items():
             if not isinstance(value, dict):
                 continue
             file_name = Path(str(value.get('file', ''))).name
             if value.get('day') == day or file_name.startswith(f'{day}-'):
-                matches.append(value)
-        for status in ('sent', 'sending', 'uncertain'):
-            for row in matches:
+                matches.append((record_key, value))
+        for status in _BLOCKING_STATUSES:
+            for record_key, row in matches:
                 if row.get('status') == status:
-                    return row
-        return matches[0] if matches else {}
+                    return record_key, row
+        return matches[0] if matches else (None, {})
 
     def _record(self, key, value):
         self.store.change(lambda data: data['records'].__setitem__(key, value))

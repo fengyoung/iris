@@ -71,6 +71,20 @@ _NON_RISK_RE = re.compile(
     r'其他[^。；\n]{0,12}(?:风险|阻塞|问题)[^。；\n]{0,12}(?:原文)?(?:未|无|暂无))'
 )
 
+# 风险句跨日指纹：同一风险换标点、换泛化尾句不应变成「新增」。
+_CLAUSE_SPLIT_RE = re.compile(r'[，,；;：:。！？!?]')
+_NON_WORD_RE = re.compile(r'[\W_]+')
+# 纯泛化风险分句（「存在风险」「属于外部依赖风险」）不含风险主体，不能当身份。
+_GENERIC_RISK_CLAUSE_RE = re.compile(
+    r'^(?:仍|还)?(?:属于|存在|有|构成|带来)?'
+    r'(?:一定|潜在|较大|较小|外部依赖|外部|整体)?(?:的)?风险(?:项|点)?$'
+)
+# 只剥离紧邻的「存在/属于…风险」后缀，避免误伤「系统性交付风险」这类主体。
+_GENERIC_RISK_SUFFIX_RE = re.compile(
+    r'(?:属于|存在|有|构成|带来)'
+    r'(?:一定|潜在|较大|较小|外部依赖|外部|整体)?(?:的)?风险(?:项|点)?$'
+)
+
 _REMINDER_SPECS = {
     'category_inactive': ('SUPPLY_GAP', 6, 3, '补充或确认该栏目'),
     'weekly_report_missing': ('WEEKLY_MISSING', 6, 3, '提醒提交周报'),
@@ -106,6 +120,37 @@ def _risk_score(text: str) -> int:
 def _risk_title(sentence: str, limit: int = 60) -> str:
     """风险句标题：保留句首主语（通常才是风险主体），只做长度截断。"""
     return clip(sentence, limit)
+
+
+def _risk_identity(sentence: str) -> str:
+    """风险句跨日身份：取最长的带风险主体分句，去掉标点与泛化尾句。
+
+    「病毒问题：共享目录回写存在风险，需限制写入」与「共享目录回写，存在风险」
+    都应归一到「共享目录回写」，否则同一风险换个说法就会重新变成「新增」。
+    """
+    cleaned = _clean_risk_line(sentence)
+    clauses = [_clean_risk_line(part) for part in _CLAUSE_SPLIT_RE.split(cleaned)]
+    candidates: list[str] = []
+    for index, clause in enumerate(clauses):
+        if not clause or not _RISK_RE.search(_NON_RISK_RE.sub('', clause)):
+            continue
+        normalized = _NON_WORD_RE.sub('', clause)
+        if _GENERIC_RISK_CLAUSE_RE.fullmatch(normalized):
+            # 「共享目录回写，存在风险」：风险词被逗号拆成独立泛化分句，
+            # 主语在前一个分句里，取它而不是整句。
+            if index > 0:
+                subject = _NON_WORD_RE.sub('', clauses[index - 1])
+                core = _GENERIC_RISK_SUFFIX_RE.sub('', subject)
+                if len(core) >= 4:
+                    candidates.append(core)
+            continue
+        core = _GENERIC_RISK_SUFFIX_RE.sub('', normalized)
+        if len(core) >= 4:
+            candidates.append(core)
+    if candidates:
+        return max(candidates, key=len)
+    fallback = _GENERIC_RISK_SUFFIX_RE.sub('', _NON_WORD_RE.sub('', cleaned))
+    return fallback or _NON_WORD_RE.sub('', cleaned) or cleaned
 
 
 def _sentences_similar(left: str, right: str) -> bool:
@@ -232,7 +277,7 @@ class SignalDetector:
                 min(5, 2 + len(item['krs']) + (1 if score >= 4 else 0)),
                 detail='关联 KR：' + '、'.join(sorted(item['krs'])),
                 sources=[compact_source(path, item['row'].get('doc_date', ''))],
-                stable_key=f'{path}|{norm}',
+                stable_key=f'{path}|{_risk_identity(item["sentence"])}',
             ))
         return signals
 

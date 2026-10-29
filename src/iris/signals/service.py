@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 
 
 def run(bundle, *, dry_run=False, reminders: dict | None = None,
-        maintenance: dict[str, Any] | None = None, notify: bool = True) -> dict:
+        maintenance: dict[str, Any] | None = None, notify: bool = True,
+        force_notify: bool = False) -> dict:
     root = data_root(bundle)
     cfg = settings(bundle)
     day = local_today()
@@ -40,7 +41,8 @@ def run(bundle, *, dry_run=False, reminders: dict | None = None,
         summary += '\n\n检测不完整：\n' + '\n'.join(errors)
         for error in errors:
             logger.warning(error)
-    delivery = _deliver(root, cfg, summary, day=day, dry_run=dry_run, notify=notify)
+    delivery = _deliver(root, cfg, summary, day=day, dry_run=dry_run, notify=notify,
+                        force_notify=force_notify)
     # 只有真正发出去（或当日已有发送记录）才推进历史；--no-notify / 未配置收件人
     # 不应让信号在第二天被误标成「持续」。
     if notify and not dry_run and delivery.get('status') == 'sent':
@@ -133,7 +135,7 @@ def _safe_record(history: SignalHistory, ranked: list[Signal], day: date,
 
 
 def _deliver(root: Path, cfg: dict, summary: str, *, day: date,
-             dry_run: bool, notify: bool) -> dict:
+             dry_run: bool, notify: bool, force_notify: bool = False) -> dict:
     feishu_app_id = cfg.get('feishu_app_id', '')
     if not feishu_app_id:
         logger.warning('feishu_app_id 未配置，将跳过飞书机器人应用身份校验，无法保证以 Iris 身份发送')
@@ -145,7 +147,8 @@ def _deliver(root: Path, cfg: dict, summary: str, *, day: date,
         user_id = cfg.get('feishu_user_id', '') or os.environ.get('IRIS_BOT_USER_ID', '')
         return delivery.deliver(summary, day=day.isoformat(), user_id=user_id,
                                 dry_run=dry_run, title=title,
-                                policy=cfg.get('notify_policy', 'daily'))
+                                policy=cfg.get('notify_policy', 'daily'),
+                                force=force_notify)
     result = delivery.deliver(summary, day=day.isoformat(), user_id='',
                               dry_run=True, title=title,
                               policy=cfg.get('notify_policy', 'daily'))
