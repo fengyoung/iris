@@ -329,6 +329,14 @@ class EnvironmentConfiguredLLMProvider(BaseLLMProvider):
 
         1. 同角色内按 priority 降序（allow_auto_upgrade=false 时仅活跃模型）
         2. 跨角色 fallback 按 priority 降序（allow_auto_downgrade=false 时跳过）
+
+        注意 priority 的语义边界：它**只在同一角色内部**参与比较，用于决定
+        该角色内先试谁。跨角色的顺序完全由 route_to → fallback_to 的拼接
+        决定（主角色整段在前，fallback 角色整段在后），与 priority 数值大小
+        无关。两个角色的数值区间刻意不重叠（当前 base 65~100、adv 170~200），
+        只是分段习惯；**不要**改成「合并所有角色后全局排序」——那会让所有
+        默认请求先打 adv_model（静默升级，延迟与成本同时跳档）。回归测试见
+        tests/test_provider_fallback.py::TestFallbackChainOrder。
         """
         chain: List[tuple] = []
         seen_roles: set = set()

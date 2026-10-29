@@ -1,5 +1,6 @@
 {
   "version": "3.6",
+  "_comment_priority_semantics": "priority 仅在同一角色内比较：角色内按数值降序尝试/降级；跨角色顺序由 routing.rules 的 route_to 再 fallback_to 拼接决定，与数值大小无关。base_model 取 40~100、adv_model 取 130~200 只是分段习惯（故意不重叠），切勿据此改成全局排序——那会让默认请求先打 adv_model。",
   "default_strategy": {
     "default_model_role": "base_model",
     "fallback_model_role": "adv_model",
@@ -730,6 +731,7 @@
     }
   },
   "routing": {
+    "_comment_priority_direction": "rules 按 priority 升序匹配（数值小者先匹配，命中即返回），方向与 models 内 priority 的降序相反。",
     "rules": [
       {
         "name": "user_force_adv_model",

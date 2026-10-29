@@ -632,3 +632,191 @@ class TestModelManagerGetModelConfig:
         mgr = self._make_manager(models_dict)
         with pytest.raises(ModelManagerError, match="未找到模型"):
             mgr.get_model_config("base_model", "nonexistent")
+
+
+# ── 降级链顺序：priority 只在角色内有效 ──────────────────────
+
+
+class TestFallbackChainOrder:
+    """锁死 _build_fallback_chain 的「角色分组」语义。
+
+    回归动机：``models[role].priority`` 只在同一角色内部比较，跨角色顺序由
+    ``route_to`` → ``fallback_to`` 的拼接决定。真实 llm.json 中两段区间互不
+    重叠且 adv 恒更大（当前 base 65~100 / adv 170~200）。若有人把链实现成
+    「合并所有角色后全局按 priority 排序」（看起来更简洁），默认问答会被
+    静默升级到 adv_model —— 延迟与成本同时跳档，而既有测试全绿。
+    本类用与 llm.json 同构的优先级分布把这条语义钉死。
+    """
+
+    @staticmethod
+    def _model(priority, *, multimodal=False):
+        return {
+            "provider": "openai", "model": f"m{priority}",
+            "api_base_url": "https://api.test.com/v1", "api_key": "sk-test",
+            "priority": priority, "multimodal": multimodal,
+            "max_context_tokens": 8192, "timeout_seconds": 10,
+        }
+
+    def _models(self):
+        """base 65~100 / adv 170~200：adv 数值恒大于 base 最大值。"""
+        return {
+            "base_model": {
+                "enabled": True, "default_model_id": "base-best",
+                "models": {
+                    "base-best": self._model(100),
+                    "base-mid": self._model(95),
+                    "base-cheap": self._model(65),
+                },
+            },
+            "adv_model": {
+                "enabled": True, "default_model_id": "adv-flagship",
+                "models": {
+                    "adv-flagship": self._model(200, multimodal=True),
+                    "adv-middle": self._model(190, multimodal=True),
+                    "adv-cheap": self._model(170, multimodal=True),
+                },
+            },
+        }
+
+    def _make_provider(self, tmp_path, *, models=None, allow_upgrade=True,
+                       allow_downgrade=True):
+        from iris.config.loader import make_config_bundle
+        from iris.llm.provider import EnvironmentConfiguredLLMProvider
+
+        config = make_config_bundle(
+            root=tmp_path,
+            app={"logging": {"log_to_file": False}, "paths": {"log_dir": "logs"}},
+            data_source={},
+            llm={
+                "version": "3.6",
+                "default_strategy": {
+                    "default_model_role": "base_model",
+                    "fallback_model_role": "adv_model",
+                    "prefer_lower_cost": True,
+                    "allow_auto_upgrade": allow_upgrade,
+                    "allow_auto_downgrade": allow_downgrade,
+                },
+                "models": models or self._models(),
+                "routing": {
+                    "rules": [
+                        {"name": "qa", "enabled": True, "priority": 1,
+                         "match": {"task_type": "qa"}, "route_to": "base_model",
+                         "fallback_to": "adv_model"},
+                    ]
+                },
+                "embedding": {"enabled": False, "model": "", "api_base_url": "",
+                              "api_key": ""},
+            },
+        )
+        return EnvironmentConfiguredLLMProvider(config)
+
+    @staticmethod
+    def _chain(provider, context):
+        from iris.llm.router import ModelRouter
+        decision = ModelRouter(provider._config).route(context)
+        return decision, provider._build_fallback_chain(decision)
+
+    @staticmethod
+    def _assert_role_blocks(chain):
+        """角色必须成块出现（不交错），且块内 priority 降序。"""
+        roles = [role for role, _, _ in chain]
+        blocks = [role for i, role in enumerate(roles)
+                  if i == 0 or roles[i - 1] != role]
+        assert len(blocks) == len(set(blocks)), f"角色块交错: {roles}"
+        for role in blocks:
+            prios = [cfg.get("priority") for r, _, cfg in chain if r == role]
+            assert prios == sorted(prios, reverse=True), \
+                f"{role} 块内未按 priority 降序: {prios}"
+
+    def test_chain_grouped_by_role_ignoring_priority_magnitude(self, tmp_path):
+        """adv 的 priority 数值更大，也不得排到 base 前面。"""
+        provider = self._make_provider(tmp_path)
+        decision, chain = self._chain(provider, {"task_type": "qa"})
+
+        assert decision.selected_role == "base_model"
+        self._assert_role_blocks(chain)
+
+        roles = [role for role, _, _ in chain]
+        assert roles == ["base_model"] * 3 + ["adv_model"] * 3
+
+        base_prios = [cfg.get("priority") for r, _, cfg in chain
+                      if r == "base_model"]
+        adv_prios = [cfg.get("priority") for r, _, cfg in chain
+                     if r == "adv_model"]
+        # 数值上 adv 全面更大，顺序却相反 —— 证明数值不参与跨角色比较
+        assert max(base_prios) < min(adv_prios)
+        assert chain[0][1] == "base-best"
+
+    def test_intra_role_order_is_priority_desc(self, tmp_path):
+        """同角色内按 priority 降序，且与配置书写顺序无关。"""
+        models = self._models()
+        # 打乱书写顺序：cheap → best → mid
+        base_models = models["base_model"]["models"]
+        models["base_model"]["models"] = {
+            "base-cheap": base_models["base-cheap"],
+            "base-best": base_models["base-best"],
+            "base-mid": base_models["base-mid"],
+        }
+        provider = self._make_provider(tmp_path, models=models)
+        _, chain = self._chain(provider, {"task_type": "qa"})
+
+        base_ids = [mid for role, mid, _ in chain if role == "base_model"]
+        assert base_ids == ["base-best", "base-mid", "base-cheap"]
+
+    def test_upgrade_disabled_uses_only_active_model(self, tmp_path):
+        """allow_auto_upgrade=false 时主角色只保留活跃模型。"""
+        provider = self._make_provider(tmp_path, allow_upgrade=False)
+        decision, chain = self._chain(provider, {"task_type": "qa"})
+
+        assert decision.allow_auto_upgrade is False
+        base_ids = [mid for role, mid, _ in chain if role == "base_model"]
+        assert base_ids == ["base-best"]
+        # 跨角色回退仍保留
+        assert [role for role, _, _ in chain].count("adv_model") == 3
+
+    def test_downgrade_disabled_drops_fallback_role(self, tmp_path):
+        """allow_auto_downgrade=false 时链中不含 fallback 角色。"""
+        provider = self._make_provider(tmp_path, allow_downgrade=False)
+        decision, chain = self._chain(provider, {"task_type": "qa"})
+
+        assert decision.allow_auto_downgrade is False
+        assert {role for role, _, _ in chain} == {"base_model"}
+
+    def test_shipped_example_config_keeps_role_grouping(self, tmp_path):
+        """随仓库分发的 llm.json.example 也必须保持角色分组语义。
+
+        llm.json 被 gitignore，CI 里只有 .example，因此这条覆盖的是
+        「示例配置被改坏」或「链实现改成全局排序」两类回归。
+        """
+        import json
+        from pathlib import Path
+
+        example = Path(__file__).resolve().parents[1] / "config" / "llm.json.example"
+        if not example.exists():
+            pytest.skip("缺少 config/llm.json.example")
+
+        from iris.config.loader import make_config_bundle
+        from iris.llm.provider import EnvironmentConfiguredLLMProvider
+        from iris.llm.router import ModelRouter
+
+        llm = json.loads(example.read_text(encoding="utf-8"))
+        bundle = make_config_bundle(
+            root=tmp_path,
+            app={"logging": {"log_to_file": False}, "paths": {"log_dir": "logs"}},
+            data_source={},
+            llm=llm,
+        )
+        provider = EnvironmentConfiguredLLMProvider(bundle)
+        router = ModelRouter(bundle)
+
+        contexts = [
+            {"task_type": "qa"},
+            {"input_type": "multimodal"},
+            {"task_type": "wiki_rebuild"},
+        ]
+        for ctx in contexts:
+            decision = router.route(ctx)
+            chain = provider._build_fallback_chain(decision)
+            assert chain, f"{ctx} 的降级链为空"
+            assert chain[0][0] == decision.selected_role
+            self._assert_role_blocks(chain)
