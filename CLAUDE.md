@@ -1,4 +1,4 @@
-# Iris 3.44.1 — 项目执行说明
+# Iris 3.44.2 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 逐版变更记录与版本历史统一归档于 [CHANGELOG.md](CHANGELOG.md)；本文件只承载现行架构 / 配置 / 约定。
@@ -7,9 +7,9 @@
 
 ## 项目概览
 
-**当前规模**：~50,700 行 / 231 个源码文件 / 30 模块 · CLI 77 命令 · 测试 4,179（pytest 全量）· 覆盖率 74.64%（`fail_under` 65，13 个关键模块另有独立门禁）· Ruff、mypy（含显式兼容边界）、AST 安全扫描与 SPDX SBOM 门禁通过 · 11 个项目级 Skill · Wiki 231 页 · 知识图谱节点 231 / 关系边 2,766 · 数据源 1,041 文档 / 7,979 Chunk（text-embedding-v3 / 1,024 维）
+**当前规模**：~50,800 行 / 231 个源码文件 / 30 模块 · CLI 77 命令 · 测试 4,224（pytest 全量）· 覆盖率 74.75%（`fail_under` 65，13 个关键模块另有独立门禁）· Ruff、mypy（含显式兼容边界）、AST 安全扫描与 SPDX SBOM 门禁通过 · 11 个项目级 Skill · Wiki 231 页 · 知识图谱节点 231 / 关系边 2,766 · 数据源 1,041 文档 / 7,979 Chunk（text-embedding-v3 / 1,024 维）
 
-**最新版本**（v3.44.1）：iris-release 的 pip-audit 门禁区分项目依赖与本地环境（补丁版）。详细变更历史见 [CHANGELOG.md](CHANGELOG.md)。
+**最新版本**（v3.44.2）：飞书日报交付加固（sending 自愈 / `--force-notify` / 归档区分）与发版门禁修正（补丁版）。详细变更历史见 [CHANGELOG.md](CHANGELOG.md)。
 
 **关键路径**：
 
@@ -93,7 +93,7 @@ PDF=PyMuPDF 提取+渲染；DOCX=python-docx 段落+表格；VIDEO=ffmpeg 抽帧
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.44.1 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.44.2 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.27 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | app 3.8（其余独立演进） | 配置文件 Schema |
 
@@ -137,7 +137,7 @@ iris3/
 ├── src/iris/          # 30 模块（config/llm/core/memory/qa/ingest/retrieval/wiki/...）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
-├── tests/             # 4,179 用例（pytest 全量）
+├── tests/             # 4,224 用例（pytest 全量）
 ├── config/            # *.json gitignored，*.example 版本控制
 ├── data/              # 运行时数据（全 gitignore）
 ├── .claude/skills/    # 项目级 Skill 真身（11 个，CC 原生读取）

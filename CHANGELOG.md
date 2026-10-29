@@ -1,3 +1,17 @@
+## v3.44.2 (2026-10-29) — 飞书日报交付加固与发版门禁修正
+
+本版为 v3.44.x 日报与发版工具链的加固，以缺陷修复与可观测性为主。
+
+- **发送自愈**（`src/iris/signals/delivery.py`）：`sending` 记录新增 `started_at`；取得发送锁后若记录已超过 10 分钟（或缺少 / 无法解析时间戳），判定上次进程中断，降级为 `uncertain` 并提示人工核验，不再让当天永久卡死。daily 与 every_run 两条路径一致。
+- **强制重发**：新增 `--force-notify`（`daily-start` / `signals`），人工核验后忽略当日 / 同内容幂等重发；`--dry-run` 与 `--no-notify` 优先于它。仅绕过幂等，不绕过发送锁与机器人身份校验。
+- **归档可见性**：实际发送写 `{day}-{digest12}.md`；预览 / 关闭 / 未配置收件人只写 `-preview.md`；`duplicate` 不再新增文件，返回 `previous_file`。
+- **风险句指纹**（`src/iris/signals/detector.py`）：跨日指纹从整句改为「最长风险主体分句」，剥离「存在风险 / 属于外部依赖风险」等泛化尾句，标点与措辞微调不再误判为新增。
+- **误报语料**：新增 `tests/unit/test_signal_risk_corpus.py`，把模板标题、风险可控、未明确提及、表格行、已解除阻塞等真实样本固化为参数化用例，后续加规则先加样本。
+- **发版门禁**（`.claude/skills/iris-release/SKILL.md`）：pip-audit 的依赖差异改为对比工作区（门禁先于提交执行），`gh run list` 限定 `ci.yml`；Skill 1.0.1→1.0.2。
+- **清理**：删除 `_render_maintenance` 死分支；uncertain 文案不再重复「请人工核验」。
+
+产品版本 3.44.1→**3.44.2**；协议版本保持 **3.27**，数据版本不变。全量单测 4,224 通过、覆盖率 74.75%；Ruff（`src scripts tests`）与 mypy 通过。
+
 ## v3.44.1 (2026-10-28) — iris-release pip-audit 门禁区分项目依赖与本地环境
 
 本版为发版工具链补丁，不改产品运行时代码。

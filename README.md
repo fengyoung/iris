@@ -1,4 +1,4 @@
-# Iris 3.44.1
+# Iris 3.44.2
 
 > 主动情报体系（决策 / 备会 / 信号 / OKR 证据）设计见 [设计文档](docs/intelligence-upgrade-design.md)，用法见 [使用说明](docs/intelligence-upgrade-usage.md)；
 > 谁是卧底 Web 使用方法与恢复边界见 [Web 使用说明](docs/undercover-web-ui.md)，历史验收证据见 [验收记录](docs/undercover-beta-acceptance-20260917.md)；
@@ -8,7 +8,15 @@
 
 ## 最新动态
 
-**v3.44.1 (2026-10-28)** - iris-release pip-audit 门禁修正：
+**v3.44.2 (2026-10-29)** - 飞书日报交付加固与发版门禁修正：
+- 🛡 **发送自愈**：`sending` 记录带 `started_at`，超过 10 分钟无结果自动降级为 `uncertain` 并提示人工核验，不会再把当天永久卡死（daily / every_run 一致）
+- 🔁 **强制重发**：新增 `--force-notify`，人工核验后忽略当日 / 同内容幂等重发（仍受发送锁与机器人身份校验约束）
+- 🗂 **归档不混淆**：实际发送与预览分别写正式 / `-preview.md`；`duplicate` 不再新增文件
+- 🎯 **风险指纹更稳**：跨日指纹改取风险主体分句，措辞与标点微调不再误判为「新增」；新增风险句误报语料库
+- 🛠 **发版门禁**：pip-audit 依赖差异改为对比工作区并限定 `ci.yml`；`iris-release` Skill 1.0.2
+- ✅ **产品版本 3.44.1 → 3.44.2**；协议版本与数据格式不变
+
+**上一版 v3.44.1 (2026-10-28)** - iris-release pip-audit 门禁修正：
 - 🛠 **发版工具链**：`iris-release` 的 pip-audit 门禁不再被本地 conda 无关包误停；依赖未变化时采用最近一次 main 绿色 CI 的依赖审计结果
 - 🔒 **依赖变更仍严格**：`pyproject.toml` / `constraints.txt` 真正变化时，必须 clean venv / CI 重新审计
 - ✅ **产品版本 3.44.0 → 3.44.1**；协议版本与数据格式不变
