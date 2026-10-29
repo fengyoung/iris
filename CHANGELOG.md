@@ -1,3 +1,14 @@
+## v3.44.3 (2026-10-29) — priority 语义澄清与 SOURCE 索引说明修正
+
+本版为补丁版：澄清 LLM 模型选择中 priority 的作用域边界并补回归测试，修正 SOURCE 索引中 02-部门管理的敏感文档说明。
+
+- **priority 作用域**（`src/iris/llm/provider.py`）：补 docstring 明确 priority 仅在**同一角色内**按数值降序参与比较；跨角色顺序完全由 `route_to → fallback_to` 的拼接决定，与数值大小无关。两个角色的数值区间刻意不重叠，仅为分段习惯，不可据此改成全局排序。
+- **配置注释**（`config/llm.json.example`）：`models.priority` 与 `routing.rules.priority` 各增一处说明，点明两者方向相反（前者角色内降序、后者升序匹配），防止后人误改为全局排序。
+- **回归测试**（`tests/test_provider_fallback.py`）：新增 `TestFallbackChainOrder` 5 个用例，锁定「跨角色按角色分组、角色内按 priority 降序」语义，并校验 shipped example 配置不被改坏。
+- **索引说明**（`src/iris/app/cli/_handlers/_system.py`）：`SOURCE/_INDEX.md` 中 02-部门管理 的说明由「（敏感文档，不进下游）」改为「目录内**含**敏感文档，逐篇判定，非整目录排除」，并补入「岗位与能力标准」类目，避免被误读为整目录排除。
+
+产品版本 3.44.2→**3.44.3**；协议版本保持 **3.27**，数据版本不变。全量单测 4,229 通过、覆盖率 74.77%；Ruff（`src scripts tests`）与 mypy 通过。
+
 ## v3.44.2 (2026-10-29) — 飞书日报交付加固与发版门禁修正
 
 本版为 v3.44.x 日报与发版工具链的加固，以缺陷修复与可观测性为主。

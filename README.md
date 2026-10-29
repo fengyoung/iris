@@ -1,4 +1,4 @@
-# Iris 3.44.2
+# Iris 3.44.3
 
 > 主动情报体系（决策 / 备会 / 信号 / OKR 证据）设计见 [设计文档](docs/intelligence-upgrade-design.md)，用法见 [使用说明](docs/intelligence-upgrade-usage.md)；
 > 谁是卧底 Web 使用方法与恢复边界见 [Web 使用说明](docs/undercover-web-ui.md)，历史验收证据见 [验收记录](docs/undercover-beta-acceptance-20260917.md)；
@@ -8,7 +8,14 @@
 
 ## 最新动态
 
-**v3.44.2 (2026-10-29)** - 飞书日报交付加固与发版门禁修正：
+**v3.44.3 (2026-10-29)** - priority 语义澄清与 SOURCE 索引说明修正：
+- 🧭 **priority 作用域**：明确 priority 仅在同一角色内按数值降序比较，跨角色顺序由 `route_to → fallback_to` 拼接决定，与数值大小无关（此前易被误读为全局排序）
+- 📝 **配置自解释**：`config/llm.json.example` 为 `models.priority`（角色内降序）与 `routing.rules.priority`（升序匹配）各加注释，点明两者方向相反
+- ✅ **回归测试**：新增 `TestFallbackChainOrder` 5 个用例，锁定「跨角色分组、角色内降序」语义并校验 shipped example 不被改坏
+- 🗂 **索引说明**：`SOURCE/_INDEX.md` 中 02-部门管理 改为「目录内**含**敏感文档，逐篇判定，非整目录排除」，不再被误读为整目录排除
+- ✅ **产品版本 3.44.2 → 3.44.3**；协议版本与数据格式不变
+
+**上一版 v3.44.2 (2026-10-29)** - 飞书日报交付加固与发版门禁修正：
 - 🛡 **发送自愈**：`sending` 记录带 `started_at`，超过 10 分钟无结果自动降级为 `uncertain` 并提示人工核验，不会再把当天永久卡死（daily / every_run 一致）
 - 🔁 **强制重发**：新增 `--force-notify`，人工核验后忽略当日 / 同内容幂等重发（仍受发送锁与机器人身份校验约束）
 - 🗂 **归档不混淆**：实际发送与预览分别写正式 / `-preview.md`；`duplicate` 不再新增文件
