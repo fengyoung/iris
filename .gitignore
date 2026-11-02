@@ -20,6 +20,9 @@ config/*.bak*
 # Runtime data
 /data/
 
+# iris-hire 岗位库含内部组织信息，只允许放 data/hiring/（不入仓）
+/.claude/skills/iris-hire/references/job-catalog.md
+
 # Working data (raw transcripts, intermediate files)
 /work-data/
 

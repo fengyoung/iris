@@ -7,7 +7,7 @@
 
 ## 项目概览
 
-**当前规模**：~50,800 行 / 231 个源码文件 / 30 模块 · CLI 77 命令 · 测试 4,240（pytest 全量）· 覆盖率 74.77%（`fail_under` 65，13 个关键模块另有独立门禁）· Ruff、mypy（含显式兼容边界）、AST 安全扫描与 SPDX SBOM 门禁通过 · 11 个项目级 Skill · Wiki 231 页 · 知识图谱节点 231 / 关系边 2,766 · 数据源 1,041 文档 / 7,979 Chunk（text-embedding-v3 / 1,024 维）
+**当前规模**：~50,800 行 / 231 个源码文件 / 30 模块 · CLI 77 命令 · 测试 4,240（pytest 全量）· 覆盖率 74.77%（`fail_under` 65，13 个关键模块另有独立门禁）· Ruff、mypy（含显式兼容边界）、AST 安全扫描与 SPDX SBOM 门禁通过 · 12 个项目级 Skill · Wiki 231 页 · 知识图谱节点 231 / 关系边 2,766 · 数据源 1,041 文档 / 7,979 Chunk（text-embedding-v3 / 1,024 维）
 
 **最新版本**（v3.45.0）：双周报总结段改为三段定式（项目评价与 Q4 差距 / 方向评价与风险 / 关键思考）并把周期口径对齐自然周，发布流程固化进 `iris-report` Skill（特性版）。详细变更历史见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -140,7 +140,7 @@ iris3/
 ├── tests/             # 4,240 用例（pytest 全量）
 ├── config/            # *.json gitignored，*.example 版本控制
 ├── data/              # 运行时数据（全 gitignore）
-├── .claude/skills/    # 项目级 Skill 真身（11 个，CC 原生读取）
+├── .claude/skills/    # 项目级 Skill 真身（12 个，CC 原生读取）
 ├── .agents/skills     # → ../.claude/skills（软链，DSH 据此发现）
 ├── .github/workflows/ # CI 流水线（Python 3.11-3.13）
 └── memory/            # Claude 工作记忆
@@ -150,6 +150,6 @@ iris3/
 
 ---
 
-## 项目级 Skill（11 个，CC + DSH 共用）
+## 项目级 Skill（12 个，CC + DSH 共用）
 
-`iris-daily-start` · `iris-wiki` · `iris-feishu-import` · `iris-feed` · `iris-meeting` · `iris-ask` · `iris-process` · `iris-report` · `iris-health` · `iris-okr-check` · `iris-release`
+`iris-daily-start` · `iris-wiki` · `iris-feishu-import` · `iris-feed` · `iris-meeting` · `iris-ask` · `iris-process` · `iris-report` · `iris-health` · `iris-okr-check` · `iris-release` · `iris-hire`
