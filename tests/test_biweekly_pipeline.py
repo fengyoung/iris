@@ -240,38 +240,53 @@ class TestConceptBoundaries:
 
 
 class TestBiweeklyFilename:
-    """验证文件名生成逻辑（通过 handlers 中的 _build_biweekly_filename）。"""
+    """验证文件名生成逻辑（通过 handlers 中的 _build_biweekly_filename）。
+
+    口径：日期与周号统一取**周期结束日**（周日），不是运行日。
+    """
+
+    @staticmethod
+    def _bundle(author: str = "团队成员J"):
+        class FakeBundle:
+            class app:
+                @staticmethod
+                def get(key, default=None):
+                    return {"author_name": author} if key == "biweekly_report" else default
+
+        return FakeBundle()
 
     def test_format_with_author(self):
-        """带作者的标准格式。"""
+        """周二运行 → 回退到最近周日（07-05）取名，周号取该周日 ISO 周。"""
         from iris.app.cli.handlers import _build_biweekly_filename
 
-        class FakeBundle:
-            class app:
-                @staticmethod
-                def get(key, default=None):
-                    return {"author_name": "团队成员J"} if key == "biweekly_report" else default
+        today = datetime(2026, 7, 7)  # 周二
+        filename = _build_biweekly_filename(self._bundle(), today)
+        # 周期 06.22~07.05（周日）→ w27
+        assert filename == "20260705-双周报-w27-团队成员J.md"
 
-        today = datetime(2026, 7, 7)  # 周二 → ISO week 28
-        filename = _build_biweekly_filename(FakeBundle(), today)
-        assert filename.startswith("20260707-双周报-w")
-        assert "团队成员J" in filename
-        assert "20260707" in filename
-
-    def test_monday_uses_previous_week(self):
-        """周一生成时归属上周。"""
+    def test_sunday_run_keeps_same_day(self):
+        """周日运行 → 周期结束日就是当天。"""
         from iris.app.cli.handlers import _build_biweekly_filename
 
-        class FakeBundle:
-            class app:
-                @staticmethod
-                def get(key, default=None):
-                    return {"author_name": "团队成员J"} if key == "biweekly_report" else default
+        today = datetime(2026, 7, 5)  # 周日
+        filename = _build_biweekly_filename(self._bundle(), today)
+        assert filename == "20260705-双周报-w27-团队成员J.md"
 
-        today = datetime(2026, 7, 6)  # 周一
-        filename = _build_biweekly_filename(FakeBundle(), today)
-        # 周一 → 用周日（7月5日）的周数，可能是 w27
-        assert "w" in filename
+    def test_monday_run_uses_previous_sunday(self):
+        """周一运行 → 回退一天到上周日（本会话 w44 回归用例）。"""
+        from iris.app.cli.handlers import _build_biweekly_filename
+
+        today = datetime(2026, 11, 2)  # 周一
+        filename = _build_biweekly_filename(self._bundle(), today)
+        # 周期 10.19~11.01（周日）→ w44；若按运行日会错成 20261102
+        assert filename == "20261101-双周报-w44-团队成员J.md"
+
+    def test_no_author_fallback(self):
+        """未配置作者时的退化格式。"""
+        from iris.app.cli.handlers import _build_biweekly_filename
+
+        filename = _build_biweekly_filename(self._bundle(author=""), datetime(2026, 11, 2))
+        assert filename == "20261101-双周报-w44.md"
 
 
 # ── _sanitize_log_payload ─────────────────────────────────────────────

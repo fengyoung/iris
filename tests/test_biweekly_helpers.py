@@ -498,3 +498,59 @@ class TestGroupLineFunctions:
         result = _render_group_lines(structured, "risk", fallback="- 无")
         assert "风险A" in result
         assert "风险B" in result
+
+
+# ── align_biweekly_period（周期对齐自然周） ──────────────────
+
+
+class TestAlignBiweeklyPeriod:
+    """周期必须对齐到自然周：结束日回退到最近周日，起始日 = 结束日 - 13 天。"""
+
+    def test_monday_run_rolls_back_to_previous_sunday(self):
+        from datetime import datetime
+
+        from iris.analysis._biweekly_helpers import align_biweekly_period
+
+        start, end = align_biweekly_period(datetime(2026, 11, 2), 14)  # 周一
+        assert end.strftime("%Y.%m.%d") == "2026.11.01"
+        assert start.strftime("%Y.%m.%d") == "2026.10.19"
+        assert start.weekday() == 0  # 周一
+        assert end.weekday() == 6  # 周日
+
+    def test_sunday_run_keeps_same_day(self):
+        from datetime import datetime
+
+        from iris.analysis._biweekly_helpers import align_biweekly_period
+
+        start, end = align_biweekly_period(datetime(2026, 11, 1), 14)
+        assert end.strftime("%Y.%m.%d") == "2026.11.01"
+        assert start.strftime("%Y.%m.%d") == "2026.10.19"
+
+    def test_matches_existing_doc_periods(self):
+        """回归：与飞书文档既有周期口径一致（10.05-10.18=w42、10.19-11.01=w44）。"""
+        from datetime import datetime
+
+        from iris.analysis._biweekly_helpers import align_biweekly_period
+
+        start, end = align_biweekly_period(datetime(2026, 10, 18), 14)
+        assert (start.strftime("%Y.%m.%d"), end.strftime("%Y.%m.%d")) == ("2026.10.05", "2026.10.18")
+        assert end.isocalendar()[1] == 42
+
+        start, end = align_biweekly_period(datetime(2026, 11, 2), 14)
+        assert end.isocalendar()[1] == 44
+
+    def test_window_is_inclusive_fourteen_days(self):
+        from datetime import datetime
+
+        from iris.analysis._biweekly_helpers import align_biweekly_period
+
+        start, end = align_biweekly_period(datetime(2026, 11, 2), 14)
+        assert (end - start).days == 13  # 含首含尾共 14 天
+
+    def test_normalizes_to_midnight(self):
+        from datetime import datetime
+
+        from iris.analysis._biweekly_helpers import align_biweekly_period
+
+        _, end = align_biweekly_period(datetime(2026, 11, 2, 12, 34, 56), 14)
+        assert (end.hour, end.minute, end.second, end.microsecond) == (0, 0, 0, 0)

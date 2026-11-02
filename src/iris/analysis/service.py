@@ -44,6 +44,7 @@ from ._biweekly_helpers import (
     _normalize_key_progress_heading,
     _strip_direction_quotes,
     DEFAULT_STYLE_GUIDE,
+    align_biweekly_period,
     assemble_biweekly_sections,
 )
 
@@ -221,14 +222,15 @@ class AnalysisReportService:
                 now = datetime.now()
         biweekly_cfg = self._config.app.get("biweekly_report", {})
         lookback_days = biweekly_cfg.get("lookback_days", 14)
-        two_weeks_ago = now - timedelta(days=lookback_days)
-        period = f"{two_weeks_ago.strftime('%Y.%m.%d')}～{now.strftime('%Y.%m.%d')}"
+        # 周期对齐自然周（周日收尾）：按运行日滚动会在非周日运行时错位一天
+        start_date, end_date = align_biweekly_period(now, lookback_days)
+        period = f"{start_date.strftime('%Y.%m.%d')}～{end_date.strftime('%Y.%m.%d')}"
 
         if not query:
             query = f"近两周({period})工作进展"
 
         op_doc = self._collector.load_op_document()
-        files = self._collector.collect_recent_files(two_weeks_ago, end_date=now)
+        files = self._collector.collect_recent_files(start_date, end_date=end_date)
 
         if not files:
             return ReportResponse(query=query, mode="llm",

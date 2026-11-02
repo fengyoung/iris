@@ -137,6 +137,44 @@ python3 scripts/run_cli.py --call-source skill build-biweekly-report --to-source
 3. 数据源文件统计（共 N 份文件）
 4. 提醒用户报告已保存到 `SOURCE/06-我的周报/YYYY/`（按年归档），建议人工审阅修订
 
+**步骤 4：发布（飞书文档 + 邮件，均需用户确认后执行）**
+
+⚠️ 周期口径：周期为**自然周（周一～周日）**，由 `align_biweekly_period()` 把运行日回退到最近一个周日。归档文件名日期与周号均取**周期结束日**，不是运行日（如 11-02 周一运行 → 周期 `10.19~11.01`、w44、文件名 `20261101-`）。
+
+**4a. 飞书文档（长期唯一载体）**
+
+- 冯扬唯一发布地：docx token `OMC9dvNcLoJhmkxgLRAclvTZnbh`（「OKR双周报-产研线-冯扬」，一人一年度一个文档不换）。
+- 每期在「2026 年重点工作」一节之后插入新 H1（新在前）。**锚点必须是该节末块的 block-id，不能是 H1 block-id**。
+- H1 只能是日期区间 `2026.10.19-2026.11.01`（用 `-`，与文档既有格式一致）。
+- **文档版裁剪**：不带 frontmatter、不带 `*时间周期：…*` 行、不带文末 `---` 与 Iris footer、**删除所有 `（来源：…）`**。
+- 写入后**必须回读校验**：逐段 diff 正文 + 核对 outline H1 总数每期 +1（未知 XML 标签会静默截断）。
+
+```bash
+lark-cli docs +fetch --doc OMC9dvNcLoJhmkxgLRAclvTZnbh --scope outline --max-depth 2 --detail with-ids
+lark-cli docs +update --doc OMC9dvNcLoJhmkxgLRAclvTZnbh --command block_insert_after --block-id <节末块id> --content "$(cat output/wNN-doc.xml)"
+```
+
+**4b. 邮件（按期分发，先建草稿不发送）**
+
+- 主题：`【双周报】-w{NN}-冯扬-{周期结束日}`，日期取周期结束日，不是发送日。
+- To：`dataintelligence@zhuanzhuan.com`、`qc-tech@zhuanzhuan.com`
+- Cc（6 人）：`lijincheng`、`wutingpeng`、`mayue05`、`linzhenying`、`shiyueqi`、`guoyubin`（均为 `@zhuanzhuan.com`）
+- 流程：md → HTML 全文（**无附件**）→ 建草稿 → 用户审阅确认 → 发送 → 查投递状态。
+- **邮件版保留来源**（与文档版相反），正文自带 Iris footer + 签名块，建草稿时加 `--no-signature` 防双签名。
+- 版式以最近一期已发送邮件的 `body_html` 为准（取 SENT 里上期 `【双周报】` 邮件回读）。
+- 发送前校验：源 HTML 与草稿回读 `body_html` 去空白后**全等**，且 md 每段文本无丢失。
+- 发送后查 `send_status`，**只有 status=4 才算送达**；1/2/3/5/6 需报告异常。
+
+```bash
+lark-cli mail +lint-html --body-file ./output/wNN-mail.html --as user
+lark-cli mail +draft-create --as user --to 'dataintelligence@zhuanzhuan.com' --to 'qc-tech@zhuanzhuan.com' \
+  --cc 'lijincheng@zhuanzhuan.com' --cc 'wutingpeng@zhuanzhuan.com' --cc 'mayue05@zhuanzhuan.com' \
+  --cc 'linzhenying@zhuanzhuan.com' --cc 'shiyueqi@zhuanzhuan.com' --cc 'guoyubin@zhuanzhuan.com' \
+  --subject '【双周报】-w44-冯扬-20261101' --body-file ./output/w44-mail.html --no-signature
+lark-cli mail user_mailbox.drafts send --params '{"user_mailbox_id":"me","draft_id":"<id>"}' --as user --yes
+lark-cli mail user_mailbox.messages send_status --params '{"user_mailbox_id":"me","message_id":"<id>"}' --as user
+```
+
 **流水线说明：**
 
 双周报生成采用五阶段流水线：

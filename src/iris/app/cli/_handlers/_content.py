@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from iris.complex_input import ComplexInputPipeline
 from iris.app.cli.helpers import (
@@ -21,16 +21,17 @@ def _build_biweekly_filename(bundle, today: datetime) -> str:
     """生成双周报文件名：{YYYYMMDD}-双周报-w{week}-{author}.md。
 
     日期前缀供 resolve_source_archive_path 识别归档子目录（06-我的周报 按年归档）。
-    周一生成时，周数归属上周（如 W27 而非 W28）。
+    日期与周号统一取**周期结束日**（周日），与报告 H1 区间、邮件主题日期一致；
+    按运行日取名会在非周日运行时偏一天（如 11-02 运行得到 20261102，实际应为 20261101）。
     """
+    from iris.analysis._biweekly_helpers import align_biweekly_period
+
     cfg = bundle.app.get("biweekly_report", {})
     author = cfg.get("author_name", "")
-    if today.weekday() == 0:  # 周一
-        report_week_date = today - timedelta(days=1)
-    else:
-        report_week_date = today
-    _, week, _ = report_week_date.isocalendar()
-    date_str = today.strftime("%Y%m%d")
+    lookback_days = cfg.get("lookback_days", 14)
+    _, period_end = align_biweekly_period(today, lookback_days)
+    _, week, _ = period_end.isocalendar()
+    date_str = period_end.strftime("%Y%m%d")
     return f"{date_str}-双周报-w{week:02d}-{author}.md" if author else f"{date_str}-双周报-w{week:02d}.md"
 
 

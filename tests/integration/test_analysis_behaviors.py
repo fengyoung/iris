@@ -76,7 +76,8 @@ def test_biweekly_local_and_empty_skip_llm(svc, empty, mode):
     if empty:
         svc._collector.collect_recent_files.return_value = []
     result = svc.build_biweekly_report(mode=mode, as_of="20260920")
-    assert "2026.09.06～2026.09.20" in result.markdown
+    # 周期对齐自然周：as_of 2026-09-20 为周日，窗口 = 09.07(周一)～09.20(周日) 共 14 天
+    assert "2026.09.07～2026.09.20" in result.markdown
     svc._llm.generate.assert_not_called()
 
 

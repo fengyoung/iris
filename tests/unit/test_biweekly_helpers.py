@@ -332,8 +332,8 @@ class TestS3CheckSubareaOrder:
 
 
 class TestW35StyleLean:
-    """防回归：Stage 3 模板与默认风格指南须保持「w35 精简风格」——
-    总结段=方向总览 + 只展开有判断/决策点的项目（反程式化、篇幅克制）；
+    """防回归：Stage 3 模板与默认风格指南须保持现行精简风格——
+    总结段=三段定式（项目评价与差距 → 方向评价与风险 → 关键思考，不加标签）；
     关键进展=每方向 2-4 条 + 「关键」门槛，不要求与 sub_area 一一对应；
     low 相关文件不作关键进展来源。"""
 
@@ -356,17 +356,46 @@ class TestW35StyleLean:
         assert "固定骨架句式" in text
         assert "≤400 字" in text
 
-    def test_summary_force_split_short_paragraphs(self):
+    def test_summary_three_block_structure(self):
+        """总结段固定三段：项目评价与差距 → 方向评价与风险 → 关键思考。"""
         text = self._template_text()
-        assert "分段硬约束" in text
-        assert "严禁把多个项目的判断揉成一个超长段落" in text
+        assert "三段定式" in text
+        assert "第一段 · 项目进展评价与目标差距" in text
+        assert "第二段 · 方向整体评价与风险" in text
+        assert "第三段 · 关键思考" in text
         assert "≤150 字" in text
 
-    def test_summary_not_forced_per_subarea(self):
+    def test_thinking_block_has_no_label(self):
+        """关键思考保留成段，但正文不出现「关键思考」四字标签。"""
         text = self._template_text()
-        assert "并入方向总览，不单独成段" in text
-        assert "不为覆盖而写" in text
-        assert "有判断才展开" in text
+        assert "不要加「关键思考」四字或任何形式的小标题" in text
+
+    def test_titles_fixed_to_okr_names(self):
+        """方向标题固定三名，不加副题。"""
+        text = self._template_text()
+        for name in ("## 图验技术", "## 质检过程智能化", "## 搜索推荐"):
+            assert name in text
+        assert "禁止**加主题副题" in text or "禁止**加主题副题" in text.replace("*", "*")
+        assert "副题每期变化" in text
+
+    def test_risk_requires_definite_judgment(self):
+        """风险只写有确定判断的，不许用缺数据告警充当风险。"""
+        text = self._template_text()
+        assert "风险只写**有确定判断的**" in text
+        assert "缺数据 / 缺周报 / 无法核验" in text
+        assert "整体可控" in text
+
+    def test_summary_must_not_repeat_progress(self):
+        """总结段不得复述关键进展的数字与事实。"""
+        text = self._template_text()
+        assert "不与关键进展重复（硬约束）" in text
+        assert "态度与判断" in text
+
+    def test_projects_grouped_by_okr_not_source_dir(self):
+        """项目按 OKR 归属归类，不按素材来源目录。"""
+        text = self._template_text()
+        assert "项目按 OKR 归属归类，不按素材来源归类" in text
+        assert "一机一镜像" in text
 
     def test_progress_value_gate_and_cap(self):
         text = self._template_text()
@@ -389,16 +418,21 @@ class TestW35StyleLean:
 
     def test_default_style_guide_matches_lean(self):
         from iris.analysis._biweekly_helpers import DEFAULT_STYLE_GUIDE
-        assert "短段" in DEFAULT_STYLE_GUIDE["paragraph_structure"]
-        assert "严禁" in DEFAULT_STYLE_GUIDE["paragraph_structure"]
+        structure = DEFAULT_STYLE_GUIDE["paragraph_structure"]
+        assert "三段定式" in structure
+        assert "①项目进展评价" in structure
+        assert "≤150 字" in DEFAULT_STYLE_GUIDE["density_note"]
         assert "≤400 字" in DEFAULT_STYLE_GUIDE["density_note"]
         patterns = "".join(DEFAULT_STYLE_GUIDE["strategic_patterns"])
         assert "固定骨架句式连排" in patterns
-        assert "严禁把多个项目的判断揉成一个超长单段" in patterns
+        assert "严禁把关键进展里的具体数字再罗列一遍" in patterns
+        assert "严格分工" in patterns
         assert "成员周报例行进展仅作关键进展事实来源" in patterns
+        assert "不按素材所在目录判定" in patterns
         rules = "".join(DEFAULT_STYLE_GUIDE["writing_rules"])
         assert "禁止流水账式事实罗列" in rules
-        assert "无判断点的项目并入总览不单列" in rules
+        assert "图验技术" in rules and "搜索推荐" in rules
+        assert "不加冒号副题" in rules
 
 
 class TestStripReviewScaffolding:
