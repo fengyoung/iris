@@ -1,4 +1,4 @@
-# Iris 3.46.0 — 项目执行说明
+# Iris 3.47.0 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 逐版变更记录与版本历史统一归档于 [CHANGELOG.md](CHANGELOG.md)；本文件只承载现行架构 / 配置 / 约定。
@@ -7,9 +7,9 @@
 
 ## 项目概览
 
-**当前规模**：~50,800 行 / 231 个源码文件 / 30 模块 · CLI 77 命令 · 测试 4,240（pytest 全量）· 覆盖率 74.77%（`fail_under` 65，13 个关键模块另有独立门禁）· Ruff、mypy（含显式兼容边界）、AST 安全扫描与 SPDX SBOM 门禁通过 · 12 个项目级 Skill · Wiki 231 页 · 知识图谱节点 231 / 关系边 2,766 · 数据源 1,041 文档 / 7,979 Chunk（text-embedding-v3 / 1,024 维）
+**当前规模**：~52,600 行 / 235 个源码文件 / 30 模块 · CLI 77 命令 · 测试 4,437（pytest 全量）· 覆盖率 75.64%（`fail_under` 65，13 个关键模块另有独立门禁）· Ruff、mypy（含显式兼容边界）、AST 安全扫描与 SPDX SBOM 门禁通过 · 12 个项目级 Skill · Wiki 231 页 · 知识图谱节点 231 / 关系边 2,766 · 数据源 1,041 文档 / 7,979 Chunk（text-embedding-v3 / 1,024 维）
 
-**最新版本**（v3.46.0）：新增 `iris-hire` 招聘评估 Skill（简历归一化 / 岗位匹配 / 面试方案），真实岗位库隔离在 `data/hiring/` 不入仓（特性版）。详细变更历史见 [CHANGELOG.md](CHANGELOG.md)。
+**最新版本**（v3.47.0）：task-panel 升级为本地 Web 控制台（命令目录与参数表单 / 子进程任务管理 / 只读总览 / 会议·飞书·Wiki·记忆·Feed 向导，特性版）。详细变更历史见 [CHANGELOG.md](CHANGELOG.md)。
 
 **关键路径**：
 
@@ -93,7 +93,7 @@ PDF=PyMuPDF 提取+渲染；DOCX=python-docx 段落+表格；VIDEO=ffmpeg 抽帧
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.46.0 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.47.0 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.27 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | app 3.8（其余独立演进） | 配置文件 Schema |
 
@@ -137,7 +137,7 @@ iris3/
 ├── src/iris/          # 30 模块（config/llm/core/memory/qa/ingest/retrieval/wiki/...）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
-├── tests/             # 4,240 用例（pytest 全量）
+├── tests/             # 4,437 用例（pytest 全量）
 ├── config/            # *.json gitignored，*.example 版本控制
 ├── data/              # 运行时数据（全 gitignore）
 ├── .claude/skills/    # 项目级 Skill 真身（12 个，CC 原生读取）
@@ -146,7 +146,7 @@ iris3/
 └── memory/            # Claude 工作记忆
 ```
 
-**src/iris 30 模块**：`config` · `llm` · `core` · `memory`（6 子模块）· `qa` · `ingest` · `retrieval` · `wiki`（最大模块，含 ASR 17 子模块）· `feed`（飞书聊天简报，11 文件）· `analysis` · `evaluation` · `complex_input` · `output` · `assistant`（实时会议参谋，14 文件）· `games`（谁是卧底）· `decisions`（决策库）· `briefing`（会前情报包）· `signals`（主动信号）· `okr_evidence`（OKR 证据）· `intelligence`（共享底座）· `app/cli`（77 命令）· `app/transcribe_meeting` · `feishu` · `utils` · `trello` · `taskpanel`（7 文件）
+**src/iris 30 模块**：`config` · `llm` · `core` · `memory`（6 子模块）· `qa` · `ingest` · `retrieval` · `wiki`（最大模块，含 ASR 17 子模块）· `feed`（飞书聊天简报，11 文件）· `analysis` · `evaluation` · `complex_input` · `output` · `assistant`（实时会议参谋，14 文件）· `games`（谁是卧底）· `decisions`（决策库）· `briefing`（会前情报包）· `signals`（主动信号）· `okr_evidence`（OKR 证据）· `intelligence`（共享底座）· `app/cli`（77 命令）· `app/transcribe_meeting` · `feishu` · `utils` · `trello` · `taskpanel`（11 文件）
 
 ---
 
