@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from iris.taskpanel.reporter import report_cli_task
+
 import json
 import os
 import sys
@@ -713,6 +715,7 @@ def _load_review_items(path: Path):
     return _load_wiki_items_from_jsonl(path, only_selected=True)
 
 
+@report_cli_task("deep-eval", phase="evaluate", detail="评估 Wiki")
 def handle_deep_eval(args, bundle, logger) -> int:
     """深度评估：校验 Wiki 页面内容准确性 + 全面性。"""
     from iris.evaluation import DeepEvaluator, deep_eval_result_to_json, print_deep_eval_pretty

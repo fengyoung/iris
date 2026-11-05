@@ -21,6 +21,7 @@ import os
 import re
 import time
 import uuid
+from functools import wraps
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -101,6 +102,7 @@ class TaskReporter:
             trace_id=uuid.uuid4().hex,
         )
         self._entered = False
+        self._failure = ""
 
     # ── 上下文管理器 ──────────────────────────────────────
 
@@ -121,14 +123,18 @@ class TaskReporter:
             return
         try:
             self._task.elapsed_seconds = round(time.monotonic() - self._started_mono, 3)
-            if exc_type is None:
+            if exc_type is None and not self._failure:
                 finalize_task(self._data_root, self._task, "success")
             else:
                 finalize_task(self._data_root, self._task, "failed",
-                              error=f"{exc_type.__name__}: {exc_val}")
+                              error=f"{exc_type.__name__}: {exc_val}" if exc_type else self._failure)
         except Exception as e:
             logger.warning("任务埋点终态写入失败: %s", e)
         # 不返回 True——异常继续向上传播，保持业务命令原有错误行为
+
+    def mark_failed(self, error: str) -> None:
+        """记录无异常的失败（例如 CLI 返回非零状态），退出时写 failed。"""
+        self._failure = error
 
     # ── 阶段上报 ──────────────────────────────────────────
 
@@ -186,3 +192,18 @@ class TaskReporter:
     @property
     def budget(self) -> Optional[TaskBudget]:
         return self._budget
+
+
+def report_cli_task(name: str, *, phase: str, detail: str):
+    """为 CLI handler 登记任务，保留输出、返回码和异常传播行为。"""
+    def decorate(handler):
+        @wraps(handler)
+        def wrapped(args, bundle, logger):
+            with TaskReporter(name, command=name, data_root=Path(bundle.root) / "data") as reporter:
+                reporter.report_phase(phase, detail)
+                result = handler(args, bundle, logger)
+                if result != 0:
+                    reporter.mark_failed(f"CLI returned {result}")
+                return result
+        return wrapped
+    return decorate

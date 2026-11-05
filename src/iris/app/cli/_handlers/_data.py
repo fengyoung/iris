@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from iris.taskpanel.reporter import report_cli_task
+
 from typing import Any, Dict
 
 from iris.llm.router import ModelRouter
@@ -169,6 +171,7 @@ def handle_build_vector_index(args, bundle, logger) -> int:
 # ── 知识图谱 ────────────────────────────────────────────
 
 
+@report_cli_task("build-graph", phase="graph", detail="构建知识图谱")
 def handle_build_graph(args, bundle, logger) -> int:
     """构建/更新知识图谱。"""
     from iris.wiki import WikiGraph

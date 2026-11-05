@@ -1,25 +1,28 @@
-"""任务面板 HTTP 服务 — stdlib ThreadingHTTPServer，零外部依赖。
+"""本地控制台 HTTP 服务：保留任务状态协议，增加目录与受保护的任务操作。
 
-路由：
-    GET /           单页面板（static/index.html，启动时读入内存）
-    GET /api/state  任务状态 JSON（每请求实时读盘 + 顺带执行 stale 判定）
-    其余            404
-
-线程模型：daemon_threads=True 的请求线程，只读 + probe（finalize 有 flock 幂等守卫）；
-每请求实时读盘不缓存任务数据，天然一致。
+只监听回环地址；全部请求校验 Host，写接口另校验 Origin、启动令牌和 JSON。
+业务执行交给 CLI 子进程，静态资源使用固定白名单。
 """
 
 from __future__ import annotations
 
 import json
 import os
+import secrets
 import time
+from typing import cast
+from urllib.parse import parse_qs, urlsplit
 from dataclasses import dataclass
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from iris.core.locks import FileLockError
 from iris.taskpanel import probe
+from iris.taskpanel.catalog import CatalogError, catalog_payload
+from iris.taskpanel.runner import JobRunner, JobRunnerError, JobConflict, JobNotFound
+from iris.taskpanel.overview import OverviewProvider
+from iris.taskpanel.wizards import WizardService, WizardError
 from iris.taskpanel.store import read_current_all, read_history
 
 _STATIC_INDEX = Path(__file__).parent / "static" / "index.html"
@@ -65,14 +68,143 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _json(self, code: int, payload) -> None:
+        self._send(
+            code,
+            json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            "application/json; charset=utf-8",
+        )
+
+    def _trusted_host(self) -> bool:
+        port = cast("TaskPanelServer", self.server).state.port
+        return self.headers.get("Host", "") in {
+            f"127.0.0.1:{port}",
+            f"localhost:{port}",
+        }
+
     def do_GET(self) -> None:  # noqa: N802
-        if self.path in ("/", "/index.html"):
+        if not self._trusted_host():
+            self._json(403, {"error": "untrusted_host"})
+            return
+        path = urlsplit(self.path).path
+        if path in ("/", "/index.html"):
             self._handle_index()
-        elif self.path == "/api/state":
+        elif path == "/api/state":
             self._handle_state()
+        elif path == "/api/overview":
+            server = cast("TaskPanelServer", self.server)
+            try:
+                self._json(200, server.overview.get(server.runner.list_jobs()))
+            except (JobRunnerError, FileLockError, OSError):
+                self._json(503, {"error": "任务存储暂不可用，请重试"})
+        elif path == "/api/catalog":
+            self._json(200, catalog_payload())
+        elif path in ("/app.js", "/app.css", "/static/app.js", "/static/app.css"):
+            asset = _STATIC_INDEX.parent / path.rsplit("/", 1)[-1]
+            if asset.is_file():
+                kind = "text/javascript" if path.endswith(".js") else "text/css"
+                self._send(200, asset.read_bytes(), kind + "; charset=utf-8")
+            else:
+                self._json(404, {"error": "not_found"})
         else:
-            self._send(404, json.dumps({"error": "not_found"}).encode("utf-8"),
-                       "application/json; charset=utf-8")
+            self._job_request(path, write=False)
+
+    def do_POST(self) -> None:  # noqa: N802
+        server = cast("TaskPanelServer", self.server)
+        port = server.state.port
+        origin = self.headers.get("Origin")
+        allowed = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
+        token = self.headers.get("X-Iris-Token", "")
+        if (
+            not self._trusted_host()
+            or (origin is not None and origin not in allowed)
+            or not secrets.compare_digest(
+                token.encode("utf-8"), server.token.encode("ascii")
+            )
+        ):
+            self._json(403, {"error": "forbidden"})
+            return
+        if self.headers.get_content_type() != "application/json":
+            self._json(415, {"error": "expected_json"})
+            return
+        self._job_request(urlsplit(self.path).path, write=True)
+
+    def _body(self) -> dict:
+        size = int(self.headers.get("Content-Length", "0"))
+        if size < 0 or size > 1048576:
+            raise ValueError("请求体过大")
+        self.connection.settimeout(10)
+        try:
+            raw = self.rfile.read(size)
+        except TimeoutError:
+            raise ValueError("读取请求体超时") from None
+        if len(raw) != size:
+            raise ValueError("请求体长度不符")
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            raise ValueError("请求必须是 JSON 对象")
+        return payload
+
+    def _job_request(self, path: str, *, write: bool) -> None:
+        runner = self.server.runner  # type: ignore[attr-defined]
+        parts = path.strip("/").split("/")
+        try:
+            if parts[:2] == ["api", "wizards"] and len(parts) == 3:
+                wizard = cast("TaskPanelServer", self.server).wizards
+                if write:
+                    result = wizard.action(parts[2], self._body())
+                else:
+                    query = parse_qs(urlsplit(self.path).query)
+                    result = wizard.read(
+                        parts[2], job_id=query.get("job_id", [None])[0]
+                    )
+                self._json(200, result)
+                return
+            if parts[:2] != ["api", "jobs"]:
+                self._json(404, {"error": "not_found"})
+                return
+            payload = self._body() if write else {}
+            result = self._dispatch_job(runner, parts[2:], write, payload)
+            self._json(200, result)
+        except JobNotFound as exc:
+            self._json(404, {"error": str(exc)})
+        except JobConflict as exc:
+            self._json(409, {"error": str(exc)})
+        except (
+            CatalogError,
+            JobRunnerError,
+            WizardError,
+            ValueError,
+            TypeError,
+        ) as exc:
+            self._json(400, {"error": str(exc)})
+        except (FileLockError, OSError):
+            self._json(503, {"error": "本地数据暂不可用，请重试"})
+
+    def _dispatch_job(self, runner, parts: list[str], write: bool, payload: dict):
+        if not parts:
+            if not write:
+                return {"jobs": runner.list_jobs()}
+            command = payload.get("command")
+            params = payload.get("params", {})
+            if not isinstance(command, str) or not isinstance(params, dict):
+                raise ValueError("command 必须为文本，params 必须为对象")
+            return runner.start(command, params)
+        if len(parts) == 1 and not write:
+            return runner.get(parts[0])
+        if len(parts) == 2:
+            if write and parts[1] == "cancel":
+                return runner.cancel(parts[0])
+            if write and parts[1] == "rerun":
+                return runner.rerun(parts[0])
+            if not write and parts[1] == "logs":
+                query = parse_qs(urlsplit(self.path).query)
+                return runner.read_log(
+                    parts[0],
+                    stream=query.get("stream", ["stdout"])[0],
+                    offset=int(query.get("offset", ["0"])[0]),
+                )
+        raise JobNotFound("not_found")
 
     def _handle_index(self) -> None:
         state: PanelState = self.server.state  # type: ignore[attr-defined]
@@ -102,8 +234,11 @@ class _Handler(BaseHTTPRequestHandler):
             "watchdog": watchdog,
             "agents": agents,
         }
-        self._send(200, json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                   "application/json; charset=utf-8")
+        self._send(
+            200,
+            json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            "application/json; charset=utf-8",
+        )
 
 
 class TaskPanelServer(ThreadingHTTPServer):
@@ -112,21 +247,30 @@ class TaskPanelServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, addr, project_root: Path, data_root: Path,
-                 port: int, version: str) -> None:
+    def __init__(
+        self, addr, project_root: Path, data_root: Path, port: int, version: str
+    ) -> None:
         super().__init__(addr, _Handler)
+        self.token = secrets.token_urlsafe(32)
+        self.runner = JobRunner(project_root, data_root)
+        self.overview = OverviewProvider(project_root, data_root)
+        self.wizards = WizardService(project_root, data_root, self.runner)
+        index_html = _STATIC_INDEX.read_bytes().replace(
+            b"__IRIS_TOKEN__", self.token.encode("ascii")
+        )
         self.state = PanelState(
             project_root=project_root,
             data_root=data_root,
-            port=port,
+            port=self.server_address[1],
             version=version,
             started_at=_now_local_iso(),
-            index_html=_STATIC_INDEX.read_bytes(),
+            index_html=index_html,
             boot_mono=time.monotonic(),
         )
 
 
-def create_server(project_root: Path, data_root: Path,
-                  port: int = 8765, version: str = "") -> TaskPanelServer:
-    """创建监听 127.0.0.1:<port> 的面板服务（只读本机展示）。"""
+def create_server(
+    project_root: Path, data_root: Path, port: int = 8765, version: str = ""
+) -> TaskPanelServer:
+    """创建监听 127.0.0.1:<port> 的本地控制台。"""
     return TaskPanelServer(("127.0.0.1", port), project_root, data_root, port, version)

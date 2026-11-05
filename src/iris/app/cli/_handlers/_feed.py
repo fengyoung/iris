@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from iris.taskpanel.reporter import report_cli_task
+
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -262,6 +264,7 @@ def handle_feed_config(args, bundle, _logger) -> int:
 
 # ── feed-collect ──────────────────────────────────────────
 
+@report_cli_task("feed-collect", phase="collect", detail="采集信息")
 def handle_feed_collect(args, bundle, _logger) -> int:
     """执行信息汇聚。"""
     llm_service = LLMService(bundle)

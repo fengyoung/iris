@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from iris.taskpanel.reporter import report_cli_task
+
 import os
 import sys
 from pathlib import Path
@@ -199,6 +201,7 @@ def handle_batch_transcribe(args, bundle, logger) -> int:
 # ── 飞书导入 ──────────────────────────────────────────────
 
 
+@report_cli_task("feishu-doc-convert", phase="convert", detail="转换飞书文档")
 def handle_feishu_doc_convert(args, bundle, logger) -> int:
     """飞书文档转本地 Markdown 并归档到 SOURCE。"""
     from iris.feishu.doc_convert import FeishuDocConverter
@@ -228,6 +231,7 @@ def handle_feishu_doc_convert(args, bundle, logger) -> int:
     return 0 if errors == 0 else 1
 
 
+@report_cli_task("chat-digest", phase="digest", detail="提炼聊天记录")
 def handle_chat_digest(args, bundle, logger) -> int:
     """聊天记录提炼。"""
     from iris.feishu.chat_digest import ChatDigester
