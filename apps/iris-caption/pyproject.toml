@@ -1,0 +1,37 @@
+[project]
+name = "iris-caption"
+dynamic = ["version"]
+description = "声笺 · Iris Caption — 本地会议实时字幕"
+requires-python = ">=3.11"
+dependencies = ["PySide6>=6.7,<7", "numpy>=1.26", "sounddevice>=0.5", "httpx>=0.27", "keyring>=25", "filelock>=3.16"]
+
+[project.optional-dependencies]
+asr = ["funasr-onnx==0.4.2", "onnxruntime>=1.19", "scipy>=1.11"]
+materials = ["PyMuPDF>=1.24", "python-docx>=1.1", "sentence-transformers>=3"]
+dev = ["pytest>=8", "ruff>=0.15", "pyinstaller>=6"]
+
+[project.scripts]
+iris_caption = "iris_caption.app:main"
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+version = {attr = "iris_caption.version.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+extend-select = ["C901"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 20

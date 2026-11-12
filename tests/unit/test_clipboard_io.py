@@ -33,15 +33,15 @@ class TestReadClipboard:
 
 class TestWriteClipboard:
     def test_calls_pbcopy_with_text(self):
-        with patch("subprocess.run") as mock_run:
-            _write_clipboard("test text")
+        with patch("subprocess.run", return_value=subprocess.CompletedProcess("pbcopy", 0)) as mock_run:
+            assert _write_clipboard("test text") is True
             mock_run.assert_called_once_with(
-                ["pbcopy"], input="test text", text=True
+                ["pbcopy"], input="test text", text=True, check=True, timeout=3
             )
 
     def test_silently_handles_exception(self):
         with patch("subprocess.run", side_effect=OSError):
-            _write_clipboard("test")  # 不应抛出异常
+            assert _write_clipboard("test") is False
 
 
 class TestPaste:
@@ -59,50 +59,29 @@ class TestPaste:
 
 class TestReplaceTextInPlace:
     def test_writes_corrected_to_clipboard(self):
-        with patch("iris.wiki.asr._clipboard_io._write_clipboard") as mock_write, \
+        with patch("iris.wiki.asr._clipboard_io._write_clipboard", return_value=True) as mock_write, \
              patch("iris.wiki.asr._clipboard_io._read_clipboard", return_value="原始文本"), \
-             patch("subprocess.run"), \
+             patch("iris.wiki.asr._clipboard_io._delete_and_paste", return_value=True), \
              patch("time.sleep"), \
              patch("time.monotonic", side_effect=[0, 0.2, 1.0]):
             ok = _replace_text_in_place("校正文本", "原始文本")
             assert ok is True
             mock_write.assert_called_once_with("校正文本")
 
-    def test_short_text_backspace_delete(self):
-        """v3.24.1: ≤120 字走逐字符 Delete + Cmd+V 粘贴（精准不误删）。"""
-        with patch("iris.wiki.asr._clipboard_io._write_clipboard"), \
-             patch("iris.wiki.asr._clipboard_io._read_clipboard", return_value="原始文本"), \
-             patch("subprocess.run") as mock_run, \
-             patch("time.sleep"), \
-             patch("time.monotonic", side_effect=[0, 0.2, 1.0]):
-            ok = _replace_text_in_place("校正文本", "原始文本")
-            assert ok is True
-            final_call_args = mock_run.call_args_list[-1][0][0]
-            script = " ".join(final_call_args)
-            assert "key code 51" in script                # Delete 逐字符删除
-            assert "keystroke" in script                   # Cmd+V 粘贴
-            assert "command down" in script
-            assert 'keystroke "a" using command down' not in script  # 短文本不用 Cmd+A
-
-    def test_long_text_backspace_delete(self):
-        """v3.24.2: >120 字也走逐字符 Delete（Cmd+A 跨 App 不可靠，导致原文残留+校正追加=重复）。"""
-        long_raw = "测试" * 70  # 140 字
-        with patch("iris.wiki.asr._clipboard_io._write_clipboard"), \
-             patch("iris.wiki.asr._clipboard_io._read_clipboard", return_value=long_raw), \
-             patch("subprocess.run") as mock_run, \
-             patch("time.sleep"), \
-             patch("time.monotonic", side_effect=[0, 0.2, 1.0]):
-            ok = _replace_text_in_place("校正文本", long_raw)
-            assert ok is True
-            final_call_args = mock_run.call_args_list[-1][0][0]
-            script = " ".join(final_call_args)
-            assert "key code 51" in script                # Delete 逐字符删除
-            assert "keystroke" in script                   # Cmd+V 粘贴
-            assert 'keystroke "a" using command down' not in script  # 全场景不用 Cmd+A
+    def test_short_and_long_text_use_native_backspace(self):
+        for count in (4, 140, 500, 2000):
+            raw = "文" * count
+            with patch("iris.wiki.asr._clipboard_io._write_clipboard", return_value=True), \
+                 patch("iris.wiki.asr._clipboard_io._read_clipboard", return_value=raw), \
+                 patch("iris.wiki.asr._clipboard_io._delete_and_paste", return_value=True) as writer, \
+                 patch("time.sleep"), \
+                 patch("time.monotonic", side_effect=[0, 0.2, 1.0]):
+                assert _replace_text_in_place("校正文本", raw)
+                writer.assert_called_once_with(count)
 
     def test_snapshot_mismatch_returns_false(self):
         """快照校验：剪贴板已不等于原文（新句到达/用户其他复制）→ 不写不贴。"""
-        with patch("iris.wiki.asr._clipboard_io._write_clipboard") as mock_write, \
+        with patch("iris.wiki.asr._clipboard_io._write_clipboard", return_value=True) as mock_write, \
              patch("iris.wiki.asr._clipboard_io._read_clipboard", return_value="其他内容"), \
              patch("subprocess.run") as mock_run, \
              patch("time.sleep"), \
@@ -112,11 +91,11 @@ class TestReplaceTextInPlace:
             mock_write.assert_not_called()
             mock_run.assert_not_called()
 
-    def test_osascript_exception_returns_false(self):
-        """系统异常（超时/无权限）→ 返回 False，调用方告警并回滚状态。"""
-        with patch("iris.wiki.asr._clipboard_io._write_clipboard"), \
+    def test_native_writer_exception_returns_false(self):
+        """系统异常（超时/无权限）→ 返回 False，调用方告警并禁用后续写回。"""
+        with patch("iris.wiki.asr._clipboard_io._write_clipboard", return_value=True), \
              patch("iris.wiki.asr._clipboard_io._read_clipboard", return_value="原始文本"), \
-             patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 5)), \
+             patch("iris.wiki.asr._clipboard_io._delete_and_paste", side_effect=OSError), \
              patch("time.sleep"), \
              patch("time.monotonic", side_effect=[0, 0.2, 1.0]):
             ok = _replace_text_in_place("校正文本", "原始文本")
@@ -130,9 +109,9 @@ class TestReplaceTextInPlace:
             if call_count[0] < 5:
                 return f"changing_{call_count[0]}"
             return "stable"
-        with patch("iris.wiki.asr._clipboard_io._write_clipboard"), \
+        with patch("iris.wiki.asr._clipboard_io._write_clipboard", return_value=True), \
              patch("iris.wiki.asr._clipboard_io._read_clipboard", side_effect=unstable_then_stable), \
-             patch("subprocess.run"), \
+             patch("iris.wiki.asr._clipboard_io._delete_and_paste", return_value=True), \
              patch("time.sleep"), \
              patch("time.monotonic", return_value=0):
             ok = _replace_text_in_place("校正文本", "stable")

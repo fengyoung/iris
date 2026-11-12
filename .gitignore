@@ -17,8 +17,9 @@ venv/
 config/*.json
 config/*.bak*
 
-# Runtime data
-/data/
+# Runtime data (only the approved logo assets are versioned)
+/data/*
+!/data/iris-logo/
 
 # iris-hire 岗位库含内部组织信息，只允许放 data/hiring/（不入仓）
 /.claude/skills/iris-hire/references/job-catalog.md
@@ -78,6 +79,9 @@ htmlcov/
 coverage.xml
 coverage.json
 .git-filter-replacements.txt
+
+# Temporary document fetch resources
+/doc-fetch-resources/
 
 # lark 工具运行时产物
 .lark-slides/

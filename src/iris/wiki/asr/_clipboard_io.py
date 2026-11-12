@@ -6,6 +6,8 @@ import re
 import subprocess
 import time
 
+from ._keyboard_writer import _delete_and_paste
+
 
 def _read_clipboard() -> str:
     """读取剪贴板文本内容。"""
@@ -15,12 +17,13 @@ def _read_clipboard() -> str:
         return ""
 
 
-def _write_clipboard(text: str) -> None:
-    """写入文本到剪贴板。"""
+def _write_clipboard(text: str) -> bool:
+    """写入文本到剪贴板；只有 pbcopy 正常退出才返回 True。"""
     try:
-        subprocess.run(["pbcopy"], input=text, text=True)
+        result = subprocess.run(["pbcopy"], input=text, text=True, check=True, timeout=3)
+        return result.returncode == 0
     except Exception:
-        pass
+        return False
 
 
 def _paste() -> None:
@@ -46,10 +49,12 @@ def _replace_text_in_place(corrected: str, raw_text: str) -> bool:
 
     逐字符删除是唯一跨 App 可靠的替换方式——Cmd+A 在聊天输入框/浏览器文本框
     等场景中行为不一致（可能全选整个对话而非当前输入），导致原文残留+校正追加=重复。
-    timeout 按 100ms/字校准，250 字长文本约 25s，全链路覆盖。
+    原生键盘事件按长度加速，退格发送目标不超过 0.8s，1s 超时停止。
+    应用处理及绘制事件的耗时由目标应用决定。
 
     Returns:
-        True 成功；False 快照不符/系统异常（调用方负责告警与状态回滚）
+        True 仅表示全部事件已投递，不能确认目标应用实际接收。
+        False 可能已经部分删除；调用方必须停止自动写回，不能重试或假定回滚。
     """
     # 基线等待：vocotype 的 Cmd+V 至少需要 0.15s 完成
     _BASELINE_WAIT = 0.15
@@ -77,29 +82,11 @@ def _replace_text_in_place(corrected: str, raw_text: str) -> bool:
     if _read_clipboard() != raw_text:
         return False
 
-    _write_clipboard(corrected)
+    if not _write_clipboard(corrected):
+        return False
 
-    raw_length = len(raw_text)
-
-    # 逐字符 Delete + Cmd+V 粘贴：唯一跨 App 可靠的方式。
-    # Cmd+A（全选覆盖）在不同 app 中行为不一致（可能选不中当前输入框内容），
-    # 导致原文残留 + 校正追加 = 文本重复。逐字符删除精准删除 vocotype
-    # 刚贴入的 raw_length 个字符，然后粘贴校正文本。
-    # timeout 按 100ms/字校准（AppleScript 逐键发送约 50ms/键 + 余量）。
     try:
-        subprocess.run([
-            "osascript", "-e",
-            f'''
-            tell application "System Events"
-                repeat {raw_length} times
-                    key code 51  -- Delete / Backspace
-                end repeat
-                delay 0.05
-                keystroke "v" using command down
-            end tell
-            ''',
-        ], timeout=max(5, int(raw_length * 0.1)))
-        return True
+        return _delete_and_paste(len(raw_text))
     except Exception:
         return False
 

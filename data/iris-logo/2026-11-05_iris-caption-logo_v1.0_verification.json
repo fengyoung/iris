@@ -1,0 +1,53 @@
+{
+  "approved_sha256": "ec8d8523b50cb8fc4ded9b895be702826d013c36ca462af38050c3184c6f0d47",
+  "icon_primary_identical": true,
+  "all_four_icon_paths_unchanged": true,
+  "outlined_wordmark": "Iris-caption",
+  "reference_Iris_paths_and_slant_reused": true,
+  "wordmark_scale": 0.0489047376464595,
+  "wordmark_tracking_font_units": 36.864,
+  "font_sha256": "a74ea71c366f15c81f9ce00a757cefb938cda21c0d32e51037d9a038e5ebc14b",
+  "lockup_viewbox": "0 0 702.234237 96",
+  "icns_sizes": [
+    [
+      512,
+      512,
+      2
+    ],
+    [
+      512,
+      512,
+      1
+    ],
+    [
+      256,
+      256,
+      2
+    ],
+    [
+      256,
+      256,
+      1
+    ],
+    [
+      128,
+      128,
+      2
+    ],
+    [
+      128,
+      128,
+      1
+    ],
+    [
+      32,
+      32,
+      2
+    ],
+    [
+      16,
+      16,
+      2
+    ]
+  ]
+}

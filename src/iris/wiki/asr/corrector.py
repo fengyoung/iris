@@ -203,6 +203,9 @@ class AsrCorrector:
         self._last_text = ""
         self._last_corrected = ""  # 防止自己写回的文本被重复处理
         self._last_corrected_lock = threading.Lock()
+        # 任意写回失败都可能已部分删除；仅新建引擎（显式重启）解除禁用。
+        self._writeback_lock = threading.Lock()
+        self._writeback_disabled = False
 
         # LLM 异步精修：单线程池 + 当前 pending 任务引用
         self._llm_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -696,11 +699,7 @@ class AsrCorrector:
 
         if self._mode == "fast":
             # fast 模式：立即写回（无 LLM 精修阶段，词典结果是最终结果）
-            if _replace_text_in_place(fast_result, current_text):
-                with self._last_corrected_lock:
-                    self._last_corrected = fast_result
-            else:
-                _log("[Iris] ⚠ 词典写回失败（剪贴板已变化或系统异常），跳过本次替换")
+            self._write_back(fast_result, current_text)
         else:
             # full 模式：不写回文档（等 LLM 精修后统一写回），
             # 仅更新 _last_corrected 防同一文本被重复处理
@@ -842,13 +841,27 @@ class AsrCorrector:
         快照 = snap_raw（文档实际内容）：LLM 返回时若剪贴板已变
         （新句到达/用户其他复制），快照校验拦截，不触碰文档。
         """
-        if _replace_text_in_place(llm_result, snap_raw):
+        self._write_back(llm_result, snap_raw)
+
+    def _write_back(self, corrected: str, raw: str) -> bool:
+        """串行投递写回；任何失败均锁定，禁止后续词典或异步 LLM 重试删除。"""
+        with self._writeback_lock:
+            if self._writeback_disabled:
+                return False
+            try:
+                posted = _replace_text_in_place(corrected, raw)
+            except Exception:
+                posted = False
+            if not posted:
+                self._writeback_disabled = True
+                _log("[Iris] ⚠ 写回失败，文档可能已部分删除或状态不明；"
+                     "自动写回已禁用，不会重试删除。请手动检查并按需恢复文本，"
+                     "确认后显式重启 asr-corrector。")
+                return False
+            # 仅用于过滤自己写入的剪贴板文本，不代表目标应用已接收键盘事件。
             with self._last_corrected_lock:
-                self._last_corrected = llm_result
-        else:
-            _log("[Iris] ⚠ LLM 精修写回失败（剪贴板已变化或系统异常），保留原始转写")
-            with self._last_corrected_lock:
-                self._last_corrected = snap_raw  # 文档实际内容仍是原始转写
+                self._last_corrected = corrected
+            return True
 
 
 # ═══════════════════════════════════════════════════════════════════

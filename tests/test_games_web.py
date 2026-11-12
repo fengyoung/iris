@@ -20,15 +20,27 @@ def web(tmp_path):
     config = SimpleNamespace(root=tmp_path)
     with patch('iris.games.web_server.LLMService') as llm:
         llm.return_value.get_provider.return_value.get_model_manager.return_value.list_models.return_value = []
+        llm.return_value.generate_as.return_value = SimpleNamespace(text='复盘总结')
         server = UndercoverWebServer(config, port=0)
-        thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .02}, daemon=True)
-        thread.start()
-        try:
-            yield server
-        finally:
-            server.shutdown()
-            server.server_close()
-            thread.join(3)
+        # Keep real summary persistence inside the game worker so joining it
+        # also drains summary work before mocks and temporary files disappear.
+        store = server.state.replay_store
+        with patch.object(store, 'trigger_summary', side_effect=store._generate_summary):
+            thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .02}, daemon=True)
+            thread.start()
+            try:
+                yield server
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(3)
+                assert not thread.is_alive()
+                for session in server.state.games.values():
+                    session.cancel_event.set()
+                    session.advance_event.set()
+                    if session.thread is not None:
+                        session.thread.join(3)
+                        assert not session.thread.is_alive()
 
 
 def request(web, method, path, body=None, headers=None):
@@ -158,8 +170,13 @@ def test_summary_model_falls_back_to_referee(web):
         status, body = request(web, 'POST', '/api/game/start', json.dumps(payload))
         assert status == 200
         session = web.state.games[json.loads(body)['game_id']]
+        session.thread.join(3)
+        assert not session.thread.is_alive()
+        game.assert_called_once()
         assert session.referee_model == 'judge-x'
         assert session.summary_model_id == 'judge-x'
+        saved = web.state.replay_store.load_game(session.game_id)
+        assert saved['summary_ready'] and saved['summary_text'] == '复盘总结'
 
 
 def test_start_validation_quota_and_saved_result(web):
@@ -172,7 +189,10 @@ def test_start_validation_quota_and_saved_result(web):
         status, body = request(web, 'POST', '/api/game/start', json.dumps(payload))
         assert status == 200
         game_id = json.loads(body)['game_id']
-        web.state.games[game_id].thread.join(3)
+        session = web.state.games[game_id]
+        session.thread.join(3)
+        assert not session.thread.is_alive()
+        game.assert_called_once()
         status, body = request(web, 'GET', '/api/history/' + game_id)
         assert status == 200 and json.loads(body)['result']['winner'] == 'cancelled'
         assert request(web, 'GET', '/api/history/' + game_id + '/image/civilian')[0] == 200
@@ -260,7 +280,15 @@ def test_referee_default_is_official_and_mutually_exclusive_with_players(web):
 
     # 同一模型换到裁判没占用的角色则不冲突（裁判固定以 base_model 调用）
     payload['referee_model'] = '9'
-    assert request(web, 'POST', '/api/game/start', json.dumps(payload))[0] != 400
+    with patch('iris.games.web_server.UndercoverGame') as game:
+        game.return_value.run.return_value = GameResult(
+            image_civilian='a', image_spy='b', players=[], spy_keys=[], winner='cancelled')
+        status, body = request(web, 'POST', '/api/game/start', json.dumps(payload))
+        assert status == 200
+        session = web.state.games[json.loads(body)['game_id']]
+        session.thread.join(3)
+        assert not session.thread.is_alive()
+        game.assert_called_once()
 
 
 def test_summary_updates_replay(web):
@@ -292,6 +320,9 @@ def test_resume_preserves_mode_and_rejects_duplicate(web):
         assert request(web, 'POST', f'/api/game/{game_id}/resume', '')[0] == 200
         assert web.state.games[game_id].auto_advance is False
         assert request(web, 'POST', f'/api/game/{game_id}/resume', '')[0] == 409
+        session = web.state.games[game_id]
+        session.thread.join(3)
+        assert not session.thread.is_alive()
         assert worker.call_count == 1
     assert web.state.game_slots.acquire(blocking=False)
     assert not web.state.game_slots.acquire(blocking=False)
