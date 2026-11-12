@@ -1,4 +1,4 @@
-# Iris 3.47.0 — 项目执行说明
+# Iris 3.48.0 — 项目执行说明
 
 > 工作知识助手，个人知识库（Obsidian Wiki）+ 飞书团队知识库集成。
 > 逐版变更记录与版本历史统一归档于 [CHANGELOG.md](CHANGELOG.md)；本文件只承载现行架构 / 配置 / 约定。
@@ -7,9 +7,9 @@
 
 ## 项目概览
 
-**当前规模**：~52,600 行 / 235 个源码文件 / 30 模块 · CLI 77 命令 · 测试 4,437（pytest 全量）· 覆盖率 75.64%（`fail_under` 65，13 个关键模块另有独立门禁）· Ruff、mypy（含显式兼容边界）、AST 安全扫描与 SPDX SBOM 门禁通过 · 12 个项目级 Skill · Wiki 231 页 · 知识图谱节点 231 / 关系边 2,766 · 数据源 1,041 文档 / 7,979 Chunk（text-embedding-v3 / 1,024 维）
+**当前规模**：~52,600 行 / 236 个源码文件 / 30 模块 · CLI 77 命令 · 测试 4,455（pytest 全量）· 覆盖率 75.68%（`fail_under` 65，13 个关键模块另有独立门禁）· Ruff、mypy（含显式兼容边界）、AST 安全扫描与 SPDX SBOM 门禁通过 · 12 个项目级 Skill · Wiki 231 页 · 知识图谱节点 231 / 关系边 2,766 · 数据源 1,041 文档 / 7,979 Chunk（text-embedding-v3 / 1,024 维）
 
-**最新版本**（v3.47.0）：task-panel 升级为本地 Web 控制台（命令目录与参数表单 / 子进程任务管理 / 只读总览 / 会议·飞书·Wiki·记忆·Feed 向导，特性版）。详细变更历史见 [CHANGELOG.md](CHANGELOG.md)。
+**最新版本**（v3.48.0）：纳入声笺独立会议字幕应用 0.4.0、控制台视觉更新与语音写回安全修复。详细变更历史见 [CHANGELOG.md](CHANGELOG.md)。
 
 **关键路径**：
 
@@ -93,7 +93,7 @@ PDF=PyMuPDF 提取+渲染；DOCX=python-docx 段落+表格；VIDEO=ffmpeg 抽帧
 
 | 层 | 位置 | 当前值 | 含义 |
 |------|------|:---:|------|
-| **产品版本** | `pyproject.toml` | 3.47.0 | 软件发布版本 |
+| **产品版本** | `pyproject.toml` | 3.48.0 | 软件发布版本 |
 | **协议版本** | `src/iris/__init__.py` | 3.27 | CLI 命令集 / agent-spec 格式 |
 | **数据版本** | `config/*.json` | app 3.8（其余独立演进） | 配置文件 Schema |
 
@@ -137,7 +137,7 @@ iris3/
 ├── src/iris/          # 30 模块（config/llm/core/memory/qa/ingest/retrieval/wiki/...）
 ├── scripts/           # CLI 入口 + 委托脚本
 ├── templates/         # Prompt / Wiki 模板
-├── tests/             # 4,437 用例（pytest 全量）
+├── tests/             # 4,455 用例（pytest 全量）
 ├── config/            # *.json gitignored，*.example 版本控制
 ├── data/              # 运行时数据（全 gitignore）
 ├── .claude/skills/    # 项目级 Skill 真身（12 个，CC 原生读取）
