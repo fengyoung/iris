@@ -153,6 +153,10 @@ class Process:
         self.alive = True
     def is_alive(self):
         return self.alive
+    def terminate(self):
+        self.terminated = True
+    def kill(self):
+        self.alive = False
     def close(self):
         self.closed = True
     def join(self, *args, **kwargs):
@@ -624,3 +628,103 @@ def test_failed_stop_queue_preserves_retryable_controls(control, monkeypatch, tm
     c.commands.get_nowait()
     c.stop()
     assert c.capture_state == 'stopping'
+
+
+def test_fatal_error_escalates_without_join_and_keeps_text(control, monkeypatch):
+    c = control
+    clock = [100.]
+    monkeypatch.setattr(module.time, 'monotonic', lambda: clock[0])
+    complete = final(c)
+    partial = c.session.apply_audio(dict(type='partial', session_id=c.session.id,
+        segment_id='tail', text='unfinished speech', start_ms=1000, end_ms=2000))
+    c.process = Process()
+    c.process.alive = True
+    process = c.process
+    c.commands, c.audio_events = queue.Queue(), queue.Queue()
+    c._event(dict(type='error', session_id=c.session.id, text='fsmn failed'))
+    assert c.commands.get_nowait() == {'type': 'stop'}
+    assert partial.status == 'interrupted' and partial.raw == 'unfinished speech'
+    assert complete.raw == 'apple' and complete.status == 'pending'
+    clock[0] += 1.1
+    c.poll()
+    assert process.terminated and c.process is process
+    clock[0] += 1.1
+    c.poll()
+    assert c.process is None and process.closed
+    assert c.capture_state == 'error'
+    assert c.window.set_status.call_args.args[0] == 'fsmn failed'
+
+
+def test_shutdown_returns_before_background_reaper(control, monkeypatch):
+    c = control
+    c.timer, c.retry_timer = Mock(), Mock()
+    c.process = Process()
+    c.process.alive = True
+    c.commands, c.audio_events = queue.Queue(), queue.Queue()
+    process = c.process
+    jobs = []
+    monkeypatch.setattr(module.threading, 'Thread',
+        lambda **kwargs: SimpleNamespace(start=lambda: jobs.append(kwargs)))
+    c.shutdown()
+    assert c.process is None and len(jobs) == 1
+    assert jobs[0]['target'] is module._reap_audio
+    assert jobs[0]['args'][0] is process
+
+
+def test_reaper_terminates_before_join_and_never_joins_feeders():
+    calls = []
+    class Child:
+        alive = True
+        def is_alive(self):
+            return self.alive
+        def terminate(self):
+            calls.append('terminate')
+        def kill(self):
+            calls.append('kill')
+            self.alive = False
+        def join(self, timeout):
+            calls.append(('join', timeout))
+        def close(self):
+            calls.append('close')
+    class Pipe:
+        def cancel_join_thread(self):
+            calls.append('cancel_feeder')
+        def close(self):
+            calls.append('close_queue')
+        def join_thread(self):
+            pytest.fail('feeder join deadlocks without consumer')
+    module._reap_audio(Child(), Pipe(), Pipe())
+    assert calls == ['terminate', ('join', 1), 'kill', ('join', 1), 'close',
+                     'cancel_feeder', 'close_queue', 'cancel_feeder', 'close_queue']
+
+
+def test_blocked_transport_runs_off_gui_and_late_event_isolated(control):
+    import threading
+    c = control
+    entered, release = threading.Event(), threading.Event()
+    main_thread = threading.get_ident()
+    old_id = c.session.id
+    class BlockedPipe:
+        def get(self, timeout):
+            assert threading.get_ident() != main_thread
+            entered.set()
+            assert release.wait(2)
+            return dict(type='partial', session_id=old_id, segment_id='late', text='old')
+    c.audio_events = BlockedPipe()
+    c._start_audio_pump()
+    assert entered.wait(1)
+    old_done, old_stop, old_inbox = c._audio_pump_done, c._audio_pump_stop, c._audio_inbox
+    try:
+        c.poll()  # Would hang if it read the raw pipe.
+        assert c.session.segments == {}
+        old_stop.set()
+        c.session = Session()
+        c.audio_events = queue.Queue()
+        c._audio_inbox = queue.Queue()
+        release.set()
+        assert old_done.wait(1)
+        c.poll()
+        assert c.session.segments == {} and old_inbox.empty()
+    finally:
+        release.set()
+        old_stop.set()

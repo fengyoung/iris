@@ -1,6 +1,6 @@
 # 声笺 · Iris Caption
 
-Iris 仓库内的独立 macOS 会议字幕应用。当前版本 **0.4.0**，为开发预览，尚未通过真实会议和 M1 / 8GB 的最终验收。声笺版本独立于主项目 Iris。
+Iris 仓库内的独立 macOS 会议字幕应用。当前版本 **0.4.3**，为开发预览，尚未通过真实会议和 M1 / 8GB 的最终验收。声笺版本独立于主项目 Iris。
 
 从 macOS 应用菜单“关于声笺”或设置底部入口查看版本、构建号与日期，并复制反馈信息。更新记录见 [CHANGELOG.md](CHANGELOG.md)，发布与回退制品规则见 [RELEASE.md](RELEASE.md)，数据迁移与恢复见 [数据兼容与恢复](docs/data-compatibility.md)。
 
@@ -16,7 +16,7 @@ Iris 仓库内的独立 macOS 会议字幕应用。当前版本 **0.4.0**，为�
 
 当前界面采用 Apple design-md 参考的浅灰与白色层次、蓝色操作强调和 macOS 系统字体。针对桌面字幕场景调整了工具栏、字幕阅读区、设置与资料窗口，具体适配见 [DESIGN.md](DESIGN.md)。
 
-更新时先退出旧版声笺，解压 `Iris-Caption-0.4.0-macos-arm64.zip`，将其中的 `声笺.app` 拖入“应用程序”并替换旧版。模型目录、设置和钥匙串账户保持原有位置。
+更新时先退出旧版声笺，解压 `Iris-Caption-0.4.3-macos-arm64.zip`，将其中的 `声笺.app` 拖入“应用程序”并替换旧版。模型目录、设置和钥匙串账户保持原有位置。
 
 已应用确认的 B 方案“轻声波”图标。完整主/反色 icon 与 Iris-caption 字标组合在仓库 `data/iris-logo/2026-11-05_iris-caption-logo_v1.0_*` 管理，App 使用对应 PNG/ICNS 副本。按钮状态审查与规则见 [BUTTON_STATES.md](BUTTON_STATES.md)。
 

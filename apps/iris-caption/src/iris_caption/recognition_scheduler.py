@@ -101,6 +101,14 @@ class RecognitionScheduler:
                 self._condition.wait(remaining)
             self.raise_if_failed()
 
+    def cancel(self) -> None:
+        """Reject admission and cancel queued audio without joining native code."""
+        with self._condition:
+            self._closed = True
+            self._finals.clear()
+            self._partial = None
+            self._condition.notify_all()
+
     def close(self, cancel: bool = False, timeout: float = 30.0) -> None:
         """Reject new work, drain (or cancel queued work), and boundedly join.
 

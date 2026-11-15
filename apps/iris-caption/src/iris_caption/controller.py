@@ -23,6 +23,52 @@ from .settings import (VAD_REQUIRED_MESSAGE, data_dir, read_settings,
 from .statistics import StatsStore, session_snapshot
 
 
+def _pump_audio(pipe, inbox, stop, done):
+    """A killed writer can leave a partial pickle frame; only this daemon waits."""
+    try:
+        while not stop.is_set():
+            try:
+                event = pipe.get(timeout=.05)
+            except queue.Empty:
+                continue
+            except (ValueError, OSError, EOFError):
+                return
+            while not stop.is_set():
+                try:
+                    inbox.put(event, timeout=.05)
+                    break
+                except queue.Full:
+                    continue
+    finally:
+        done.set()
+
+
+def _reap_audio(process, events, commands):
+    """Run outside Qt; never join a queue feeder with an absent consumer."""
+    try:
+        if process is not None:
+            # No GUI consumer remains. Stop the child immediately rather than
+            # joining it while its event feeder is blocked on a full pipe.
+            if process.is_alive():
+                process.terminate()
+            process.join(timeout=1)
+            if process.is_alive():
+                process.kill()
+                process.join(timeout=1)
+            if not process.is_alive():
+                process.close()
+    except (ValueError, OSError, AssertionError):
+        pass
+    finally:
+        for stream in (events, commands):
+            if stream is not None:
+                try:
+                    stream.cancel_join_thread()
+                    stream.close()
+                except (AttributeError, ValueError, OSError):
+                    pass
+
+
 class Controller(QObject):
     def __init__(self, window):
         super().__init__(window)
@@ -252,6 +298,7 @@ class Controller(QObject):
             self.process = context.Process(target=run_audio_worker,
                 args=(config, self.audio_events, self.commands), daemon=True)
             self.process.start()
+            self._start_audio_pump()
         except Exception:
             self._release_audio()
             self._set_capture_state('error')
@@ -273,6 +320,8 @@ class Controller(QObject):
         self.window.clear_segments()
         self.paused = False
         self._audio_failure = None
+        self._audio_deadline = None
+        self._audio_terminated = False
         self.window.set_status('正在加载语音模型…')
 
     def _command(self, kind):
@@ -282,6 +331,43 @@ class Controller(QObject):
         except (queue.Full, ValueError, OSError, AttributeError):
             self.window.set_status('收音进程暂未响应，请稍后重试。')
             return False
+
+    def _start_audio_pump(self):
+        self._audio_inbox = None
+        self._audio_dead_since = None
+        if isinstance(self.audio_events, queue.Queue):
+            return
+        self._audio_inbox = queue.Queue(maxsize=256)
+        self._audio_pump_stop = threading.Event()
+        self._audio_pump_done = threading.Event()
+        threading.Thread(target=_pump_audio,
+            args=(self.audio_events, self._audio_inbox, self._audio_pump_stop, self._audio_pump_done),
+            name='caption-audio-events', daemon=True).start()
+
+    def _interrupt_audio(self):
+        for segment in self.session.interrupt_partials():
+            self.window.upsert_segment(segment.view())
+
+    def _arm_audio_deadline(self, seconds):
+        deadline = time.monotonic() + seconds
+        self._audio_deadline = min(getattr(self, '_audio_deadline', None) or deadline, deadline)
+
+    def _check_audio_deadline(self):
+        deadline = getattr(self, '_audio_deadline', None)
+        if not self.process or deadline is None or time.monotonic() < deadline:
+            return
+        if not self.process.is_alive():
+            return
+        self._audio_failure = getattr(self, '_audio_failure', None) or '收音处理超时，已中断；已有文字已保留，请确认未完成句段。'
+        self._interrupt_audio()
+        if getattr(self, '_audio_terminated', False):
+            self.process.kill()
+        else:
+            self.process.terminate()
+            self._audio_terminated = True
+        self._audio_deadline = time.monotonic() + 1
+        self._set_capture_state('stopping')
+        self.window.set_status(self._audio_failure)
 
     def _release_audio(self):
         """Release dead/unstarted processes without waiting on the GUI thread."""
@@ -293,6 +379,9 @@ class Controller(QObject):
             except (ValueError, OSError):
                 pass
         self.process = None
+        if getattr(self, '_audio_pump_stop', None) is not None:
+            self._audio_pump_stop.set()
+        self._audio_inbox = None
         for stream in (self.audio_events, self.commands):
             if stream is not None:
                 try:
@@ -310,6 +399,7 @@ class Controller(QObject):
             command = 'resume' if self.capture_state == 'paused' else 'pause'
             if self._command(command):
                 self._set_capture_state(self.capture_state, pending=command)
+                self._arm_audio_deadline(10)
                 self.window.set_status('正在继续收音…' if command == 'resume' else '正在暂停并处理当前句段…')
 
     def stop(self):
@@ -327,25 +417,36 @@ class Controller(QObject):
             return False
         self._update_statistics()
         self._set_capture_state('stopping')
+        self._arm_audio_deadline(10)
         self.window.set_status('正在结束收音并处理最后句段…')
         return True
 
     def poll(self):
-        audio_drained = self.audio_events is None
-        for source in (self.audio_events, self.results):
+        audio_source = getattr(self, '_audio_inbox', None)
+        if audio_source is None:
+            audio_source = self.audio_events
+        audio_drained = audio_source is None
+        for source in (audio_source, self.results):
             if source is None:
                 continue
             for _ in range(100):
                 try:
                     event = source.get_nowait()
                 except (queue.Empty, ValueError, OSError):
-                    if source is self.audio_events:
+                    if source is audio_source:
                         audio_drained = True
                     break
                 self._event(event)
+        self._check_audio_deadline()
+        if self.process and not self.process.is_alive() and getattr(self, '_audio_inbox', None) is not None:
+            if getattr(self, '_audio_dead_since', None) is None:
+                self._audio_dead_since = time.monotonic()
+            if not self._audio_pump_done.is_set() and time.monotonic() - self._audio_dead_since < .25:
+                audio_drained = False
         if audio_drained and self.process and not self.process.is_alive():
             if getattr(self.process, 'exitcode', 0) not in (None, 0) and not getattr(self, '_audio_failure', None):
                 self._audio_failure = '收音进程异常退出，请检查设备和模型设置后重试。'
+            self._interrupt_audio()
             self._release_audio()
             self._set_capture_state('error' if getattr(self, '_audio_failure', None) else 'idle')
             self.window.set_status(getattr(self, '_audio_failure', None) or
@@ -362,6 +463,16 @@ class Controller(QObject):
                 self.window.cancel_pending_close()
                 self.window.set_status('收音尚未结束，未执行保存退出。请稍后重试，或手动导出已有字幕。')
 
+    def _transcript_event(self, event):
+        if event['type'] == 'partial' and getattr(self, '_audio_failure', None):
+            return
+        segment = self.session.apply_audio(event)
+        if segment:
+            if event['type'] == 'final':
+                self._schedule(segment)
+                self._update_statistics()
+            self.window.upsert_segment(segment.view())
+
     def _event(self, event):
         if self._closing or event.get('session_id', self.session.id) != self.session.id:
             return
@@ -369,12 +480,7 @@ class Controller(QObject):
             return
         kind = event.get('type')
         if kind in {'partial', 'final'}:
-            segment = self.session.apply_audio(event)
-            if segment:
-                if kind == 'final':
-                    self._schedule(segment)
-                    self._update_statistics()
-                self.window.upsert_segment(segment.view())
+            self._transcript_event(event)
         elif (kind in {'correction', 'error'} and 'service_generation' in event
               and event.get('segment_id') in self.session.segments):
             segment = self.session.apply_correction(event)
@@ -436,6 +542,10 @@ class Controller(QObject):
         message = event.get('message', event.get('text', '已结束收音'))
         if kind == 'error' and 'session_id' in event and 'service_generation' not in event:
             self._audio_failure = message
+            self._interrupt_audio()
+            if self.process is not None:
+                self._command('stop')
+                self._arm_audio_deadline(1)
             self._set_capture_state('stopping' if self.process is not None else 'error')
         state = event.get('state')
         if (kind == 'status' and 'session_id' in event
@@ -444,6 +554,7 @@ class Controller(QObject):
             expected = {'pause': 'paused', 'resume': 'recording'}.get(self._capture_pending)
             if expected and state != expected:
                 return
+            self._audio_deadline = None
             self._set_capture_state(state)
             message = {'loading': '正在加载语音模型…', 'recording': '正在收音', 'paused': '已暂停'}[state]
         elif kind == 'status' and state in {'loading', 'recording', 'paused'}:
@@ -458,6 +569,7 @@ class Controller(QObject):
                     if updated:
                         self.window.upsert_segment(updated.view())
             if kind == 'stopped' and self.process is not None:
+                self._arm_audio_deadline(1)
                 self._set_capture_state('stopping')
         if kind in {'status', 'stopped'} and getattr(self, '_audio_failure', None):
             return
@@ -656,15 +768,15 @@ class Controller(QObject):
         if self.service:
             self.service.stop(wait=False)
         self._request_stop()
-        if self.process:
-            self.process.join(timeout=3)
-            if self.process.is_alive():
-                self.process.terminate()
-                self.process.join(timeout=1)
-        self._release_audio()
+        if getattr(self, '_audio_pump_stop', None) is not None:
+            self._audio_pump_stop.set()
+        self._audio_inbox = None
+        process, events, commands = self.process, self.audio_events, self.commands
+        self.process = self.audio_events = self.commands = None
+        if process is not None or events is not None or commands is not None:
+            threading.Thread(target=_reap_audio, args=(process, events, commands),
+                             name='caption-audio-cleanup').start()
         self.index.clear()
         if hasattr(self, '_stats_queue'):
             self._stats_queue.put_nowait(None)
-            self._stats_worker.join(timeout=2)
-            if self._stats_worker.is_alive():
-                self.window.set_status('字数统计仍在保存；本机存储暂未响应。')
+

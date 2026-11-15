@@ -20,6 +20,10 @@ APP_STYLE = """
 QMainWindow, QDialog { background: %(background)s; color: %(ink)s; }
 QWidget { font-family: '.AppleSystemUIFont', 'PingFang SC'; }
 QPushButton, QComboBox, QLineEdit, QTextEdit, QTabBar, QTableWidget, QListWidget { font-size: 14px; }
+QCheckBox { color: %(ink)s; background: transparent; font-size: 14px; spacing: 8px; }
+QCheckBox:disabled { color: %(muted)s; }
+QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid %(muted)s; border-radius: 4px; background: %(canvas)s; }
+QCheckBox::indicator:checked { background: %(primary)s; border: 3px solid %(canvas)s; outline: 1px solid %(primary)s; }
 QLabel { color: %(ink)s; background: transparent; }
 QLabel#brand, QLabel#dialogTitle { font-size: 34px; font-weight: 600; }
 QLabel#sectionTitle { font-size: 17px; font-weight: 600; }

@@ -327,14 +327,25 @@ def _capture_loop(config, events, commands, adapter, segmenter, sd):
                           "speaker_id": None, "label": None, "speaker_state": "unknown",
                           "reason": "unavailable", "overlap_intervals": []})
 
+    accepting = threading.Event()
+    accepting.set()
+
+    class RecognitionEvents:
+        def put(self, event, timeout):
+            if accepting.is_set():
+                events.put(event, timeout=timeout)
+
     scheduler = RecognitionScheduler(lambda w: _recognize(
-        [w], adapter, events, config, speaker_final))
+        [w], adapter, RecognitionEvents(), config, speaker_final))
     try:
         _capture_scheduled(config, events, commands, segmenter, sd, scheduler, speakers)
     finally:
-        scheduler.close(cancel=True)
+        # Capture has already closed its stream. Never delay the original error
+        # behind an uninterruptible native call, or emit results after stopped.
+        accepting.clear()
+        scheduler.cancel()
         if speakers:
-            speakers.close()
+            speakers.close(timeout=0)
 
 
 def _feed_capture(segmenter, scheduler, samples, speakers=None):
@@ -451,7 +462,7 @@ def run_audio_worker(config: dict, events, commands):
         messages = {
             "vad_required": "A local FSMN speech detector is required; select its model folder in Settings",
             "vad_failed": "Local FSMN speech detector is missing or incompatible; check its model folder in Settings",
-            "fsmn_inference_failed": "Speech detector returned invalid output; recording stopped before recognition",
+            "fsmn_inference_failed": "语音检测失败，收音已中断；已有文字已保留，未完成句段请确认后导出。可检查模型设置后重新开始。",
             "configuration_failed": "Invalid audio configuration; check session ID and timing limits",
             "model_failed": "Local contextual ONNX model is missing or incompatible; check graph files and hotwords",
             "capture_failed": "Audio capture or inference failed; check input device and 16 kHz support",
@@ -460,4 +471,12 @@ def run_audio_worker(config: dict, events, commands):
         _emit(events, _event(config, "error", messages.get(code, "Audio buffer or device failure; recording stopped"),
                             code=code, error_class=type(exc).__name__))
     finally:
-        _emit(events, _event(config, "stopped", state="stopped"))
+        try:
+            _emit(events, _event(config, "stopped", state="stopped"))
+        except (RuntimeError, ValueError, OSError):
+            # A failed consumer cannot drain this process's feeder on exit.
+            # Keep a nonzero exit for the controller's process watchdog.
+            if hasattr(events, "cancel_join_thread"):
+                events.cancel_join_thread()
+            raise
+

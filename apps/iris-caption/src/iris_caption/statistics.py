@@ -22,7 +22,7 @@ def session_snapshot(session, *, started_at=None, updated_at=None) -> dict:
     """Build a text-free snapshot on the owner thread before queueing disk work."""
     now = datetime.now(timezone.utc).isoformat()
     final = [segment for segment in session.segments.values()
-             if segment.status not in {'partial', 'transcribing'}]
+             if segment.status not in {'partial', 'transcribing', 'interrupted'}]
     return dict(session_id=session.id, started_at=started_at or now, updated_at=updated_at or now,
                 raw_chars=sum(count_characters(s.raw) for s in final),
                 corrected_chars=sum(count_characters(s.corrected) for s in final

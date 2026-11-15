@@ -53,6 +53,8 @@ class StreamingFsmnVad:
         self.scorer = E2EVadModel(self.model.config["model_conf"])
         self.scorer.decibel = _FrameHistory()
         self.cache = self.model.prepare_cache([])
+        import numpy as np
+        self._pending_waveform = np.empty(0, dtype=np.float32)
         self.position = 0
         self.quiet = False
 
@@ -61,6 +63,16 @@ class StreamingFsmnVad:
         waveform = np.asarray(samples, dtype=np.float32)
         if waveform.ndim != 1 or not np.isfinite(waveform).all():
             raise ValueError("FSMN requires finite mono audio")
+        # Bound frontend, scorer and history working sets even for offline input.
+        endpoints = []
+        for offset in range(0, max(1, len(waveform)), 1600):
+            chunk = waveform[offset:offset + 1600]
+            endpoints.extend(self._feed_chunk(chunk, final and offset + 1600 >= len(waveform)))
+        return endpoints
+
+    def _feed_chunk(self, waveform, final):
+        import numpy as np
+        self._pending_waveform = np.concatenate((self._pending_waveform, waveform))
         self.position += len(waveform)
         # Fewer than one 25ms feature frame cannot establish learned speech;
         # vendor finalization otherwise stacks an empty feature cache.
@@ -73,7 +85,23 @@ class StreamingFsmnVad:
             scores, self.cache = self.model.infer([feats, *self.cache])
             silence_ids = self.model.config["model_conf"].get("sil_pdf_ids", [0])
             self.quiet = bool(np.mean(scores[0][:, silence_ids].sum(axis=1)) > .8)
-            result = self.scorer(scores, self.frontend.get_waveforms(), is_final=final,
+            # get_waveforms() includes the frontend's LFR right context again
+            # on each call. Passing it directly makes decibel indices drift away
+            # from score indices until bounded history evicts live frames.
+            # Consume exactly one 10ms shift per score, retaining the 25ms
+            # analysis-window overlap in our own PCM queue.
+            frame_count = scores.shape[1]
+            shift = self.frontend.frame_shift_sample_length
+            window = self.frontend.frame_sample_length
+            required = (frame_count - 1) * shift + window
+            if len(self._pending_waveform) < required:
+                if not final:
+                    raise ValueError("FSMN scores exceed available waveform")
+                self._pending_waveform = np.pad(
+                    self._pending_waveform, (0, required - len(self._pending_waveform)))
+            scored_waveform = self._pending_waveform[:required]
+            self._pending_waveform = self._pending_waveform[frame_count * shift:].copy()
+            result = self.scorer(scores, scored_waveform[None, :], is_final=final,
                                  max_end_sil=self.model.max_end_sil, online=True)
             # Vendor retains every emitted segment forever; only its active tail
             # is subsequently consulted. Compact already-consumed endpoints.

@@ -27,7 +27,7 @@ MAX_TOTAL_BYTES = 16 * 1024**3
 MAX_FILES = 256
 ALLOWED_HOSTS = {"huggingface.co", "hf.co", "modelscope.cn", "www.modelscope.cn",
                  "cdn-lfs.huggingface.co", "cdn-lfs-us-1.huggingface.co",
-                 "cas-bridge.xethub.hf.co", "cdn-lfs.hf.co"}
+                 "cas-bridge.xethub.hf.co", "cdn-lfs.hf.co", "us.aws.cdn.hf.co"}
 
 
 class ModelCancelled(RuntimeError):

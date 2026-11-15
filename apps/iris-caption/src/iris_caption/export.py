@@ -39,6 +39,8 @@ def render_markdown(session: Session) -> str:
         lines += [f"## {timestamp(segment.start_ms)} — {timestamp(segment.end_ms)}{suffix}", "",
                   "**原文**", "", segment.raw, "", "**校正**", "",
                   segment.corrected or segment.dictionary_text or segment.raw, ""]
+        if segment.status == 'interrupted':
+            lines += ['*转写中断 · 未定稿，内容可能不完整*', '']
         if segment.status not in {"corrected", "manual"}:
             lines += ["*未完成云端校正*", ""]
     return "\n".join(lines)
@@ -55,6 +57,8 @@ def render_srt(session: Session, mode: str = "corrected") -> str:
         if mode == "both":
             text = f"原文：{raw}\n校正：{corrected}"
         annotation = speaker_annotation(session, segment)
+        if segment.status == 'interrupted':
+            text = f'[转写中断 · 未定稿] {text}'
         if annotation:
             text = f"{annotation} {text}"
         lines += [str(index), f"{timestamp(segment.start_ms, True)} --> "

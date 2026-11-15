@@ -27,6 +27,34 @@ from .theme import apply_theme
 
 
 
+def _failure_message(error):
+    """Map failures to safe actions without exposing signed URLs or local paths."""
+    import errno
+    import ssl
+    from urllib.error import HTTPError, URLError
+    if isinstance(error, HTTPError):
+        return f'下载服务器返回 HTTP {error.code}，请稍后重试或导入本地模型。'
+    if isinstance(error, URLError):
+        return _failure_message(error.reason) if isinstance(error.reason, Exception) else '无法连接模型下载服务器，请检查网络或代理。'
+    if isinstance(error, ssl.SSLError):
+        return '下载服务器证书验证失败，请检查系统时间和网络代理证书。'
+    if isinstance(error, TimeoutError):
+        return '连接或下载超时，请检查网络能否访问模型文件服务器，或导入本地模型。'
+    if isinstance(error, OSError):
+        if error.errno == errno.ENOSPC:
+            return '磁盘空间不足，请释放空间后重试。'
+        if error.errno in {errno.EACCES, errno.EPERM}:
+            return '没有模型目录的写入权限，请检查目录权限。'
+        return '网络或文件读写失败，请检查连接和模型目录。'
+    if isinstance(error, ValueError):
+        if str(error) == 'Model URL is outside approved HTTPS hosts':
+            return '下载地址不在允许名单内，请更新应用或使用本地导入。'
+        if str(error) in {'Model integrity check failed', 'Model file exceeds declared size'}:
+            return '下载文件的大小或校验值不匹配，未启用该模型，请重新下载。'
+        return '模型清单或文件格式不正确，请检查模型目录是否完整。'
+    return '安装未完成，请重试或使用完整的本地模型文件夹。'
+
+
 class _Signals(QObject):
     progress = Signal(object)
     finished = Signal(object, str)
@@ -43,9 +71,8 @@ class _InstallTask(QRunnable):
             result = self.operation(self.signals.progress.emit)
         except ModelCancelled:
             self.signals.finished.emit(None, "cancelled")
-        except Exception:
-            # URLs and filesystem exceptions can carry sensitive source information.
-            self.signals.finished.emit(None, "failed")
+        except Exception as error:
+            self.signals.finished.emit({'message': _failure_message(error)}, 'failed')
         else:
             self.signals.finished.emit(result, "complete")
 
@@ -72,7 +99,8 @@ class ModelDialog(QDialog):
         self._pool = QThreadPool(self)
         self._pool.setMaxThreadCount(1)
         self.setWindowTitle("安装模型 · 声笺")
-        self.resize(620, 400)
+        self.resize(700, 620)
+        self.setMinimumSize(560, 520)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(12)
@@ -89,10 +117,8 @@ class ModelDialog(QDialog):
         self.kind_combo.addItem("会议说话人（实验性 · 约 34 MB）", "speaker")
         layout.addWidget(self.kind_combo)
         hint = QLabel(
-            "从包含固定 SHA-256 校验值的 JSON 模型清单下载，或导入你信任的本地模型文件夹。\n"
-            "内置 contextual Paraformer ONNX 语音模型清单（约 905 MB），校验值来自官方固定版本元数据。"
-            "另提供多语言 MiniLM 语义检索模型（约 485 MB）和 FSMN VAD（约 517 KB）。"
-            "文件完整性通过不代表模型与当前识别后端兼容；请使用对应后端支持的模型格式。"
+            "选择内置模型下载，或导入完整的本地模型文件夹。\n"
+            "下载完成后会校验文件；只有全部通过才替换当前模型。"
         )
         hint.setObjectName("muted")
         hint.setWordWrap(True)
@@ -115,6 +141,7 @@ class ModelDialog(QDialog):
         heading.setObjectName("sectionTitle")
         layout.addWidget(heading)
         self.progress_bar = QProgressBar()
+        self.progress_bar.setStyleSheet('QProgressBar { color: #1d1d1f; min-height: 22px; }')
         self.progress_bar.setRange(0, 1000)
         self.progress_bar.setValue(0)
         layout.addWidget(self.progress_bar)
@@ -229,6 +256,7 @@ class ModelDialog(QDialog):
     @Slot(object)
     def _progress(self, value):
         total, completed = value.get("total", 0), value.get("completed", 0)
+        self.progress_bar.setStyleSheet('QProgressBar { color: #1d1d1f; min-height: 22px; }')
         self.progress_bar.setRange(0, 1000)
         self.progress_bar.setValue(min(1000, int(1000 * completed / total)) if total else 0)
         if not self._cancel.is_set():
@@ -244,6 +272,7 @@ class ModelDialog(QDialog):
         self.download_button.setEnabled(True)
         self.import_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
+        self.progress_bar.setStyleSheet('QProgressBar { color: #1d1d1f; min-height: 22px; }')
         self.progress_bar.setRange(0, 1000)
         if status == "complete":
             self.progress_bar.setValue(1000)
@@ -254,7 +283,8 @@ class ModelDialog(QDialog):
             self.status_label.setText("已取消安装，之前的模型未更改。")
         else:
             self.progress_bar.setValue(0)
-            self.status_label.setText("安装失败。请检查清单校验值、文件格式、网络及可用磁盘空间。之前的模型未更改。")
+            message = result.get('message', '请检查模型文件及网络。') if isinstance(result, dict) else '请检查模型文件及网络。'
+            self.status_label.setText(f'安装失败：{message} 之前的模型未更改。')
         if self._close_pending:
             super().reject()
 

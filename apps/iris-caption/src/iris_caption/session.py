@@ -190,6 +190,20 @@ class Session:
                 groups.append([segment])
         return groups
 
+    def interrupt_partials(self) -> list[Segment]:
+        """Preserve provisional text after capture failure without calling it final."""
+        interrupted = []
+        for segment in self.segments.values():
+            if segment.status == 'partial':
+                segment.status = 'interrupted'
+                segment.revision += 1
+                if segment.speaker_state == 'pending':
+                    segment.speaker_state = 'unknown'
+                interrupted.append(segment)
+        if interrupted:
+            self.dirty = True
+        return interrupted
+
     def discard_partial(self, event: dict) -> bool:
         if event.get('session_id') != self.id or event.get('type') != 'discard':
             return False

@@ -301,3 +301,44 @@ def test_simulated_stream_stop_flushes_and_closes():
     final = events.get()
     assert (final["type"], final["start_ms"], final["end_ms"], final["reason"]) == ("final", 0, 40, "stop")
     assert Stream.closed
+
+
+def test_capture_failure_does_not_wait_for_native_inference(monkeypatch):
+    import threading
+    from types import SimpleNamespace
+    from iris_caption import audio, speaker_runtime
+    entered, release = threading.Event(), threading.Event()
+    closed = []
+    def infer(samples):
+        entered.set()
+        assert release.wait(3)
+        return "late result"
+    def capture(config, events, commands, segmenter, sd, scheduler, speakers):
+        scheduler.submit([AudioWindow("partial", 1, 0, 640, samples(.04), 1)])
+        assert entered.wait(1)
+        raise RuntimeError("fsmn_inference_failed")
+    monkeypatch.setattr(audio, "_capture_scheduled", capture)
+    monkeypatch.setattr(speaker_runtime, "create_speaker_runtime",
+                        lambda *args: SimpleNamespace(close=lambda timeout: closed.append(timeout)))
+    events = queue.Queue()
+    try:
+        with pytest.raises(RuntimeError, match="^fsmn_inference_failed$"):
+            _capture_loop({"session_id": "s", "speakers_enabled": True}, events, queue.Queue(),
+                          SimpleNamespace(transcribe=infer), None, None)
+        assert closed == [0]
+        assert not release.is_set()  # cleanup returned while native inference still blocked
+    finally:
+        release.set()
+
+
+def test_terminal_queue_failure_cancels_feeder_join():
+    class FullEvents:
+        cancelled = False
+        def put(self, event, timeout):
+            raise queue.Full
+        def cancel_join_thread(self):
+            self.cancelled = True
+    events = FullEvents()
+    with pytest.raises(RuntimeError, match="event_backpressure"):
+        run_audio_worker({}, events, queue.Queue())
+    assert events.cancelled

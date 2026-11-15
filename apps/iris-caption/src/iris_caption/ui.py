@@ -30,6 +30,7 @@ else:
         "partial": "转写中", "transcribing": "转写中", "final": "已定稿",
         "pending": "待校正", "queued": "待校正", "correcting": "校正中",
         "corrected": "已校正", "failed": "校正待重试", "error": "校正待重试",
+        "interrupted": "转写中断 · 未定稿",
         "manual": "人工修改", "cancelled": "已取消",
         "local": "词典校正 · 待云端", "retry": "校正待重试",
     }
