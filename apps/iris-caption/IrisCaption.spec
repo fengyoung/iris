@@ -34,7 +34,8 @@ datas = collect_data_files('funasr_onnx') + collect_data_files('sentence_transfo
 datas += copy_metadata('sentence-transformers')
 datas += copy_metadata('torchcodec')
 datas += [(str(metadata_path), 'assets')]
-datas += [('assets/logo/iris-caption-icon.png', 'assets/logo')]
+datas += [('assets/logo/iris-caption-icon.png', 'assets/logo'),
+          ('assets/logo/iris-caption-dock.png', 'assets/logo')]
 a = Analysis(['launcher.py'], pathex=['src'], binaries=[], datas=datas,
              hiddenimports=hiddenimports,
              excludes=['PyQt5', 'PyQt6', 'PySide2', 'tensorflow', 'matplotlib', 'IPython'],

@@ -1,0 +1,22 @@
+{
+  "icon-inverse.svg": {
+    "outlined_text": true,
+    "original_wings_unchanged": true,
+    "sha256": "f12904b7f78f20ece3e2c884f95817a2d78fa025d26bbc77762bada2fd19c278"
+  },
+  "lockup-primary.svg": {
+    "outlined_text": true,
+    "original_wings_unchanged": true,
+    "sha256": "612364dcc9b64fbfe24966ce82521e719a6220981daaa0669f0c1e548a42eec2"
+  },
+  "icon-primary.svg": {
+    "outlined_text": true,
+    "original_wings_unchanged": true,
+    "sha256": "488d7346eb0aa6a37d90f51977f6830eb9dc363f45ff4395e52d511225a6d064"
+  },
+  "lockup-inverse.svg": {
+    "outlined_text": true,
+    "original_wings_unchanged": true,
+    "sha256": "d3f51dc2140ae214f2ef7babe11a3689464edf18a4da5b782c820718cdf515de"
+  }
+}

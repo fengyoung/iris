@@ -27,7 +27,7 @@ def main():
     app.setApplicationName('声笺')
     app.setApplicationVersion(__version__)
     app.setOrganizationName('Iris')
-    app.setWindowIcon(QIcon(str(icon_path())))
+    app.setWindowIcon(QIcon(str(icon_path(dock=True))))
     window = MainWindow(persist_preferences=not (args.demo or args.smoke_test))
     app.aboutToQuit.connect(window.flush_preferences)
     controller = None
