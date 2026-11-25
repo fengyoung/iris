@@ -138,8 +138,10 @@ def test_invalid_task_not_retried_forever(control):
     c = control
     c.service = Mock()
     c.service.submit.side_effect = ValueError('invalid text')
-    c._event({'type': 'task_ready', 'task': task(c, final(c))})
-    assert not c.retry_tasks and not c.tasks
+    segment = final(c)
+    c._event({'type': 'task_ready', 'task': task(c, segment)})
+    assert not c.retry_tasks and c.tasks['one']['revision'] == segment.revision
+    assert segment.status == 'error'
 
 
 class Process:
@@ -168,7 +170,7 @@ def fake_context(monkeypatch, process):
     context = SimpleNamespace(Queue=lambda **kwargs: queue.Queue(**kwargs),
                               Process=lambda **kwargs: process)
     monkeypatch.setattr(module.mp, 'get_context', lambda _: context)
-    monkeypatch.setattr(module.QMessageBox, 'question', lambda *args: module.QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(module.QMessageBox, 'question', lambda *args: module.QMessageBox.StandardButton.Discard)
 
 
 def test_missing_vad_blocks_capture_without_reset(control, monkeypatch, tmp_path):
@@ -218,7 +220,9 @@ def test_start_failure_keeps_session_and_cleanup(control, monkeypatch, tmp_path)
     process.fail = False
     c.start()
     assert c.capture_state == 'loading'
-    assert c.session is not old
+    assert c.session is old  # failed new session never replaced the old transcript
+    c._capture_event(dict(type='status', session_id=c._attempt.wire_id, state='recording'))
+    assert c.session is old  # error-state primary action resumes this meeting
 
 
 def test_restart_cancels_old_work_and_clears_ui_rules(control, monkeypatch, tmp_path):
@@ -230,6 +234,8 @@ def test_restart_cancels_old_work_and_clears_ui_rules(control, monkeypatch, tmp_
     process = Process()
     fake_context(monkeypatch, process)
     c.start()
+    assert c.session.id == old_id
+    c._capture_event(dict(type='status', session_id=c._attempt.wire_id, state='recording'))
     assert c.session.id != old_id
     c.service.cancel.assert_called_once_with(old_id)
     c.rules.clear_session.assert_called_once()
@@ -302,6 +308,7 @@ def test_new_meeting_quarantines_retained_remote_and_drops_temp(control, monkeyp
     # Run only this local reload synchronously for deterministic testing.
     monkeypatch.setattr(module.threading, 'Thread', lambda target, **kw: SimpleNamespace(start=target))
     c.start()
+    c._capture_event(dict(type='status', session_id=c._attempt.wire_id, state='recording'))
     assert c.index.list_materials() == []
     c.poll()
     rows = c.index.list_materials()
@@ -317,6 +324,7 @@ def test_initial_start_preserves_prepared_materials(control, monkeypatch, tmp_pa
     c.settings['model_path'] = str(tmp_path)
     fake_context(monkeypatch, Process())
     c.start()
+    c._capture_event(dict(type='status', session_id=c._attempt.wire_id, state='recording'))
     assert c.background == '主题：original'
     assert len(c.index.list_materials()) == 1
 
@@ -468,7 +476,9 @@ def test_permanent_correction_failure_keeps_snapshot_until_settings_change(contr
     monkeypatch.setattr(module, 'CorrectionService', lambda *args, **kwargs: replacement)
     c._init_service()
     c.retry_pending()
-    replacement.submit.assert_called_once_with(snapshot)
+    replacement.submit.assert_not_called()
+    c.retry_correction(segment.id)
+    replacement.submit.assert_called_once_with(dict(snapshot, revision=snapshot['revision'] + 1))
 
 
 def test_partial_edit_is_ignored_without_cancelling_work(control):
@@ -482,13 +492,16 @@ def test_partial_edit_is_ignored_without_cancelling_work(control):
 def test_statistics_final_correction_and_manual_edit(control, monkeypatch):
     from iris_caption import dialogs
     c = control
-    c._stats_queue = queue.Queue()
+    c._stats_writer = Mock()
+    c.service = Mock()
     c._stats_started_at = '2026-01-01T00:00:00+00:00'
     c._event(dict(type='final', session_id=c.session.id, segment_id='one',
                   text='中文 abc!', start_ms=0, end_ms=1))
     c.window.set_statistics.assert_called_with(5, 0)
-    queued = c._stats_queue.get_nowait()
+    queued = c._stats_writer.submit.call_args.args[0]
     assert queued['raw_chars'] == 5 and 'text' not in queued
+    task, _ = c._prepare_queue.get_nowait()
+    c._event({'type': 'task_ready', 'task': task})
     c._service_generation = 1
     c._event(dict(type='correction', service_generation=1, session_id=c.session.id,
                   segment_id='one', revision=1, corrected_text='校正完成'))
@@ -496,21 +509,23 @@ def test_statistics_final_correction_and_manual_edit(control, monkeypatch):
     monkeypatch.setattr(dialogs, 'choose_rule_scope', lambda *args: 'none')
     c.edit('one', '短')
     c.window.set_statistics.assert_called_with(5, 1)
-    assert c._stats_queue.queue[-1]['corrected_chars'] == 1
-    assert c._stats_queue.queue[-1]['started_at'] == c._stats_started_at
+    latest = c._stats_writer.submit.call_args.args[0]
+    assert latest['corrected_chars'] == 1
+    assert latest['started_at'] == c._stats_started_at
 
 
-def test_statistics_worker_drains_in_order_and_reports_failure(control):
+def test_statistics_rollover_preserves_old_session(control):
     c = control
-    c._stats = Mock()
-    c._stats.record.side_effect = [OSError('disk unavailable'), None]
-    c._stats_queue = queue.Queue()
-    c._stats_queue.put({'raw_chars': 1})
-    c._stats_queue.put({'raw_chars': 2})
-    c._stats_queue.put(None)
-    c._write_statistics()
-    assert c._stats.record.call_count == 2
-    assert c.results.get_nowait()['type'] == 'status'
+    c._stats_writer = Mock()
+    c._event(dict(type='final', session_id=c.session.id, segment_id='one',
+                  text='旧场', start_ms=0, end_ms=1))
+    old_id = c.session.id
+    c.session = Session()
+    c._update_statistics()
+    args, kwargs = c._stats_writer.submit.call_args
+    assert kwargs['flush'] is True
+    assert args[0]['session_id'] == old_id and args[0]['raw_chars'] == 2
+    c.window.set_statistics.assert_called_with(0, 0)
 
 
 
@@ -520,13 +535,14 @@ def test_worker_acknowledged_lifecycle_and_programmatic_guards(control, monkeypa
     process = Process()
     fake_context(monkeypatch, process)
     c.start()
-    session_id = c.session.id
+    previous_id = c.session.id
+    session_id = c._attempt.session.id
     assert c.capture_state == 'loading'
     c.start()
     c.pause()
-    assert c.commands.empty() and c.session.id == session_id
+    assert c.commands.empty() and c.session.id == previous_id
     def status(state):
-        c._event(dict(type='status', session_id=session_id, state=state))
+        c._capture_event(dict(type='status', session_id=c._attempt.wire_id, state=state))
     status('recording')
     assert c.capture_state == 'recording'
     c.pause()
@@ -558,7 +574,9 @@ def test_worker_acknowledged_lifecycle_and_programmatic_guards(control, monkeypa
     c.poll()
     assert c.capture_state == 'idle'
     c.start()
-    assert c.capture_state == 'loading' and c.session.id != session_id
+    assert c.capture_state == 'loading' and c.session.id == session_id
+    status('recording')
+    assert c.session.id != session_id
 
 
 def test_worker_failure_drains_before_restart(control, monkeypatch, tmp_path):
@@ -568,14 +586,16 @@ def test_worker_failure_drains_before_restart(control, monkeypatch, tmp_path):
     fake_context(monkeypatch, process)
     c.start()
     old = c.session.id
-    c._event(dict(type='error', session_id=old, text='Model failed'))
+    c._capture_event(dict(type='error', session_id=c._attempt.wire_id, text='Model failed'))
     c.start()
     assert c.capture_state == 'stopping' and c.session.id == old
     process.alive = False
     c.poll()
     assert c.capture_state == 'error'
     c.start()
-    assert c.capture_state == 'loading' and c.session.id != old
+    assert c.capture_state == 'loading' and c.session.id == old
+    c._capture_event(dict(type='status', session_id=c._attempt.wire_id, state='recording'))
+    assert c.session.id != old
 
 
 def test_close_pending_rejects_capture_actions_without_duplicate_stop(control, monkeypatch, tmp_path):

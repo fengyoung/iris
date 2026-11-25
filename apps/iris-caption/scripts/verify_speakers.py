@@ -84,6 +84,40 @@ def main():
                                session_id='verification'))
                                for i, x in enumerate([*voices, sum(voices)])]
     diarizer.reset()
+    # A label is anonymous: compare against a separate, non-overlapping enrollment
+    # region, not against a guessed A/B ordering. Unenrolled voices remain unknown.
+    truth = {}
+    for i, wave in enumerate(voices):
+        for begin in (0, 32000):
+            label = diarizer.analyze_final(wave[begin:begin+32000], start_sample=i*64000+begin,
+                                           session_id='turns').label
+            if label:
+                truth.setdefault(label, set()).add(i)
+    clock = 128000
+    metrics = {}
+    for case, length in [('turn', 64000), ('interjection', 6400)]:
+        counts = dict(total=0, unknown=0, wrong_identity=0, verified_identity=0,
+                      unverified_identity=0)
+        for i, wave in enumerate(voices):
+            # Enrollment and holds are disjoint; short tests reuse holdout audio
+            # across scenarios, so these counts are illustrative, not independent.
+            result = diarizer.analyze_final(wave[-length:], start_sample=clock,
+                                            session_id='turns')
+            clock += length
+            counts['total'] += 1
+            if not result.label:
+                counts['unknown'] += 1
+            elif result.label not in truth or len(truth[result.label]) != 1:
+                counts['unverified_identity'] += 1
+            else:
+                counts['verified_identity' if i in truth[result.label] else 'wrong_identity'] += 1
+        metrics[case] = counts
+    metrics['mix_marked_overlap'] = bool(report['final_results'][-1]['overlap'])
+    metrics['mix_given_single_identity'] = report['final_results'][-1]['label'] is not None
+    metrics['transition_detection_delay_s'] = [(event.detected_at_sample-64000)/16000
+                                              for event in events if event.kind == 'boundary']
+    report['turn_metrics'] = metrics
+    diarizer.reset()
     # Exclusive creation protects against races too. Do not create parent dirs implicitly.
     with args.output.open('x', encoding='utf-8') as stream:
         json.dump(report, stream, ensure_ascii=False, indent=2)

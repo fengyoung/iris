@@ -15,8 +15,10 @@ def test_interruption_preserves_text_without_counting_as_final():
     assert segment.speaker_state == 'unknown'
     assert session_snapshot(session)['finalized_segments'] == 0
     assert '转写中断' in render_markdown(session)
-    assert '未说完的话' in render_srt(session)
-    assert '未定稿' in render_srt(session)
+    assert render_srt(session) == ''
+    emergency = render_srt(session, include_unfinalized=True)
+    assert '未说完的话' in emergency
+    assert '未定稿' in emergency
     assert session.apply_audio(dict(event, type='final', text='late')) is None
     assert session.interrupt_partials() == []
 

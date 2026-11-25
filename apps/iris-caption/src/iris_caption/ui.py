@@ -29,10 +29,11 @@ else:
     _STATUS = {
         "partial": "转写中", "transcribing": "转写中", "final": "已定稿",
         "pending": "待校正", "queued": "待校正", "correcting": "校正中",
-        "corrected": "已校正", "failed": "校正待重试", "error": "校正待重试",
+        "corrected": "已校正", "failed": "校正待重试", "error": "校正失败",
         "interrupted": "转写中断 · 未定稿",
         "manual": "人工修改", "cancelled": "已取消",
-        "local": "词典校正 · 待云端", "retry": "校正待重试",
+        "local": "仅本地词典校正", "retry": "等待重试",
+        "retry_required": "设置已变更 · 请重试", "retry_exhausted": "自动重试已用尽",
     }
     from .theme import APP_STYLE as _STYLE
 
@@ -45,6 +46,7 @@ else:
     class _SegmentCard(QFrame):
         edit_clicked = Signal(str)
         speaker_clicked = Signal(str)
+        retry_clicked = Signal(str)
 
         def __init__(self, segment, parent=None):
             super().__init__(parent)
@@ -62,6 +64,10 @@ else:
             self.speaker_label.setObjectName("muted")
             top.addWidget(self.speaker_label)
             top.addStretch()
+            self.retry_button = QPushButton("重试校正")
+            self.retry_button.setObjectName("quiet")
+            self.retry_button.clicked.connect(lambda: self.retry_clicked.emit(str(self.segment["id"])))
+            top.addWidget(self.retry_button)
             self.speaker_button = QPushButton("说话人…")
             self.speaker_button.setObjectName("quiet")
             self.speaker_button.setAccessibleName("指定此句段的说话人")
@@ -100,13 +106,21 @@ else:
         def render(self, columns, size, projector, comparison, speakers_enabled=False):
             item = self.segment
             state = "人工修改" if item.get("manual") else _STATUS.get(item.get("status"), item.get("status", "待校正"))
+            if item.get('manual') and item.get('status') == 'interrupted':
+                state = '转写中断 · 未定稿（人工修订）'
             self.meta.setText(f"{_timestamp(item.get('start_ms'))} — {_timestamp(item.get('end_ms'))}  ·  {state}")
             speaker_state = item.get("speaker_state", "unknown")
-            overlap = bool(item.get("overlap_intervals")) or speaker_state == "overlap"
+            overlap = item.get("has_overlap") or bool(item.get("overlap_intervals")) or speaker_state == "overlap"
             label = ("多人同时讲话 · 可能不完整" if overlap else
                      (str(item.get("speaker_name") or item.get("speaker_id") or "未知说话人")
                       if speaker_state == "confirmed" else
                       "说话人待确认" if speaker_state == "pending" else "未知说话人"))
+            if item.get("speaker_manual") and speaker_state == "confirmed":
+                label = f"{item.get('speaker_name') or item.get('speaker_id')}（人工确认）"
+                if overlap:
+                    label += " · 多人同时讲话 · 可能不完整"
+            self.retry_button.setVisible(not projector and not item.get("manual") and
+                                        item.get("status") in {"error", "retry_exhausted", "retry_required", "local"})
             self.speaker_label.setText(label)
             self.speaker_label.setVisible(speakers_enabled)
             self.speaker_button.setVisible(speakers_enabled and not projector)
@@ -130,6 +144,8 @@ else:
         updates. mark_saved closes a pending close only if no new update arrived.
         """
         start_requested = Signal()
+        new_meeting_requested = Signal()
+        retry_correction_requested = Signal(str)
         pause_requested = Signal()
         stop_requested = Signal()
         settings_requested = Signal()
@@ -137,6 +153,7 @@ else:
         speaker_assign_requested = Signal(str)
         materials_requested = Signal()
         knowledge_requested = Signal()
+        boundary_stats_requested = Signal()
         statistics_requested = Signal()
         export_requested = Signal(str, str)
         edit_requested = Signal(str, str)
@@ -187,6 +204,10 @@ else:
             return button
 
         def _build_ui(self):
+            meeting_menu = self.menuBar().addMenu("会议")
+            self.new_meeting_action = meeting_menu.addAction("开始新会议…")
+            self.new_meeting_action.triggered.connect(self.new_meeting_requested.emit)
+            meeting_menu.addAction('本场分段诊断…').triggered.connect(self.boundary_stats_requested.emit)
             settings_menu = self.menuBar().addMenu("设置")
             settings_action = settings_menu.addAction("设置…")
             settings_action.triggered.connect(self.settings_requested.emit)
@@ -248,6 +269,7 @@ else:
                 ("Markdown · 原文与校正", "markdown", "both"),
                 ("SRT · 校正结果（默认）", "srt", "corrected"),
                 ("SRT · 原文", "srt", "raw"), ("SRT · 双行对照", "srt", "both"),
+                ("应急 SRT · 含未定稿原文", "srt", "emergency"),
             ):
                 action = QAction(title, menu)
                 action.triggered.connect(lambda checked=False, k=kind, m=mode: self.export_requested.emit(k, m))
@@ -418,8 +440,12 @@ else:
 
         def set_reading_groups(self, groups):
             """Keep segments independently editable; mark continuations only."""
-            self._speaker_continuations = {str(key) for group in groups for key in group[1:]}
-            self._render_all()
+            current = {str(key) for group in groups for key in group[1:]}
+            changed = current ^ self._speaker_continuations
+            self._speaker_continuations = current
+            for key in changed:
+                if key in self._cards:
+                    self._render_card(self._cards[key])
 
         def set_statistics(self, raw, corrected):
             """Show controller-provided character counts without retaining text."""
@@ -486,6 +512,7 @@ else:
             if key not in self._cards:
                 card = _SegmentCard(item)
                 card.edit_clicked.connect(self._edit_segment)
+                card.retry_clicked.connect(self.retry_correction_requested.emit)
                 card.speaker_clicked.connect(self.speaker_assign_requested.emit)
                 self._cards[key] = card
                 self.transcript_layout.insertWidget(self.transcript_layout.count() - 1, card)
@@ -511,7 +538,7 @@ else:
                         self._projector, self.comparison_button.isChecked(), self._speakers_enabled)
             if (self._speakers_enabled and str(card.segment['id']) in self._speaker_continuations
                     and card.segment.get('speaker_state') == 'confirmed'
-                    and not card.segment.get('overlap_intervals')):
+                    and not card.segment.get('overlap_intervals') and not card.segment.get('has_overlap')):
                 card.speaker_label.setText(card.speaker_label.text() + ' · 接续发言')
 
         def _render_all(self, *_):
@@ -623,7 +650,8 @@ else:
             state, pending = self._capture_state, self._capture_pending
             closing = self.closing_after_save
             self.start_button.setText({"loading": "加载中…", "recording": "正在收音",
-                "paused": "继续", "stopping": "结束中…", "error": "重试"}.get(state, "开始"))
+                "paused": "继续", "stopping": "结束中…", "error": "恢复收音" if self._segments else "重试"}.get(state, "开始"))
+            self.new_meeting_action.setEnabled(not closing and not pending and state in {"idle", "error"})
             self.pause_button.setText("继续中…" if pending == "resume" else
                 "暂停中…" if pending == "pause" else "继续" if state == "paused" else "暂停")
             self.stop_button.setText("结束中…" if state == "stopping" else "结束")

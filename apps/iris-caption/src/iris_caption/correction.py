@@ -100,8 +100,8 @@ def validate_output(original: str, value: str) -> str:
 class CorrectionService:
     """Single bounded network worker: three latest tasks then oldest ready backlog.
 
-    Failed transient requests retry at most max_retries; exhaustion reports pending
-    so a caller can explicitly resubmit after connectivity recovers. Queue capacity
+    Failed transient requests retry at most max_retries per accepted revision.
+    Exhaustion is terminal until an explicit user retry starts a new revision. Queue capacity
     rejection is explicit, never silently evicts a segment. No files or logging.
     """
 
@@ -248,8 +248,9 @@ class CorrectionService:
                 result.update(type="correction", corrected_text=corrected, status="corrected")
             except Exception as exc:
                 failure = exc if isinstance(exc, CorrectionError) else CorrectionError("service_error")
-                result.update(type="error", corrected_text=None, status="pending" if failure.retryable else "error",
-                              error=failure.category, retryable=failure.retryable)
+                result.update(type="error", corrected_text=None,
+                              status="retry_exhausted" if failure.retryable else "error",
+                              attempts=attempts + 1, error=failure.category, retryable=failure.retryable)
             with self._condition:
                 if self._stopped or self._tokens.get(key, (None,))[0] is not token:
                     continue

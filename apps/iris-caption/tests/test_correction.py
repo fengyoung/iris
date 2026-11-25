@@ -65,7 +65,8 @@ def test_retry_and_exhaustion_sanitized():
     assert done.wait(2)
     service.stop()
     assert len(calls) == 3
-    assert results[0]["status"] == "pending"
+    assert results[0]["status"] == "retry_exhausted"
+    assert results[0]["attempts"] == 3
     assert "secret" not in repr(results)
     assert task()["text"] not in repr(results)
 

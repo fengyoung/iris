@@ -11,6 +11,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QTimer
 from PySide6.QtWidgets import QFileDialog, QInputDialog, QMessageBox
 
+from .capture_attempt import CaptureAttempt
 from .correction import CorrectionService
 from .dialogs import SettingsDialog, available_key
 from .export import export_session
@@ -20,7 +21,7 @@ from .persistence import PersistenceError
 from .session import Session
 from .settings import (VAD_REQUIRED_MESSAGE, data_dir, read_settings,
                        resolve_speaker_model_path, resolve_vad_model_path)
-from .statistics import StatsStore, session_snapshot
+from .statistics import SessionCounts, StatisticsWriter, StatsStore
 
 
 def _pump_audio(pipe, inbox, stop, done):
@@ -83,9 +84,9 @@ class Controller(QObject):
         self.results = queue.Queue()
         self._stats = StatsStore(data_dir() / 'statistics')
         self._stats_started_at = datetime.now(timezone.utc).isoformat()
-        self._stats_queue = queue.Queue()
-        self._stats_worker = threading.Thread(target=self._write_statistics, daemon=True)
-        self._stats_worker.start()
+        self._stats_counts = SessionCounts(self.session.id, self._stats_started_at)
+        self._stats_writer = StatisticsWriter(self._stats, lambda: self.results.put(
+            {'type': 'status', 'message': '字数统计未能及时保存，请检查本机存储。'}))
         self.audio_events = None
         self.commands = None
         self.process = None
@@ -124,11 +125,25 @@ class Controller(QObject):
                              (self.window.export_requested, self.export),
                              (self.window.edit_requested, self.edit)]:
             signal.connect(slot)
+        if hasattr(self.window, 'retry_correction_requested'):
+            self.window.retry_correction_requested.connect(self.retry_correction)
+        if hasattr(self.window, 'new_meeting_requested'):
+            self.window.new_meeting_requested.connect(self.start_new_meeting)
+        if hasattr(self.window, 'boundary_stats_requested'):
+            self.window.boundary_stats_requested.connect(self.show_boundary_statistics)
         if hasattr(self.window, 'statistics_requested'):
             self.window.statistics_requested.connect(self.show_statistics)
         if hasattr(self.window, 'speakers_requested'):
             self.window.speakers_requested.connect(self.show_speakers)
             self.window.speaker_assign_requested.connect(self.assign_speaker)
+
+    def show_boundary_statistics(self):
+        labels = {'silence': '停顿结束', 'soft_pause': '长段短停顿', 'limit': '达到时长上限',
+                  'speaker': '检测到换人', 'pause': '手动暂停', 'stop': '结束收音', 'unknown': '原因未知'}
+        counts = self.session.boundary_diagnostics()
+        detail = '\n'.join(f'{label}：{counts.get(reason, 0)}' for reason, label in labels.items())
+        QMessageBox.information(self.window, '本场分段诊断',
+                                f'已定稿 {sum(counts.values())} 段（未计入初稿和中断稿）\n\n{detail}')
 
     def _refresh_reading_groups(self):
         if hasattr(self.window, 'set_reading_groups'):
@@ -156,7 +171,7 @@ class Controller(QObject):
             return
         ids = [None, *self.session.speaker_names]
         labels = ['未确定（人工确认）', *[
-            f'{key} · {name}' for key, name in self.session.speaker_names.items()]]
+            f'{index}. {name}' for index, name in enumerate(self.session.speaker_names.values(), 1)]]
         label, accepted = QInputDialog.getItem(self.window, '修改本段说话人',
                                                '只修改本段，之后不会被自动判断覆盖：',
                                                labels, 0, False)
@@ -165,25 +180,32 @@ class Controller(QObject):
             self.window.upsert_segment(segment.view())
             self._refresh_reading_groups()
 
-    def _statistics_snapshot(self):
-        return session_snapshot(self.session, started_at=getattr(self, '_stats_started_at', None))
+    def _statistics_ledger(self):
+        counts = getattr(self, '_stats_counts', None)
+        if counts is None or counts.session_id != self.session.id:
+            if counts is not None and (writer := getattr(self, '_stats_writer', None)):
+                old = counts.snapshot()
+                if old['finalized_segments']:
+                    writer.submit(old, flush=True)
+            started = getattr(self, '_stats_started_at', None) or datetime.now(timezone.utc).isoformat()
+            counts = self._stats_counts = SessionCounts(self.session.id, started)
+            for existing in self.session.segments.values():
+                counts.update(existing)  # Bootstrap once if an existing session was adopted.
+        return counts
 
-    def _update_statistics(self):
-        snapshot = self._statistics_snapshot()
+    def _statistics_snapshot(self):
+        return self._statistics_ledger().snapshot()
+
+    def _update_statistics(self, segment=None, *, flush=False):
+        counts = self._statistics_ledger()
+        if segment is not None:
+            counts.update(segment)
+        snapshot = counts.snapshot()
         if hasattr(self.window, 'set_statistics'):
             self.window.set_statistics(snapshot['raw_chars'], snapshot['corrected_chars'])
-        if snapshot['finalized_segments'] and hasattr(self, '_stats_queue'):
-            self._stats_queue.put_nowait(snapshot)
-
-    def _write_statistics(self):
-        while True:
-            snapshot = self._stats_queue.get()
-            if snapshot is None:
-                return
-            try:
-                self._stats.record(snapshot)
-            except Exception:
-                self.results.put({'type': 'status', 'message': '字数统计保存失败，请检查本机存储权限。'})
+        writer = getattr(self, '_stats_writer', None)
+        if snapshot['finalized_segments'] and writer:
+            writer.submit(snapshot, flush=flush)
 
     def show_statistics(self):
         from .statistics_dialog import StatsDialog
@@ -233,7 +255,13 @@ class Controller(QObject):
         self.service = None
         self._service_generation = getattr(self, '_service_generation', 0) + 1
         generation = self._service_generation
-        self.retry_tasks.update(self.tasks)
+        # Only work that has never reached a service may be submitted automatically
+        # after configuration changes. The previous worker may already have sent
+        # an in-flight request, even if its callback hasn't reached the GUI.
+        for sid in self.tasks.keys() - self.retry_tasks.keys():
+            segment = self.session.segments.get(sid)
+            if segment and segment.status == 'queued':
+                self._correction_status(segment, 'retry_required')
         try:
             key = available_key()
             if key:
@@ -253,13 +281,34 @@ class Controller(QObject):
         self.window.set_capture_state(state, pending=pending)
 
     def start(self):
-        if (self._closing or self.window.closing_after_save
-                or getattr(self, '_deferred_export', None)):
-            return
         if self.capture_state == 'paused':
             self.pause()
             return
-        if self.capture_state not in {'idle', 'error'} or self.process is not None:
+        self._begin_capture(resume=self.capture_state == 'error' and
+                            (bool(self.session.segments) or getattr(self, '_meeting_started', False)))
+
+    def start_new_meeting(self):
+        self._begin_capture(resume=False)
+
+    def _can_start(self):
+        return (not self._closing and not self.window.closing_after_save
+                and not getattr(self, '_deferred_export', None)
+                and self.capture_state in {'idle', 'error'} and self.process is None)
+
+    def _confirm_replacement(self):
+        if not self.session.segments:
+            return True
+        button = QMessageBox.StandardButton
+        answer = QMessageBox.question(self.window, '开始新会议',
+            '新会议就绪后将替换本场记录。选择“保存”先导出 Markdown，'
+            '或选择“丢弃”不导出；新会议启动失败时仍会保留本场记录。',
+            button.Save | button.Discard | button.Cancel, button.Cancel)
+        if answer == button.Save:
+            return bool(self.export('markdown', 'both'))
+        return answer == button.Discard
+
+    def _begin_capture(self, *, resume):
+        if not self._can_start():
             return
         path = self.settings.get('model_path', '')
         if not path or not Path(path).is_dir():
@@ -273,56 +322,101 @@ class Controller(QObject):
             self.show_settings()
             self.window.set_status(VAD_REQUIRED_MESSAGE)
             return
-        replacing_meeting = bool(self.session.segments)
-        if replacing_meeting:
-            answer = QMessageBox.question(self.window, '开始新会议',
-                '新会议将清空字幕、背景、本场规则和临时资料。未保存的内容将丢失，是否继续？',
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No)
-            if answer != QMessageBox.StandardButton.Yes:
-                return
-        from .audio import run_audio_worker
-        speakers_enabled = self.settings.get('speakers_enabled', False)
-        speaker_path = resolve_speaker_model_path(self.settings.get('speaker_model_path', '')) if speakers_enabled else ''
-        next_session = Session(speakers_enabled=speakers_enabled)
+        previous = self.session
+        if not resume and not self._confirm_replacement():
+            return
+        # A file/confirmation dialog runs its own Qt event loop.
+        if previous is not self.session or not self._can_start():
+            return
+        session = previous if resume else Session(speakers_enabled=self.settings.get('speakers_enabled', False))
+        replacing = bool(previous.segments) or getattr(self, '_meeting_started', False)
+        attempt = CaptureAttempt(session, resume, replacing)
+        if resume:
+            attempt.clock_base = max((s.end_ms for s in session.segments.values()), default=0)
+            attempt.clock_base = max(attempt.clock_base, getattr(self, '_capture_clock_end', 0))
+            attempt.id_base = max((int(i) for i in session.segments if i.isdecimal()), default=0)
+            attempt.id_base = max(attempt.id_base, getattr(self, '_capture_id_end', 0))
+        self._attempt = attempt
+        self._audio_failure = self._audio_deadline = None
+        self._audio_terminated = False
         self._set_capture_state('loading')
         try:
-            context = mp.get_context('spawn')
-            self.audio_events = context.Queue(maxsize=256)
-            self.commands = context.Queue(maxsize=32)
-            bundle = self.knowledge.active_bundle()
-            config = dict(session_id=next_session.id, device=self.window.selected_device,
-                          model_path=path, hotwords=bundle.get('hotwords', []),
-                          vad_model_path=vad_path, vad_required=True,
-                          speakers_enabled=speakers_enabled, speaker_model_path=str(speaker_path or ''))
-            self.process = context.Process(target=run_audio_worker,
-                args=(config, self.audio_events, self.commands), daemon=True)
-            self.process.start()
-            self._start_audio_pump()
+            self._spawn_capture(attempt, path, vad_path)
         except Exception:
-            self._release_audio()
-            self._set_capture_state('error')
+            if self.process and self.process.is_alive():
+                self._audio_failure = '收音进程初始化失败，原会议仍保留。'
+                self._arm_audio_deadline(1)
+                self._set_capture_state('stopping')
+            else:
+                self._release_audio()
+                self._set_capture_state('error')
             self.window.set_status('无法启动收音进程，请检查设备和模型设置后重试。')
             return
-        if self.service:
-            self.service.cancel(self.session.id)
-        self._update_statistics()
-        self.session = next_session
+        self.window.set_status('正在加载语音模型，已有会议记录保持不变…')
+
+    def _spawn_capture(self, attempt, path, vad_path):
+        from .audio import run_audio_worker
+        context = mp.get_context('spawn')
+        self.audio_events = context.Queue(maxsize=256)
+        self.commands = context.Queue(maxsize=32)
+        speakers = attempt.session.speakers_enabled
+        speaker_path = resolve_speaker_model_path(self.settings.get('speaker_model_path', '')) if speakers else ''
+        config = dict(session_id=attempt.wire_id, device=self.window.selected_device,
+                      model_path=path, hotwords=self.knowledge.active_bundle().get('hotwords', []),
+                      vad_model_path=vad_path, vad_required=True,
+                      speakers_enabled=speakers, speaker_model_path=str(speaker_path or ''))
+        self.process = context.Process(target=run_audio_worker,
+            args=(config, self.audio_events, self.commands), daemon=True)
+        self.process.start()
+        self._start_audio_pump()
+
+    def _capture_ready(self, attempt):
+        if not attempt.resume:
+            if self.service:
+                self.service.cancel(self.session.id)
+            self._update_statistics(flush=True)
+            self.session = attempt.session
+            self._stats_started_at = datetime.now(timezone.utc).isoformat()
+            self._update_statistics()
+            if attempt.replacing:
+                self._reset_materials()
+            self.rules.clear_session()
+            self.tasks.clear()
+            self.retry_tasks.clear()
+            self.window.clear_segments()
+            self._capture_clock_end = self._capture_id_end = 0
+        self._meeting_started = attempt.ready = True
         if hasattr(self.window, 'set_speakers_enabled'):
-            self.window.set_speakers_enabled(speakers_enabled)
-        self._stats_started_at = datetime.now(timezone.utc).isoformat()
-        self._update_statistics()
-        if replacing_meeting:
-            self._reset_materials()
-        self.rules.clear_session()
-        self.tasks.clear()
-        self.retry_tasks.clear()
-        self.window.clear_segments()
-        self.paused = False
-        self._audio_failure = None
-        self._audio_deadline = None
-        self._audio_terminated = False
-        self.window.set_status('正在加载语音模型…')
+            self.window.set_speakers_enabled(self.session.speakers_enabled)
+        if attempt.speaker_status:
+            self._event(attempt.translate(attempt.speaker_status))
+            attempt.speaker_status = None
+
+    def _capture_event(self, event):
+        attempt = getattr(self, '_attempt', None)
+        if attempt is None or event.get('session_id') != attempt.wire_id:
+            return
+        if not attempt.ready:
+            if event.get('type') == 'speaker_status':
+                attempt.speaker_status = event
+                return
+            kind = event.get('type')
+            if kind == 'status' and event.get('state') == 'recording':
+                if self.capture_state != 'loading' or self._audio_failure or self._closing:
+                    return
+                self._capture_ready(attempt)
+            elif kind in {'error', 'stopped', 'status'}:
+                self._status_event(dict(event, session_id=self.session.id))
+                return
+            else:
+                return
+        event = attempt.translate(event)
+        if event.get('type') in {'partial', 'final', 'discard'}:
+            self._capture_clock_end = max(getattr(self, '_capture_clock_end', 0), event.get('end_ms', 0))
+            sid = str(event.get('segment_id', ''))
+            if sid.isdecimal():
+                self._capture_id_end = max(getattr(self, '_capture_id_end', 0), int(sid))
+        self._event(event)
 
     def _command(self, kind):
         try:
@@ -345,6 +439,9 @@ class Controller(QObject):
             name='caption-audio-events', daemon=True).start()
 
     def _interrupt_audio(self):
+        attempt = getattr(self, '_attempt', None)
+        if attempt is not None and not attempt.ready:
+            return
         for segment in self.session.interrupt_partials():
             self.window.upsert_segment(segment.view())
 
@@ -369,6 +466,15 @@ class Controller(QObject):
         self._set_capture_state('stopping')
         self.window.set_status(self._audio_failure)
 
+    def _record_exit_failure(self):
+        if getattr(self, '_audio_failure', None):
+            return
+        attempt = getattr(self, '_attempt', None)
+        if attempt and not attempt.ready and self.capture_state == 'loading':
+            self._audio_failure = '收音未就绪，原会议仍保留；请检查设备和模型后重试。'
+        elif getattr(self.process, 'exitcode', 0) not in (None, 0):
+            self._audio_failure = '收音进程异常退出，请检查设备和模型设置后重试。'
+
     def _release_audio(self):
         """Release dead/unstarted processes without waiting on the GUI thread."""
         if self.process:
@@ -378,7 +484,7 @@ class Controller(QObject):
                 self.process.close()
             except (ValueError, OSError):
                 pass
-        self.process = None
+        self.process = self._attempt = None
         if getattr(self, '_audio_pump_stop', None) is not None:
             self._audio_pump_stop.set()
         self._audio_inbox = None
@@ -415,7 +521,7 @@ class Controller(QObject):
             return False
         if self.process.is_alive() and not self._command('stop'):
             return False
-        self._update_statistics()
+        self._update_statistics(flush=True)
         self._set_capture_state('stopping')
         self._arm_audio_deadline(10)
         self.window.set_status('正在结束收音并处理最后句段…')
@@ -436,7 +542,10 @@ class Controller(QObject):
                     if source is audio_source:
                         audio_drained = True
                     break
-                self._event(event)
+                if source is audio_source and getattr(self, '_attempt', None) is not None:
+                    self._capture_event(event)
+                else:
+                    self._event(event)
         self._check_audio_deadline()
         if self.process and not self.process.is_alive() and getattr(self, '_audio_inbox', None) is not None:
             if getattr(self, '_audio_dead_since', None) is None:
@@ -444,8 +553,7 @@ class Controller(QObject):
             if not self._audio_pump_done.is_set() and time.monotonic() - self._audio_dead_since < .25:
                 audio_drained = False
         if audio_drained and self.process and not self.process.is_alive():
-            if getattr(self.process, 'exitcode', 0) not in (None, 0) and not getattr(self, '_audio_failure', None):
-                self._audio_failure = '收音进程异常退出，请检查设备和模型设置后重试。'
+            self._record_exit_failure()
             self._interrupt_audio()
             self._release_audio()
             self._set_capture_state('error' if getattr(self, '_audio_failure', None) else 'idle')
@@ -470,7 +578,7 @@ class Controller(QObject):
         if segment:
             if event['type'] == 'final':
                 self._schedule(segment)
-                self._update_statistics()
+                self._update_statistics(segment)
             self.window.upsert_segment(segment.view())
 
     def _event(self, event):
@@ -483,19 +591,18 @@ class Controller(QObject):
             self._transcript_event(event)
         elif (kind in {'correction', 'error'} and 'service_generation' in event
               and event.get('segment_id') in self.session.segments):
+            current = self.session.segments[event['segment_id']]
+            if current.status not in {'queued', 'pending'}:
+                return
             segment = self.session.apply_correction(event)
             if segment:
-                if kind == 'error' and not event.get('retryable'):
-                    segment.status = 'error'
-                self.window.upsert_segment(segment.view())
-                self._update_statistics()
-                sid = segment.id
-                if event.get('retryable'):
-                    self.retry_tasks[sid] = self.tasks.get(sid)
+                self.retry_tasks.pop(segment.id, None)
+                if kind == 'error':
+                    segment.status = 'retry_exhausted' if event.get('retryable') else 'error'
                 else:
-                    self.retry_tasks.pop(sid, None)
-                    if kind == 'correction':
-                        self.tasks.pop(sid, None)
+                    self.tasks.pop(segment.id, None)
+                    self._update_statistics(segment)
+                self.window.upsert_segment(segment.view())
         elif kind == 'task_ready':
             self._task_ready(event['task'])
         elif kind == 'devices':
@@ -520,6 +627,7 @@ class Controller(QObject):
     def _task_ready(self, task):
         segment = self.session.segments.get(task['segment_id'])
         if (task['session_id'] == self.session.id and segment and not segment.manual
+                and segment.status in {'pending', 'local'} and segment.id not in self.tasks
                 and segment.revision == task['revision']):
             self.tasks[segment.id] = task
             self._submit_task(task)
@@ -560,7 +668,8 @@ class Controller(QObject):
         elif kind == 'status' and state in {'loading', 'recording', 'paused'}:
             return
         if kind == 'stopped' or (kind == 'status' and state == 'paused'):
-            for segment in self.session.ordered():
+            attempt = getattr(self, '_attempt', None)
+            for segment in self.session.ordered() if attempt is None or attempt.ready else ():
                 if segment.speaker_state == 'pending':
                     updated = self.session.apply_speaker({
                         'type': 'speaker', 'session_id': self.session.id,
@@ -581,8 +690,13 @@ class Controller(QObject):
         segment.corrected = segment.dictionary_text
         if not self.service:
             segment.status = 'local'
-        context = [(s.corrected or s.raw) for s in self.session.ordered()
-                   if s.id != segment.id and s.status != 'partial'][-5:]
+        context = []
+        for prior in reversed(self.session.segments.values()):
+            if prior.id != segment.id and prior.status not in {'partial', 'transcribing', 'interrupted'}:
+                context.append(prior.corrected or prior.raw)
+                if len(context) == 5:
+                    break
+        context.reverse()
         # Snapshot background on the GUI thread; retrieval itself happens in a background thread.
         base = dict(session_id=self.session.id, segment_id=segment.id, revision=segment.revision,
                     text=segment.dictionary_text, context=context,
@@ -612,19 +726,56 @@ class Controller(QObject):
             if not self._closing:
                 self.results.put({'type': 'task_ready', 'task': dict(base, references=references)})
 
+    def _correction_status(self, segment, status):
+        if segment.status != status:
+            segment.status = status
+            self.window.upsert_segment(segment.view())
+
     def _submit_task(self, task):
+        """Admission retries never resend accepted work; network retries live in the worker."""
         sid = task['segment_id']
-        if self.service:
-            try:
-                if self.service.submit(task):
-                    self.retry_tasks.pop(sid, None)
-                    return
-            except (ValueError, RuntimeError):
-                self.tasks.pop(sid, None)
-                self.retry_tasks.pop(sid, None)
-                self.window.set_status('该句无法云端校正，保留本地词典结果。')
-                return
-        self.retry_tasks[sid] = task
+        segment = self.session.segments[sid]
+        if not self.service:
+            self.retry_tasks[sid] = task  # No network attempt has been made.
+            self._correction_status(segment, 'local')
+            return
+        try:
+            accepted = self.service.submit(task)
+        except (ValueError, RuntimeError):
+            self.retry_tasks.pop(sid, None)
+            self._correction_status(segment, 'error')
+            self.window.set_status('该句无法提交云端校正，已保留本地结果。')
+            return
+        if accepted:
+            self.retry_tasks.pop(sid, None)
+            self._correction_status(segment, 'queued')
+            return
+        misses = task.get('_admission_misses', 0) + 1
+        if misses >= 3:
+            self.retry_tasks.pop(sid, None)
+            self._correction_status(segment, 'retry_exhausted')
+            return
+        self.retry_tasks[sid] = dict(task, _admission_misses=misses)
+        self._correction_status(segment, 'queued')
+
+    def retry_correction(self, sid):
+        """One explicit click opens one fresh correction revision, not a repeating resubmit."""
+        segment = self.session.segments.get(sid)
+        if (self._closing or not segment or segment.manual
+                or segment.status not in {'local', 'error', 'retry_required', 'retry_exhausted'}):
+            return
+        if not self.service:
+            self.window.set_status('请先在设置中配置云端校正；本地文字已保留。')
+            return
+        task = self.tasks.get(sid)
+        if (not task or task['session_id'] != self.session.id
+                or task['revision'] != segment.revision):
+            return
+        segment.revision += 1
+        fresh = dict(task, revision=segment.revision)
+        self.tasks[sid] = fresh
+        self.retry_tasks.pop(sid, None)
+        self._submit_task(fresh)
 
     def retry_pending(self):
         if not self.service or self._closing:
@@ -632,6 +783,7 @@ class Controller(QObject):
         for sid, task in list(self.retry_tasks.items()):
             segment = self.session.segments.get(sid)
             if (task and segment and not segment.manual and task['session_id'] == self.session.id
+                    and segment.status in {'pending', 'queued', 'local'}
                     and task['revision'] == segment.revision):
                 self._submit_task(task)
             else:
@@ -715,7 +867,7 @@ class Controller(QObject):
         if self.service:
             self.service.cancel(self.session.id, sid)
         self.window.upsert_segment(segment.view())
-        self._update_statistics()
+        self._update_statistics(segment)
         from .dialogs import choose_rule_scope
         for candidate in extract_rule_candidates(before, text):
             source, target = candidate['source'], candidate['target']
@@ -749,15 +901,30 @@ class Controller(QObject):
                 self.window.cancel_pending_close()
                 self.window.set_status('收音状态已变化，请重新保存退出。')
                 return
-            export_session(self.session, Path(path), kind, mode)
-            if kind == 'markdown':
+            live = self.process is not None
+            emergency = kind == 'srt' and mode == 'emergency'
+            if live or emergency:
+                export_session(self.session, Path(path), kind, 'raw' if emergency else mode,
+                               live_snapshot=live, include_unfinalized=emergency)
+            else:
+                export_session(self.session, Path(path), kind, mode)
+            if kind == 'markdown' and not live:
                 self.session.dirty = False
                 self.window.mark_saved()
             else:
                 self.window.cancel_pending_close()
-            self.window.set_status('已保存完整会议记录' if kind == 'markdown' else
-                                   '已导出 SRT；字幕不保留全部原文和校正版本，请另存 Markdown。')
-        except (OSError, ValueError):
+            if live:
+                message = '已导出实时快照；后续内容不会自动写入，请在会议结束后再次导出。'
+            elif emergency:
+                message = '已导出应急字幕；未定稿内容已标记。'
+            else:
+                message = '已保存会议记录' if kind == 'markdown' else '已导出定稿 SRT；完整记录请另存 Markdown。'
+            self.window.set_status(message)
+            return True
+        except ValueError as exc:
+            self.window.cancel_pending_close()
+            self.window.set_status(str(exc))
+        except OSError:
             self.window.cancel_pending_close()
             QMessageBox.warning(self.window, '保存失败', '请检查目标文件夹权限或可用空间。')
 
@@ -777,6 +944,7 @@ class Controller(QObject):
             threading.Thread(target=_reap_audio, args=(process, events, commands),
                              name='caption-audio-cleanup').start()
         self.index.clear()
-        if hasattr(self, '_stats_queue'):
-            self._stats_queue.put_nowait(None)
+        if (writer := getattr(self, '_stats_writer', None)) is not None:
+            self._update_statistics(flush=True)
+            writer.close()
 

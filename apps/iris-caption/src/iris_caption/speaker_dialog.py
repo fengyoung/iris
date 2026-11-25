@@ -37,10 +37,10 @@ class SpeakerManagementDialog(QDialog):
         scroll.setWidgetResizable(True)
         content = QWidget()
         form = QFormLayout(content)
-        for speaker_id, name in self._names.items():
-            field = QLineEdit(name or str(speaker_id))
-            field.setAccessibleName(f'说话人 {speaker_id} 的显示名称')
-            label = QLabel(str(speaker_id))
+        for index, (speaker_id, name) in enumerate(self._names.items(), 1):
+            field = QLineEdit(name or f'说话人 {index}')
+            field.setAccessibleName(f'说话人 {index} 的显示名称')
+            label = QLabel(f'说话人 {index}')
             label.setTextFormat(Qt.TextFormat.PlainText)
             label.setBuddy(field)
             form.addRow(label, field)

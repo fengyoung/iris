@@ -5,6 +5,10 @@ from dataclasses import asdict, dataclass, field
 from uuid import uuid4
 
 
+UNFINALIZED = frozenset({'partial', 'transcribing', 'interrupted'})
+BOUNDARY_REASONS = frozenset({'silence', 'limit', 'soft_pause', 'speaker', 'pause', 'stop'})
+
+
 @dataclass
 class Segment:
     id: str
@@ -28,8 +32,14 @@ class Segment:
     recognition_start_ms: int | None = None
     recognition_end_ms: int | None = None
 
+    overlap_detected: bool = False
+
+    @property
+    def has_overlap(self) -> bool:
+        return self.overlap_detected or self.speaker_state == 'overlap' or bool(self.overlap_intervals)
+
     def view(self) -> dict:
-        return asdict(self)
+        return {**asdict(self), 'has_overlap': self.has_overlap}
 
 
 @dataclass
@@ -64,9 +74,11 @@ class Session:
     @staticmethod
     def _audio_metadata(segment: Segment, event: dict) -> None:
         # Deliberate allowlist: never accept text/manual flags or arbitrary attributes.
-        for key in ("boundary_reason", "boundary_alignment"):
-            if key in event and isinstance(event[key], str):
-                setattr(segment, key, event[key])
+        reason = event.get('boundary_reason', event.get('reason'))
+        if isinstance(reason, str) and reason in BOUNDARY_REASONS:
+            segment.boundary_reason = reason
+        if isinstance(event.get('boundary_alignment'), str):
+            segment.boundary_alignment = event['boundary_alignment']
         for key in ("recognition_start_ms", "recognition_end_ms"):
             value = event.get(key)
             if type(value) is int and value >= 0:
@@ -113,14 +125,17 @@ class Session:
         segment.start_ms = start
         segment.end_ms = end
         next_revision = revision if revision is not None else segment.audio_revision + 1
-        if (next_revision != segment.audio_revision and not segment.speaker_manual
-                and segment.speaker_state != "off"):
-            segment.speaker_id = None
-            segment.speaker_state = "pending"
-            segment.speaker_name = ""
+        if next_revision != segment.audio_revision:
+            segment.overlap_detected = False
             segment.overlap_intervals = []
+            if not segment.speaker_manual and segment.speaker_state != 'off':
+                segment.speaker_id = None
+                segment.speaker_state = 'pending'
+                segment.speaker_name = ''
         segment.audio_revision = next_revision
         self._audio_metadata(segment, event)
+        if event.get('speaker_state') == 'overlap':
+            segment.overlap_detected = True
         self._speaker_metadata(segment, event)
         segment.raw = str(event.get("text", ""))
         if event["type"] == "final":
@@ -136,16 +151,23 @@ class Session:
             return None
         segment = self.segments.get(str(event.get("segment_id")))
         revision = event.get("audio_revision", event.get("revision"))
-        if (segment is None or segment.speaker_manual or type(revision) is not int
+        if (segment is None or type(revision) is not int
                 or revision != segment.audio_revision):
             return None
         state = event.get("speaker_state")
         if not isinstance(state, str) or state not in {"off", "pending", "confirmed", "unknown", "overlap"}:
             return None
+        old_overlap = segment.has_overlap, segment.overlap_intervals
         self._speaker_metadata(segment, event)
-        # Speaker results may describe overlap, but cannot change audio boundaries.
-        if "overlap_intervals" in event:
-            self._audio_metadata(segment, {"overlap_intervals": event["overlap_intervals"]})
+        # A same-revision positive observation survives late unknown/timeout events.
+        if state == 'overlap':
+            segment.overlap_detected = True
+        if isinstance(event.get('overlap_intervals'), list):
+            self._audio_metadata(segment, {'overlap_intervals': event['overlap_intervals']})
+            segment.overlap_intervals = [list(pair) for pair in sorted({
+                tuple(pair) for pair in old_overlap[1] + segment.overlap_intervals})]
+        if segment.speaker_manual and old_overlap == (segment.has_overlap, segment.overlap_intervals):
+            return None
         self.dirty = True
         return segment
 
@@ -183,7 +205,7 @@ class Session:
             if (self.speakers_enabled and previous is not None
                     and previous.speaker_state == segment.speaker_state == "confirmed"
                     and previous.speaker_id == segment.speaker_id and segment.speaker_id
-                    and not previous.overlap_intervals and not segment.overlap_intervals
+                    and not previous.has_overlap and not segment.has_overlap
                     and previous.end_ms == segment.start_ms):
                 groups[-1].append(segment)
             else:
@@ -219,7 +241,8 @@ class Session:
         if event.get("session_id") != self.id:
             return None
         segment = self.segments.get(str(event.get("segment_id")))
-        if not segment or segment.manual or segment.revision != event.get("revision"):
+        if (not segment or segment.manual or segment.status in UNFINALIZED
+                or segment.revision != event.get('revision')):
             return None
         if event.get("type") == "correction":
             segment.corrected = str(event.get("corrected_text", ""))
@@ -236,9 +259,20 @@ class Session:
         segment.corrected = text
         segment.manual = True
         segment.revision += 1
-        segment.status = "manual"
+        if segment.status != 'interrupted':
+            segment.status = 'manual'
         self.dirty = True
         return segment
+
+    def boundary_diagnostics(self) -> dict[str, int]:
+        """Return finalized cut counts only, never transcript, audio or arbitrary reason strings."""
+        counts: dict[str, int] = {}
+        for segment in self.segments.values():
+            if segment.status in UNFINALIZED:
+                continue
+            reason = segment.boundary_reason if segment.boundary_reason in BOUNDARY_REASONS else 'unknown'
+            counts[reason] = counts.get(reason, 0) + 1
+        return counts
 
     def ordered(self) -> list[Segment]:
         return sorted(self.segments.values(), key=lambda s: (s.start_ms, s.id))

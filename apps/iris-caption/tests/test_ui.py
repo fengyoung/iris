@@ -276,7 +276,23 @@ def test_export_menu_contract(window):
     window.export_requested.connect(lambda *args: emitted.append(args))
     for action in window.export_button.menu().actions():
         action.trigger()
-    assert emitted == [("markdown", "both"), ("srt", "corrected"), ("srt", "raw"), ("srt", "both")]
+    assert emitted == [("markdown", "both"), ("srt", "corrected"), ("srt", "raw"),
+                       ("srt", "both"), ("srt", "emergency")]
+
+
+def test_recover_retry_and_manual_overlap_controls(window):
+    window.upsert_segment(dict(segment(), status='retry_exhausted', speaker_state='confirmed',
+                               speaker_name='甲', speaker_manual=True, has_overlap=True))
+    window.set_speakers_enabled(True)
+    window.set_capture_state('error')
+    assert window.start_button.text() == '恢复收音'
+    card = next(iter(window._cards.values()))
+    assert '甲（人工确认）' in card.speaker_label.text() and '可能不完整' in card.speaker_label.text()
+    emitted = []
+    window.retry_correction_requested.connect(emitted.append)
+    card.retry_button.click()
+    assert emitted == [str(card.segment['id'])]
+    assert window.new_meeting_action.isEnabled()
 
 
 @pytest.mark.parametrize('state,enabled,label', [
