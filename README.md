@@ -1,4 +1,4 @@
-# Iris 3.48.0
+# Iris 3.49.0
 
 > 主动情报体系（决策 / 备会 / 信号 / OKR 证据）设计见 [设计文档](docs/intelligence-upgrade-design.md)，用法见 [使用说明](docs/intelligence-upgrade-usage.md)；
 > 谁是卧底 Web 使用方法与恢复边界见 [Web 使用说明](docs/undercover-web-ui.md)，历史验收证据见 [验收记录](docs/undercover-beta-acceptance-20260917.md)；
@@ -8,7 +8,13 @@
 
 ## 最新动态
 
-**v3.48.0 (2026-11-12)** - 声笺独立应用与语音写回安全改进：
+**v3.49.0 (2026-11-25)** - 知遇独立工作台与 ASR 校正增强：
+- 纳入 [知遇 Iris Interview](apps/iris-interview/README.md) 独立 macOS 面试工作台 **0.1.2** 开发预览，支持本地 OCR 与双路音频桥接。
+- [声笺 Iris Caption](apps/iris-caption/README.md) 独立版本更新至 **0.4.4**，修复长时检测与安装问题，并调整 Dock 图标。
+- ASR 部署保留手动替换映射、自动计算热词配额；周报默认排除双周报，决策复核可修订摘要。
+- **产品版本 3.48.0 → 3.49.0**；协议版本与数据格式不变。
+
+**上一版 v3.48.0 (2026-11-12)** - 声笺独立应用与语音写回安全改进：
 - 新增 [声笺 Iris Caption](apps/iris-caption/README.md) 独立 macOS 应用，保持独立版本 **0.4.0**，支持流式分段与可选本地说话人区分。
 - 控制台视觉和品牌资源统一；macOS 语音写回失败后停用自动写回，避免重复删除。
 - 修复游戏 Web 测试线程竞争；主项目 **4455** 测试通过，覆盖率 **75.68%**。
