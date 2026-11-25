@@ -382,6 +382,24 @@ def run_build_asr_prompt(args, bundle, logger) -> Dict[str, Any]:
 # ── daily-start 用的 ASR 资源刷新 ───────────────────────
 
 
+#: 反馈反向优化在 Phase 1 之后追加热词、绕过 max_hotwords，为其预留的槽位
+_FEEDBACK_HOTWORD_HEADROOM = 20
+
+
+def _resolve_hotword_budget(data_dir: Path) -> int:
+    """按 VocoType 硬上限倒算 Phase 1 的热词配额。
+
+    手动热词在 deploy 时合并、反馈热词在 Phase 1 结束后追加，两者都不受
+    ``max_hotwords`` 约束。此处若把配额写死（曾为 490），一旦手动热词增长或
+    反馈命中较多，合并结果就会越过 ``HOTWORD_LIMIT``，导致整个 ASR 部署阶段
+    失败——2026-11-17 daily-start 的 503 条事故即此成因。
+    """
+    from iris.wiki.asr.version import load_manual_hotwords
+
+    manual = _drop_sensitive_hotwords(load_manual_hotwords(data_dir), "手动热词")
+    return max(1, HOTWORD_LIMIT - len(manual) - _FEEDBACK_HOTWORD_HEADROOM)
+
+
 def refresh_asr_resources(bundle, logger) -> dict:
     """Wiki 有变化时重建 ASR 三件套 → 部署 → 重启 VocoType。
 
@@ -423,7 +441,8 @@ def refresh_asr_resources(bundle, logger) -> dict:
                 "fingerprint": fingerprint, "pages": len(pages)}
 
     args = SimpleNamespace(command="build-asr-prompt", asr_mode="all", deploy=True,
-                           output_file="", bump="auto", max_hotwords=490,
+                           output_file="", bump="auto",
+                           max_hotwords=_resolve_hotword_budget(data_dir),
                            max_mappings=None, max_chars=20, pretty=False)
     started = time.monotonic()
     result = run_build_asr_prompt(args, bundle, logger)
@@ -600,6 +619,52 @@ def _merge_manual_hotwords(hotwords: List[str], deployed: List[str], logger,
     return merged
 
 
+def _merge_manual_replace_map(replace_map: Dict[str, str], deployed: List[str], logger,
+                              *, data_dir: Path) -> Dict[str, str]:
+    """把手动替换映射合并进 LLM 生成结果（手动条目优先）。
+
+    与 ``_merge_manual_hotwords`` 对称。``mis_asr`` 由 ``generate_misreadings()``
+    每次重新生成，手改 ``data/asr_replace_dict.json`` 在下一次 ``--deploy`` 时
+    必然被整体覆盖——2026-11-17 的全量重建就把人工补的 5 条人名映射冲掉了。
+    手动映射单独存一份、部署时合并，才能「改一次、永久生效」。
+
+    手动词同样要过与生成侧一致的三道守卫：敏感词、危险映射（单字/通用高频字，
+    大面积误伤）、交叉冲突（误识别词恰好是另一个术语的正确写法）。
+    """
+    from iris.wiki._sensitive import is_sensitive_term
+    from iris.wiki.asr.coverage import is_dangerous_mapping
+    from iris.wiki.asr.version import load_manual_replace_map
+    from iris.wiki.discovery_utils import normalized_key
+
+    manual = load_manual_replace_map(data_dir)
+    if not manual:
+        return dict(replace_map)
+
+    merged = dict(replace_map)
+    # 生成结果里的全部正确写法：手动条目的误识别词若与之重合，替换会改掉真实术语
+    correct_forms = {normalized_key(v) for v in replace_map.values()}
+    added = skipped = 0
+    for wrong, right in manual.items():
+        if is_sensitive_term(right):
+            logger.warning("手动替换映射跳过敏感词: %r", right)
+            skipped += 1
+            continue
+        if is_dangerous_mapping(wrong):
+            logger.warning("手动替换映射跳过危险映射: %r（过于宽泛，会大面积误伤）", wrong)
+            skipped += 1
+            continue
+        if normalized_key(wrong) in correct_forms:
+            logger.warning("手动替换映射跳过交叉冲突: %r 是另一个术语的正确写法", wrong)
+            skipped += 1
+            continue
+        merged[wrong] = right
+        added += 1
+
+    deployed.append(
+        f"手动替换映射 +{added}" + (f"（跳过 {skipped}）" if skipped else ""))
+    return merged
+
+
 def _patch_json_file(path: Path, mutate, label: str, deployed: List[str], logger) -> None:
     """读 JSON → mutate(dict) → 原子写回；失败只记 warning 不中断部署。"""
     if not path.exists():
@@ -668,9 +733,14 @@ def _deploy_asr_to_vocotype(hotwords: List[str], hotwords_file: str, replace_dic
     if replace_dict_file:
         # 原子写：asr-corrector 常驻运行且每 5 秒轮询这两个文件，copy2 期间
         # 它可能读到半截 JSON/Prompt——与上面 hotwords.txt 是同一类风险。
+        generated = json.loads(Path(replace_dict_file).read_text(encoding="utf-8"))
+        merged_map = _merge_manual_replace_map(
+            generated.get("replace_map", {}), deployed, logger, data_dir=data_dir)
+        payload = dict(generated)
+        payload["replace_map"] = merged_map
         atomic_write_text(data_dir / "asr_replace_dict.json",
-                          Path(replace_dict_file).read_text(encoding="utf-8"))
-        deployed.append("data/asr_replace_dict.json")
+                          json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+        deployed.append(f"data/asr_replace_dict.json ({len(merged_map)} 条)")
     if prompt and output_path:
         atomic_write_text(data_dir / "asr_prompt.md",
                           Path(output_path).read_text(encoding="utf-8"))

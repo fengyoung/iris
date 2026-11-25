@@ -79,6 +79,29 @@ def test_unreviewed_save_rejected(store):
         store.save(decision(review_status='pending'))
 
 
+def test_review_can_patch_summary(store):
+    """摘要必须可修：复核意见绝大多数是针对 summary 的措辞。
+
+    白名单曾漏掉 summary，导致「判了不确定 → 想改却改不了 → 永久卡 pending」。
+    """
+    candidate = store.stage(decision(review_status='pending'), '摘要把「原则上」写没了')
+    result = store.review(candidate['candidate_id'], approve=True,
+                          patch={'summary': '决定原则上采用规则与模型双路'})
+    assert store.get(result['decision_id'])['summary'] == '决定原则上采用规则与模型双路'
+
+
+def test_review_rejects_unpatchable_field(store):
+    candidate = store.stage(decision(review_status='pending'), '歧义')
+    with pytest.raises(IrisValueError, match='不可修改'):
+        store.review(candidate['candidate_id'], approve=True, patch={'status': 'archived'})
+
+
+def test_patchable_fields_cover_every_minor_field():
+    """白名单由字段集派生，新增说明性字段时不能漏——否则又是同一个死锁。"""
+    from iris.decisions.schema import MINOR_FIELDS, REVIEW_PATCHABLE_FIELDS
+    assert set(MINOR_FIELDS) <= REVIEW_PATCHABLE_FIELDS
+
+
 def test_atomic_publish_failure(store, monkeypatch):
     store.save(decision())
     from iris.intelligence import storage

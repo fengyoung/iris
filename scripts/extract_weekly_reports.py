@@ -90,6 +90,13 @@ class ExtractWeeklyReportsConfig:
         return self._raw.get("filters", {}).get("subject_keywords", ["周报", "周会"])
 
     @property
+    def subject_exclude_keywords(self) -> List[str]:
+        """主题排除词：命中即不入库（默认「双周报」）。"""
+        return self._raw.get("filters", {}).get(
+            "subject_exclude_keywords", DEFAULT_SUBJECT_EXCLUDE_KEYWORDS
+        )
+
+    @property
     def sender_whitelist(self) -> List[Dict]:
         return self._raw.get("filters", {}).get("sender_whitelist", [])
 
@@ -129,12 +136,25 @@ class ExtractWeeklyReportsConfig:
 # 飞书「发件人已撤回邮件：...」通知邮件的主题前缀，需排除（否则会生成空/垃圾报告）
 RECALL_SUBJECT_PREFIX = "发件人已撤回邮件"
 
+# 默认排除的主题关键词：双周报不单独入库（同一发件人只收周报，避免双周报顶替周报）
+DEFAULT_SUBJECT_EXCLUDE_KEYWORDS = ["双周报"]
+
 
 class EmailFilter:
     """根据白名单和主题关键词过滤周报邮件（移植自 _weekly-reports-from-email/filter.py）。"""
 
-    def __init__(self, sender_whitelist: List[Dict], subject_keywords: List[str]):
+    def __init__(
+        self,
+        sender_whitelist: List[Dict],
+        subject_keywords: List[str],
+        exclude_keywords: Optional[List[str]] = None,
+    ):
         self.subject_keywords = [kw.lower() for kw in subject_keywords]
+        # 主题排除词（默认排除「双周报」）：双周报不单独入库，周报优先
+        effective_exclude = (
+            DEFAULT_SUBJECT_EXCLUDE_KEYWORDS if exclude_keywords is None else exclude_keywords
+        )
+        self.exclude_keywords = [kw.lower() for kw in effective_exclude if kw]
 
         # 构建邮箱→姓名映射
         self._email_to_name: Dict[str, str] = {}
@@ -160,6 +180,13 @@ class EmailFilter:
             return False
         subject_lower = subject.lower()
         return any(kw in subject_lower for kw in self.subject_keywords)
+
+    def has_excluded_keyword(self, subject: str) -> bool:
+        """主题是否命中排除词（默认「双周报」——双周报不单独入库）。"""
+        if not subject or not self.exclude_keywords:
+            return False
+        subject_lower = subject.lower()
+        return any(kw in subject_lower for kw in self.exclude_keywords)
 
     @staticmethod
     def is_recall_notice(subject: str) -> bool:
@@ -192,6 +219,7 @@ class EmailFilter:
         """过滤邮件列表，保留白名单发件人的周报邮件。
 
         - 排除「发件人已撤回邮件」通知
+        - 排除命中 subject_exclude_keywords 的邮件（默认「双周报」，双周报不单独入库）
         - 同一发件人若发了多封（重复/更正），仅保留日期最新的一封
         """
         candidates = []
@@ -202,6 +230,8 @@ class EmailFilter:
             if not self.is_whitelisted_sender(from_addr):
                 continue
             if self.is_recall_notice(subject):
+                continue
+            if self.has_excluded_keyword(subject):
                 continue
             if not self.has_weekly_report_keyword(subject):
                 continue
@@ -1402,7 +1432,11 @@ def cmd_run(args: argparse.Namespace) -> None:
     print()
     print("─" * 40)
     print("【Step 2/4】过滤周报邮件...")
-    email_filter = EmailFilter(config.sender_whitelist, config.subject_keywords)
+    email_filter = EmailFilter(
+        config.sender_whitelist,
+        config.subject_keywords,
+        config.subject_exclude_keywords,
+    )
     weekly_reports = email_filter.filter_emails(emails)
 
     if not weekly_reports:

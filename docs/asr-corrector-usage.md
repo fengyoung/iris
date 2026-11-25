@@ -64,9 +64,38 @@ iris3 asr-corrector --correct-mode full
 | `data/asr_prompt.md` | LLM 校正 Prompt（~970 字），编辑助手角色，支持热加载 |
 | `data/asr_feedback.jsonl` | 校正记录（自动积累），Phase 1 反向优化用 |
 | `data/asr_manual_hotwords.txt` | 手动热词表（用户添加），`--deploy` 时自动与 LLM 热词合并去重 |
+| `data/asr_manual_replace.json` | 手动替换映射（用户确认的人名纠正），`--deploy` 时自动合并进替换词典 |
 | `config/asr_profiles.json` | LLM 使用参数 + max_mappings 上限配置 |
 
 > **热加载**：替换词典和 LLM Prompt 均支持运行时热加载（每 5 秒检测文件变化），修改后无需重启 `asr-corrector` 进程。
+
+## 手工纠正一个名字该改哪里
+
+**不要手改 `data/asr_replace_dict.json`。** 它由 `build-asr-prompt --deploy` 整体重写
+（`mis_asr` 是 LLM 每次重新生成的），手改的内容会在下一次部署时被静默覆盖。
+
+两个持久化通道（都进输入指纹，改完下次 `daily-start` 会自动重建并部署）：
+
+| 目的 | 改这个文件 | 生效方式 |
+|------|-----------|---------|
+| 让 ASR **听对** | `data/asr_manual_hotwords.txt`（每行一个词） | 合并进 VocoType 热词表 |
+| 把听错的**改回来** | `data/asr_manual_replace.json` | 合并进替换词典 |
+
+```json
+{
+  "replace_map": {
+    "玉斌": "煜彬",
+    "于斌": "煜彬",
+    "志成": "智诚"
+  }
+}
+```
+
+- 写法与 `data/asr_replace_dict.json` 同构，也可直接用扁平的 `{"误": "正"}`；`_` 开头的键视为注释。
+- 手动条目优先于 LLM 生成结果；但**会被自动跳过**的三类：敏感词、单字高频词（如「是」）、
+  交叉冲突（误识别词恰好是另一个术语的正确写法）。跳过原因记在 `--deploy` 的日志与
+  输出的 `deployed` 列表里（形如 `手动替换映射 +3（跳过 1）`）。
+
 
 ## 常见问题
 

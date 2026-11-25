@@ -10,7 +10,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 # 运行时导入（非 TYPE_CHECKING），因为函数体内需要构造 AsrPromptVersion 实例。
 # term_extractor 的重导出在文件末尾，不会形成循环导入。
@@ -25,6 +25,12 @@ _VERSION_FILE = "asr_prompt_version.json"
 
 #: 手动热词文件（与 LLM 生成的热词合并后部署）
 MANUAL_HOTWORDS_FILE = "asr_manual_hotwords.txt"
+
+#: 手动替换映射文件（与 LLM 生成的替换词典合并后部署）
+MANUAL_REPLACE_FILE = "asr_manual_replace.json"
+
+#: 替换词典里承载映射的子键（与 data/asr_replace_dict.json 同构）
+_REPLACE_MAP_KEY = "replace_map"
 
 
 def _now_iso() -> str:
@@ -59,19 +65,66 @@ def _manual_hotwords_digest(data_dir: Path) -> str:
     return hashlib.sha256("\n".join(words).encode("utf-8")).hexdigest()[:16]
 
 
-def compute_input_fingerprint(pages: List[WikiPageInfo], data_dir: Path) -> str:
-    """生成 ASR 三件套的**全部输入**指纹 = Wiki 页面 + 手动热词。
+def load_manual_replace_map(data_dir: Path) -> Dict[str, str]:
+    """读手动替换映射（误识别 → 正确写法）。文件缺失或不可读返回空映射。
 
-    手动热词是热词表的第二个来源（``--deploy`` 时与生成结果合并）。它不进指纹
-    的话，改完手动词 daily-start 看不出输入有变化、不会重建——而用户改手动词
-    的意图恰恰就是「让它生效」。
+    与 ``_merge_manual_replace_map`` 共用同一读法，避免「指纹算一套、合并用另一套」。
+
+    接受两种写法，便于直接从生成的词典里复制条目：
+
+    - ``{"replace_map": {"误识别": "正确"}}``（与 data/asr_replace_dict.json 同构）
+    - ``{"误识别": "正确"}``（扁平写法）
+
+    非字符串值一律丢弃，``_`` 开头的键视为注释。误写一个数组或对象不该让整条
+    部署链路失败——但这属于「静默少了内容」，故丢弃的条数由调用方回报。
+    """
+    path = Path(data_dir) / MANUAL_REPLACE_FILE
+    if not path.exists():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("读取手动替换映射失败 (%s): %s", path, exc)
+        return {}
+    if not isinstance(raw, dict):
+        logger.warning("手动替换映射格式错误 (%s)：顶层应为对象", path)
+        return {}
+
+    nested = raw.get(_REPLACE_MAP_KEY)
+    entries = nested if isinstance(nested, dict) else raw
+    return {
+        k: v for k, v in entries.items()
+        if k != _REPLACE_MAP_KEY and not k.startswith("_")
+        and isinstance(k, str) and isinstance(v, str)
+        and k.strip() and v.strip() and k != v
+    }
+
+
+def _manual_replace_digest(data_dir: Path) -> str:
+    """手动替换映射的归一化摘要（排序，忽略键顺序）。
+
+    必须进指纹：手改映射的意图就是「让它生效」，而映射只在 ``--deploy`` 时合并，
+    不进指纹就会出现「改完了 daily-start 认为输入没变、跳过部署」。
+    """
+    mapping = load_manual_replace_map(data_dir)
+    lines = sorted(f"{k}→{v}" for k, v in mapping.items())
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()[:16]
+
+
+def compute_input_fingerprint(pages: List[WikiPageInfo], data_dir: Path) -> str:
+    """生成 ASR 三件套的**全部输入**指纹 = Wiki 页面 + 手动热词 + 手动替换映射。
+
+    手动热词是热词表的第二个来源、手动替换映射是替换词典的第二个来源（均在
+    ``--deploy`` 时与生成结果合并）。它们不进指纹的话，改完文件 daily-start
+    看不出输入有变化、不会重建——而用户改这两个文件的意图恰恰就是「让它生效」。
 
     ⚠️ 本函数必须同时被 ``determine_new_version`` 与 daily-start 的重建判定使用。
     若两处各算各的（一处含手动词、一处不含），会出现「判定要重建 → 生成时认为
     未变化 → 存回旧指纹 → 下次又判定要重建」的每日重建死循环。
     """
     return hashlib.sha256(
-        f"{compute_fingerprint(pages)}|{_manual_hotwords_digest(data_dir)}".encode("utf-8")
+        f"{compute_fingerprint(pages)}|{_manual_hotwords_digest(data_dir)}"
+        f"|{_manual_replace_digest(data_dir)}".encode("utf-8")
     ).hexdigest()[:16]
 
 

@@ -6,7 +6,14 @@ from datetime import datetime
 from uuid import uuid4
 from iris.core.exceptions import IrisValueError
 from iris.intelligence.storage import SnapshotStore
-from .schema import CRITICAL_FIELDS, MINOR_FIELDS, Decision, field_labels, now
+from .schema import (
+    CRITICAL_FIELDS,
+    MINOR_FIELDS,
+    REVIEW_PATCHABLE_FIELDS,
+    Decision,
+    field_labels,
+    now,
+)
 
 
 def identity(record: dict) -> str:
@@ -130,8 +137,7 @@ class DecisionStore(SnapshotStore):
                 raise IrisValueError('候选不存在或已审核')
             record = candidate['decision']
             if patch:
-                allowed = {'title', 'outcome', 'decided_at', 'owners', 'review_at', 'related_krs', 'context', 'rationale'}
-                if set(patch) - allowed:
+                if set(patch) - REVIEW_PATCHABLE_FIELDS:
                     raise IrisValueError('包含不可修改的候选字段')
                 record.update(patch)
             Decision(**record).validate()

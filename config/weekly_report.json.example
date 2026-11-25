@@ -7,6 +7,8 @@
   },
   "filters": {
     "subject_keywords": ["周报", "周会", "week report", "weekly"],
+    "subject_exclude_keywords": ["双周报"],
+    "_filters_note": "subject_keywords 为命中才收录的关键词；subject_exclude_keywords 为命中即丢弃的关键词——默认排除「双周报」，即双周报不单独入库、只收周报（同一发件人同期既发周报又发双周报时，周报优先且不会被双周报顶替）。",
     "sender_whitelist": [],
     "date_range_days": 7,
     "date_from": null

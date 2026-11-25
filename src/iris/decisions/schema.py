@@ -16,6 +16,14 @@ def now() -> str:
 CRITICAL_FIELDS = ('outcome', 'decided_at', 'owners', 'review_at', 'related_krs')
 MINOR_FIELDS = ('context', 'rationale', 'summary')
 
+#: ``DecisionStore.review()`` 允许人工修订的字段。
+#:
+#: 由字段集派生而非手写：白名单曾手写成一组字面量，恰好漏掉 ``summary``——
+#: 而复核意见绝大多数正是针对摘要（「摘要把 X 写成了 Y」）。结果是判了不确定
+#: 却改不了，候选永久卡在 pending（2026-11-18 清理 35 条积压时，21 条都卡在这里）。
+REVIEW_PATCHABLE_FIELDS = frozenset(CRITICAL_FIELDS) | frozenset(MINOR_FIELDS) | {'title'}
+
+
 _FIELD_LABELS = {
     'outcome': '结论', 'decided_at': '决策日期', 'owners': '责任人',
     'review_at': '复盘日期', 'related_krs': '关联 KR',

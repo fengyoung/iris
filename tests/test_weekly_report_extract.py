@@ -8,6 +8,7 @@
 - scan_mode 配置默认 search、非法值兜底 search
 - _prefilter_summaries：白名单 + 关键词预筛，空白名单透传
 - EmailFilter：排除「发件人已撤回邮件」通知、同一发件人保留最新一封
+- EmailFilter：双周报不单独入库（默认排除「双周报」，周报优先）
 """
 
 from __future__ import annotations
@@ -177,6 +178,43 @@ def test_filter_multiple_senders_and_drops_nonmatching():
     ]
     out = f.filter_emails(emails)
     assert sorted(e["sender_name"] for e in out) == ["张三", "李四"]
+
+
+# ── EmailFilter：双周报不单独入库（周报优先）──────────────
+
+
+def test_has_excluded_keyword():
+    f = ewr.EmailFilter(WHITELIST, KEYWORDS)
+    assert f.has_excluded_keyword("OKR双周报-张三（2026.10.19-2026.10.30）")
+    assert f.has_excluded_keyword("【双周报】-w39-嘉晨")
+    assert not f.has_excluded_keyword("后端技术周报")
+    assert not f.has_excluded_keyword("")
+
+
+def test_filter_excludes_biweekly_even_when_only_one():
+    """只有双周报时也不入库——「双周报不单独收」。"""
+    f = ewr.EmailFilter(WHITELIST, KEYWORDS)
+    emails = [_make_email("zhangsan@example.com", "【双周报】-w39-张三-20261102", "2026-11-02 10:00")]
+    assert f.filter_emails(emails) == []
+
+
+def test_filter_keeps_weekly_when_biweekly_is_newer():
+    """同期既发周报又发双周报：保留周报，即使双周报日期更晚（回归 w44 被顶替问题）。"""
+    f = ewr.EmailFilter(WHITELIST, KEYWORDS)
+    emails = [
+        _make_email("zhangsan@example.com", "后端技术周报-2026/10/31", "2026-10-31 15:00"),
+        _make_email("zhangsan@example.com", "OKR双周报-张三（2026.10.19-2026.10.30）", "2026-11-02 09:00"),
+    ]
+    out = f.filter_emails(emails)
+    assert len(out) == 1
+    assert out[0]["subject"] == "后端技术周报-2026/10/31"
+
+
+def test_filter_exclude_keywords_configurable():
+    """显式传空列表可关闭排除（保留可配置能力）。"""
+    f = ewr.EmailFilter(WHITELIST, KEYWORDS, [])
+    emails = [_make_email("zhangsan@example.com", "OKR双周报-张三", "2026-11-02 09:00")]
+    assert len(f.filter_emails(emails)) == 1
 
 
 # ── 主题日期与发送日期不一致标注（复制标题忘改日期）──────────

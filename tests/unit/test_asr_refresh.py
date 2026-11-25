@@ -243,6 +243,45 @@ class TestVocotypeRestart:
         assert _vocotype.restart()["status"] == "quit_failed"
 
 
+class TestHotwordBudget:
+    """热词配额必须为「不受 max_hotwords 约束」的两类来源留出槽位。
+
+    VocoType 对热词表有 500 条硬上限，超出一条即整段部署失败；手动热词在
+    deploy 时合并、反馈热词在 Phase 1 之后追加，两者都不经过 max_hotwords。
+    配额写死（曾为 490）时，手动热词一长就必然撞线（2026-11-17 的 503 条事故）。
+    """
+
+    def test_reserves_slots_for_manual_hotwords_and_feedback(self, tmp_path):
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        (data_dir / "asr_manual_hotwords.txt").write_text(
+            "# 注释行\n甲\n乙\n丙\n\n", encoding="utf-8")
+        assert _wiki._resolve_hotword_budget(data_dir) == (
+            _wiki.HOTWORD_LIMIT - 3 - _wiki._FEEDBACK_HOTWORD_HEADROOM)
+
+    def test_missing_manual_file_keeps_only_feedback_headroom(self, tmp_path):
+        assert _wiki._resolve_hotword_budget(tmp_path / "nope") == (
+            _wiki.HOTWORD_LIMIT - _wiki._FEEDBACK_HOTWORD_HEADROOM)
+
+    def test_budget_reaches_build_asr_prompt(self, tmp_path, wiki_root, monkeypatch):
+        """配额要真的传进生成器，否则改了也算不出来。"""
+        _write_version(tmp_path / "data", "oldfingerprint00")
+        (tmp_path / "data" / "asr_manual_hotwords.txt").write_text(
+            "甲\n乙\n", encoding="utf-8")
+        seen = {}
+
+        def _capture(args, bundle, logger):
+            seen["max_hotwords"] = args.max_hotwords
+            return {"hotword_count": 1, "version": "0.0.7"}
+
+        monkeypatch.setattr(_wiki, "run_build_asr_prompt", _capture)
+        monkeypatch.setattr(_vocotype, "restart", lambda: {"status": "restarted",
+                                                          "detail": ""})
+        _wiki.refresh_asr_resources(_bundle(tmp_path, wiki_root), LOGGER)
+        assert seen["max_hotwords"] == (
+            _wiki.HOTWORD_LIMIT - 2 - _wiki._FEEDBACK_HOTWORD_HEADROOM)
+
+
 class TestDailyStage:
     def test_stage_isolates_failure(self, monkeypatch):
         from iris.app.cli._handlers import _system
